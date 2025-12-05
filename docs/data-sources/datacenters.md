@@ -22,7 +22,8 @@ Retrieves information about available GPCN datacenters. Use this data source to 
 terraform {
   required_providers {
     gpcn = {
-      source = "gpcn.com/dev/gpcn"
+      source  = "Global-Private-Cloud-Network/gpcn"
+      version = "~>0.1.0"
     }
   }
 }

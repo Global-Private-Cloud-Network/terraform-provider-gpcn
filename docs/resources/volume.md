@@ -29,3 +29,13 @@ Manages a storage volume that can be attached to virtual machines
 - `last_updated` (String) Timestamp when the volume was last updated in ISO-8601 format
 - `location` (Map of String) Location details including datacenter, region, and country information
 - `volume_type_id` (Number) Internal identifier for the volume type
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import gpcn_volume.example_ssd "c13808d9-3b7d-42c5-a21d-f0961308a38a"
+```
