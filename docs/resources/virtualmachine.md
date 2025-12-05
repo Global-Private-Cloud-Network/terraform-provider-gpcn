@@ -22,7 +22,8 @@ Manages a virtual machine instance with configurable compute resources, networki
 terraform {
   required_providers {
     gpcn = {
-      source = "gpcn.com/dev/gpcn"
+      source  = "Global-Private-Cloud-Network/gpcn"
+      version = "~>0.1.0"
     }
   }
 }
@@ -148,3 +149,13 @@ Read-Only:
 - `id` (Number) Unique identifier for the size configuration
 - `name` (String) Name of the size configuration
 - `ram` (Number) Amount of RAM in MB
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import gpcn_virtualmachine.example "c13808d9-3b7d-42c5-a21d-f0961308a38a"
+```
