@@ -1,3 +1,11 @@
+## 0.1.1 (December 04, 2025)
+
+ENHANCEMENTS:
+
+- Added LICENSE file to repository
+- Updated documentation with improved examples and clarity
+- Updated provider source address to `Global-Private-Cloud-Network/gpcn` in examples
+
 ## 0.1.0 (Initial Release)
 
 **Initial public release of the GPCN Terraform Provider**
