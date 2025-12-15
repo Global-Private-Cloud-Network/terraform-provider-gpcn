@@ -31,7 +31,7 @@ type ResourceModel struct {
 }
 
 // Update the plan or state with new values from the GET response
-func MapVirtualMachineResponseToModel(ctx context.Context, response *ReadVirtualMachinesResponse, images []VirtualMachineImagesDataResponseTF, sizes []VirtualMachineSizesDataResponseTF, model ResourceModel) ResourceModel {
+func MapVirtualMachineResponseToModel(ctx context.Context, response *ReadVirtualMachinesResponse, images []VirtualMachineImagesDataResponseTF, sizes []VirtualMachineConfigurationsTF, model ResourceModel) ResourceModel {
 	model.ID = types.StringValue(response.Data.VirtualMachine.ID)
 
 	// Construct time entries
@@ -65,10 +65,10 @@ func MapVirtualMachineResponseToModel(ctx context.Context, response *ReadVirtual
 
 	// Construct images and sizes
 	model.AdditionalImages, _ = types.ListValueFrom(ctx, types.ObjectType{AttrTypes: VirtualMachineImagesDataResponseTF{}.AttrTypes()}, images)
-	model.AdditionalSizes, _ = types.ListValueFrom(ctx, types.ObjectType{AttrTypes: VirtualMachineSizesDataResponseTF{}.AttrTypes()}, sizes)
+	model.AdditionalSizes, _ = types.ListValueFrom(ctx, types.ObjectType{AttrTypes: VirtualMachineConfigurationsTF{}.AttrTypes()}, sizes)
 
 	// Find the imageId and sizeId from the objects. Not possible to be < 0
-	sizeIdx := slices.IndexFunc(sizes, func(virtualMachineSize VirtualMachineSizesDataResponseTF) bool {
+	sizeIdx := slices.IndexFunc(sizes, func(virtualMachineSize VirtualMachineConfigurationsTF) bool {
 		return strings.EqualFold(virtualMachineSize.Name.ValueString(), model.Size.ValueString())
 	})
 	imageIdx := slices.IndexFunc(images, func(virtualMachineImage VirtualMachineImagesDataResponseTF) bool {
