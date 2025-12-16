@@ -64,7 +64,7 @@ resource "gpcn_network" "vm_network_custom" {
   description = "Custom network for advanced networking configuration"
 }
 
-# Create storage volumes for the VM
+# Create storage volume for the VM
 resource "gpcn_volume" "vm_storage" {
   name          = "vm-storage-primary"
   datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
@@ -78,7 +78,10 @@ resource "gpcn_virtualmachine" "example" {
   datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
 
   # Compute configuration
-  size  = "Micro"
+  size = {
+    category = "general"
+    tier     = "micro"
+  }
   image = "Alma Linux 8.x"
 
   wait_for_startup = false
@@ -110,7 +113,7 @@ output "example_gpcn_virtualmachine" {
 - `datacenter_id` (String) Unique identifier of the datacenter where the virtual machine will be created. Changing this value requires replacing the virtual machine
 - `image` (String) Operating system image to use for the virtual machine. Changing this value requires replacing the virtual machine
 - `name` (String) Human-readable name for the virtual machine
-- `size` (String) Size specification defining CPU, RAM, and disk resources. Can be upgraded to a larger size without replacement, but downsizing requires replacement
+- `size` (Attributes) Hardware size configuration defining the compute resources (CPU, memory, disk) for the virtual machine. Specified using a category and tier pairing. Downsizing requires replacing the virtual machine (see [below for nested schema](#nestedatt--size))
 
 ### Optional
 
@@ -121,7 +124,7 @@ output "example_gpcn_virtualmachine" {
 ### Read-Only
 
 - `additional_images` (Attributes List) List of available operating system images that can be used for this virtual machine (see [below for nested schema](#nestedatt--additional_images))
-- `additional_sizes` (Attributes List) List of available size configurations for this virtual machine (see [below for nested schema](#nestedatt--additional_sizes))
+- `additional_sizes` (Attributes List) List of available size configurations for this virtual machine in the datacenter (see [below for nested schema](#nestedatt--additional_sizes))
 - `configuration` (Map of String) Hardware configuration details including CPU, RAM, and disk specifications
 - `created_time` (String) Timestamp when the virtual machine was created in ISO-8601 format
 - `id` (String) Unique identifier for the virtual machine in UUID format
@@ -129,6 +132,15 @@ output "example_gpcn_virtualmachine" {
 - `last_updated` (String) Timestamp when the virtual machine was last updated in ISO-8601 format
 - `location` (Map of String) Location details including datacenter, region, and country information
 - `size_id` (Number) Internal identifier for the selected size configuration
+
+<a id="nestedatt--size"></a>
+### Nested Schema for `size`
+
+Required:
+
+- `category` (String) Short code representing the category (e.g., 'general')
+- `tier` (String) Human-readable name of the size configuration (e.g., 'micro')
+
 
 <a id="nestedatt--additional_images"></a>
 ### Nested Schema for `additional_images`
@@ -144,11 +156,14 @@ Read-Only:
 
 Read-Only:
 
-- `cpu` (Number) Number of CPU cores
-- `disk` (Number) Disk size in GB
+- `category` (String) Category name of the size configuration (e.g., 'General Purpose')
+- `category_code` (String) Short code representing the category (e.g., 'general')
+- `code` (String) Short code uniquely identifying this size configuration
+- `cpu` (Number) Number of CPU cores allocated to this size configuration
+- `disk` (Number) Base storage disk size in GB allocated to this size configuration
 - `id` (Number) Unique identifier for the size configuration
-- `name` (String) Name of the size configuration
-- `ram` (Number) Amount of RAM in MB
+- `memory` (Number) Amount of memory (RAM) in GB allocated to this size configuration
+- `name` (String) Human-readable name of the size configuration
 
 ## Import
 
