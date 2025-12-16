@@ -50,7 +50,7 @@ resource "gpcn_network" "vm_network_custom" {
   description = "Custom network for advanced networking configuration"
 }
 
-# Create storage volumes for the VM
+# Create storage volume for the VM
 resource "gpcn_volume" "vm_storage" {
   name          = "vm-storage-primary"
   datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
@@ -64,7 +64,10 @@ resource "gpcn_virtualmachine" "example" {
   datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
 
   # Compute configuration
-  size  = "Micro"
+  size = {
+    category = "general"
+    tier     = "micro"
+  }
   image = "Alma Linux 8.x"
 
   wait_for_startup = false

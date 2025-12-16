@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 type ResourceModel struct {
@@ -15,7 +16,7 @@ type ResourceModel struct {
 	Name             types.String `tfsdk:"name"`
 	DatacenterId     types.String `tfsdk:"datacenter_id"`
 	WaitForStartup   types.Bool   `tfsdk:"wait_for_startup"`
-	Size             types.String `tfsdk:"size"`
+	Size             types.Object `tfsdk:"size"`
 	Image            types.String `tfsdk:"image"`
 	CreatedTime      types.String `tfsdk:"created_time"`
 	LastUpdated      types.String `tfsdk:"last_updated"`
@@ -28,6 +29,11 @@ type ResourceModel struct {
 	AdditionalSizes  types.List   `tfsdk:"additional_sizes"`
 	ImageId          types.Int64  `tfsdk:"image_id"`
 	SizeId           types.Int64  `tfsdk:"size_id"`
+}
+
+type ResourceModelSize struct {
+	Category types.String `tfsdk:"category"`
+	Tier     types.String `tfsdk:"tier"`
 }
 
 // Update the plan or state with new values from the GET response
@@ -68,8 +74,10 @@ func MapVirtualMachineResponseToModel(ctx context.Context, response *ReadVirtual
 	model.AdditionalSizes, _ = types.ListValueFrom(ctx, types.ObjectType{AttrTypes: VirtualMachineConfigurationsTF{}.AttrTypes()}, sizes)
 
 	// Find the imageId and sizeId from the objects. Not possible to be < 0
+	var size ResourceModelSize
+	model.Size.As(ctx, &size, basetypes.ObjectAsOptions{})
 	sizeIdx := slices.IndexFunc(sizes, func(virtualMachineSize VirtualMachineConfigurationsTF) bool {
-		return strings.EqualFold(virtualMachineSize.Name.ValueString(), model.Size.ValueString())
+		return strings.EqualFold(virtualMachineSize.Name.ValueString(), size.Tier.ValueString())
 	})
 	imageIdx := slices.IndexFunc(images, func(virtualMachineImage VirtualMachineImagesDataResponseTF) bool {
 		return strings.EqualFold(virtualMachineImage.Name.ValueString(), model.Image.ValueString())

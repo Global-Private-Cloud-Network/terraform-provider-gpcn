@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"slices"
 	"strings"
+	"terraform-provider-gpcn/internal/client"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -83,8 +83,8 @@ func (o VirtualMachineConfigurationsTF) AttrTypes() map[string]attr.Type {
 }
 
 // Get virtual machine size Id for a given datacenterId
-func GetVirtualMachineSizeConfigurationId(client *http.Client, ctx context.Context, datacenterId, virtualMachineSizeName string) (int64, []VirtualMachineConfigurationsTF, error) {
-	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVMSizeIDWithName, virtualMachineSizeName))
+func GetVirtualMachineSizeConfigurationId(client *http.Client, ctx context.Context, datacenterId, virtualMachineSizeCategoryCode, virtualMachineSizeTierCode string) (int64, []VirtualMachineConfigurationsTF, error) {
+	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVMSizeIDWithName, virtualMachineSizeTierCode))
 	request, err := http.NewRequest("GET", "/resource/data-centers/"+datacenterId+"/virtual-machine-sizes", nil)
 	var sizes []VirtualMachineConfigurationsTF
 	if err != nil {
@@ -109,12 +109,7 @@ func GetVirtualMachineSizeConfigurationId(client *http.Client, ctx context.Conte
 		return -1, sizes, err
 	}
 
-	// Verify the size specified is available
-	// TODO: Get questions answered to also iterate through categories or use an input param
-	tierIdx := slices.IndexFunc(virtualMachineSizesResponse.Data.Categories[0].Tiers, func(tier virtualMachineSizesDataCategoriesTiersResponse) bool {
-		return strings.EqualFold(tier.Name, virtualMachineSizeName)
-	})
-
+	// Collect all names for error handling later
 	var names []string
 	for _, category := range virtualMachineSizesResponse.Data.Categories {
 		for _, tier := range category.Tiers {
@@ -129,22 +124,36 @@ func GetVirtualMachineSizeConfigurationId(client *http.Client, ctx context.Conte
 					MemorySizeGB: types.Int64Value(configuration.Memory.SizeGb),
 					DiskSizeGB:   types.Int64Value(configuration.Disk.SizeGb),
 				})
-				names = append(names, category.Name+" - "+tier.Name)
+				names = append(names, category.Code+" - "+tier.Code)
 			}
 		}
 	}
 	sizesFormatted := strings.Join(names, ", ")
 
-	if tierIdx < 0 {
-		return -1, sizes, errors.New("the size '" + virtualMachineSizeName + "' is not available for this datacenter. Valid sizes are: " + sizesFormatted)
+	// Verify the category selected is available
+	categoryIdx := slices.IndexFunc(virtualMachineSizesResponse.Data.Categories, func(category virtualMachineSizesDataCategoriesResponse) bool {
+		return strings.EqualFold(category.Code, virtualMachineSizeCategoryCode)
+	})
+
+	if categoryIdx < 0 {
+		return -1, sizes, fmt.Errorf(ErrDetailSizeNotAvailableForDatacenter, virtualMachineSizeCategoryCode, virtualMachineSizeTierCode, sizesFormatted)
 	}
 
-	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyRetrievedVMSizeIDWithName, virtualMachineSizeName))
-	return virtualMachineSizesResponse.Data.Categories[0].Tiers[tierIdx].Configurations[0].ConfigurationID, sizes, nil
+	// Verify the size specified is available
+	tierIdx := slices.IndexFunc(virtualMachineSizesResponse.Data.Categories[categoryIdx].Tiers, func(tier virtualMachineSizesDataCategoriesTiersResponse) bool {
+		return strings.EqualFold(tier.Code, virtualMachineSizeTierCode)
+	})
+
+	if tierIdx < 0 {
+		return -1, sizes, fmt.Errorf(ErrDetailSizeNotAvailableForDatacenter, virtualMachineSizeCategoryCode, virtualMachineSizeTierCode, sizesFormatted)
+	}
+
+	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyRetrievedVMSizeIDWithName, virtualMachineSizeTierCode))
+	return virtualMachineSizesResponse.Data.Categories[categoryIdx].Tiers[tierIdx].Configurations[0].ConfigurationID, sizes, nil
 }
 
 // Helper function to update a VM by Id
-func UpdateVirtualMachineSize(client *http.Client, ctx context.Context, virtualMachineId string, sizeId int64) error {
+func UpdateVirtualMachineSize(httpClient *http.Client, ctx context.Context, virtualMachineId string, sizeId int64) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateVMSizeWithID, virtualMachineId))
 	// Create a new request from the plan
 	updateVMRequestBody := map[string]any{
@@ -160,7 +169,28 @@ func UpdateVirtualMachineSize(client *http.Client, ctx context.Context, virtualM
 		return err
 	}
 
-	_, err = client.Do(request)
+	response, err := httpClient.Do(request)
+	if err != nil {
+		return err
+	}
+
+	defer response.Body.Close()
+
+	// Read the response body and process it as updateVirtualMachineSizeResponse
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return err
+	}
+
+	var updateVirtualMachineSizeResponse client.JobStatusSingularResponse
+	err = json.Unmarshal(body, &updateVirtualMachineSizeResponse)
+
+	if err != nil {
+		return err
+	}
+
+	_, err = client.PerformLongPolling(httpClient, ctx, "Update Virtual Machine Size", updateVirtualMachineSizeResponse.Data.JobID)
+
 	if err != nil {
 		return err
 	}
