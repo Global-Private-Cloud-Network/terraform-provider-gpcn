@@ -16,5 +16,5 @@ description: |-
 
 ### Optional
 
-- `api_key` (String, Sensitive)
-- `host` (String)
+- `api_key` (String, Sensitive) API key used for programmatic authentication with the GPCN API. This can be created through the portal, under User Management -> API Keys. This must be set either in the provider configuration block (NOT RECOMMENDED), or as an environment variable exposed via GPCN_API_KEY
+- `host` (String) The hostname of the GPCN API. For most users, this is https://api.gpcn.com. This must be set either in the provider configuration block, or as an environment variable exposed via GPCN_HOST

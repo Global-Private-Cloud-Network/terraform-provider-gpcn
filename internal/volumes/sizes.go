@@ -37,7 +37,7 @@ type volumeSizesDataVolumeTypesAvailableSizesResponse struct {
 // Get volume size Id for a given datacenterId and volume type and verify typeId and sizeGb are valid
 func GetVolumeSizeId(httpClient *http.Client, ctx context.Context, datacenterId string, volumeTypeId, sizeGb int64) (int64, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVolumeSizeIDWithParams, strconv.FormatInt(volumeTypeId, 10), strconv.FormatInt(sizeGb, 10)))
-	request, err := http.NewRequest("GET", "/resource/data-centers/"+datacenterId+"/volume-sizes", nil)
+	request, err := http.NewRequest("GET", DATA_CENTERS_BASE_URL_V1+datacenterId+"/volume-sizes", nil)
 	if err != nil {
 		return -1, err
 	}

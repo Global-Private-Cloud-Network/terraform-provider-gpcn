@@ -82,7 +82,7 @@ func poll(client *http.Client, jobId string) (*JobStatusMultiResponse, bool, err
 		return nil, false, err
 	}
 
-	request, err := http.NewRequest("POST", "/resource/jobs", bytes.NewBuffer(jsonJobStatusRequestBody))
+	request, err := http.NewRequest("POST", "/v1/resource/jobs", bytes.NewBuffer(jsonJobStatusRequestBody))
 	if err != nil {
 		return nil, false, err
 	}

@@ -49,11 +49,13 @@ func (p *gpcnProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp 
 	resp.Schema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
 			"host": schema.StringAttribute{
-				Optional: true,
+				Description: "The hostname of the GPCN API. For most users, this is https://api.gpcn.com. This must be set either in the provider configuration block, or as an environment variable exposed via GPCN_HOST",
+				Optional:    true,
 			},
 			"api_key": schema.StringAttribute{
-				Optional:  true,
-				Sensitive: true,
+				Description: "API key used for programmatic authentication with the GPCN API. This can be created through the portal, under User Management -> API Keys. This must be set either in the provider configuration block (NOT RECOMMENDED), or as an environment variable exposed via GPCN_API_KEY",
+				Optional:    true,
+				Sensitive:   true,
 			},
 		},
 	}

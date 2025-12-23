@@ -8,4 +8,6 @@ terraform {
 }
 
 # Instantiate the provider to verify required parameters are successfully set
-provider "gpcn" {}
+provider "gpcn" {
+  host = "https://api.gpcn.com"
+}

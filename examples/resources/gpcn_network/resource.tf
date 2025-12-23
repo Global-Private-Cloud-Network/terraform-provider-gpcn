@@ -14,7 +14,9 @@ terraform {
   }
 }
 
-provider "gpcn" {}
+provider "gpcn" {
+  host = "https://api.gpcn.com"
+}
 
 # Lookup datacenter in East US region
 data "gpcn_datacenters" "east_us" {

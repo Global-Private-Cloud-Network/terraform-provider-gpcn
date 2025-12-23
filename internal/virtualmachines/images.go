@@ -39,7 +39,7 @@ func (o VirtualMachineImagesDataResponseTF) AttrTypes() map[string]attr.Type {
 // Get virtual machine image Id for a given datacenterId and virtual machine image name
 func GetVirtualMachineImageId(client *http.Client, ctx context.Context, datacenterId, virtualMachineImageName string) (int64, []VirtualMachineImagesDataResponseTF, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVMImageIDWithName, virtualMachineImageName))
-	request, err := http.NewRequest("GET", "/resource/data-centers/"+datacenterId+"/virtual-machine-images", nil)
+	request, err := http.NewRequest("GET", DATA_CENTERS_BASE_URL_V1+datacenterId+"/virtual-machine-images", nil)
 
 	var images []VirtualMachineImagesDataResponseTF
 	if err != nil {

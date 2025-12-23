@@ -69,7 +69,7 @@ func CreateVolume(httpClient *http.Client, ctx context.Context, model ResourceMo
 		return nil, err
 	}
 
-	request, err := http.NewRequest("POST", BASE_URL, bytes.NewBuffer(jsonCreateVolumeRequestBody))
+	request, err := http.NewRequest("POST", BASE_URL_V1, bytes.NewBuffer(jsonCreateVolumeRequestBody))
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func CreateVolume(httpClient *http.Client, ctx context.Context, model ResourceMo
 // Helper function to get a volume by Id. Shared between Read and the final action of Create and Update
 func GetVolume(httpClient *http.Client, ctx context.Context, volumeId string) (*readVolumesResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVolumeWithID, volumeId))
-	request, err := http.NewRequest("GET", BASE_URL+volumeId, nil)
+	request, err := http.NewRequest("GET", BASE_URL_V1+volumeId, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +167,7 @@ func UpdateVolume(httpClient *http.Client, ctx context.Context, volumeId string,
 	}
 
 	// The only possible update is a resizing since everything else triggers a re-create
-	request, err := http.NewRequest("PUT", BASE_URL+volumeId+"/resize", bytes.NewBuffer(jsonUpdateVolumeRequestBody))
+	request, err := http.NewRequest("PUT", BASE_URL_V1+volumeId+"/resize", bytes.NewBuffer(jsonUpdateVolumeRequestBody))
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +215,7 @@ func UpdateVolume(httpClient *http.Client, ctx context.Context, volumeId string,
 
 func DeleteVolume(httpClient *http.Client, ctx context.Context, volumeId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteVolumeWithID, volumeId))
-	request, err := http.NewRequest("DELETE", BASE_URL+volumeId, nil)
+	request, err := http.NewRequest("DELETE", BASE_URL_V1+volumeId, nil)
 	if err != nil {
 		return err
 	}

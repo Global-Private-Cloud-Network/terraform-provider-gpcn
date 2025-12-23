@@ -91,7 +91,7 @@ func CreateVirtualMachine(httpClient *http.Client, ctx context.Context, imageId,
 	}
 
 	// Create API request
-	request, err := http.NewRequest("POST", BASE_URL, bytes.NewBuffer(jsonCreateVMRequestBody))
+	request, err := http.NewRequest("POST", BASE_URL_V1, bytes.NewBuffer(jsonCreateVMRequestBody))
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +138,7 @@ func CreateVirtualMachine(httpClient *http.Client, ctx context.Context, imageId,
 // Gets a Virtual Machine by its Id
 func GetVirtualMachine(httpClient *http.Client, ctx context.Context, virtualMachineId string) (*ReadVirtualMachinesResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVMWithID, virtualMachineId))
-	request, err := http.NewRequest("GET", BASE_URL+virtualMachineId, nil)
+	request, err := http.NewRequest("GET", BASE_URL_V1+virtualMachineId, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +177,7 @@ func UpdateVirtualMachine(httpClient *http.Client, ctx context.Context, virtualM
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequest("PUT", BASE_URL+virtualMachineId, bytes.NewBuffer(jsonUpdateVMRequestBody))
+	request, err := http.NewRequest("PUT", BASE_URL_V1+virtualMachineId, bytes.NewBuffer(jsonUpdateVMRequestBody))
 	if err != nil {
 		return err
 	}

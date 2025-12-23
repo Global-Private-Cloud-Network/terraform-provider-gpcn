@@ -50,7 +50,7 @@ func (o VirtualMachineSizesDataResponseTF) AttrTypes() map[string]attr.Type {
 // Get virtual machine size Id for a given datacenterId and virtual machine image name
 func GetVirtualMachineSizeId(client *http.Client, ctx context.Context, imageId int64, datacenterId, virtualMachineSizeName string) (int64, []VirtualMachineSizesDataResponseTF, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVMSizeIDWithName, virtualMachineSizeName))
-	request, err := http.NewRequest("GET", "/resource/data-centers/"+datacenterId+"/virtual-machine-sizes?imageId="+strconv.FormatInt(imageId, 10), nil)
+	request, err := http.NewRequest("GET", DATA_CENTERS_BASE_URL_V1+datacenterId+"/virtual-machine-sizes?imageId="+strconv.FormatInt(imageId, 10), nil)
 	var sizes []VirtualMachineSizesDataResponseTF
 	if err != nil {
 		return -1, sizes, err
@@ -112,7 +112,7 @@ func UpdateVirtualMachineSize(client *http.Client, ctx context.Context, virtualM
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequest("PUT", BASE_URL+virtualMachineId+"/size", bytes.NewBuffer(jsonUpdateVMRequestBody))
+	request, err := http.NewRequest("PUT", BASE_URL_V1+virtualMachineId+"/size", bytes.NewBuffer(jsonUpdateVMRequestBody))
 	if err != nil {
 		return err
 	}

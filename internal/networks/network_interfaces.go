@@ -82,7 +82,7 @@ type readNetworksToVMsDataResponse struct {
 
 func GetVirtualMachinesAttachedToNetworks(httpClient *http.Client, ctx context.Context, networkId string) (*readNetworksToVMsResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVirtualMachinesAttachedToNetworks, networkId))
-	request, err := http.NewRequest("GET", BASE_URL+networkId+"/virtual-machines", nil)
+	request, err := http.NewRequest("GET", BASE_URL_V1+networkId+"/virtual-machines", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +112,7 @@ func GetVirtualMachinesAttachedToNetworks(httpClient *http.Client, ctx context.C
 // Fetch all network interfaces attached to the VM
 func GetNetworkInterfaces(httpClient *http.Client, ctx context.Context, virtualMachineId string) ([]ReadVirtualMachineNetworkDataResponseTF, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetNetworkInterfacesWithID, virtualMachineId))
-	request, err := http.NewRequest("GET", VIRTUAL_MACHINES_BASE_URL+virtualMachineId+"/network-interfaces", nil)
+	request, err := http.NewRequest("GET", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -167,7 +167,7 @@ func AddNetworkInterface(httpClient *http.Client, ctx context.Context, virtualMa
 	if err != nil {
 		return errors.New("error marshaling the json request body GPCN Virtual Machines - Attach Network")
 	}
-	request, err := http.NewRequest("POST", VIRTUAL_MACHINES_BASE_URL+virtualMachineId+"/network-interfaces", bytes.NewBuffer(jsonAttachNetworkInterfaceRequestBody))
+	request, err := http.NewRequest("POST", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces", bytes.NewBuffer(jsonAttachNetworkInterfaceRequestBody))
 	if err != nil {
 		return err
 	}
@@ -220,7 +220,7 @@ func SetNextNetworkInterfaceToPrimary(httpClient *http.Client, ctx context.Conte
 	}
 	nextPrimaryNetworkInterfaceId := allNetworkInterfaces[networkInterfaceIdx].ID.ValueString()
 	tflog.Info(ctx, fmt.Sprintf(LogSettingNetworkInterfaceAsPrimary, nextPrimaryNetworkInterfaceId))
-	request, err := http.NewRequest("PUT", VIRTUAL_MACHINES_BASE_URL+virtualMachineId+"/network-interfaces/"+nextPrimaryNetworkInterfaceId, bytes.NewBuffer(jsonUpdateNetworkInterfaceRequestBody))
+	request, err := http.NewRequest("PUT", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces/"+nextPrimaryNetworkInterfaceId, bytes.NewBuffer(jsonUpdateNetworkInterfaceRequestBody))
 	if err != nil {
 		return err
 	}
@@ -237,7 +237,7 @@ func SetNextNetworkInterfaceToPrimary(httpClient *http.Client, ctx context.Conte
 // Remove a network interface from the virtual machine
 func RemoveNetworkInterface(httpClient *http.Client, ctx context.Context, virtualMachineId, networkInterfaceId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingRemoveNetworkInterfaceWithIDs, virtualMachineId, networkInterfaceId))
-	request, err := http.NewRequest("DELETE", VIRTUAL_MACHINES_BASE_URL+virtualMachineId+"/network-interfaces/"+networkInterfaceId, nil)
+	request, err := http.NewRequest("DELETE", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces/"+networkInterfaceId, nil)
 	if err != nil {
 		return err
 	}
@@ -303,7 +303,7 @@ func RemoveNetworkInterfaceByNetworkId(httpClient *http.Client, ctx context.Cont
 
 func AllocatePublicIp(httpClient *http.Client, ctx context.Context, virtualMachineId, networkInterfaceId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingAllocatePublicIp, virtualMachineId, networkInterfaceId))
-	request, err := http.NewRequest("POST", VIRTUAL_MACHINES_BASE_URL+virtualMachineId+"/network-interfaces/"+networkInterfaceId+"/public-ip", nil)
+	request, err := http.NewRequest("POST", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces/"+networkInterfaceId+"/public-ip", nil)
 	if err != nil {
 		return err
 	}
@@ -338,7 +338,7 @@ func AllocatePublicIp(httpClient *http.Client, ctx context.Context, virtualMachi
 
 func ReleasePublicIp(httpClient *http.Client, ctx context.Context, virtualMachineId, networkInterfaceId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingReleasePublicIp, virtualMachineId, networkInterfaceId))
-	request, err := http.NewRequest("DELETE", VIRTUAL_MACHINES_BASE_URL+virtualMachineId+"/network-interfaces/"+networkInterfaceId+"/public-ip", nil)
+	request, err := http.NewRequest("DELETE", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces/"+networkInterfaceId+"/public-ip", nil)
 	if err != nil {
 		return err
 	}
