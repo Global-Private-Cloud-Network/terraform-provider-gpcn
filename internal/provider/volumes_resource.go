@@ -70,7 +70,7 @@ func (r *volumesResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"volume_type": schema.StringAttribute{
-				Description: "Type of storage: either 'SSD' or 'NVMe'. Changing this value requires replacing the volume",
+				Description: "Type of storage: either 'SSD' or 'NVMe'. Changing this value requires replacing the volume. Note that not all volume types are available for every datacenter",
 				Required:    true,
 				Validators: []validator.String{
 					stringvalidator.OneOf("SSD", "NVMe"),

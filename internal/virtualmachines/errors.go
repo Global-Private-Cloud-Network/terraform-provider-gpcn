@@ -37,26 +37,26 @@ const (
 	ErrDetailExpectedHTTPClient                 = "Expected *http.Client, got: %T. Please report this issue to the provider developers."
 	ErrDetailSizeNoLongerAvailable              = "The size in the state is no longer available for this datacenter and image. This will require a re-create"
 	ErrDetailSizeNotAvailableForDatacenterImage = "The size '%s' is not available for this datacenter and image. The available values are: %s"
-	ErrDetailImageVerificationFailed            = "Error verifying the virtual image: %s for datacenter with Id: %s"
-	ErrDetailSizeVerificationFailed             = "Error verifying the size: %s for datacenter with Id: %s"
-	ErrDetailNetworkInterfacesForNewVM          = "Error retrieving network interfaces for newly created virtual machine with ID: %s"
-	ErrDetailNetworkInterfacesForVM             = "Error retrieving network interfaces for virtual machine with ID: %s"
+	ErrDetailImageVerificationFailed            = "Error verifying the virtual image: '%s' for datacenter with ID: '%s'"
+	ErrDetailSizeVerificationFailed             = "Error verifying the size: '%s' for datacenter with ID: '%s'"
+	ErrDetailNetworkInterfacesForNewVM          = "Error retrieving network interfaces for newly created virtual machine with ID: '%s'"
+	ErrDetailNetworkInterfacesForVM             = "Error retrieving network interfaces for virtual machine with ID: '%s'"
 	ErrDetailVMInfoFailedCanImport              = "Retrieving information about the Virtual Machine failed. The job was successful, but Terraform could not read more information about its value. You can import the id to repair the state with terraform import"
 	ErrDetailAddedNetworksExceedsMax            = "this change would exceed the maximum number of networks attached allowed %d"
-	ErrDetailUnableToDeleteVMWithID             = "Unable to delete GPCN Virtual Machine with ID %s"
-	ErrDetailUnmarshalingDeleteWithID           = "Error unmarshaling GPCN Virtual Machine - Delete with ID %s"
+	ErrDetailUnableToDeleteVMWithID             = "Unable to delete GPCN Virtual Machine with ID '%s'"
+	ErrDetailUnmarshalingDeleteWithID           = "Error unmarshaling GPCN Virtual Machine - Delete with ID '%s'"
 	ErrDetailJobInfoCheckDashboard              = "Encountered an error getting job info. The request may still have succeeded. Check the GPCN dashboard for more information"
-	ErrDetailStoppingVM                         = "Error stopping virtual machine with ID: %s"
-	ErrDetailStartingVM                         = "Error starting virtual machine with ID: %s"
+	ErrDetailStoppingVM                         = "Error stopping virtual machine with ID: '%s'"
+	ErrDetailStartingVM                         = "Error starting virtual machine with ID: '%s'"
 	ErrDetailCannotRemoveLastNetwork            = "unable to remove the last Network attached to a virtual machine"
 	ErrDetailNetworkTypeMustBeStandard          = "the prospective primary network (first in the list) is of type custom. The value for allocatePublicIp can only be set to true if the primary network's network_type is standard"
 )
 
 // Warning detail message templates
 const (
-	WarnDetailAttachingVolumeWithIDFailed          = "Attaching volume with ID %s failed"
-	WarnDetailRemovingNetworkInterfaceWithIDFailed = "Removing the network interface with Id %s failed"
-	WarnDetailRemovingVolumeWithIDFailed           = "Removing the volume with Id %s failed"
+	WarnDetailAttachingVolumeWithIDFailed          = "Attaching volume with ID: '%s' failed"
+	WarnDetailRemovingNetworkInterfaceWithIDFailed = "Removing the network interface with ID: '%s' failed"
+	WarnDetailRemovingVolumeWithIDFailed           = "Removing the volume with ID: '%s' failed"
 )
 
 // Polling constants

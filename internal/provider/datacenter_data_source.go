@@ -260,7 +260,7 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 }
 
 func (d *datacenterDataSource) getDatacenters(queryString string) (*datacenterResponse, error) {
-	datacenterUrl := datacenters.BASE_URL + "?page=1&limit=100"
+	datacenterUrl := datacenters.BASE_URL_V1 + "?page=1&limit=100"
 	request, err := http.NewRequest("GET", datacenterUrl+queryString, nil)
 	if err != nil {
 		return nil, err
@@ -289,7 +289,7 @@ func (d *datacenterDataSource) getDatacenters(queryString string) (*datacenterRe
 
 func (d *datacenterDataSource) getCountriesAndRegions(countryName string) (*datacenterRegionResponse, error) {
 	// Safe to use since it'll default to empty string if not provided, which will just search all countries
-	datacenterUrl := datacenters.BASE_URL + "regions?page=1&limit=100&countryName=" + countryName
+	datacenterUrl := datacenters.BASE_URL_V1 + "regions?page=1&limit=100&countryName=" + countryName
 	request, err := http.NewRequest("GET", datacenterUrl, nil)
 	if err != nil {
 		return nil, err
@@ -318,7 +318,7 @@ func (d *datacenterDataSource) getCountriesAndRegions(countryName string) (*data
 
 func (d *datacenterDataSource) getAllCountries() (*datacenterCountryResponse, error) {
 	// Safe to use since it'll default to empty string if not provided, which will just search all countries
-	datacenterUrl := datacenters.BASE_URL + "countries?page=1&limit=100"
+	datacenterUrl := datacenters.BASE_URL_V1 + "countries?page=1&limit=100"
 	request, err := http.NewRequest("GET", datacenterUrl, nil)
 	if err != nil {
 		return nil, err

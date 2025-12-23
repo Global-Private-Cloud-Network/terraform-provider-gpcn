@@ -83,7 +83,7 @@ func CreateNetwork(httpClient *http.Client, ctx context.Context, model ResourceM
 	}
 	tflog.Info(ctx, LogConstructedCreateNetworkRequestBody)
 
-	request, err := http.NewRequest("POST", BASE_URL, bytes.NewBuffer(jsonCreateNetworkRequestBody))
+	request, err := http.NewRequest("POST", BASE_URL_V1, bytes.NewBuffer(jsonCreateNetworkRequestBody))
 	if err != nil {
 		return nil, err
 	}
@@ -126,10 +126,10 @@ func CreateNetwork(httpClient *http.Client, ctx context.Context, model ResourceM
 	return getNetworkResponse, nil
 }
 
-// Helper function to get a network by Id. Shared between Read and the final action of Create and Delete
+// Helper function to get a network by ID. Shared between Read and the final action of Create and Delete
 func GetNetwork(client *http.Client, ctx context.Context, networkId string) (*readNetworkResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetNetworkWithID, networkId))
-	request, err := http.NewRequest("GET", BASE_URL+networkId, nil)
+	request, err := http.NewRequest("GET", BASE_URL_V1+networkId, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +187,7 @@ func UpdateNetwork(httpClient *http.Client, ctx context.Context, networkId strin
 	}
 	tflog.Info(ctx, LogConstructedUpdateNetworkRequestBody)
 
-	request, err := http.NewRequest("PUT", BASE_URL+model.ID.ValueString(), bytes.NewBuffer(jsonUpdateNetworkRequestBody))
+	request, err := http.NewRequest("PUT", BASE_URL_V1+model.ID.ValueString(), bytes.NewBuffer(jsonUpdateNetworkRequestBody))
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +211,7 @@ func UpdateNetwork(httpClient *http.Client, ctx context.Context, networkId strin
 
 func DeleteNetwork(httpClient *http.Client, ctx context.Context, networkId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteNetworkWithID, networkId))
-	request, err := http.NewRequest("DELETE", BASE_URL+networkId, nil)
+	request, err := http.NewRequest("DELETE", BASE_URL_V1+networkId, nil)
 	if err != nil {
 		return err
 	}

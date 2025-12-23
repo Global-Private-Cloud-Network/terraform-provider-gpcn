@@ -1,7 +1,7 @@
 package networks
 
-var VIRTUAL_MACHINES_BASE_URL string = "/resource/virtual-machines/"
-var BASE_URL string = "/resource/networks/"
+var VIRTUAL_MACHINES_BASE_URL_V1 string = "/v1/resource/virtual-machines/"
+var BASE_URL_V1 string = "/v1/resource/networks/"
 
 // Network types
 var NETWORK_TYPE_CUSTOM = "custom"

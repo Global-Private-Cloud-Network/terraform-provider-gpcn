@@ -20,7 +20,7 @@ func AddVolumeToVirtualMachine(httpClient *http.Client, ctx context.Context, vir
 	if err != nil {
 		return errors.New("error marshaling the json request body GPCN Virtual Machines - Attach Volume")
 	}
-	request, err := http.NewRequest("PUT", BASE_URL+volumeId+"/attach", bytes.NewBuffer(jsonAttachVolumeRequestBody))
+	request, err := http.NewRequest("PUT", BASE_URL_V1+volumeId+"/attach", bytes.NewBuffer(jsonAttachVolumeRequestBody))
 	if err != nil {
 		return err
 	}
@@ -54,7 +54,7 @@ func AddVolumeToVirtualMachine(httpClient *http.Client, ctx context.Context, vir
 
 // Remove a volume from the virtual machine
 func RemoveVolumeFromVirtualMachine(httpClient *http.Client, ctx context.Context, volumeId string) error {
-	request, err := http.NewRequest("PUT", BASE_URL+volumeId+"/detach", nil)
+	request, err := http.NewRequest("PUT", BASE_URL_V1+volumeId+"/detach", nil)
 	if err != nil {
 		return err
 	}

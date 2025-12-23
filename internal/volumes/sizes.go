@@ -34,10 +34,10 @@ type volumeSizesDataVolumeTypesAvailableSizesResponse struct {
 	SizeGb int64 `json:"sizeGb"`
 }
 
-// Get volume size Id for a given datacenterId and volume type and verify typeId and sizeGb are valid
+// Get volume size ID for a given datacenterId and volume type and verify typeId and sizeGb are valid
 func GetVolumeSizeId(httpClient *http.Client, ctx context.Context, datacenterId string, volumeTypeId, sizeGb int64) (int64, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVolumeSizeIDWithParams, strconv.FormatInt(volumeTypeId, 10), strconv.FormatInt(sizeGb, 10)))
-	request, err := http.NewRequest("GET", "/resource/data-centers/"+datacenterId+"/volume-sizes", nil)
+	request, err := http.NewRequest("GET", DATA_CENTERS_BASE_URL_V1+datacenterId+"/volume-sizes", nil)
 	if err != nil {
 		return -1, err
 	}
@@ -88,7 +88,7 @@ func GetVolumeSizeId(httpClient *http.Client, ctx context.Context, datacenterId 
 		return -1, errors.New("the specified volume size is not available for this datacenter. Valid sizes are (in GB): " + sizesFormatted)
 	}
 
-	// If both are available, we can use the Id
+	// If both are available, we can use the ID
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyRetrievedVolumeSizeIDWithParams, strconv.FormatInt(volumeTypeId, 10), strconv.FormatInt(sizeGb, 10)))
 	return volumeSizesResponse.Data.VolumeTypes[typeIdx].AvailableSizes[sizeIdx].ID, nil
 }
