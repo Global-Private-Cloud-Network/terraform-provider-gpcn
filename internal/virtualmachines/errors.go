@@ -38,7 +38,7 @@ const (
 	ErrDetailSizeNoLongerAvailable         = "The size in the state is no longer available for this datacenter. This will require a re-create with a new value"
 	ErrDetailSizeNotAvailableForDatacenter = "the category '%s' and size '%s' is not available for this datacenter. The available values are: %s"
 	ErrDetailImageVerificationFailed       = "Error verifying the virtual image: %s for datacenter with Id: %s"
-	ErrDetailSizeVerificationFailed        = "Error verifying the size: %s for datacenter with Id: %s"
+	ErrDetailSizeVerificationFailed        = "Error verifying the category '%s' and size '%s' for datacenter with Id: %s"
 	ErrDetailNetworkInterfacesForNewVM     = "Error retrieving network interfaces for newly created virtual machine with ID: %s"
 	ErrDetailNetworkInterfacesForVM        = "Error retrieving network interfaces for virtual machine with ID: %s"
 	ErrDetailVMInfoFailedCanImport         = "Retrieving information about the Virtual Machine failed. The job was successful, but Terraform could not read more information about its value. You can import the id to repair the state with terraform import"

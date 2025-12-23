@@ -325,7 +325,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryErrorVerifyingSize,
-			fmt.Sprintf(virtualmachines.ErrDetailSizeVerificationFailed, size.Tier.ValueString(), plan.DatacenterId.ValueString())+": "+err.Error(),
+			fmt.Sprintf(virtualmachines.ErrDetailSizeVerificationFailed, size.Category.ValueString(), size.Tier.ValueString(), plan.DatacenterId.ValueString())+": "+err.Error(),
 		)
 		return
 	}
@@ -409,11 +409,11 @@ func (r *virtualMachinesResource) Read(ctx context.Context, req resource.ReadReq
 
 	var size virtualmachines.ResourceModelSize
 	state.Size.As(ctx, &size, basetypes.ObjectAsOptions{})
-	_, sizes, err := virtualmachines.GetVirtualMachineSizeConfigurationId(r.client, ctx, getVirtualMachineResponse.Data.VirtualMachine.DatacenterId, size.Category.ValueString(), getVirtualMachineResponse.Data.VirtualMachine.Configuration)
+	_, sizes, err := virtualmachines.GetVirtualMachineSizeConfigurationId(r.client, ctx, state.DatacenterId.ValueString(), size.Category.ValueString(), size.Tier.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryErrorVerifyingSize,
-			fmt.Sprintf(virtualmachines.ErrDetailSizeVerificationFailed, getVirtualMachineResponse.Data.VirtualMachine.Configuration, getVirtualMachineResponse.Data.VirtualMachine.DatacenterId)+": "+err.Error(),
+			fmt.Sprintf(virtualmachines.ErrDetailSizeVerificationFailed, size.Category.ValueString(), size.Tier.ValueString(), getVirtualMachineResponse.Data.VirtualMachine.DatacenterId)+": "+err.Error(),
 		)
 		return
 	}
@@ -646,7 +646,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryErrorVerifyingSize,
-			fmt.Sprintf(virtualmachines.ErrDetailSizeVerificationFailed, size.Tier.ValueString(), plan.DatacenterId.ValueString())+": "+err.Error(),
+			fmt.Sprintf(virtualmachines.ErrDetailSizeVerificationFailed, size.Category.ValueString(), size.Tier.ValueString(), plan.DatacenterId.ValueString())+": "+err.Error(),
 		)
 		return
 	}
