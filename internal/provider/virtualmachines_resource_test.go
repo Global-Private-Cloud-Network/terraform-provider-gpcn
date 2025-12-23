@@ -48,7 +48,10 @@ resource "gpcn_virtualmachine" "test" {
   name          = "terraform-demo-vm"
   datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
 
-  size  = "Micro"
+  size = {
+    category = "general"
+    tier     = "micro"
+  }
   image = "Alma Linux 8.x"
 
   wait_for_startup = false
@@ -86,7 +89,7 @@ resource "gpcn_virtualmachine" "test" {
 					// Verify configuration map is populated
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.cpu"),
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.ram"),
-					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.disk"),
+					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.base_storage"),
 				),
 				ConfigStateChecks: []statecheck.StateCheck{
 					imageIdCompareValuesDiffer.AddStateValue(gpcnVirtualMachineTest, tfjsonpath.New("image_id")),
@@ -114,7 +117,10 @@ resource "gpcn_virtualmachine" "test" {
   name          = "terraform-demo-vm-update"
   datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
 
-  size  = "Micro"
+  size = {
+    category = "general"
+    tier     = "micro"
+  }
   image = "Alma Linux 8.x"
 
   wait_for_startup = false
@@ -155,7 +161,10 @@ resource "gpcn_virtualmachine" "test" {
   name          = "terraform-demo-vm-update"
   datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
 
-  size  = "Micro"
+  size = {
+    category = "general"
+    tier     = "micro"
+  }
   image = "Alma Linux 9.x"
 
   wait_for_startup = false
@@ -204,7 +213,10 @@ resource "gpcn_virtualmachine" "test" {
   name          = "terraform-demo-vm"
   datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
 
-  size  = "Micro"
+  size = {
+    category = "general"
+    tier     = "micro"
+  }
   image = "Alma Linux 8.x"
 
   wait_for_startup = false
@@ -239,7 +251,10 @@ resource "gpcn_virtualmachine" "test" {
   name          = "terraform-demo-vm"
   datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
 
-  size  = "Micro"
+  size = {
+    category = "general"
+    tier     = "micro"
+  }
   image = "Alma Linux 8.x"
 
   wait_for_startup = false
@@ -277,7 +292,10 @@ resource "gpcn_virtualmachine" "test" {
   name          = "terraform-demo-vm"
   datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
 
-  size  = "Micro"
+  size = {
+    category = "general"
+    tier     = "micro"
+  }
   image = "Alma Linux 8.x"
 
   wait_for_startup = false
@@ -306,7 +324,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Create VM with Micro size
+			// Create VM with micro size
 			{
 				Config: providerConfig + `
 resource "gpcn_network" "vm_network" {
@@ -323,7 +341,10 @@ resource "gpcn_virtualmachine" "test" {
   name          = "terraform-size-upgrade-vm"
   datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
 
-  size  = "Micro"
+  size = {
+    category = "general"
+    tier     = "micro"
+  }
   image = "Alma Linux 8.x"
 
   wait_for_startup = false
@@ -338,9 +359,9 @@ resource "gpcn_virtualmachine" "test" {
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionCreate),
 					},
 				},
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "size", "Micro"),
-				),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("size").AtMapKey("tier"), knownvalue.StringExact("micro")),
+				},
 			},
 			// Upgrade to Small size - should update in place
 			{
@@ -359,7 +380,10 @@ resource "gpcn_virtualmachine" "test" {
   name          = "terraform-size-upgrade-vm"
   datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
 
-  size  = "Small"
+  size = {
+    category = "general"
+    tier     = "small"
+  }
   image = "Alma Linux 8.x"
 
   wait_for_startup = false
@@ -375,9 +399,9 @@ resource "gpcn_virtualmachine" "test" {
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
 					},
 				},
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "size", "Small"),
-				),
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("size").AtMapKey("tier"), knownvalue.StringExact("small")),
+				},
 			},
 		},
 	})
@@ -418,7 +442,10 @@ resource "gpcn_virtualmachine" "test" {
   name          = "terraform-volume-test-vm"
   datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
 
-  size  = "Micro"
+  size = {
+    category = "general"
+    tier     = "micro"
+  }
   image = "Alma Linux 8.x"
 
   wait_for_startup = false
@@ -468,7 +495,10 @@ resource "gpcn_virtualmachine" "test" {
   name          = "terraform-volume-test-vm"
   datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
 
-  size  = "Micro"
+  size = {
+    category = "general"
+    tier     = "micro"
+  }
   image = "Alma Linux 8.x"
 
   wait_for_startup = false
@@ -522,7 +552,10 @@ resource "gpcn_virtualmachine" "test" {
   name          = "terraform-volume-test-vm"
   datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
 
-  size  = "Micro"
+  size = {
+    category = "general"
+    tier     = "micro"
+  }
   image = "Alma Linux 8.x"
 
   wait_for_startup = false
@@ -577,7 +610,10 @@ resource "gpcn_virtualmachine" "test" {
   name          = "terraform-volume-test-vm"
   datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
 
-  size  = "Micro"
+  size = {
+    category = "general"
+    tier     = "micro"
+  }
   image = "Alma Linux 8.x"
 
   wait_for_startup = false

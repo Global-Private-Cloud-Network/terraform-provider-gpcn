@@ -11,27 +11,30 @@ import (
 	"terraform-provider-gpcn/internal/networks"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
 // Validates that the planned virtual machine size is larger than the current. Returns the new sizeId if so
 func ValidatePlanSizeLargerThanStateSize(httpClient *http.Client, ctx context.Context, state, plan ResourceModel) (int64, error) {
 	tflog.Info(ctx, LogSizeChangedVerifyingLarger)
+	var size ResourceModelSize
+	plan.Size.As(ctx, &size, basetypes.ObjectAsOptions{})
 	// This had preliminary validation, but verify it's up-to-date
-	_, sizes, err := GetVirtualMachineSizeId(httpClient, ctx, plan.ImageId.ValueInt64(), plan.DatacenterId.ValueString(), plan.Size.ValueString())
+	_, sizes, err := GetVirtualMachineSizeConfigurationId(httpClient, ctx, plan.DatacenterId.ValueString(), size.Category.ValueString(), size.Tier.ValueString())
 	if err != nil {
 		return -1, err
 	}
 
 	// Verify the new size is larger than the old
-	stateSizeIdx := slices.IndexFunc(sizes, func(virtualMachineSize VirtualMachineSizesDataResponseTF) bool {
-		return strings.EqualFold(virtualMachineSize.Name.ValueString(), state.Size.ValueString())
+	stateSizeIdx := slices.IndexFunc(sizes, func(virtualMachineSize VirtualMachineConfigurationsTF) bool {
+		return strings.EqualFold(virtualMachineSize.Name.ValueString(), size.Tier.ValueString())
 	})
-	planSizeIdx := slices.IndexFunc(sizes, func(virtualMachineSize VirtualMachineSizesDataResponseTF) bool {
-		return strings.EqualFold(virtualMachineSize.Name.ValueString(), plan.Size.ValueString())
+	planSizeIdx := slices.IndexFunc(sizes, func(virtualMachineSize VirtualMachineConfigurationsTF) bool {
+		return strings.EqualFold(virtualMachineSize.Name.ValueString(), size.Tier.ValueString())
 	})
 
-	if sizes[stateSizeIdx].CPU.ValueInt64() > sizes[planSizeIdx].CPU.ValueInt64() {
+	if sizes[stateSizeIdx].CPUCores.ValueInt64() > sizes[planSizeIdx].CPUCores.ValueInt64() {
 		return -1, errors.New("the target virtual machine size is smaller than the old size. This shouldn't happen, since the validation should check for a smaller size (and force a replace), but in case it does, make sure the target size is LARGER than the current")
 	}
 

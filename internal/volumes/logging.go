@@ -39,12 +39,12 @@ const (
 	LogSuccessfullyRetrievedVolumeSizeIDWithParams = "Successfully retrieved volume size ID for volume type ID: %s and size: %s"
 
 	// Resource-level CRUD operation messages
-	LogStartingCreateGPCNVolume           = "Starting Create GPCN Volume"
+	LogStartingCreateGPCNVolume             = "Starting Create GPCN Volume"
 	LogSuccessfullyFinishedCreateGPCNVolume = "Successfully finished Create GPCN Volume"
-	LogStartingReadGPCNVolume             = "Starting Read GPCN Volume"
-	LogSuccessfullyFinishedReadGPCNVolume = "Successfully finished Read GPCN Volume"
-	LogStartingUpdateGPCNVolume           = "Starting Update GPCN Volume"
+	LogStartingReadGPCNVolume               = "Starting Read GPCN Volume"
+	LogSuccessfullyFinishedReadGPCNVolume   = "Successfully finished Read GPCN Volume"
+	LogStartingUpdateGPCNVolume             = "Starting Update GPCN Volume"
 	LogSuccessfullyFinishedUpdateGPCNVolume = "Successfully finished Update GPCN Volume"
-	LogStartingDeleteGPCNVolume           = "Starting Delete GPCN Volume"
+	LogStartingDeleteGPCNVolume             = "Starting Delete GPCN Volume"
 	LogSuccessfullyFinishedDeleteGPCNVolume = "Successfully finished Delete GPCN Volume"
 )
