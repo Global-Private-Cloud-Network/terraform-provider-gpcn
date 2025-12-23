@@ -1,3 +1,17 @@
+## 0.1.2 (December 23, 2025)
+
+ENHANCEMENTS:
+
+- Updated all API endpoints to use versioned paths
+- Added documentation to provider configuration attributes
+- Improved consistency in error messages and ID field references across all resources
+
+DOCUMENTATION:
+
+- Enhanced provider configuration documentation with usage guidance
+- Updated examples for networks, virtual machines, and volumes with improved clarity
+- Added better explanations for how to use example files locally during development
+
 ## 0.1.1 (December 04, 2025)
 
 ENHANCEMENTS:
