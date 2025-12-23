@@ -135,7 +135,7 @@ func CreateVirtualMachine(httpClient *http.Client, ctx context.Context, imageId,
 	return getVirtualMachineResponse, nil
 }
 
-// Gets a Virtual Machine by its Id
+// Gets a Virtual Machine by its ID
 func GetVirtualMachine(httpClient *http.Client, ctx context.Context, virtualMachineId string) (*ReadVirtualMachinesResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVMWithID, virtualMachineId))
 	request, err := http.NewRequest("GET", BASE_URL_V1+virtualMachineId, nil)
@@ -165,7 +165,7 @@ func GetVirtualMachine(httpClient *http.Client, ctx context.Context, virtualMach
 	return &readVirtualMachinesResponse, nil
 }
 
-// Updates a Virtual Machine by its Id
+// Updates a Virtual Machine by its ID
 func UpdateVirtualMachine(httpClient *http.Client, ctx context.Context, virtualMachineId, name string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateVMWithID, virtualMachineId))
 	// Create a new request from the plan

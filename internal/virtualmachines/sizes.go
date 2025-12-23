@@ -47,7 +47,7 @@ func (o VirtualMachineSizesDataResponseTF) AttrTypes() map[string]attr.Type {
 	}
 }
 
-// Get virtual machine size Id for a given datacenterId and virtual machine image name
+// Get virtual machine size ID for a given datacenterId and virtual machine image name
 func GetVirtualMachineSizeId(client *http.Client, ctx context.Context, imageId int64, datacenterId, virtualMachineSizeName string) (int64, []VirtualMachineSizesDataResponseTF, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVMSizeIDWithName, virtualMachineSizeName))
 	request, err := http.NewRequest("GET", DATA_CENTERS_BASE_URL_V1+datacenterId+"/virtual-machine-sizes?imageId="+strconv.FormatInt(imageId, 10), nil)
@@ -100,7 +100,7 @@ func GetVirtualMachineSizeId(client *http.Client, ctx context.Context, imageId i
 	return virtualMachineSizesResponse.Data[sizeIdx].ID, sizes, nil
 }
 
-// Helper function to update a VM by Id
+// Helper function to update a VM by ID
 func UpdateVirtualMachineSize(client *http.Client, ctx context.Context, virtualMachineId string, sizeId int64) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateVMSizeWithID, virtualMachineId))
 	// Create a new request from the plan

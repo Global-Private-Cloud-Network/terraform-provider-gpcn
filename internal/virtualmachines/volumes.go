@@ -21,7 +21,7 @@ func UpdateVolumes(httpClient *http.Client, ctx context.Context, vmId string, ol
 
 	// Do removals first, since there is a cap of 5 volumes
 	for _, val := range removedValues {
-		tflog.Info(ctx, fmt.Sprintf("Removing volume for Id: %s", val))
+		tflog.Info(ctx, fmt.Sprintf("Removing volume for ID: %s", val))
 
 		// Make sure volume actually needs to be removed
 		// If the volume was deleted outside of terraform, it would've detached first and the volumeIds wouldn't be updated
@@ -38,7 +38,7 @@ func UpdateVolumes(httpClient *http.Client, ctx context.Context, vmId string, ol
 
 	// Add new volumes
 	for _, val := range addedValues {
-		tflog.Info(ctx, fmt.Sprintf("Adding volume for Id: %s", val))
+		tflog.Info(ctx, fmt.Sprintf("Adding volume for ID: %s", val))
 		err := volumes.AddVolumeToVirtualMachine(httpClient, ctx, vmId, val)
 		if err != nil {
 			return fmt.Errorf("error adding volume with ID %s: %w", val, err)

@@ -27,7 +27,7 @@ const (
 	LogStartingPollForVMStatusWithID = "Starting PollForVirtualMachineStatus for Virtual Machine ID: %s"
 	LogStartingLongPollingIteration  = "Starting long polling iteration %d for retrieving information about the Virtual Machine. Seconds spent: %d"
 	LogVMResponseStatus              = "Virtual Machine response status is: %s"
-	LogVMStatusProceedingToAttach    = "Virtual Machine with Id %s is '%s'. Proceeding to attach networks and volumes if possible"
+	LogVMStatusProceedingToAttach    = "Virtual Machine with ID %s is '%s'. Proceeding to attach networks and volumes if possible"
 
 	// ValidatePublicIpValue messages
 	LogStartingValidatePublicIPValue          = "Starting ValidatePublicIpValue"

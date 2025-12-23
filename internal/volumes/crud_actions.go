@@ -112,7 +112,7 @@ func CreateVolume(httpClient *http.Client, ctx context.Context, model ResourceMo
 	return getVolumeResponse, nil
 }
 
-// Helper function to get a volume by Id. Shared between Read and the final action of Create and Update
+// Helper function to get a volume by ID. Shared between Read and the final action of Create and Update
 func GetVolume(httpClient *http.Client, ctx context.Context, volumeId string) (*readVolumesResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVolumeWithID, volumeId))
 	request, err := http.NewRequest("GET", BASE_URL_V1+volumeId, nil)

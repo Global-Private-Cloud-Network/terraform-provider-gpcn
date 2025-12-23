@@ -126,7 +126,7 @@ func CreateNetwork(httpClient *http.Client, ctx context.Context, model ResourceM
 	return getNetworkResponse, nil
 }
 
-// Helper function to get a network by Id. Shared between Read and the final action of Create and Delete
+// Helper function to get a network by ID. Shared between Read and the final action of Create and Delete
 func GetNetwork(client *http.Client, ctx context.Context, networkId string) (*readNetworkResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetNetworkWithID, networkId))
 	request, err := http.NewRequest("GET", BASE_URL_V1+networkId, nil)
