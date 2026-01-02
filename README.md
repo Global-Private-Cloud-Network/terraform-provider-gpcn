@@ -25,9 +25,21 @@ provider_installation {
 }
 ```
 
+You should also change the required_providers block in the resource.tf file you're testing to
+
+```
+terraform {
+  required_providers {
+    gpcn = {
+      source  = "gpcn.com/dev/gpcn"
+    }
+  }
+}
+```
+
 This means when you run the provider examples locally and access the GPCN provider, it will use the compiled binary from your local GOBIN directory.
 
-An API key (GPCN_API_KEY) and address of the base URL (GPCN_HOST) must be exposed as environment variables to run the provider or any associated main.tf files. They can also optionally be passed in as parameters to the `provider "gpcn" {}` block in main.tf, but it is considered better practice to expose them at runtime through the environment.
+An API key (GPCN_API_KEY) and address of the base URL (GPCN_HOST) must be exposed as environment variables to run the provider or any associated resource.tf files. They can also optionally be passed in as parameters to the `provider "gpcn" {}` block in resource.tf, but it is considered better practice to expose them at runtime through the environment.
 
 ## Examples
 

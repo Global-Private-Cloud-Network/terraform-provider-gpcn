@@ -85,7 +85,7 @@ func (o VirtualMachineConfigurationsTF) AttrTypes() map[string]attr.Type {
 // Get virtual machine size Id for a given datacenterId
 func GetVirtualMachineSizeConfigurationId(client *http.Client, ctx context.Context, datacenterId, virtualMachineSizeCategoryCode, virtualMachineSizeTierCode string) (int64, []VirtualMachineConfigurationsTF, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVMSizeIDWithName, virtualMachineSizeTierCode))
-	request, err := http.NewRequest("GET", "/resource/data-centers/"+datacenterId+"/virtual-machine-sizes", nil)
+	request, err := http.NewRequest("GET", DATA_CENTERS_BASE_URL_V1+datacenterId+"/virtual-machine-sizes", nil)
 	var sizes []VirtualMachineConfigurationsTF
 	if err != nil {
 		return -1, sizes, err
@@ -152,7 +152,7 @@ func GetVirtualMachineSizeConfigurationId(client *http.Client, ctx context.Conte
 	return virtualMachineSizesResponse.Data.Categories[categoryIdx].Tiers[tierIdx].Configurations[0].ConfigurationID, sizes, nil
 }
 
-// Helper function to update a VM by Id
+// Helper function to update a VM by ID
 func UpdateVirtualMachineSize(httpClient *http.Client, ctx context.Context, virtualMachineId string, sizeId int64) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateVMSizeWithID, virtualMachineId))
 	// Create a new request from the plan
@@ -164,7 +164,7 @@ func UpdateVirtualMachineSize(httpClient *http.Client, ctx context.Context, virt
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequest("PUT", BASE_URL+virtualMachineId+"/size", bytes.NewBuffer(jsonUpdateVMRequestBody))
+	request, err := http.NewRequest("PUT", BASE_URL_V1+virtualMachineId+"/size", bytes.NewBuffer(jsonUpdateVMRequestBody))
 	if err != nil {
 		return err
 	}

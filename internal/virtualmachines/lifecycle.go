@@ -14,7 +14,7 @@ func StartVirtualMachine(httpClient *http.Client, ctx context.Context, virtualMa
 	// Start is sometimes finnicky. Give it 3 tries of 2min each to be in Running status, kicking off a new request each time. No harm in doing so
 	for idx := range 3 {
 		tflog.Info(ctx, fmt.Sprintf(LogStartingIteration, idx))
-		request, err := http.NewRequest("POST", BASE_URL+virtualMachineId+"/start", nil)
+		request, err := http.NewRequest("POST", BASE_URL_V1+virtualMachineId+"/start", nil)
 		if err != nil {
 			return err
 		}
@@ -44,7 +44,7 @@ func StartVirtualMachine(httpClient *http.Client, ctx context.Context, virtualMa
 // Issues a Stop command to the virtual machine and then polls until it is verified stopped
 func StopVirtualMachine(httpClient *http.Client, ctx context.Context, virtualMachineId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingStopVMWithID, virtualMachineId))
-	request, err := http.NewRequest("POST", BASE_URL+virtualMachineId+"/stop", nil)
+	request, err := http.NewRequest("POST", BASE_URL_V1+virtualMachineId+"/stop", nil)
 	if err != nil {
 		return err
 	}

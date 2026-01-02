@@ -17,5 +17,5 @@ const (
 	ErrDetailCIDRBlockInvalidIP           = "The attribute '%s' does not contain a CIDR block with a valid IP address"
 	ErrDetailDNSInvalidDelimiter          = "The attribute '%s' must use comma-space (', ') as the delimiter between DNS server addresses. Example: '8.8.8.8, 8.8.4.4'"
 	ErrDetailDNSSpaceBeforeComma          = "The attribute '%s' must use comma-space (', ') as the delimiter. Space before comma is not allowed. Example: '8.8.8.8, 8.8.4.4'"
-	ErrDetailRemoveNetworkInterfaceFailed = "failed to detach network interface for ID: %s before deleting. Unable to delete a network still attached to a virtual machine"
+	ErrDetailRemoveNetworkInterfaceFailed = "failed to detach network interface for ID: '%s' before deleting. Unable to delete a network still attached to a virtual machine"
 )

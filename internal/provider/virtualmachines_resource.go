@@ -81,7 +81,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				},
 			},
 			"wait_for_startup": schema.BoolAttribute{
-				Description: "Determines if Terraform should wait for the virtual machine to start running before exiting. This will add a few minutes to virtual machine creation",
+				Description: "Determines if Terraform should wait for the virtual machine to start running before exiting. This will add a few minutes to virtual machine creation. Defaults to true",
 				Optional:    true,
 				Computed:    true,
 				PlanModifiers: []planmodifier.Bool{
@@ -148,7 +148,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				},
 			},
 			"image": schema.StringAttribute{
-				Description: "Operating system image to use for the virtual machine. Changing this value requires replacing the virtual machine",
+				Description: "Operating system image to use for the virtual machine. Changing this value requires replacing the virtual machine.  Note that not all images are available for every datacenter",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					// Changing the image requires us to destroy and create a new VM
@@ -195,7 +195,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				Default: listdefault.StaticValue(types.ListValueMust(types.StringType, []attr.Value{})),
 			},
 			"volume_ids": schema.ListAttribute{
-				Description: "List of volume IDs to attach to the virtual machine. Maximum of 5 volumes allowed. A volume can only be attached to a single virtual machine, so this parameter will not work as expected when using the count meta-attribute",
+				Description: "List of volume IDs to attach to the virtual machine. Maximum of 5 volumes allowed. A volume can only be attached to a single virtual machine, so this parameter will not work as expected when using Terraform's count meta-attribute",
 				ElementType: types.StringType,
 				Optional:    true,
 				Computed:    true,
@@ -737,7 +737,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 		}
 	}
 
-	request, err := http.NewRequest("DELETE", virtualmachines.BASE_URL+state.ID.ValueString(), nil)
+	request, err := http.NewRequest("DELETE", virtualmachines.BASE_URL_V1+state.ID.ValueString(), nil)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToCreateDeleteRequest,

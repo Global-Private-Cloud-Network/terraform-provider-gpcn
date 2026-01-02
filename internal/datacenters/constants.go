@@ -1,3 +1,3 @@
 package datacenters
 
-var BASE_URL string = "/resource/data-centers/"
+var BASE_URL_V1 string = "/v1/resource/data-centers/"
