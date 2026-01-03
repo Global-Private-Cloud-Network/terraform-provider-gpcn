@@ -8,7 +8,6 @@ import (
 	"maps"
 	"net/http"
 	"slices"
-	"strings"
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/networks"
 	"terraform-provider-gpcn/internal/volumes"
@@ -16,6 +15,7 @@ import (
 	"terraform-provider-gpcn/internal/virtualmachines"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -89,66 +89,69 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				Default: booldefault.StaticBool(true),
 			},
 			"size": schema.SingleNestedAttribute{
-				Description: "Hardware size configuration defining the compute resources (CPU, memory, disk) for the virtual machine. Specified using a category and tier pairing. Downsizing requires replacing the virtual machine",
+				Description: "Hardware size configuration defining the compute resources (CPU, memory, disk) for the virtual machine. Specified using a category and tier pairing. Downsizing requires replacing the virtual machine. Note that not all sizes are available for every datacenter",
 				Required:    true,
 				Attributes: map[string]schema.Attribute{
 					"category": schema.StringAttribute{
-						Description: "Short code representing the category (e.g., 'general')",
+						Description: "Short code representing the category. Must be one of: 'general' or 'memory'",
 						Required:    true,
+						Validators: []validator.String{
+							stringvalidator.OneOf(virtualmachines.CategoryGeneral, virtualmachines.CategoryMemory),
+						},
 					},
 					"tier": schema.StringAttribute{
-						Description: "Human-readable name of the size configuration (e.g., 'micro')",
+						Description: "Human-readable name of the size configuration. Must be one of: 'g-micro-1', 'g-small-1', 'g-medium-1', 'g-large-1', 'g-xl-1', 'm-micro-1', 'm-small-1', 'm-medium-1', 'm-large-1', 'm-xl-1'",
 						Required:    true,
+						Validators: []validator.String{
+							stringvalidator.OneOf(virtualmachines.AllTiers...),
+						},
 					},
 				},
 				PlanModifiers: []planmodifier.Object{
-					// Changing the size requires us to destroy and create a new VM if the size is smaller
+					// Changing the size requires us to destroy and create a new VM if:
+					// 1. The category changes, OR
+					// 2. The tier decreases within the same category
 					objectplanmodifier.RequiresReplaceIf(func(ctx context.Context, req planmodifier.ObjectRequest, resp *objectplanmodifier.RequiresReplaceIfFuncResponse) {
-						// Get other sizes and see if this is considered a size increase or not
-						var additionalSizes []virtualmachines.VirtualMachineConfigurationsTF
-						req.State.GetAttribute(ctx, path.Root("additional_sizes"), &additionalSizes)
-
 						var stateSize virtualmachines.ResourceModelSize
 						req.StateValue.As(ctx, &stateSize, basetypes.ObjectAsOptions{})
 						var planSize virtualmachines.ResourceModelSize
 						req.PlanValue.As(ctx, &planSize, basetypes.ObjectAsOptions{})
 
-						stateIdx := slices.IndexFunc(additionalSizes, func(size virtualmachines.VirtualMachineConfigurationsTF) bool {
-							return strings.EqualFold(stateSize.Tier.ValueString(), size.Name.ValueString()) && strings.EqualFold(stateSize.Category.ValueString(), size.CategoryCode.ValueString())
-						})
-						// This should never return -1 but just in case...
-						if stateIdx < 0 {
-							resp.Diagnostics.AddWarning(virtualmachines.ErrSummaryUnableToCompletePlan, virtualmachines.ErrDetailSizeNoLongerAvailable)
+						// If the category changes, require replacement
+						if stateSize.Category.ValueString() != planSize.Category.ValueString() {
 							resp.RequiresReplace = true
 							return
 						}
 
-						planIdx := slices.IndexFunc(additionalSizes, func(size virtualmachines.VirtualMachineConfigurationsTF) bool {
-							return strings.EqualFold(planSize.Tier.ValueString(), size.Name.ValueString()) && strings.EqualFold(planSize.Category.ValueString(), size.CategoryCode.ValueString())
-						})
-						if planIdx < 0 {
-							var names []string
-							for _, size := range additionalSizes {
-								names = append(names, size.CategoryCode.ValueString()+" - "+size.Code.ValueString())
-							}
-							sizesFormatted := strings.Join(names, ", ")
-							resp.Diagnostics.AddError(
-								virtualmachines.ErrSummaryUnableToCompletePlan,
-								fmt.Sprintf(virtualmachines.ErrDetailSizeNotAvailableForDatacenter, planSize.Category.ValueString(), planSize.Tier.ValueString(), sizesFormatted),
-							)
+						// Categories are the same, check if tier is decreasing
+						// Determine which tier list to use based on category
+						var tierList []string
+						if stateSize.Category.ValueString() == virtualmachines.CategoryGeneral {
+							tierList = virtualmachines.GeneralTiers
+						} else {
+							tierList = virtualmachines.MemoryTiers
+						}
+
+						// Find the index of state and plan tiers in the list
+						stateIdx := slices.Index(tierList, stateSize.Tier.ValueString())
+						planIdx := slices.Index(tierList, planSize.Tier.ValueString())
+
+						// If either tier is not found (shouldn't happen due to validators), don't require replacement
+						if stateIdx < 0 || planIdx < 0 {
 							return
 						}
 
-						// Require a replacement if the plan CPU, memory, or disk size is smaller. That means this is a size decrease
-						resp.RequiresReplace = int(additionalSizes[planIdx].CPUCores.ValueInt64()) < int(additionalSizes[stateIdx].CPUCores.ValueInt64()) ||
-							int(additionalSizes[planIdx].DiskSizeGB.ValueInt64()) < int(additionalSizes[stateIdx].DiskSizeGB.ValueInt64()) ||
-							int(additionalSizes[planIdx].MemorySizeGB.ValueInt64()) < int(additionalSizes[stateIdx].MemorySizeGB.ValueInt64())
-					}, "Requires a replacement if the planned size is smaller than the current size", "Requires a replacement if the plan size is smaller than the current size"),
+						// Require replacement if the plan tier has a lower index (smaller size) than state tier
+						resp.RequiresReplace = planIdx < stateIdx
+					}, "Requires a replacement if the category changes or the tier decreases within the same category", "Requires a replacement if the category changes or the tier decreases within the same category"),
 				},
 			},
 			"image": schema.StringAttribute{
-				Description: "Operating system image to use for the virtual machine. Changing this value requires replacing the virtual machine.  Note that not all images are available for every datacenter",
+				Description: "Operating system image to use for the virtual machine. Must be one of the supported image names. Changing this value requires replacing the virtual machine. Note that not all images are available for every datacenter",
 				Required:    true,
+				Validators: []validator.String{
+					stringvalidator.OneOf(virtualmachines.ValidImageNames...),
+				},
 				PlanModifiers: []planmodifier.String{
 					// Changing the image requires us to destroy and create a new VM
 					stringplanmodifier.RequiresReplace(),
@@ -204,62 +207,6 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				},
 				Default: listdefault.StaticValue(types.ListValueMust(types.StringType, []attr.Value{})),
 			},
-			"additional_images": schema.ListNestedAttribute{
-				Description: "List of available operating system images that can be used for this virtual machine",
-				Computed:    true,
-				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"id": schema.Int64Attribute{
-							Description: "Unique identifier for the image",
-							Computed:    true,
-						},
-						"name": schema.StringAttribute{
-							Description: "Name of the image",
-							Computed:    true,
-						},
-					},
-				},
-			},
-			"additional_sizes": schema.ListNestedAttribute{
-				Description: "List of available size configurations for this virtual machine in the datacenter",
-				Computed:    true,
-				NestedObject: schema.NestedAttributeObject{
-					Attributes: map[string]schema.Attribute{
-						"id": schema.Int64Attribute{
-							Description: "Unique identifier for the size configuration",
-							Computed:    true,
-						},
-						"category": schema.StringAttribute{
-							Description: "Category name of the size configuration (e.g., 'General Purpose')",
-							Computed:    true,
-						},
-						"category_code": schema.StringAttribute{
-							Description: "Short code representing the category (e.g., 'general')",
-							Computed:    true,
-						},
-						"name": schema.StringAttribute{
-							Description: "Human-readable name of the size configuration",
-							Computed:    true,
-						},
-						"code": schema.StringAttribute{
-							Description: "Short code uniquely identifying this size configuration",
-							Computed:    true,
-						},
-						"cpu": schema.Int64Attribute{
-							Description: "Number of CPU cores allocated to this size configuration",
-							Computed:    true,
-						},
-						"memory": schema.Int64Attribute{
-							Description: "Amount of memory (RAM) in GB allocated to this size configuration",
-							Computed:    true,
-						},
-						"disk": schema.Int64Attribute{
-							Description: "Base storage disk size in GB allocated to this size configuration",
-							Computed:    true,
-						},
-					},
-				},
-			},
 		},
 	}
 }
@@ -296,7 +243,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 	}
 
 	// Verify the image selected is still available
-	imageId, images, err := virtualmachines.GetVirtualMachineImageId(r.client, ctx, plan.DatacenterId.ValueString(), plan.Image.ValueString())
+	imageId, _, err := virtualmachines.GetVirtualMachineImageId(r.client, ctx, plan.DatacenterId.ValueString(), plan.Image.ValueString())
 
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -309,7 +256,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 	// Verify the size selected is still available
 	var size virtualmachines.ResourceModelSize
 	plan.Size.As(ctx, &size, basetypes.ObjectAsOptions{})
-	sizeId, sizes, err := virtualmachines.GetVirtualMachineSizeConfigurationId(r.client, ctx, plan.DatacenterId.ValueString(), size.Tier.ValueString())
+	sizeId, _, err := virtualmachines.GetVirtualMachineSizeConfigurationId(r.client, ctx, plan.DatacenterId.ValueString(), size.Tier.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryErrorVerifyingSize,
@@ -327,7 +274,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
-	plan = virtualmachines.MapVirtualMachineResponseToModel(ctx, getVirtualMachineResponse, images, sizes, plan)
+	plan = virtualmachines.MapVirtualMachineResponseToModel(ctx, getVirtualMachineResponse, plan)
 
 	// Attach each volume
 	if !plan.VolumeIds.IsNull() {
@@ -385,26 +332,7 @@ func (r *virtualMachinesResource) Read(ctx context.Context, req resource.ReadReq
 		return
 	}
 
-	_, images, err := virtualmachines.GetVirtualMachineImageId(r.client, ctx, getVirtualMachineResponse.Data.VirtualMachine.Datacenter.ID, getVirtualMachineResponse.Data.VirtualMachine.Image)
-
-	if err != nil {
-		resp.Diagnostics.AddError(
-			virtualmachines.ErrSummaryErrorVerifyingImage,
-			fmt.Sprintf(virtualmachines.ErrDetailImageVerificationFailed, getVirtualMachineResponse.Data.VirtualMachine.Image, getVirtualMachineResponse.Data.VirtualMachine.Datacenter.ID)+": "+err.Error(),
-		)
-		return
-	}
-
-	_, sizes, err := virtualmachines.GetVirtualMachineSizeConfigurationId(r.client, ctx, getVirtualMachineResponse.Data.VirtualMachine.Datacenter.ID, getVirtualMachineResponse.Data.VirtualMachine.ConfigurationCode)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			virtualmachines.ErrSummaryErrorVerifyingSize,
-			fmt.Sprintf(virtualmachines.ErrDetailSizeVerificationFailed, getVirtualMachineResponse.Data.VirtualMachine.ConfigurationCategoryCode, getVirtualMachineResponse.Data.VirtualMachine.ConfigurationCode, getVirtualMachineResponse.Data.VirtualMachine.Datacenter.ID)+": "+err.Error(),
-		)
-		return
-	}
-
-	state = virtualmachines.MapVirtualMachineResponseToModel(ctx, getVirtualMachineResponse, images, sizes, state)
+	state = virtualmachines.MapVirtualMachineResponseToModel(ctx, getVirtualMachineResponse, state)
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, state)
@@ -616,29 +544,8 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		return
 	}
 
-	_, images, err := virtualmachines.GetVirtualMachineImageId(r.client, ctx, plan.DatacenterId.ValueString(), plan.Image.ValueString())
-
-	if err != nil {
-		resp.Diagnostics.AddError(
-			virtualmachines.ErrSummaryErrorVerifyingImage,
-			fmt.Sprintf(virtualmachines.ErrDetailImageVerificationFailed, plan.Image.ValueString(), plan.DatacenterId.ValueString())+": "+err.Error(),
-		)
-		return
-	}
-
-	var size virtualmachines.ResourceModelSize
-	plan.Size.As(ctx, &size, basetypes.ObjectAsOptions{})
-	_, sizes, err := virtualmachines.GetVirtualMachineSizeConfigurationId(r.client, ctx, plan.DatacenterId.ValueString(), size.Tier.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError(
-			virtualmachines.ErrSummaryErrorVerifyingSize,
-			fmt.Sprintf(virtualmachines.ErrDetailSizeVerificationFailed, size.Category.ValueString(), size.Tier.ValueString(), plan.DatacenterId.ValueString())+": "+err.Error(),
-		)
-		return
-	}
-
 	tflog.Info(ctx, virtualmachines.LogRetrievedLatestVMInfoMappingToModel)
-	plan = virtualmachines.MapVirtualMachineResponseToModel(ctx, getVirtualMachineResponse, images, sizes, plan)
+	plan = virtualmachines.MapVirtualMachineResponseToModel(ctx, getVirtualMachineResponse, plan)
 
 	// Once finished, conditionally start the virtual machine again
 	if needStopVM {

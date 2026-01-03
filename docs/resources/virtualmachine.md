@@ -113,9 +113,9 @@ output "example_gpcn_virtualmachine" {
 
 - `allocate_public_ip` (Boolean) Whether to allocate a public IP address for the virtual machine
 - `datacenter_id` (String) Unique identifier of the datacenter where the virtual machine will be created. Changing this value requires replacing the virtual machine
-- `image` (String) Operating system image to use for the virtual machine. Changing this value requires replacing the virtual machine.  Note that not all images are available for every datacenter
+- `image` (String) Operating system image to use for the virtual machine. Must be one of the supported image names. Changing this value requires replacing the virtual machine. Note that not all images are available for every datacenter
 - `name` (String) Human-readable name for the virtual machine
-- `size` (Attributes) Hardware size configuration defining the compute resources (CPU, memory, disk) for the virtual machine. Specified using a category and tier pairing. Downsizing requires replacing the virtual machine (see [below for nested schema](#nestedatt--size))
+- `size` (Attributes) Hardware size configuration defining the compute resources (CPU, memory, disk) for the virtual machine. Specified using a category and tier pairing. Downsizing requires replacing the virtual machine. Note that not all sizes are available for every datacenter (see [below for nested schema](#nestedatt--size))
 
 ### Optional
 
@@ -125,8 +125,6 @@ output "example_gpcn_virtualmachine" {
 
 ### Read-Only
 
-- `additional_images` (Attributes List) List of available operating system images that can be used for this virtual machine (see [below for nested schema](#nestedatt--additional_images))
-- `additional_sizes` (Attributes List) List of available size configurations for this virtual machine in the datacenter (see [below for nested schema](#nestedatt--additional_sizes))
 - `configuration` (Map of String) Hardware configuration details including CPU, RAM, and disk specifications
 - `created_time` (String) Timestamp when the virtual machine was created in ISO-8601 format
 - `id` (String) Unique identifier for the virtual machine in UUID format
@@ -138,32 +136,8 @@ output "example_gpcn_virtualmachine" {
 
 Required:
 
-- `category` (String) Short code representing the category (e.g., 'general')
-- `tier` (String) Human-readable name of the size configuration (e.g., 'micro')
-
-
-<a id="nestedatt--additional_images"></a>
-### Nested Schema for `additional_images`
-
-Read-Only:
-
-- `id` (Number) Unique identifier for the image
-- `name` (String) Name of the image
-
-
-<a id="nestedatt--additional_sizes"></a>
-### Nested Schema for `additional_sizes`
-
-Read-Only:
-
-- `category` (String) Category name of the size configuration (e.g., 'General Purpose')
-- `category_code` (String) Short code representing the category (e.g., 'general')
-- `code` (String) Short code uniquely identifying this size configuration
-- `cpu` (Number) Number of CPU cores allocated to this size configuration
-- `disk` (Number) Base storage disk size in GB allocated to this size configuration
-- `id` (Number) Unique identifier for the size configuration
-- `memory` (Number) Amount of memory (RAM) in GB allocated to this size configuration
-- `name` (String) Human-readable name of the size configuration
+- `category` (String) Short code representing the category. Must be one of: 'general' or 'memory'
+- `tier` (String) Human-readable name of the size configuration. Must be one of: 'g-micro-1', 'g-small-1', 'g-medium-1', 'g-large-1', 'g-xl-1', 'm-micro-1', 'm-small-1', 'm-medium-1', 'm-large-1', 'm-xl-1'
 
 ## Import
 

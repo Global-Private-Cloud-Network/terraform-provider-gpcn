@@ -23,8 +23,6 @@ type ResourceModel struct {
 	AllocatePublicIp types.Bool   `tfsdk:"allocate_public_ip"`
 	NetworkIds       types.List   `tfsdk:"network_ids"`
 	VolumeIds        types.List   `tfsdk:"volume_ids"`
-	AdditionalImages types.List   `tfsdk:"additional_images"`
-	AdditionalSizes  types.List   `tfsdk:"additional_sizes"`
 }
 
 type ResourceModelSize struct {
@@ -40,7 +38,7 @@ func (o ResourceModelSize) AttrTypes() map[string]attr.Type {
 }
 
 // Update the plan or state with new values from the GET response
-func MapVirtualMachineResponseToModel(ctx context.Context, response *ReadVirtualMachinesResponse, images []VirtualMachineImagesDataResponseTF, sizes []VirtualMachineConfigurationsTF, model ResourceModel) ResourceModel {
+func MapVirtualMachineResponseToModel(ctx context.Context, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
 	model.ID = types.StringValue(response.Data.VirtualMachine.ID)
 
 	// Construct time entries
@@ -71,10 +69,6 @@ func MapVirtualMachineResponseToModel(ctx context.Context, response *ReadVirtual
 		"ram":          strconv.FormatInt(response.Data.VirtualMachine.RAM, 10) + " GB",
 		"base_storage": strconv.FormatInt(response.Data.VirtualMachine.Disk, 10) + " GB",
 	})
-
-	// Construct images and sizes
-	model.AdditionalImages, _ = types.ListValueFrom(ctx, types.ObjectType{AttrTypes: VirtualMachineImagesDataResponseTF{}.AttrTypes()}, images)
-	model.AdditionalSizes, _ = types.ListValueFrom(ctx, types.ObjectType{AttrTypes: VirtualMachineConfigurationsTF{}.AttrTypes()}, sizes)
 
 	// If model doesn't already have these populated, set them
 	model = setModelValuesNotPresent(ctx, response, model)

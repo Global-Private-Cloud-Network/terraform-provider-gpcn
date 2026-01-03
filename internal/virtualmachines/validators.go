@@ -18,20 +18,22 @@ import (
 // Validates that the planned virtual machine size is larger than the current. Returns the new sizeId if so
 func ValidatePlanSizeLargerThanStateSize(httpClient *http.Client, ctx context.Context, state, plan ResourceModel) (int64, error) {
 	tflog.Info(ctx, LogSizeChangedVerifyingLarger)
-	var size ResourceModelSize
-	plan.Size.As(ctx, &size, basetypes.ObjectAsOptions{})
+	var planSize ResourceModelSize
+	plan.Size.As(ctx, &planSize, basetypes.ObjectAsOptions{})
+	var stateSize ResourceModelSize
+	state.Size.As(ctx, &stateSize, basetypes.ObjectAsOptions{})
 	// This had preliminary validation, but verify it's up-to-date
-	_, sizes, err := GetVirtualMachineSizeConfigurationId(httpClient, ctx, plan.DatacenterId.ValueString(), size.Tier.ValueString())
+	_, sizes, err := GetVirtualMachineSizeConfigurationId(httpClient, ctx, plan.DatacenterId.ValueString(), planSize.Tier.ValueString())
 	if err != nil {
 		return -1, err
 	}
 
 	// Verify the new size is larger than the old
 	stateSizeIdx := slices.IndexFunc(sizes, func(virtualMachineSize VirtualMachineConfigurationsTF) bool {
-		return strings.EqualFold(virtualMachineSize.Name.ValueString(), size.Tier.ValueString())
+		return strings.EqualFold(virtualMachineSize.Code.ValueString(), stateSize.Tier.ValueString())
 	})
 	planSizeIdx := slices.IndexFunc(sizes, func(virtualMachineSize VirtualMachineConfigurationsTF) bool {
-		return strings.EqualFold(virtualMachineSize.Name.ValueString(), size.Tier.ValueString())
+		return strings.EqualFold(virtualMachineSize.Code.ValueString(), planSize.Tier.ValueString())
 	})
 
 	if sizes[stateSizeIdx].CPUCores.ValueInt64() > sizes[planSizeIdx].CPUCores.ValueInt64() {
