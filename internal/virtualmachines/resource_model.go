@@ -2,13 +2,11 @@ package virtualmachines
 
 import (
 	"context"
-	"slices"
 	"strconv"
-	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 type ResourceModel struct {
@@ -27,13 +25,18 @@ type ResourceModel struct {
 	VolumeIds        types.List   `tfsdk:"volume_ids"`
 	AdditionalImages types.List   `tfsdk:"additional_images"`
 	AdditionalSizes  types.List   `tfsdk:"additional_sizes"`
-	ImageId          types.Int64  `tfsdk:"image_id"`
-	SizeId           types.Int64  `tfsdk:"size_id"`
 }
 
 type ResourceModelSize struct {
 	Category types.String `tfsdk:"category"`
 	Tier     types.String `tfsdk:"tier"`
+}
+
+func (o ResourceModelSize) AttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"category": types.StringType,
+		"tier":     types.StringType,
+	}
 }
 
 // Update the plan or state with new values from the GET response
@@ -56,9 +59,9 @@ func MapVirtualMachineResponseToModel(ctx context.Context, response *ReadVirtual
 
 	// Construct the location object
 	model.Location, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{
-		"country":    response.Data.VirtualMachine.Country,
-		"region":     response.Data.VirtualMachine.Region,
-		"datacenter": response.Data.VirtualMachine.Datacenter,
+		"country":    response.Data.VirtualMachine.Datacenter.Country,
+		"region":     response.Data.VirtualMachine.Datacenter.Region,
+		"datacenter": response.Data.VirtualMachine.Datacenter.Name,
 	})
 
 	// Construct the configuration object
@@ -73,17 +76,29 @@ func MapVirtualMachineResponseToModel(ctx context.Context, response *ReadVirtual
 	model.AdditionalImages, _ = types.ListValueFrom(ctx, types.ObjectType{AttrTypes: VirtualMachineImagesDataResponseTF{}.AttrTypes()}, images)
 	model.AdditionalSizes, _ = types.ListValueFrom(ctx, types.ObjectType{AttrTypes: VirtualMachineConfigurationsTF{}.AttrTypes()}, sizes)
 
-	// Find the imageId and sizeId from the objects. Not possible to be < 0
-	var size ResourceModelSize
-	model.Size.As(ctx, &size, basetypes.ObjectAsOptions{})
-	sizeIdx := slices.IndexFunc(sizes, func(virtualMachineSize VirtualMachineConfigurationsTF) bool {
-		return strings.EqualFold(virtualMachineSize.Name.ValueString(), size.Tier.ValueString())
-	})
-	imageIdx := slices.IndexFunc(images, func(virtualMachineImage VirtualMachineImagesDataResponseTF) bool {
-		return strings.EqualFold(virtualMachineImage.Name.ValueString(), model.Image.ValueString())
-	})
-	model.ImageId = images[imageIdx].ID
-	model.SizeId = sizes[sizeIdx].ID
+	// If model doesn't already have these populated, set them
+	model = setModelValuesNotPresent(ctx, response, model)
+
+	return model
+}
+
+func setModelValuesNotPresent(ctx context.Context, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
+	if model.DatacenterId.IsNull() {
+		model.DatacenterId = types.StringValue(response.Data.VirtualMachine.Datacenter.ID)
+	}
+	if model.Image.IsNull() {
+		model.Image = types.StringValue(response.Data.VirtualMachine.Image)
+	}
+	if model.Name.IsNull() {
+		model.Name = types.StringValue(response.Data.VirtualMachine.Name)
+	}
+	if model.Size.IsNull() {
+		size := ResourceModelSize{}
+		model.Size, _ = types.ObjectValueFrom(ctx, size.AttrTypes(), ResourceModelSize{
+			Category: types.StringValue(response.Data.VirtualMachine.ConfigurationCategoryCode),
+			Tier:     types.StringValue(response.Data.VirtualMachine.ConfigurationCode),
+		})
+	}
 
 	return model
 }

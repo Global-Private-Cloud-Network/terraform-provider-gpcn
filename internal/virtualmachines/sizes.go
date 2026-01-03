@@ -83,7 +83,7 @@ func (o VirtualMachineConfigurationsTF) AttrTypes() map[string]attr.Type {
 }
 
 // Get virtual machine size Id for a given datacenterId
-func GetVirtualMachineSizeConfigurationId(client *http.Client, ctx context.Context, datacenterId, virtualMachineSizeCategoryCode, virtualMachineSizeTierCode string) (int64, []VirtualMachineConfigurationsTF, error) {
+func GetVirtualMachineSizeConfigurationId(client *http.Client, ctx context.Context, datacenterId, virtualMachineSizeTierCode string) (int64, []VirtualMachineConfigurationsTF, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVMSizeIDWithName, virtualMachineSizeTierCode))
 	request, err := http.NewRequest("GET", DATA_CENTERS_BASE_URL_V1+datacenterId+"/virtual-machine-sizes", nil)
 	var sizes []VirtualMachineConfigurationsTF
@@ -130,26 +130,17 @@ func GetVirtualMachineSizeConfigurationId(client *http.Client, ctx context.Conte
 	}
 	sizesFormatted := strings.Join(names, ", ")
 
-	// Verify the category selected is available
-	categoryIdx := slices.IndexFunc(virtualMachineSizesResponse.Data.Categories, func(category virtualMachineSizesDataCategoriesResponse) bool {
-		return strings.EqualFold(category.Code, virtualMachineSizeCategoryCode)
-	})
-
-	if categoryIdx < 0 {
-		return -1, sizes, fmt.Errorf(ErrDetailSizeNotAvailableForDatacenter, virtualMachineSizeCategoryCode, virtualMachineSizeTierCode, sizesFormatted)
-	}
-
 	// Verify the size specified is available
-	tierIdx := slices.IndexFunc(virtualMachineSizesResponse.Data.Categories[categoryIdx].Tiers, func(tier virtualMachineSizesDataCategoriesTiersResponse) bool {
-		return strings.EqualFold(tier.Code, virtualMachineSizeTierCode)
+	tierIdx := slices.IndexFunc(sizes, func(size VirtualMachineConfigurationsTF) bool {
+		return strings.EqualFold(size.Code.ValueString(), virtualMachineSizeTierCode)
 	})
 
 	if tierIdx < 0 {
-		return -1, sizes, fmt.Errorf(ErrDetailSizeNotAvailableForDatacenter, virtualMachineSizeCategoryCode, virtualMachineSizeTierCode, sizesFormatted)
+		return -1, sizes, fmt.Errorf(ErrDetailSizeNotAvailableForDatacenterNoCategory, virtualMachineSizeTierCode, sizesFormatted)
 	}
 
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyRetrievedVMSizeIDWithName, virtualMachineSizeTierCode))
-	return virtualMachineSizesResponse.Data.Categories[categoryIdx].Tiers[tierIdx].Configurations[0].ConfigurationID, sizes, nil
+	return sizes[tierIdx].ID.ValueInt64(), sizes, nil
 }
 
 // Helper function to update a VM by ID

@@ -82,7 +82,7 @@ resource "gpcn_virtualmachine" "example" {
   # Compute configuration
   size = {
     category = "general"
-    tier     = "micro"
+    tier     = "g-micro-1"
   }
   image = "Alma Linux 8.x"
 
@@ -130,10 +130,8 @@ output "example_gpcn_virtualmachine" {
 - `configuration` (Map of String) Hardware configuration details including CPU, RAM, and disk specifications
 - `created_time` (String) Timestamp when the virtual machine was created in ISO-8601 format
 - `id` (String) Unique identifier for the virtual machine in UUID format
-- `image_id` (Number) Internal identifier for the selected image
 - `last_updated` (String) Timestamp when the virtual machine was last updated in ISO-8601 format
 - `location` (Map of String) Location details including datacenter, region, and country information
-- `size_id` (Number) Internal identifier for the selected size configuration
 
 <a id="nestedatt--size"></a>
 ### Nested Schema for `size`

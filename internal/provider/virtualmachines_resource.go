@@ -22,7 +22,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
@@ -261,17 +260,6 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 					},
 				},
 			},
-			"image_id": schema.Int64Attribute{
-				Description: "Internal identifier for the selected image",
-				Computed:    true,
-				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.UseStateForUnknown(),
-				},
-			},
-			"size_id": schema.Int64Attribute{
-				Description: "Internal identifier for the selected size configuration",
-				Computed:    true,
-			},
 		},
 	}
 }
@@ -321,7 +309,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 	// Verify the size selected is still available
 	var size virtualmachines.ResourceModelSize
 	plan.Size.As(ctx, &size, basetypes.ObjectAsOptions{})
-	sizeId, sizes, err := virtualmachines.GetVirtualMachineSizeConfigurationId(r.client, ctx, plan.DatacenterId.ValueString(), size.Category.ValueString(), size.Tier.ValueString())
+	sizeId, sizes, err := virtualmachines.GetVirtualMachineSizeConfigurationId(r.client, ctx, plan.DatacenterId.ValueString(), size.Tier.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryErrorVerifyingSize,
@@ -397,23 +385,21 @@ func (r *virtualMachinesResource) Read(ctx context.Context, req resource.ReadReq
 		return
 	}
 
-	_, images, err := virtualmachines.GetVirtualMachineImageId(r.client, ctx, getVirtualMachineResponse.Data.VirtualMachine.DatacenterId, getVirtualMachineResponse.Data.VirtualMachine.Image)
+	_, images, err := virtualmachines.GetVirtualMachineImageId(r.client, ctx, getVirtualMachineResponse.Data.VirtualMachine.Datacenter.ID, getVirtualMachineResponse.Data.VirtualMachine.Image)
 
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryErrorVerifyingImage,
-			fmt.Sprintf(virtualmachines.ErrDetailImageVerificationFailed, getVirtualMachineResponse.Data.VirtualMachine.Image, getVirtualMachineResponse.Data.VirtualMachine.DatacenterId)+": "+err.Error(),
+			fmt.Sprintf(virtualmachines.ErrDetailImageVerificationFailed, getVirtualMachineResponse.Data.VirtualMachine.Image, getVirtualMachineResponse.Data.VirtualMachine.Datacenter.ID)+": "+err.Error(),
 		)
 		return
 	}
 
-	var size virtualmachines.ResourceModelSize
-	state.Size.As(ctx, &size, basetypes.ObjectAsOptions{})
-	_, sizes, err := virtualmachines.GetVirtualMachineSizeConfigurationId(r.client, ctx, state.DatacenterId.ValueString(), size.Category.ValueString(), size.Tier.ValueString())
+	_, sizes, err := virtualmachines.GetVirtualMachineSizeConfigurationId(r.client, ctx, getVirtualMachineResponse.Data.VirtualMachine.Datacenter.ID, getVirtualMachineResponse.Data.VirtualMachine.ConfigurationCode)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryErrorVerifyingSize,
-			fmt.Sprintf(virtualmachines.ErrDetailSizeVerificationFailed, size.Category.ValueString(), size.Tier.ValueString(), getVirtualMachineResponse.Data.VirtualMachine.DatacenterId)+": "+err.Error(),
+			fmt.Sprintf(virtualmachines.ErrDetailSizeVerificationFailed, getVirtualMachineResponse.Data.VirtualMachine.ConfigurationCategoryCode, getVirtualMachineResponse.Data.VirtualMachine.ConfigurationCode, getVirtualMachineResponse.Data.VirtualMachine.Datacenter.ID)+": "+err.Error(),
 		)
 		return
 	}
@@ -642,7 +628,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 
 	var size virtualmachines.ResourceModelSize
 	plan.Size.As(ctx, &size, basetypes.ObjectAsOptions{})
-	_, sizes, err := virtualmachines.GetVirtualMachineSizeConfigurationId(r.client, ctx, plan.DatacenterId.ValueString(), size.Category.ValueString(), size.Tier.ValueString())
+	_, sizes, err := virtualmachines.GetVirtualMachineSizeConfigurationId(r.client, ctx, plan.DatacenterId.ValueString(), size.Tier.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryErrorVerifyingSize,

@@ -21,7 +21,7 @@ func ValidatePlanSizeLargerThanStateSize(httpClient *http.Client, ctx context.Co
 	var size ResourceModelSize
 	plan.Size.As(ctx, &size, basetypes.ObjectAsOptions{})
 	// This had preliminary validation, but verify it's up-to-date
-	_, sizes, err := GetVirtualMachineSizeConfigurationId(httpClient, ctx, plan.DatacenterId.ValueString(), size.Category.ValueString(), size.Tier.ValueString())
+	_, sizes, err := GetVirtualMachineSizeConfigurationId(httpClient, ctx, plan.DatacenterId.ValueString(), size.Tier.ValueString())
 	if err != nil {
 		return -1, err
 	}
