@@ -274,7 +274,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
-	plan = virtualmachines.MapVirtualMachineResponseToModel(ctx, getVirtualMachineResponse, plan)
+	plan = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
 
 	// Attach each volume
 	if !plan.VolumeIds.IsNull() {
@@ -332,7 +332,7 @@ func (r *virtualMachinesResource) Read(ctx context.Context, req resource.ReadReq
 		return
 	}
 
-	state = virtualmachines.MapVirtualMachineResponseToModel(ctx, getVirtualMachineResponse, state)
+	state = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, state)
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, state)
@@ -545,7 +545,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	}
 
 	tflog.Info(ctx, virtualmachines.LogRetrievedLatestVMInfoMappingToModel)
-	plan = virtualmachines.MapVirtualMachineResponseToModel(ctx, getVirtualMachineResponse, plan)
+	plan = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
 
 	// Once finished, conditionally start the virtual machine again
 	if needStopVM {

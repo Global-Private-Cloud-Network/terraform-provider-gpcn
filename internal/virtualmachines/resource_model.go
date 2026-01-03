@@ -2,7 +2,9 @@ package virtualmachines
 
 import (
 	"context"
+	"net/http"
 	"strconv"
+	"terraform-provider-gpcn/internal/networks"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -38,7 +40,7 @@ func (o ResourceModelSize) AttrTypes() map[string]attr.Type {
 }
 
 // Update the plan or state with new values from the GET response
-func MapVirtualMachineResponseToModel(ctx context.Context, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
+func MapVirtualMachineResponseToModel(ctx context.Context, httpClient *http.Client, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
 	model.ID = types.StringValue(response.Data.VirtualMachine.ID)
 
 	// Construct time entries
@@ -71,12 +73,12 @@ func MapVirtualMachineResponseToModel(ctx context.Context, response *ReadVirtual
 	})
 
 	// If model doesn't already have these populated, set them
-	model = setModelValuesNotPresent(ctx, response, model)
+	model = setModelValuesNotPresent(ctx, httpClient, response, model)
 
 	return model
 }
 
-func setModelValuesNotPresent(ctx context.Context, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
+func setModelValuesNotPresent(ctx context.Context, httpClient *http.Client, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
 	if model.DatacenterId.IsNull() {
 		model.DatacenterId = types.StringValue(response.Data.VirtualMachine.Datacenter.ID)
 	}
@@ -92,6 +94,33 @@ func setModelValuesNotPresent(ctx context.Context, response *ReadVirtualMachines
 			Category: types.StringValue(response.Data.VirtualMachine.ConfigurationCategoryCode),
 			Tier:     types.StringValue(response.Data.VirtualMachine.ConfigurationCode),
 		})
+	}
+	if model.NetworkIds.IsNull() {
+		// Fetch network interfaces for the virtual machine
+		networkInterfaces, err := networks.GetNetworkInterfaces(httpClient, ctx, response.Data.VirtualMachine.ID)
+		if err == nil && len(networkInterfaces) > 0 {
+			// Extract network IDs from network interfaces
+			var networkIds []string
+			hasPublicIp := false
+			for _, iface := range networkInterfaces {
+				networkIds = append(networkIds, iface.NetworkID.ValueString())
+				// Check if this interface has a public IP
+				if !iface.PublicIP.IsNull() && iface.PublicIP.ValueString() != "" {
+					hasPublicIp = true
+				}
+			}
+			// Set the network IDs in the model
+			model.NetworkIds, _ = types.ListValueFrom(ctx, types.StringType, networkIds)
+
+			// Set AllocatePublicIp if it's currently null
+			if model.AllocatePublicIp.IsNull() {
+				model.AllocatePublicIp = types.BoolValue(hasPublicIp)
+			}
+		}
+	}
+	if model.WaitForStartup.IsNull() {
+		// Set WaitForStartup to the default value
+		model.WaitForStartup = types.BoolValue(true)
 	}
 
 	return model
