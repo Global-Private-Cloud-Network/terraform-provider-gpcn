@@ -123,11 +123,12 @@ resource "gpcn_volume" "test" {
 }
 
 func TestVolumesResourceInvalidSize(t *testing.T) {
-	resource.UnitTest(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config: providerConfig + `
+	t.Run("invalid_size", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: providerConfig + `
 resource "gpcn_volume" "test" {
   name = "terraform-demo"
 
@@ -138,8 +139,9 @@ resource "gpcn_volume" "test" {
   size_gb = 555
 }
 			`,
-				ExpectError: regexp.MustCompile("the specified volume size is not available for this datacenter"),
+					ExpectError: regexp.MustCompile("the specified volume size is not available for this datacenter"),
+				},
 			},
-		},
+		})
 	})
 }

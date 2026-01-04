@@ -139,7 +139,6 @@ resource "gpcn_network" "test" {
 
 func TestNetworkTypeInvalid(t *testing.T) {
 	t.Run("invalid_network_type", func(t *testing.T) {
-
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
