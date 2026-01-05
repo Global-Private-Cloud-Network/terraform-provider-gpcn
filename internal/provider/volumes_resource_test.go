@@ -123,12 +123,12 @@ resource "gpcn_volume" "test" {
 }
 
 func TestVolumesResourceInvalidSize(t *testing.T) {
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			// Setting the size_gb to an invalid size for the datacenter returns an error
-			{
-				Config: providerConfig + `
+	t.Run("invalid_size", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: providerConfig + `
 resource "gpcn_volume" "test" {
   name = "terraform-demo"
 
@@ -139,23 +139,9 @@ resource "gpcn_volume" "test" {
   size_gb = 555
 }
 			`,
-				Check: resource.ComposeAggregateTestCheckFunc(
-					// Verify attributes are set to the values from the config
-					resource.TestCheckResourceAttr(gpcnVolumesTest, "datacenter_id", "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"),
-					resource.TestCheckResourceAttr(gpcnVolumesTest, "name", "terraform-demo"),
-					resource.TestCheckResourceAttr(gpcnVolumesTest, "size_gb", "256"),
-					resource.TestCheckResourceAttr(gpcnVolumesTest, "volume_type", "SSD"),
-					// Verify generated values are generated
-					resource.TestCheckResourceAttrSet(gpcnVolumesTest, "id"),
-					resource.TestCheckResourceAttrSet(gpcnVolumesTest, "last_updated"),
-					resource.TestCheckResourceAttrSet(gpcnVolumesTest, "created_time"),
-				),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(gpcnVolumesTest, plancheck.ResourceActionCreate),
-					},
+					ExpectError: regexp.MustCompile("the specified volume size is not available for this datacenter"),
 				},
-				ExpectError: regexp.MustCompile("the specified volume size is not available for this datacenter"),
 			},
-		}})
+		})
+	})
 }

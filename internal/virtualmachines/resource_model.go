@@ -2,11 +2,12 @@ package virtualmachines
 
 import (
 	"context"
-	"slices"
+	"net/http"
 	"strconv"
-	"strings"
+	"terraform-provider-gpcn/internal/networks"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -15,7 +16,7 @@ type ResourceModel struct {
 	Name             types.String `tfsdk:"name"`
 	DatacenterId     types.String `tfsdk:"datacenter_id"`
 	WaitForStartup   types.Bool   `tfsdk:"wait_for_startup"`
-	Size             types.String `tfsdk:"size"`
+	Size             types.Object `tfsdk:"size"`
 	Image            types.String `tfsdk:"image"`
 	CreatedTime      types.String `tfsdk:"created_time"`
 	LastUpdated      types.String `tfsdk:"last_updated"`
@@ -24,14 +25,22 @@ type ResourceModel struct {
 	AllocatePublicIp types.Bool   `tfsdk:"allocate_public_ip"`
 	NetworkIds       types.List   `tfsdk:"network_ids"`
 	VolumeIds        types.List   `tfsdk:"volume_ids"`
-	AdditionalImages types.List   `tfsdk:"additional_images"`
-	AdditionalSizes  types.List   `tfsdk:"additional_sizes"`
-	ImageId          types.Int64  `tfsdk:"image_id"`
-	SizeId           types.Int64  `tfsdk:"size_id"`
+}
+
+type ResourceModelSize struct {
+	Category types.String `tfsdk:"category"`
+	Tier     types.String `tfsdk:"tier"`
+}
+
+func (o ResourceModelSize) AttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"category": types.StringType,
+		"tier":     types.StringType,
+	}
 }
 
 // Update the plan or state with new values from the GET response
-func MapVirtualMachineResponseToModel(ctx context.Context, response *ReadVirtualMachinesResponse, images []VirtualMachineImagesDataResponseTF, sizes []VirtualMachineSizesDataResponseTF, model ResourceModel) ResourceModel {
+func MapVirtualMachineResponseToModel(ctx context.Context, httpClient *http.Client, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
 	model.ID = types.StringValue(response.Data.VirtualMachine.ID)
 
 	// Construct time entries
@@ -50,9 +59,9 @@ func MapVirtualMachineResponseToModel(ctx context.Context, response *ReadVirtual
 
 	// Construct the location object
 	model.Location, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{
-		"country":    response.Data.VirtualMachine.Country,
-		"region":     response.Data.VirtualMachine.Region,
-		"datacenter": response.Data.VirtualMachine.Datacenter,
+		"country":    response.Data.VirtualMachine.Datacenter.Country,
+		"region":     response.Data.VirtualMachine.Datacenter.Region,
+		"datacenter": response.Data.VirtualMachine.Datacenter.Name,
 	})
 
 	// Construct the configuration object
@@ -63,19 +72,56 @@ func MapVirtualMachineResponseToModel(ctx context.Context, response *ReadVirtual
 		"base_storage": strconv.FormatInt(response.Data.VirtualMachine.Disk, 10) + " GB",
 	})
 
-	// Construct images and sizes
-	model.AdditionalImages, _ = types.ListValueFrom(ctx, types.ObjectType{AttrTypes: VirtualMachineImagesDataResponseTF{}.AttrTypes()}, images)
-	model.AdditionalSizes, _ = types.ListValueFrom(ctx, types.ObjectType{AttrTypes: VirtualMachineSizesDataResponseTF{}.AttrTypes()}, sizes)
+	// If model doesn't already have these populated, set them
+	model = setModelValuesNotPresent(ctx, httpClient, response, model)
 
-	// Find the imageId and sizeId from the objects. Not possible to be < 0
-	sizeIdx := slices.IndexFunc(sizes, func(virtualMachineSize VirtualMachineSizesDataResponseTF) bool {
-		return strings.EqualFold(virtualMachineSize.Name.ValueString(), model.Size.ValueString())
-	})
-	imageIdx := slices.IndexFunc(images, func(virtualMachineImage VirtualMachineImagesDataResponseTF) bool {
-		return strings.EqualFold(virtualMachineImage.Name.ValueString(), model.Image.ValueString())
-	})
-	model.ImageId = images[imageIdx].ID
-	model.SizeId = sizes[sizeIdx].ID
+	return model
+}
+
+func setModelValuesNotPresent(ctx context.Context, httpClient *http.Client, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
+	if model.DatacenterId.IsNull() {
+		model.DatacenterId = types.StringValue(response.Data.VirtualMachine.Datacenter.ID)
+	}
+	if model.Image.IsNull() {
+		model.Image = types.StringValue(response.Data.VirtualMachine.Image)
+	}
+	if model.Name.IsNull() {
+		model.Name = types.StringValue(response.Data.VirtualMachine.Name)
+	}
+	if model.Size.IsNull() {
+		size := ResourceModelSize{}
+		model.Size, _ = types.ObjectValueFrom(ctx, size.AttrTypes(), ResourceModelSize{
+			Category: types.StringValue(response.Data.VirtualMachine.ConfigurationCategoryCode),
+			Tier:     types.StringValue(response.Data.VirtualMachine.ConfigurationCode),
+		})
+	}
+	if model.NetworkIds.IsNull() {
+		// Fetch network interfaces for the virtual machine
+		networkInterfaces, err := networks.GetNetworkInterfaces(httpClient, ctx, response.Data.VirtualMachine.ID)
+		if err == nil && len(networkInterfaces) > 0 {
+			// Extract network IDs from network interfaces
+			var networkIds []string
+			hasPublicIp := false
+			for _, iface := range networkInterfaces {
+				networkIds = append(networkIds, iface.NetworkID.ValueString())
+				// Check if this interface has a public IP
+				if !iface.PublicIP.IsNull() && iface.PublicIP.ValueString() != "" {
+					hasPublicIp = true
+				}
+			}
+			// Set the network IDs in the model
+			model.NetworkIds, _ = types.ListValueFrom(ctx, types.StringType, networkIds)
+
+			// Set AllocatePublicIp if it's currently null
+			if model.AllocatePublicIp.IsNull() {
+				model.AllocatePublicIp = types.BoolValue(hasPublicIp)
+			}
+		}
+	}
+	if model.WaitForStartup.IsNull() {
+		// Set WaitForStartup to the default value
+		model.WaitForStartup = types.BoolValue(true)
+	}
 
 	return model
 }

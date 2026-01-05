@@ -138,12 +138,13 @@ resource "gpcn_network" "test" {
 }
 
 func TestNetworkTypeInvalid(t *testing.T) {
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			// Validate network_type value not in standard or custom
-			{
-				Config: providerConfig + `
+	t.Run("invalid_network_type", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				// Validate network_type value not in standard or custom
+				{
+					Config: providerConfig + `
 resource "gpcn_network" "test" {
 
   name = "terraform-demo-standard"
@@ -153,20 +154,22 @@ resource "gpcn_network" "test" {
   network_type = "bad_value"
 }
 `,
-				ExpectError: regexp.MustCompile("Invalid Attribute Value Match"),
+					ExpectError: regexp.MustCompile("Invalid Attribute Value Match"),
+				},
 			},
-		},
+		})
 	})
 }
 
 func TestStandardNetworkValidator(t *testing.T) {
 	missingRequiredAttributeErr := "Missing required attribute"
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			// Validate error is shown when CIDR_block is missing
-			{
-				Config: providerConfig + `
+
+	t.Run("missing_cidr_block", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: providerConfig + `
 resource "gpcn_network" "test" {
 
   name = "terraform-demo-standard"
@@ -181,11 +184,18 @@ resource "gpcn_network" "test" {
   dns_servers = "8.8.8.8, 8.8.4.4"
 }
 `,
-				ExpectError: regexp.MustCompile(missingRequiredAttributeErr),
+					ExpectError: regexp.MustCompile(missingRequiredAttributeErr),
+				},
 			},
-			// Validate error is shown when dhcp_start_address is missing
-			{
-				Config: providerConfig + `
+		})
+	})
+
+	t.Run("missing_dhcp_start_address", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: providerConfig + `
 resource "gpcn_network" "test" {
 
   name = "terraform-demo-standard"
@@ -200,11 +210,18 @@ resource "gpcn_network" "test" {
   dns_servers = "8.8.8.8, 8.8.4.4"
 }
 `,
-				ExpectError: regexp.MustCompile(missingRequiredAttributeErr),
+					ExpectError: regexp.MustCompile(missingRequiredAttributeErr),
+				},
 			},
-			// Validate error is shown when dhcp_end_address is missing
-			{
-				Config: providerConfig + `
+		})
+	})
+
+	t.Run("missing_dhcp_end_address", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: providerConfig + `
 resource "gpcn_network" "test" {
 
   name = "terraform-demo-standard"
@@ -219,11 +236,18 @@ resource "gpcn_network" "test" {
   dns_servers = "8.8.8.8, 8.8.4.4"
 }
 `,
-				ExpectError: regexp.MustCompile(missingRequiredAttributeErr),
+					ExpectError: regexp.MustCompile(missingRequiredAttributeErr),
+				},
 			},
-			// Validate error is shown when dns_servers are missing
-			{
-				Config: providerConfig + `
+		})
+	})
+
+	t.Run("missing_dns_servers", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: providerConfig + `
 resource "gpcn_network" "test" {
 
   name = "terraform-demo-standard"
@@ -237,19 +261,20 @@ resource "gpcn_network" "test" {
   dhcp_end_address   = "10.0.0.140"
 }
 `,
-				ExpectError: regexp.MustCompile(missingRequiredAttributeErr),
+					ExpectError: regexp.MustCompile(missingRequiredAttributeErr),
+				},
 			},
-		},
+		})
 	})
 }
 
 func TestIpAddressValidator(t *testing.T) {
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			// Validate error is shown when dhcp_start_address is an invalid IPv4 address
-			{
-				Config: providerConfig + `
+	t.Run("invalid_dhcp_start_address", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: providerConfig + `
 resource "gpcn_network" "test" {
 
   name = "terraform-demo-standard"
@@ -265,11 +290,18 @@ resource "gpcn_network" "test" {
   dns_servers = "8.8.8.8, 8.8.4.4"
 }
 `,
-				ExpectError: regexp.MustCompile("does not resolve to a valid IPv4 address"),
+					ExpectError: regexp.MustCompile("does not resolve to a valid IPv4 address"),
+				},
 			},
-			// Validate error is shown when dhcp_end_address is an invalid IPv4 address
-			{
-				Config: providerConfig + `
+		})
+	})
+
+	t.Run("invalid_dhcp_end_address", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: providerConfig + `
 resource "gpcn_network" "test" {
 
   name = "terraform-demo-standard"
@@ -285,11 +317,18 @@ resource "gpcn_network" "test" {
   dns_servers = "8.8.8.8, 8.8.4.4"
 }
 `,
-				ExpectError: regexp.MustCompile("does not resolve to a valid IPv4 address"),
+					ExpectError: regexp.MustCompile("does not resolve to a valid IPv4 address"),
+				},
 			},
-			// Validate error is shown when dhcp_start_address is a valid IPv4 address but not within CIDR range
-			{
-				Config: providerConfig + `
+		})
+	})
+
+	t.Run("dhcp_start_address_not_in_cidr", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: providerConfig + `
 resource "gpcn_network" "test" {
 
   name = "terraform-demo-standard"
@@ -305,19 +344,20 @@ resource "gpcn_network" "test" {
   dns_servers = "8.8.8.8, 8.8.4.4"
 }
 `,
-				ExpectError: regexp.MustCompile("is not a valid IP address in the CIDR"),
+					ExpectError: regexp.MustCompile("is not a valid IP address in the CIDR"),
+				},
 			},
-		},
+		})
 	})
 }
 
 func TestCIDRValidator(t *testing.T) {
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			// Validate error is shown when cidr_block is a not a valid CIDR block
-			{
-				Config: providerConfig + `
+	t.Run("invalid_cidr_block", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: providerConfig + `
 resource "gpcn_network" "test" {
 
   name = "terraform-demo-standard"
@@ -333,11 +373,18 @@ resource "gpcn_network" "test" {
   dns_servers = "8.8.8.8, 8.8.4.4"
 }
 `,
-				ExpectError: regexp.MustCompile("does not contain a valid CIDR block"),
+					ExpectError: regexp.MustCompile("does not contain a valid CIDR block"),
+				},
 			},
-			// Validate error is shown when dhcp_start_address is a valid IP address, but not in the CIDR block
-			{
-				Config: providerConfig + `
+		})
+	})
+
+	t.Run("dhcp_address_not_in_cidr_block", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: providerConfig + `
 resource "gpcn_network" "test" {
 
   name = "terraform-demo-standard"
@@ -353,19 +400,20 @@ resource "gpcn_network" "test" {
   dns_servers = "8.8.8.8, 8.8.4.4"
 }
 `,
-				ExpectError: regexp.MustCompile("is not a valid IP address in the CIDR"),
+					ExpectError: regexp.MustCompile("is not a valid IP address in the CIDR"),
+				},
 			},
-		},
+		})
 	})
 }
 
 func TestDNSServersValidator(t *testing.T) {
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			// Validate error is shown when dns_servers contains a DNS server that is not a valid IP address
-			{
-				Config: providerConfig + `
+	t.Run("invalid_dns_server_ip", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: providerConfig + `
 resource "gpcn_network" "test" {
 
   name = "terraform-demo-standard"
@@ -381,11 +429,18 @@ resource "gpcn_network" "test" {
   dns_servers = "8.8.8.8, 8.8.4.4, 123.123.123.1234"
 }
 `,
-				ExpectError: regexp.MustCompile("is not a valid IPv4 address"),
+					ExpectError: regexp.MustCompile("is not a valid IPv4 address"),
+				},
 			},
-			// Validate error is shown when dns_servers contains a hanging comma
-			{
-				Config: providerConfig + `
+		})
+	})
+
+	t.Run("dns_servers_hanging_comma", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: providerConfig + `
 resource "gpcn_network" "test" {
 
   name = "terraform-demo-standard"
@@ -401,8 +456,9 @@ resource "gpcn_network" "test" {
   dns_servers = "8.8.8.8, 8.8.4.4, "
 }
 `,
-				ExpectError: regexp.MustCompile("is not a valid IPv4 address"),
+					ExpectError: regexp.MustCompile("is not a valid IPv4 address"),
+				},
 			},
-		},
+		})
 	})
 }
