@@ -1,3 +1,34 @@
+## 0.2.0 (January 05, 2026)
+
+BREAKING CHANGES:
+
+- Virtual machine sizing logic has been restructured to use category and tier codes, aligning with GPCN API changes
+
+FEATURES:
+
+- **Virtual Machines**: Added support for specifying category and tier codes directly, enabling broader VM sizing configurations beyond General Purpose
+- **Import Improvements**: Enhanced import functionality for virtual machines to include network interfaces and comprehensive state information
+
+ENHANCEMENTS:
+
+- Simplified virtual machine sizing configuration by removing separate `additionalImages` and `additionalSizes` response objects
+- Updated virtual machine response models to reflect GPCN API changes for size configurations
+- Improved logging throughout virtual machine operations with consistent ID references
+- Enhanced network interface handling for virtual machine resources
+
+TESTING:
+
+- Added unit test coverage for networks, volumes, and virtual machines
+- Refactored acceptance tests to improve clarity
+
+BUG FIXES:
+
+- Importing a virtualmachine into Terraform state should now correctly fetch related information
+
+DOCUMENTATION:
+
+- Updated virtual machine resource documentation to reflect new category and tier code attributes
+
 ## 0.1.2 (December 23, 2025)
 
 ENHANCEMENTS:
