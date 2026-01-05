@@ -97,33 +97,31 @@ resource "gpcn_virtualmachine" "test" {
 			// Update and Read testing
 			{
 				Config: providerConfig + `
-			resource "gpcn_network" "vm_network" {
-			  name          = "vm-network-standard"
-			  network_type  = "standard"
-			  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
-			  cidr_block = "10.0.0.0/24"
-			  dhcp_start_address = "10.0.0.10"
-			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = "8.8.8.8, 8.8.4.4"
-			}
+resource "gpcn_network" "vm_network" {
+  name          = "vm-network-standard"
+  network_type  = "standard"
+  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  cidr_block = "10.0.0.0/24"
+  dhcp_start_address = "10.0.0.10"
+  dhcp_end_address   = "10.0.0.254"
+  dns_servers = "8.8.8.8, 8.8.4.4"
+}
 
-			resource "gpcn_virtualmachine" "test" {
-			  name          = "terraform-demo-vm-update"
-			  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
-
-			  size = {
-			    category = "general"
-			    tier     = "g-micro-1"
-			  }
-			  image = "Alma Linux 8.x"
-
-			  wait_for_startup = false
-			  allocate_public_ip = false
-			  network_ids = [
-			    gpcn_network.vm_network.id
-			  ]
-			}
-						`,
+resource "gpcn_virtualmachine" "test" {
+  name          = "terraform-demo-vm-update"
+  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  size = {
+    category = "general"
+    tier     = "g-micro-1"
+  }
+  image = "Alma Linux 8.x"
+  wait_for_startup = false
+  allocate_public_ip = false
+  network_ids = [
+    gpcn_network.vm_network.id
+  ]
+}
+			`,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Verify name has been updated
 					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "name", "terraform-demo-vm-update"),
@@ -139,43 +137,46 @@ resource "gpcn_virtualmachine" "test" {
 					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("network_ids"), knownvalue.ListSizeExact(1)),
 				},
 			},
+			// Changing image forces a replace
 			{
 				Config: providerConfig + `
-			resource "gpcn_network" "vm_network" {
-			  name          = "vm-network-standard"
-			  network_type  = "standard"
-			  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
-			  cidr_block = "10.0.0.0/24"
-			  dhcp_start_address = "10.0.0.10"
-			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = "8.8.8.8, 8.8.4.4"
-			}
+resource "gpcn_network" "vm_network" {
+  name          = "vm-network-standard"
+  network_type  = "standard"
+  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  cidr_block = "10.0.0.0/24"
+  dhcp_start_address = "10.0.0.10"
+  dhcp_end_address   = "10.0.0.254"
+  dns_servers = "8.8.8.8, 8.8.4.4"
+}
 
-			resource "gpcn_virtualmachine" "test" {
-			  name          = "terraform-demo-vm-update"
-			  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
-
-			  size = {
-			    category = "general"
-			    tier     = "g-micro-1"
-			  }
-			  image = "Alma Linux 9.x"
-
-			  wait_for_startup = false
-			  allocate_public_ip = false
-			  network_ids = [
-			    gpcn_network.vm_network.id
-			  ]
-			}
-						`,
+resource "gpcn_virtualmachine" "test" {
+  name          = "terraform-demo-vm-update"
+  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  size = {
+    category = "general"
+    tier     = "g-micro-1"
+  }
+  image = "Alma Linux 9.x"
+  wait_for_startup = false
+  allocate_public_ip = false
+  network_ids = [
+    gpcn_network.vm_network.id
+  ]
+}
+			`,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Verify image name has been updated
 					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "image", "Alma Linux 9.x"),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
+						// Changing image forces a replace
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionReplace),
 					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("image"), knownvalue.StringExact("Alma Linux 9.x")),
 				},
 			},
 		},

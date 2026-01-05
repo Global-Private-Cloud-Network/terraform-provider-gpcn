@@ -108,13 +108,13 @@ func CreateVirtualMachine(httpClient *http.Client, ctx context.Context, imageId,
 		return nil, err
 	}
 	tflog.Info(ctx, LogIssuedCreateVMJob)
-	defer response.Body.Close()
 
 	// Read the response body and process it as createVirtualMachineResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
+	_ = response.Body.Close()
 
 	var createVirtualMachineResponse client.JobStatusMultiResponse
 	err = json.Unmarshal(body, &createVirtualMachineResponse)
@@ -152,12 +152,12 @@ func GetVirtualMachine(httpClient *http.Client, ctx context.Context, virtualMach
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
+	_ = response.Body.Close()
 
 	var readVirtualMachinesResponse ReadVirtualMachinesResponse
 	err = json.Unmarshal(body, &readVirtualMachinesResponse)

@@ -91,12 +91,13 @@ func poll(client *http.Client, jobId string) (*JobStatusMultiResponse, bool, err
 	if err != nil {
 		return nil, false, err
 	}
-	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, false, err
 	}
+
+	_ = response.Body.Close()
 
 	var jobStatusMultiResponse JobStatusMultiResponse
 	err = json.Unmarshal(body, &jobStatusMultiResponse)

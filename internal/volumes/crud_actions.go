@@ -80,13 +80,13 @@ func CreateVolume(httpClient *http.Client, ctx context.Context, model ResourceMo
 		return nil, err
 	}
 	tflog.Info(ctx, LogIssuedCreateVolumeJob)
-	defer response.Body.Close()
 
 	// Read the response body and process it as createVolumeResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
+	_ = response.Body.Close()
 
 	var createVolumeResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &createVolumeResponse)
@@ -124,12 +124,12 @@ func GetVolume(httpClient *http.Client, ctx context.Context, volumeId string) (*
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
+	_ = response.Body.Close()
 
 	var readVolumesResponse readVolumesResponse
 	err = json.Unmarshal(body, &readVolumesResponse)
@@ -178,12 +178,12 @@ func UpdateVolume(httpClient *http.Client, ctx context.Context, volumeId string,
 		return nil, err
 	}
 	tflog.Info(ctx, LogIssuedUpdateVolumeJob)
-	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
+	_ = response.Body.Close()
 
 	var updateVolumeResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &updateVolumeResponse)
@@ -238,13 +238,13 @@ func DeleteVolume(httpClient *http.Client, ctx context.Context, volumeId string)
 		return err
 	}
 	tflog.Info(ctx, LogIssuedDeleteVolumeJob)
-	defer response.Body.Close()
 
 	// Read the response body and process it as deleteVolumeResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
+	_ = response.Body.Close()
 
 	var deleteVolumeResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &deleteVolumeResponse)
