@@ -270,13 +270,13 @@ func (d *datacenterDataSource) getDatacenters(queryString string) (*datacenterRe
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
 
 	// Read the response body and process it as datacenterResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
+	_ = response.Body.Close()
 
 	var datacenterResponse datacenterResponse
 	err = json.Unmarshal(body, &datacenterResponse)
@@ -299,13 +299,13 @@ func (d *datacenterDataSource) getCountriesAndRegions(countryName string) (*data
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
 
 	// Read the response body and process it as datacenterRegionResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
+	_ = response.Body.Close()
 
 	var datacenterRegionResponse datacenterRegionResponse
 	err = json.Unmarshal(body, &datacenterRegionResponse)
@@ -328,13 +328,13 @@ func (d *datacenterDataSource) getAllCountries() (*datacenterCountryResponse, er
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
 
 	// Read the response body and process it as datacenterCountryResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
+	_ = response.Body.Close()
 
 	var datacenterCountryResponse datacenterCountryResponse
 	err = json.Unmarshal(body, &datacenterCountryResponse)

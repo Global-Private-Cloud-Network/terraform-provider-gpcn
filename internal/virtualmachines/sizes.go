@@ -95,12 +95,12 @@ func GetVirtualMachineSizeConfigurationId(client *http.Client, ctx context.Conte
 	if err != nil {
 		return -1, sizes, err
 	}
-	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return -1, sizes, err
 	}
+	_ = response.Body.Close()
 
 	var virtualMachineSizesResponse virtualMachineSizesResponse
 	err = json.Unmarshal(body, &virtualMachineSizesResponse)
@@ -165,13 +165,12 @@ func UpdateVirtualMachineSize(httpClient *http.Client, ctx context.Context, virt
 		return err
 	}
 
-	defer response.Body.Close()
-
 	// Read the response body and process it as updateVirtualMachineSizeResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
+	_ = response.Body.Close()
 
 	var updateVirtualMachineSizeResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &updateVirtualMachineSizeResponse)

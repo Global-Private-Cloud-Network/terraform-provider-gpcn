@@ -46,12 +46,12 @@ func GetVolumeSizeId(httpClient *http.Client, ctx context.Context, datacenterId 
 	if err != nil {
 		return -1, err
 	}
-	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return -1, err
 	}
+	_ = response.Body.Close()
 
 	var volumeSizesResponse volumeSizesResponse
 	err = json.Unmarshal(body, &volumeSizesResponse)

@@ -91,12 +91,12 @@ func GetVirtualMachinesAttachedToNetworks(httpClient *http.Client, ctx context.C
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
+	_ = response.Body.Close()
 
 	var readNetworksToVMsResponse readNetworksToVMsResponse
 	err = json.Unmarshal(body, &readNetworksToVMsResponse)
@@ -121,12 +121,12 @@ func GetNetworkInterfaces(httpClient *http.Client, ctx context.Context, virtualM
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
+	_ = response.Body.Close()
 
 	var readVirtualMachineNetworkResponse readVirtualMachineNetworkResponse
 	err = json.Unmarshal(body, &readVirtualMachineNetworkResponse)
@@ -176,12 +176,12 @@ func AddNetworkInterface(httpClient *http.Client, ctx context.Context, virtualMa
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
+	_ = response.Body.Close()
 
 	var addNetworkInterfaceResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &addNetworkInterfaceResponse)
@@ -247,13 +247,12 @@ func RemoveNetworkInterface(httpClient *http.Client, ctx context.Context, virtua
 		return err
 	}
 
-	defer response.Body.Close()
-
 	// Read the response body and process it as removeNetworkInterfaceResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
+	_ = response.Body.Close()
 
 	var removeNetworkInterfaceResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &removeNetworkInterfaceResponse)
@@ -312,13 +311,13 @@ func AllocatePublicIp(httpClient *http.Client, ctx context.Context, virtualMachi
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
 
 	// Read the response body and process it as allocatePublicIpResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
+	_ = response.Body.Close()
 
 	var allocatePublicIpResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &allocatePublicIpResponse)
@@ -347,13 +346,13 @@ func ReleasePublicIp(httpClient *http.Client, ctx context.Context, virtualMachin
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
 
-	// Read the response body and process it as allocatePublicIpResponse
+	// Read the response body and process it as releasePublicIpResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
+	_ = response.Body.Close()
 
 	var releasePublicIpResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &releasePublicIpResponse)

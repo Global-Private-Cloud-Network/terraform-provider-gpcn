@@ -649,7 +649,6 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 		return
 	}
 	tflog.Info(ctx, virtualmachines.LogIssuedDeleteGPCNVirtualMachineJob)
-	defer response.Body.Close()
 
 	// Read the response body and process it as deleteVirtualMachineResponse
 	body, err := io.ReadAll(response.Body)
@@ -660,6 +659,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 		)
 		return
 	}
+	_ = response.Body.Close()
 
 	var deleteVirtualMachineResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &deleteVirtualMachineResponse)

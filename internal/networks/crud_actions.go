@@ -94,13 +94,13 @@ func CreateNetwork(httpClient *http.Client, ctx context.Context, model ResourceM
 		return nil, err
 	}
 	tflog.Info(ctx, LogIssuedCreateNetworkJob)
-	defer response.Body.Close()
 
 	// Read the response body and process it as createNetworkResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
+	_ = response.Body.Close()
 
 	var createNetworkResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &createNetworkResponse)
@@ -138,12 +138,12 @@ func GetNetwork(client *http.Client, ctx context.Context, networkId string) (*re
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
+	_ = response.Body.Close()
 
 	var readNetworkResponse readNetworkResponse
 	err = json.Unmarshal(body, &readNetworkResponse)
@@ -247,13 +247,13 @@ func DeleteNetwork(httpClient *http.Client, ctx context.Context, networkId strin
 			}
 		}
 		tflog.Info(ctx, LogIssuedDeleteNetworkJob)
-		defer response.Body.Close()
 
 		// Read the response body and process it as deleteNetworkResponse
 		body, err := io.ReadAll(response.Body)
 		if err != nil {
 			return err
 		}
+		_ = response.Body.Close()
 
 		var deleteNetworkResponse client.JobStatusSingularResponse
 		err = json.Unmarshal(body, &deleteNetworkResponse)

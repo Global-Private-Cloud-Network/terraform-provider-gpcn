@@ -29,12 +29,12 @@ func AddVolumeToVirtualMachine(httpClient *http.Client, ctx context.Context, vir
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
+	_ = response.Body.Close()
 
 	var attachVolumeResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &attachVolumeResponse)
@@ -63,12 +63,12 @@ func RemoveVolumeFromVirtualMachine(httpClient *http.Client, ctx context.Context
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
+	_ = response.Body.Close()
 
 	var detachVolumeResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &detachVolumeResponse)

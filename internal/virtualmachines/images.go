@@ -50,12 +50,12 @@ func GetVirtualMachineImageId(client *http.Client, ctx context.Context, datacent
 	if err != nil {
 		return -1, images, err
 	}
-	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return -1, images, err
 	}
+	_ = response.Body.Close()
 
 	var virtualMachineImagesResponse virtualMachineImagesResponse
 	err = json.Unmarshal(body, &virtualMachineImagesResponse)
