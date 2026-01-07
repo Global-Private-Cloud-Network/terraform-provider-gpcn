@@ -18,36 +18,33 @@ import (
 )
 
 type ReadVirtualMachinesResponse struct {
-	Success bool                            `json:"success"`
-	Message string                          `json:"message"`
-	Data    readVirtualMachinesDataResponse `json:"data"`
-}
-type readVirtualMachinesDataResponse struct {
-	VirtualMachine readVirtualMachinesDataVMResponse `json:"virtualmachine"`
-	Status         string                            `json:"status"`
-}
-type readVirtualMachinesDataVMResponse struct {
-	ID                        string                                      `json:"id"`
-	Name                      string                                      `json:"name"`
-	CreatedAt                 string                                      `json:"createdAt"`
-	UpdatedAt                 string                                      `json:"updatedAt"`
-	ConfigurationId           int64                                       `json:"configurationId"`
-	Configuration             string                                      `json:"configuration"`
-	ConfigurationCode         string                                      `json:"configurationCode"`
-	ConfigurationCategoryCode string                                      `json:"configurationCategoryCode"`
-	CPU                       int64                                       `json:"cpu"`
-	RAM                       int64                                       `json:"ram"`
-	Disk                      int64                                       `json:"disk"`
-	Image                     string                                      `json:"image"`
-	Username                  string                                      `json:"username"`
-	Datacenter                readVirtualMachinesDataVMDatacenterResponse `json:"datacenter"`
-}
-type readVirtualMachinesDataVMDatacenterResponse struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Region      string `json:"region"`
-	CountryAbbr string `json:"countryAbbr"`
-	Country     string `json:"country"`
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		Status         string `json:"status"`
+		VirtualMachine struct {
+			ID                        string `json:"id"`
+			Name                      string `json:"name"`
+			CreatedAt                 string `json:"createdAt"`
+			UpdatedAt                 string `json:"updatedAt"`
+			ConfigurationId           int64  `json:"configurationId"`
+			Configuration             string `json:"configuration"`
+			ConfigurationCode         string `json:"configurationCode"`
+			ConfigurationCategoryCode string `json:"configurationCategoryCode"`
+			CPU                       int64  `json:"cpu"`
+			RAM                       int64  `json:"ram"`
+			Disk                      int64  `json:"disk"`
+			Image                     string `json:"image"`
+			Username                  string `json:"username"`
+			Datacenter                struct {
+				ID          string `json:"id"`
+				Name        string `json:"name"`
+				Region      string `json:"region"`
+				CountryAbbr string `json:"countryAbbr"`
+				Country     string `json:"country"`
+			} `json:"datacenter"`
+		} `json:"virtualmachine"`
+	} `json:"data"`
 }
 
 func CreateVirtualMachine(httpClient *http.Client, ctx context.Context, imageId, sizeId int64, model ResourceModel) (*ReadVirtualMachinesResponse, error) {

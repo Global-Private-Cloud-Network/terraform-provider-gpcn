@@ -47,32 +47,26 @@ func TestMapVirtualMachineResponseToModel_Unit(t *testing.T) {
 	response := &ReadVirtualMachinesResponse{
 		Success: true,
 		Message: "VM retrieved successfully",
-		Data: readVirtualMachinesDataResponse{
-			Status: "Running",
-			VirtualMachine: readVirtualMachinesDataVMResponse{
-				ID:                        "vm-123",
-				Name:                      "test-vm",
-				CreatedAt:                 createdAt,
-				UpdatedAt:                 updatedAt,
-				ConfigurationId:           1,
-				Configuration:             "General - Micro - 1",
-				ConfigurationCode:         "g-micro-1",
-				ConfigurationCategoryCode: "general",
-				CPU:                       1,
-				RAM:                       2,
-				Disk:                      20,
-				Image:                     "Alma Linux 8.x",
-				Username:                  "admin",
-				Datacenter: readVirtualMachinesDataVMDatacenterResponse{
-					ID:          "dc-123",
-					Name:        "US-East-1",
-					Region:      "US-East",
-					CountryAbbr: "US",
-					Country:     "United States",
-				},
-			},
-		},
 	}
+	response.Data.Status = "Running"
+	response.Data.VirtualMachine.ID = "vm-123"
+	response.Data.VirtualMachine.Name = "test-vm"
+	response.Data.VirtualMachine.CreatedAt = createdAt
+	response.Data.VirtualMachine.UpdatedAt = updatedAt
+	response.Data.VirtualMachine.ConfigurationId = 1
+	response.Data.VirtualMachine.Configuration = "General - Micro - 1"
+	response.Data.VirtualMachine.ConfigurationCode = "g-micro-1"
+	response.Data.VirtualMachine.ConfigurationCategoryCode = "general"
+	response.Data.VirtualMachine.CPU = 1
+	response.Data.VirtualMachine.RAM = 2
+	response.Data.VirtualMachine.Disk = 20
+	response.Data.VirtualMachine.Image = "Alma Linux 8.x"
+	response.Data.VirtualMachine.Username = "admin"
+	response.Data.VirtualMachine.Datacenter.ID = "dc-123"
+	response.Data.VirtualMachine.Datacenter.Name = "US-East-1"
+	response.Data.VirtualMachine.Datacenter.Region = "US-East"
+	response.Data.VirtualMachine.Datacenter.CountryAbbr = "US"
+	response.Data.VirtualMachine.Datacenter.Country = "United States"
 
 	// Create a mock HTTP server for network interface calls
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -196,32 +190,26 @@ func TestCreateVirtualMachine_MockHTTP(t *testing.T) {
 			response := ReadVirtualMachinesResponse{
 				Success: true,
 				Message: "VM retrieved",
-				Data: readVirtualMachinesDataResponse{
-					Status: "Running",
-					VirtualMachine: readVirtualMachinesDataVMResponse{
-						ID:                        vmID,
-						Name:                      "test-vm",
-						CreatedAt:                 time.Now().Format(time.RFC3339),
-						UpdatedAt:                 time.Now().Format(time.RFC3339),
-						ConfigurationId:           sizeID,
-						Configuration:             "General - Micro - 1",
-						ConfigurationCode:         "g-micro-1",
-						ConfigurationCategoryCode: "general",
-						CPU:                       1,
-						RAM:                       2,
-						Disk:                      20,
-						Image:                     "Alma Linux 8.x",
-						Username:                  "admin",
-						Datacenter: readVirtualMachinesDataVMDatacenterResponse{
-							ID:          "datacenter-123",
-							Name:        "US-East-1",
-							Region:      "US-East",
-							CountryAbbr: "US",
-							Country:     "United States",
-						},
-					},
-				},
 			}
+			response.Data.Status = "Running"
+			response.Data.VirtualMachine.ID = vmID
+			response.Data.VirtualMachine.Name = "test-vm"
+			response.Data.VirtualMachine.CreatedAt = time.Now().Format(time.RFC3339)
+			response.Data.VirtualMachine.UpdatedAt = time.Now().Format(time.RFC3339)
+			response.Data.VirtualMachine.ConfigurationId = sizeID
+			response.Data.VirtualMachine.Configuration = "General - Micro - 1"
+			response.Data.VirtualMachine.ConfigurationCode = "g-micro-1"
+			response.Data.VirtualMachine.ConfigurationCategoryCode = "general"
+			response.Data.VirtualMachine.CPU = 1
+			response.Data.VirtualMachine.RAM = 2
+			response.Data.VirtualMachine.Disk = 20
+			response.Data.VirtualMachine.Image = "Alma Linux 8.x"
+			response.Data.VirtualMachine.Username = "admin"
+			response.Data.VirtualMachine.Datacenter.ID = "datacenter-123"
+			response.Data.VirtualMachine.Datacenter.Name = "US-East-1"
+			response.Data.VirtualMachine.Datacenter.Region = "US-East"
+			response.Data.VirtualMachine.Datacenter.CountryAbbr = "US"
+			response.Data.VirtualMachine.Datacenter.Country = "United States"
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(response)
 		} else if r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces") {
@@ -286,32 +274,26 @@ func TestGetVirtualMachine_MockHTTP(t *testing.T) {
 			response := ReadVirtualMachinesResponse{
 				Success: true,
 				Message: "VM retrieved",
-				Data: readVirtualMachinesDataResponse{
-					Status: "Running",
-					VirtualMachine: readVirtualMachinesDataVMResponse{
-						ID:                        vmID,
-						Name:                      "test-vm",
-						CreatedAt:                 time.Now().Format(time.RFC3339),
-						UpdatedAt:                 time.Now().Format(time.RFC3339),
-						ConfigurationId:           1,
-						Configuration:             "General - Micro - 1",
-						ConfigurationCode:         "g-micro-1",
-						ConfigurationCategoryCode: "general",
-						CPU:                       1,
-						RAM:                       2,
-						Disk:                      20,
-						Image:                     "Alma Linux 8.x",
-						Username:                  "admin",
-						Datacenter: readVirtualMachinesDataVMDatacenterResponse{
-							ID:          "datacenter-123",
-							Name:        "US-East-1",
-							Region:      "US-East",
-							CountryAbbr: "US",
-							Country:     "United States",
-						},
-					},
-				},
 			}
+			response.Data.Status = "Running"
+			response.Data.VirtualMachine.ID = vmID
+			response.Data.VirtualMachine.Name = "test-vm"
+			response.Data.VirtualMachine.CreatedAt = time.Now().Format(time.RFC3339)
+			response.Data.VirtualMachine.UpdatedAt = time.Now().Format(time.RFC3339)
+			response.Data.VirtualMachine.ConfigurationId = 1
+			response.Data.VirtualMachine.Configuration = "General - Micro - 1"
+			response.Data.VirtualMachine.ConfigurationCode = "g-micro-1"
+			response.Data.VirtualMachine.ConfigurationCategoryCode = "general"
+			response.Data.VirtualMachine.CPU = 1
+			response.Data.VirtualMachine.RAM = 2
+			response.Data.VirtualMachine.Disk = 20
+			response.Data.VirtualMachine.Image = "Alma Linux 8.x"
+			response.Data.VirtualMachine.Username = "admin"
+			response.Data.VirtualMachine.Datacenter.ID = "datacenter-123"
+			response.Data.VirtualMachine.Datacenter.Name = "US-East-1"
+			response.Data.VirtualMachine.Datacenter.Region = "US-East"
+			response.Data.VirtualMachine.Datacenter.CountryAbbr = "US"
+			response.Data.VirtualMachine.Datacenter.Country = "United States"
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(response)
 		} else {
@@ -377,32 +359,26 @@ func TestUpdateVirtualMachine_MockHTTP(t *testing.T) {
 			response := ReadVirtualMachinesResponse{
 				Success: true,
 				Message: "VM retrieved",
-				Data: readVirtualMachinesDataResponse{
-					Status: "Running",
-					VirtualMachine: readVirtualMachinesDataVMResponse{
-						ID:                        vmID,
-						Name:                      newName,
-						CreatedAt:                 time.Now().Add(-24 * time.Hour).Format(time.RFC3339),
-						UpdatedAt:                 time.Now().Format(time.RFC3339),
-						ConfigurationId:           1,
-						Configuration:             "General - Micro - 1",
-						ConfigurationCode:         "g-micro-1",
-						ConfigurationCategoryCode: "general",
-						CPU:                       1,
-						RAM:                       2,
-						Disk:                      20,
-						Image:                     "Alma Linux 8.x",
-						Username:                  "admin",
-						Datacenter: readVirtualMachinesDataVMDatacenterResponse{
-							ID:          "datacenter-123",
-							Name:        "US-East-1",
-							Region:      "US-East",
-							CountryAbbr: "US",
-							Country:     "United States",
-						},
-					},
-				},
 			}
+			response.Data.Status = "Running"
+			response.Data.VirtualMachine.ID = vmID
+			response.Data.VirtualMachine.Name = newName
+			response.Data.VirtualMachine.CreatedAt = time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
+			response.Data.VirtualMachine.UpdatedAt = time.Now().Format(time.RFC3339)
+			response.Data.VirtualMachine.ConfigurationId = 1
+			response.Data.VirtualMachine.Configuration = "General - Micro - 1"
+			response.Data.VirtualMachine.ConfigurationCode = "g-micro-1"
+			response.Data.VirtualMachine.ConfigurationCategoryCode = "general"
+			response.Data.VirtualMachine.CPU = 1
+			response.Data.VirtualMachine.RAM = 2
+			response.Data.VirtualMachine.Disk = 20
+			response.Data.VirtualMachine.Image = "Alma Linux 8.x"
+			response.Data.VirtualMachine.Username = "admin"
+			response.Data.VirtualMachine.Datacenter.ID = "datacenter-123"
+			response.Data.VirtualMachine.Datacenter.Name = "US-East-1"
+			response.Data.VirtualMachine.Datacenter.Region = "US-East"
+			response.Data.VirtualMachine.Datacenter.CountryAbbr = "US"
+			response.Data.VirtualMachine.Datacenter.Country = "United States"
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(response)
 		} else if r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces") {
@@ -475,32 +451,26 @@ func TestPollForVirtualMachineStatus_MockHTTP(t *testing.T) {
 			response := ReadVirtualMachinesResponse{
 				Success: true,
 				Message: "VM retrieved",
-				Data: readVirtualMachinesDataResponse{
-					Status: status,
-					VirtualMachine: readVirtualMachinesDataVMResponse{
-						ID:                        vmID,
-						Name:                      "test-vm",
-						CreatedAt:                 time.Now().Format(time.RFC3339),
-						UpdatedAt:                 time.Now().Format(time.RFC3339),
-						ConfigurationId:           1,
-						Configuration:             "General - Micro - 1",
-						ConfigurationCode:         "g-micro-1",
-						ConfigurationCategoryCode: "general",
-						CPU:                       1,
-						RAM:                       2,
-						Disk:                      20,
-						Image:                     "Alma Linux 8.x",
-						Username:                  "admin",
-						Datacenter: readVirtualMachinesDataVMDatacenterResponse{
-							ID:          "datacenter-123",
-							Name:        "US-East-1",
-							Region:      "US-East",
-							CountryAbbr: "US",
-							Country:     "United States",
-						},
-					},
-				},
 			}
+			response.Data.Status = status
+			response.Data.VirtualMachine.ID = vmID
+			response.Data.VirtualMachine.Name = "test-vm"
+			response.Data.VirtualMachine.CreatedAt = time.Now().Format(time.RFC3339)
+			response.Data.VirtualMachine.UpdatedAt = time.Now().Format(time.RFC3339)
+			response.Data.VirtualMachine.ConfigurationId = 1
+			response.Data.VirtualMachine.Configuration = "General - Micro - 1"
+			response.Data.VirtualMachine.ConfigurationCode = "g-micro-1"
+			response.Data.VirtualMachine.ConfigurationCategoryCode = "general"
+			response.Data.VirtualMachine.CPU = 1
+			response.Data.VirtualMachine.RAM = 2
+			response.Data.VirtualMachine.Disk = 20
+			response.Data.VirtualMachine.Image = "Alma Linux 8.x"
+			response.Data.VirtualMachine.Username = "admin"
+			response.Data.VirtualMachine.Datacenter.ID = "datacenter-123"
+			response.Data.VirtualMachine.Datacenter.Name = "US-East-1"
+			response.Data.VirtualMachine.Datacenter.Region = "US-East"
+			response.Data.VirtualMachine.Datacenter.CountryAbbr = "US"
+			response.Data.VirtualMachine.Datacenter.Country = "United States"
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(response)
 		}

@@ -36,28 +36,22 @@ func TestMapVolumeResponseToModel_Unit(t *testing.T) {
 	response := &readVolumesResponse{
 		Success: true,
 		Message: "Volume retrieved successfully",
-		Data: readVolumesDataResponse{
-			ID:     "volume-123",
-			Name:   "test-volume",
-			SizeGb: 256,
-			VolumeType: readVolumesDataVolumeTypeResponse{
-				ID:          1,
-				Name:        "SSD",
-				Description: "Solid State Drive",
-			},
-			VolumeSizeId: 10,
-			Datacenter: readVolumesDataDatacenterResponse{
-				ID:      "dc-123",
-				Name:    "US-East-1",
-				Region:  "US-East",
-				Country: "US",
-			},
-			VirtualMachineId:   "",
-			VirtualMachineName: "",
-			CreatedAt:          createdAt,
-			UpdatedAt:          updatedAt,
-		},
 	}
+	response.Data.ID = "volume-123"
+	response.Data.Name = "test-volume"
+	response.Data.SizeGb = 256
+	response.Data.VolumeType.ID = 1
+	response.Data.VolumeType.Name = "SSD"
+	response.Data.VolumeType.Description = "Solid State Drive"
+	response.Data.VolumeSizeId = 10
+	response.Data.Datacenter.ID = "dc-123"
+	response.Data.Datacenter.Name = "US-East-1"
+	response.Data.Datacenter.Region = "US-East"
+	response.Data.Datacenter.Country = "US"
+	response.Data.VirtualMachineId = ""
+	response.Data.VirtualMachineName = ""
+	response.Data.CreatedAt = createdAt
+	response.Data.UpdatedAt = updatedAt
 
 	model := createTestVolumeModel("test-volume", "SSD", 256)
 
@@ -170,28 +164,22 @@ func TestCreateVolume_MockHTTP(t *testing.T) {
 			response := readVolumesResponse{
 				Success: true,
 				Message: "Volume retrieved",
-				Data: readVolumesDataResponse{
-					ID:     volumeID,
-					Name:   "test-volume",
-					SizeGb: 256,
-					VolumeType: readVolumesDataVolumeTypeResponse{
-						ID:          1,
-						Name:        "SSD",
-						Description: "Solid State Drive",
-					},
-					VolumeSizeId: volumeSizeID,
-					Datacenter: readVolumesDataDatacenterResponse{
-						ID:      "datacenter-123",
-						Name:    "US-East-1",
-						Region:  "US-East",
-						Country: "US",
-					},
-					VirtualMachineId:   "",
-					VirtualMachineName: "",
-					CreatedAt:          time.Now().Format(time.RFC3339),
-					UpdatedAt:          time.Now().Format(time.RFC3339),
-				},
 			}
+			response.Data.ID = volumeID
+			response.Data.Name = "test-volume"
+			response.Data.SizeGb = 256
+			response.Data.VolumeType.ID = 1
+			response.Data.VolumeType.Name = "SSD"
+			response.Data.VolumeType.Description = "Solid State Drive"
+			response.Data.VolumeSizeId = volumeSizeID
+			response.Data.Datacenter.ID = "datacenter-123"
+			response.Data.Datacenter.Name = "US-East-1"
+			response.Data.Datacenter.Region = "US-East"
+			response.Data.Datacenter.Country = "US"
+			response.Data.VirtualMachineId = ""
+			response.Data.VirtualMachineName = ""
+			response.Data.CreatedAt = time.Now().Format(time.RFC3339)
+			response.Data.UpdatedAt = time.Now().Format(time.RFC3339)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(response)
 		} else {
@@ -250,28 +238,22 @@ func TestGetVolume_MockHTTP(t *testing.T) {
 			response := readVolumesResponse{
 				Success: true,
 				Message: "Volume retrieved",
-				Data: readVolumesDataResponse{
-					ID:     volumeID,
-					Name:   "test-volume",
-					SizeGb: 256,
-					VolumeType: readVolumesDataVolumeTypeResponse{
-						ID:          1,
-						Name:        "SSD",
-						Description: "Solid State Drive",
-					},
-					VolumeSizeId: 10,
-					Datacenter: readVolumesDataDatacenterResponse{
-						ID:      "datacenter-123",
-						Name:    "US-East-1",
-						Region:  "US-East",
-						Country: "US",
-					},
-					VirtualMachineId:   "",
-					VirtualMachineName: "",
-					CreatedAt:          time.Now().Format(time.RFC3339),
-					UpdatedAt:          time.Now().Format(time.RFC3339),
-				},
 			}
+			response.Data.ID = volumeID
+			response.Data.Name = "test-volume"
+			response.Data.SizeGb = 256
+			response.Data.VolumeType.ID = 1
+			response.Data.VolumeType.Name = "SSD"
+			response.Data.VolumeType.Description = "Solid State Drive"
+			response.Data.VolumeSizeId = 10
+			response.Data.Datacenter.ID = "datacenter-123"
+			response.Data.Datacenter.Name = "US-East-1"
+			response.Data.Datacenter.Region = "US-East"
+			response.Data.Datacenter.Country = "US"
+			response.Data.VirtualMachineId = ""
+			response.Data.VirtualMachineName = ""
+			response.Data.CreatedAt = time.Now().Format(time.RFC3339)
+			response.Data.UpdatedAt = time.Now().Format(time.RFC3339)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(response)
 		} else {
@@ -382,28 +364,22 @@ func TestUpdateVolume_MockHTTP(t *testing.T) {
 			response := readVolumesResponse{
 				Success: true,
 				Message: "Volume retrieved",
-				Data: readVolumesDataResponse{
-					ID:     volumeID,
-					Name:   "test-volume",
-					SizeGb: newSizeGb,
-					VolumeType: readVolumesDataVolumeTypeResponse{
-						ID:          1,
-						Name:        "SSD",
-						Description: "Solid State Drive",
-					},
-					VolumeSizeId: volumeSizeID,
-					Datacenter: readVolumesDataDatacenterResponse{
-						ID:      "datacenter-123",
-						Name:    "US-East-1",
-						Region:  "US-East",
-						Country: "US",
-					},
-					VirtualMachineId:   "",
-					VirtualMachineName: "",
-					CreatedAt:          time.Now().Add(-24 * time.Hour).Format(time.RFC3339),
-					UpdatedAt:          time.Now().Format(time.RFC3339),
-				},
 			}
+			response.Data.ID = volumeID
+			response.Data.Name = "test-volume"
+			response.Data.SizeGb = newSizeGb
+			response.Data.VolumeType.ID = 1
+			response.Data.VolumeType.Name = "SSD"
+			response.Data.VolumeType.Description = "Solid State Drive"
+			response.Data.VolumeSizeId = volumeSizeID
+			response.Data.Datacenter.ID = "datacenter-123"
+			response.Data.Datacenter.Name = "US-East-1"
+			response.Data.Datacenter.Region = "US-East"
+			response.Data.Datacenter.Country = "US"
+			response.Data.VirtualMachineId = ""
+			response.Data.VirtualMachineName = ""
+			response.Data.CreatedAt = time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
+			response.Data.UpdatedAt = time.Now().Format(time.RFC3339)
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(response)
 		} else {
