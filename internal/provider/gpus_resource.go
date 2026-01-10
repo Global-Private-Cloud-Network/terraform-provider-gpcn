@@ -12,6 +12,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -82,6 +83,7 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 			"series_code": schema.StringAttribute{
 				Description: "Short code of the GPU series. Exactly one of series_name or series_code must be specified",
 				Optional:    true,
+				Computed:    true,
 				Validators: []validator.String{
 					stringvalidator.ExactlyOneOf(path.Expressions{
 						path.MatchRoot("series_name"),
@@ -91,6 +93,7 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				PlanModifiers: []planmodifier.String{
 					// Changing the series_code requires us to destroy and create a new GPU
 					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"gpu_count": schema.Int64Attribute{
@@ -119,6 +122,9 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Description: "Location details including datacenter, region, and country information",
 				ElementType: types.StringType,
 				Computed:    true,
+				PlanModifiers: []planmodifier.Map{
+					mapplanmodifier.UseStateForUnknown(),
+				},
 			},
 		},
 	}
@@ -155,10 +161,28 @@ func (r *gpuResource) Create(ctx context.Context, req resource.CreateRequest, re
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	// TODO: Check series code availability with datacenterId and GPU Count
 
-	// Call no-op Create function
-	getGPUResponse, err := gpu.CreateGPU(r.client, ctx, plan)
+	// If series code is not populated, perform a lookup and set it
+	if plan.SeriesCode.IsNull() || plan.SeriesCode.ValueString() == "" {
+		code := gpu.GPUSeriesNameToCode[plan.SeriesName.ValueString()]
+		plan.SeriesCode = types.StringValue(code)
+	}
+
+	// Check series code availability with datacenterId and GPU Count
+	inventory, err := gpu.CheckInventory(r.client, ctx, plan)
+
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Unable to create GPCN GPU",
+			err.Error(),
+		)
+		return
+	}
+
+	// Extract the series ID from the inventory response
+	seriesId := inventory.Data[0].ID
+
+	getGPUResponse, err := gpu.CreateGPU(r.client, ctx, seriesId, plan)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			gpu.ErrSummaryUnableToCreateGPU,
@@ -191,7 +215,6 @@ func (r *gpuResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 		return
 	}
 
-	// Call no-op Read function
 	getGPUResponse, err := gpu.GetGPU(r.client, ctx, state.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -232,8 +255,7 @@ func (r *gpuResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		return
 	}
 
-	// Call no-op Update function
-	err := gpu.UpdateGPU(r.client, ctx, state.ID.ValueString(), plan)
+	err := gpu.UpdateGPU(r.client, ctx, state.ID.ValueString(), plan.Name.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
 			gpu.ErrSummaryUnableToUpdateGPU,
@@ -275,7 +297,6 @@ func (r *gpuResource) Delete(ctx context.Context, req resource.DeleteRequest, re
 		return
 	}
 
-	// Call no-op Delete function
 	err := gpu.DeleteGPU(r.client, ctx, state.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
