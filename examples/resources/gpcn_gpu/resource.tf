@@ -8,13 +8,14 @@
 terraform {
   required_providers {
     gpcn = {
-      source = "gpcn.com/dev/gpcn"
+      source  = "Global-Private-Cloud-Network/gpcn"
+      version = "~>0.3.0"
     }
   }
 }
 
 provider "gpcn" {
-  #   host = "https://api.gpcn.com"
+  host = "https://api.gpcn.com"
 }
 
 # Lookup datacenter in East US region

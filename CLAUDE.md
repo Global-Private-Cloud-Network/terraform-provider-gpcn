@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Terraform provider for GPCN (cloud infrastructure platform) built using the Terraform Plugin Framework (v1.16.1). The provider manages three main resource types: networks, volumes, and virtual machines, plus a datacenter data source.
+This is a Terraform provider for GPCN (cloud infrastructure platform) built using the Terraform Plugin Framework (v1.16.1). The provider manages four main resource types: networks, volumes, virtual machines, and GPUs, plus a datacenter data source.
 
 ## Environment Setup
 
@@ -56,7 +56,43 @@ TF_ACC=1 TF_LOG=warn go test -run=TestAccNetworkResource_basic -v -timeout 60m .
 make testacc LOGLEVEL=debug
 ```
 
-## Recent Changes (v0.2.0)
+## Recent Changes
+
+### v0.3.0 (Current Branch: feat/add-gpu-support)
+
+**New Features:**
+
+- Added GPU resource (`gpcn_gpu`) for managing dedicated GPU instances
+- GPU inventory checking to validate availability before creation
+
+**GPU Resource:**
+
+- Supports specifying GPU series by either `series_name` (human-readable) or `series_code`
+- Automatic lookup from `series_name` to `series_code` using static mapping
+- GPU count must be 1, 2, or 4
+- Inventory validation ensures requested GPU configuration is available in datacenter
+- Example Terraform configuration:
+
+  ```hcl
+  resource "gpcn_gpu" "example" {
+    name          = "my-gpu"
+    datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+
+    # Use either series_name or series_code (exactly one required)
+    series_name = "A100 Series"
+    # series_code = "a100_series"
+
+    gpu_count = 1  # Must be 1, 2, or 4
+  }
+  ```
+
+**Other Improvements:**
+
+- Refactored CRUD response handling to use anonymous inline structs for better readability
+- Enhanced structured logging across all resources
+- Additional unit and acceptance tests for GPU resources
+
+### v0.2.0
 
 **Breaking Changes:**
 
@@ -121,11 +157,11 @@ make testacc LOGLEVEL=debug
 
 ### Resource Package Pattern
 
-Each resource (networks, volumes, virtualmachines) follows this consistent structure in `internal/{resource}/`:
+Each resource (networks, volumes, virtualmachines, gpu) follows this consistent structure in `internal/{resource}/`:
 
 - `resource_model.go`: Terraform state model structs
 - `crud_actions.go`: HTTP request/response logic and API calls (Create, Read, Update, Delete)
-- `validators.go`: Custom validators for resource attributes
+- `validators.go`: Custom validators for resource attributes (optional, not all resources use this)
 - `logging.go`: Structured logging constants and helpers
 - `errors.go`: Error message constants
 - `constants.go`: API endpoints and other constants
@@ -135,6 +171,7 @@ Each resource (networks, volumes, virtualmachines) follows this consistent struc
 - `networks_resource.go`
 - `volumes_resource.go`
 - `virtualmachines_resource.go`
+- `gpus_resource.go`
 - `datacenter_data_source.go`
 
 Each resource file defines:
@@ -174,6 +211,21 @@ Each resource file defines:
 - `sizes.go`: Volume size helpers
 - `virtualmachines.go`: VM attachment logic
 
+**GPUs** (`internal/gpu/`):
+
+- `inventory.go`: GPU inventory checking and availability validation
+- `constants.go`: Defines valid GPU series names and codes
+  - `GPUSeriesNameToCode` map for converting series names to codes
+- GPU creation flow:
+  1. If `series_name` is provided instead of `series_code`, performs static lookup to get the code
+  2. Checks inventory availability using `CheckInventory()` with datacenter ID, series code, and GPU count
+  3. Extracts series ID from inventory response
+  4. Creates GPU using the series ID
+  5. Uses long polling to wait for async creation job completion
+- GPU count must be 1, 2, or 4
+- Changing datacenter, series name/code, or GPU count requires resource replacement
+- Only the GPU name can be updated without replacement
+
 ## Testing
 
 ### Unit Tests
@@ -183,6 +235,7 @@ Unit tests use mock HTTP servers to test resource logic without making real API 
 - `internal/networks/networks_unit_test.go`: Network resource unit tests
 - `internal/virtualmachines/virtualmachines_unit_test.go`: VM resource unit tests
 - `internal/volumes/volumes_unit_test.go`: Volume resource unit tests
+- `internal/gpu/gpu_unit_test.go`: GPU resource unit tests
 - `internal/testutil/mock_http.go`: Mock HTTP server utilities
   - `MockTransport`: Custom RoundTripper for intercepting HTTP calls
   - `SetupMockServer()`: Creates mock server with configurable handlers
