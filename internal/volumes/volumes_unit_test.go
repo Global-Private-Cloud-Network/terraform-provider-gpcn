@@ -26,8 +26,8 @@ func createTestVolumeModel(name, volumeType string, sizeGb int64) ResourceModel 
 	}
 }
 
-// TestMapVolumeResponseToModel tests the mapping function
-func TestMapVolumeResponseToModel_Unit(t *testing.T) {
+// TestMapVolumeResponseToModelUnit tests the mapping function
+func TestMapVolumeResponseToModelUnit(t *testing.T) {
 	ctx := context.Background()
 
 	createdAt := time.Now().Format(time.RFC3339)
@@ -81,8 +81,8 @@ func TestMapVolumeResponseToModel_Unit(t *testing.T) {
 	}
 }
 
-// TestCreateVolume_MockHTTP tests CreateVolume with a mock HTTP server
-func TestCreateVolume_MockHTTP(t *testing.T) {
+// TestCreateVolumeMockHTTP tests CreateVolume with a mock HTTP server
+func TestCreateVolumeMockHTTP(t *testing.T) {
 	jobID := "job-123"
 	volumeID := "volume-456"
 	volumeSizeID := int64(10)
@@ -229,8 +229,8 @@ func TestCreateVolume_MockHTTP(t *testing.T) {
 	}
 }
 
-// TestGetVolume_MockHTTP tests GetVolume with a mock HTTP server
-func TestGetVolume_MockHTTP(t *testing.T) {
+// TestGetVolumeMockHTTP tests GetVolume with a mock HTTP server
+func TestGetVolumeMockHTTP(t *testing.T) {
 	volumeID := "volume-789"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -286,8 +286,8 @@ func TestGetVolume_MockHTTP(t *testing.T) {
 	}
 }
 
-// TestUpdateVolume_MockHTTP tests UpdateVolume with a mock HTTP server
-func TestUpdateVolume_MockHTTP(t *testing.T) {
+// TestUpdateVolumeMockHTTP tests UpdateVolume with a mock HTTP server
+func TestUpdateVolumeMockHTTP(t *testing.T) {
 	volumeID := "volume-update-123"
 	newSizeGb := int64(512)
 	volumeSizeID := int64(11)
@@ -427,8 +427,8 @@ func TestUpdateVolume_MockHTTP(t *testing.T) {
 	}
 }
 
-// TestGetVolumeSizeId_MockHTTP tests GetVolumeSizeId with a mock HTTP server
-func TestGetVolumeSizeId_MockHTTP(t *testing.T) {
+// TestGetVolumeSizeIdMockHTTP tests GetVolumeSizeId with a mock HTTP server
+func TestGetVolumeSizeIdMockHTTP(t *testing.T) {
 	datacenterID := "datacenter-123"
 	volumeTypeID := int64(1)
 	sizeGb := int64(256)
@@ -483,8 +483,8 @@ func TestGetVolumeSizeId_MockHTTP(t *testing.T) {
 	}
 }
 
-// TestGetVolumeSizeId_InvalidSize tests that GetVolumeSizeId returns an error for invalid size
-func TestGetVolumeSizeId_InvalidSize_MockHTTP(t *testing.T) {
+// TestGetVolumeSizeIdInvalidSizeMockHTTP tests that GetVolumeSizeId returns an error for invalid size
+func TestGetVolumeSizeIdInvalidSizeMockHTTP(t *testing.T) {
 	datacenterID := "datacenter-123"
 	volumeTypeID := int64(1)
 	invalidSizeGb := int64(555) // Not in available sizes

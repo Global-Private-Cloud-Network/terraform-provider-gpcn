@@ -48,8 +48,8 @@ func createTestResourceModel(networkType, cidr, dhcpStart, dhcpEnd, dnsServers s
 	return model
 }
 
-// TestMapNetworkResponseToModel tests the mapping function
-func TestMapNetworkResponseToModel_Unit(t *testing.T) {
+// TestMapNetworkResponseToModelUnit tests the mapping function
+func TestMapNetworkResponseToModelUnit(t *testing.T) {
 	ctx := context.Background()
 
 	createdAt := time.Now().Format(time.RFC3339)
@@ -143,8 +143,8 @@ func TestMapNetworkResponseToModel_Unit(t *testing.T) {
 	}
 }
 
-// TestMapNetworkResponseToModel_CustomNetwork tests mapping for custom network type
-func TestMapNetworkResponseToModel_CustomNetwork_Unit(t *testing.T) {
+// TestMapNetworkResponseToModelCustomNetworkUnit tests mapping for custom network type
+func TestMapNetworkResponseToModelCustomNetworkUnit(t *testing.T) {
 	ctx := context.Background()
 
 	response := &readNetworkResponse{
@@ -192,8 +192,8 @@ func TestMapNetworkResponseToModel_CustomNetwork_Unit(t *testing.T) {
 	}
 }
 
-// TestCreateNetwork_MockHTTP tests CreateNetwork with a mock HTTP server
-func TestCreateNetwork_MockHTTP(t *testing.T) {
+// TestCreateNetworkMockHTTP tests CreateNetwork with a mock HTTP server
+func TestCreateNetworkMockHTTP(t *testing.T) {
 	jobID := "job-123"
 	networkID := "network-456"
 
@@ -280,8 +280,8 @@ func TestCreateNetwork_MockHTTP(t *testing.T) {
 	}
 }
 
-// TestGetNetwork_MockHTTP tests GetNetwork with a mock HTTP server
-func TestGetNetwork_MockHTTP(t *testing.T) {
+// TestGetNetworkMockHTTP tests GetNetwork with a mock HTTP server
+func TestGetNetworkMockHTTP(t *testing.T) {
 	networkID := "network-789"
 
 	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
@@ -344,8 +344,8 @@ func TestGetNetwork_MockHTTP(t *testing.T) {
 	}
 }
 
-// TestUpdateNetwork_MockHTTP tests UpdateNetwork with a mock HTTP server
-func TestUpdateNetwork_MockHTTP(t *testing.T) {
+// TestUpdateNetworkMockHTTP tests UpdateNetwork with a mock HTTP server
+func TestUpdateNetworkMockHTTP(t *testing.T) {
 	networkID := "network-update-123"
 
 	var updateCalled, getCalled bool

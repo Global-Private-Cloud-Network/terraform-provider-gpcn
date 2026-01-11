@@ -3,6 +3,7 @@ package gpu
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -88,13 +89,13 @@ func CheckInventory(httpClient *http.Client, ctx context.Context, model Resource
 
 	// Validate response structure
 	if len(gpuInventoryResponse.Data) == 0 {
-		return nil, fmt.Errorf(ErrDetailMalformedResponseMissingData)
+		return nil, errors.New(ErrDetailMalformedResponseMissingData)
 	}
 	if len(gpuInventoryResponse.Data[0].Availability) == 0 {
-		return nil, fmt.Errorf(ErrDetailMalformedResponseMissingAvailability)
+		return nil, errors.New(ErrDetailMalformedResponseMissingAvailability)
 	}
 	if len(gpuInventoryResponse.Data[0].Availability[0].GPUCounts) == 0 {
-		return nil, fmt.Errorf(ErrDetailMalformedResponseMissingGPUCounts)
+		return nil, errors.New(ErrDetailMalformedResponseMissingGPUCounts)
 	}
 
 	// Check if inventory is available

@@ -21,6 +21,7 @@ provider "gpcn" {
 data "gpcn_datacenters" "east_us" {
   country_name = "United States"
   region_name  = "east"
+  name         = "Beltsville"
 }
 
 resource "gpcn_gpu" "example" {

@@ -20,6 +20,7 @@ func TestGPUResource(t *testing.T) {
 data "gpcn_datacenters" "east_us" {
   country_name = "United States"
   region_name  = "east"
+  name = "Beltsville"
 }
 
 resource "gpcn_gpu" "test" {
@@ -48,7 +49,6 @@ resource "gpcn_gpu" "test" {
 					resource.TestCheckResourceAttrSet(gpcnGPUTest, "location.country"),
 					// Verify configured attributes
 					resource.TestCheckResourceAttr(gpcnGPUTest, "name", "terraform-demo-gpu"),
-					resource.TestCheckResourceAttr(gpcnGPUTest, "datacenter_id", "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"),
 					resource.TestCheckResourceAttr(gpcnGPUTest, "series_name", "A100 Series"),
 					resource.TestCheckResourceAttr(gpcnGPUTest, "gpu_count", "1"),
 				),
@@ -64,6 +64,7 @@ resource "gpcn_gpu" "test" {
 data "gpcn_datacenters" "east_us" {
   country_name = "United States"
   region_name  = "east"
+  name = "Beltsville"
 }
 
 resource "gpcn_gpu" "test" {
@@ -88,6 +89,33 @@ resource "gpcn_gpu" "test" {
 	})
 }
 
+func TestGPUResourceNoAvailability(t *testing.T) {
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: providerConfig + `
+data "gpcn_datacenters" "east_us" {
+  country_name = "United States"
+  region_name  = "east"
+  name = "Beltsville"
+}
+
+resource "gpcn_gpu" "test" {
+  name          = "terraform-demo-gpu-no-availability"
+  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  series_code   = "a100_series"
+  gpu_count     = 4
+}
+`,
+				// This should fail due to insufficient GPU availability
+				// The exact error message depends on the API response
+				ExpectError: regexp.MustCompile("(no GPU availability|No GPU Inventory Available|Unable to create GPCN GPU)"),
+			},
+		},
+	})
+}
+
 func TestGPUResourceInvalidSeries(t *testing.T) {
 	t.Run("invalid_series_code", func(t *testing.T) {
 		resource.UnitTest(t, resource.TestCase{
@@ -97,7 +125,7 @@ func TestGPUResourceInvalidSeries(t *testing.T) {
 					Config: providerConfig + `
 resource "gpcn_gpu" "test" {
   name          = "terraform-gpu-bad-code"
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = "any-datacenter-id"
   series_code   = "invalid_series_code"
   gpu_count     = 1
 }
@@ -116,7 +144,7 @@ resource "gpcn_gpu" "test" {
 					Config: providerConfig + `
 resource "gpcn_gpu" "test" {
   name          = "terraform-gpu-bad-series"
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = "any-datacenter-id"
   series_name   = "Invalid GPU Series"
   gpu_count     = 1
 }
@@ -135,7 +163,7 @@ resource "gpcn_gpu" "test" {
 					Config: providerConfig + `
 resource "gpcn_gpu" "test" {
   name          = "terraform-gpu-both-series"
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = "any-datacenter-id"
   series_name   = "A100 Series"
   series_code   = "a100_series"
   gpu_count     = 1
@@ -155,7 +183,7 @@ resource "gpcn_gpu" "test" {
 					Config: providerConfig + `
 resource "gpcn_gpu" "test" {
   name          = "terraform-gpu-no-series"
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = "any-datacenter-id"
   gpu_count     = 1
 }
 `,
@@ -175,7 +203,7 @@ func TestGPUResourceInvalidGPUCount(t *testing.T) {
 					Config: providerConfig + `
 resource "gpcn_gpu" "test" {
   name          = "terraform-gpu-invalid-count"
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = "any-datacenter-id"
   series_name   = "A100 Series"
   gpu_count     = 0
 }
@@ -184,31 +212,5 @@ resource "gpcn_gpu" "test" {
 				},
 			},
 		})
-	})
-}
-
-func TestGPUResourceNoAvailability(t *testing.T) {
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config: providerConfig + `
-data "gpcn_datacenters" "east_us" {
-  country_name = "United States"
-  region_name  = "east"
-}
-
-resource "gpcn_gpu" "test" {
-  name          = "terraform-demo-gpu-no-availability"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
-  series_code   = "a100_series"
-  gpu_count     = 4
-}
-`,
-				// This should fail due to insufficient GPU availability
-				// The exact error message depends on the API response
-				ExpectError: regexp.MustCompile("(No GPU availability|No GPU Inventory Available|Unable to create GPCN GPU)"),
-			},
-		},
 	})
 }

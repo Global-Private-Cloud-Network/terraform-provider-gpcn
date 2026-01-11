@@ -20,10 +20,16 @@ func TestNetworksResource(t *testing.T) {
 			// Create and Read testing
 			{
 				Config: providerConfig + `
+data "gpcn_datacenters" "east_us" {
+  country_name = "United States"
+  region_name  = "east"
+  name = "Newark"
+}
+
 resource "gpcn_network" "test" {
   name = "terraform-demo-standard"
   description = "An example Network for a demo of Terraform! This one uses the standard network_type."
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
   network_type = "standard"
   cidr_block = "10.0.0.0/24"
   dhcp_start_address = "10.0.0.10"
@@ -34,7 +40,6 @@ resource "gpcn_network" "test" {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Verify attributes are set to the values from the config
 					resource.TestCheckResourceAttr(gpcnNetworkTest, "cidr_block", "10.0.0.0/24"),
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "datacenter_id", "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"),
 					resource.TestCheckResourceAttr(gpcnNetworkTest, "description", "An example Network for a demo of Terraform! This one uses the standard network_type."),
 					resource.TestCheckResourceAttr(gpcnNetworkTest, "dhcp_end_address", "10.0.0.254"),
 					resource.TestCheckResourceAttr(gpcnNetworkTest, "dhcp_start_address", "10.0.0.10"),
@@ -67,10 +72,16 @@ resource "gpcn_network" "test" {
 			// Update and Read testing with little changes
 			{
 				Config: providerConfig + `
+data "gpcn_datacenters" "east_us" {
+  country_name = "United States"
+  region_name  = "east"
+  name = "Newark"
+}
+
 resource "gpcn_network" "test" {
   name = "terraform-demo-standard"
   description = "An example Network for a demo of Terraform! This one uses the standard network_type."
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
   network_type = "standard"
   cidr_block = "10.0.0.0/24"
   dhcp_start_address = "10.0.0.10"
@@ -80,7 +91,6 @@ resource "gpcn_network" "test" {
 			`,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Verify attributes are set to the values from the config
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "datacenter_id", "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"),
 					resource.TestCheckResourceAttr(gpcnNetworkTest, "dhcp_end_address", "10.0.0.140"),
 					resource.TestCheckResourceAttr(gpcnNetworkTest, "name", "terraform-demo-standard"),
 					resource.TestCheckResourceAttr(gpcnNetworkTest, "network_type", "standard"),
@@ -102,16 +112,21 @@ resource "gpcn_network" "test" {
 			// Changing network_type forces a replace
 			{
 				Config: providerConfig + `
+data "gpcn_datacenters" "east_us" {
+  country_name = "United States"
+  region_name  = "east"
+  name = "Newark"
+}
+
 resource "gpcn_network" "test" {
   name = "terraform-demo-custom"
   description = "An example Network for a demo of Terraform! This one uses the custom network_type."
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
   network_type = "custom"
 }
 			`,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Verify attributes are set to the values from the config
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "datacenter_id", "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"),
 					resource.TestCheckResourceAttr(gpcnNetworkTest, "name", "terraform-demo-custom"),
 					resource.TestCheckResourceAttr(gpcnNetworkTest, "network_type", "custom"),
 					// Verify generated values are generated
@@ -141,7 +156,7 @@ func TestNetworksResourceInvalidType(t *testing.T) {
 					Config: providerConfig + `
 resource "gpcn_network" "test" {
   name = "terraform-demo-standard"
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = "any-datacenter-id"
   network_type = "bad_value"
 }
 `,
@@ -163,7 +178,7 @@ func TestNetworksResourceStandardValidator(t *testing.T) {
 					Config: providerConfig + `
 resource "gpcn_network" "test" {
   name = "terraform-demo-standard"
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = "any-datacenter-id"
   network_type = "standard"
   dhcp_start_address = "10.0.0.10"
   dhcp_end_address   = "10.0.0.140"
@@ -184,7 +199,7 @@ resource "gpcn_network" "test" {
 					Config: providerConfig + `
 resource "gpcn_network" "test" {
   name = "terraform-demo-standard"
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = "any-datacenter-id"
   network_type = "standard"
   cidr_block = "10.0.0.0/24"
   dhcp_end_address   = "10.0.0.140"
@@ -205,7 +220,7 @@ resource "gpcn_network" "test" {
 					Config: providerConfig + `
 resource "gpcn_network" "test" {
   name = "terraform-demo-standard"
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = "any-datacenter-id"
   network_type = "standard"
   cidr_block = "10.0.0.0/24"
   dhcp_start_address = "10.0.0.10"
@@ -226,7 +241,7 @@ resource "gpcn_network" "test" {
 					Config: providerConfig + `
 resource "gpcn_network" "test" {
   name = "terraform-demo-standard"
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = "any-datacenter-id"
   network_type = "standard"
   cidr_block = "10.0.0.0/24"
   dhcp_start_address = "10.0.0.10"
@@ -249,7 +264,7 @@ func TestNetworksResourceIpAddressValidator(t *testing.T) {
 					Config: providerConfig + `
 resource "gpcn_network" "test" {
   name = "terraform-demo-standard"
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = "any-datacenter-id"
   network_type = "standard"
   cidr_block = "10.0.0.0/24"
   dhcp_start_address = "10.0.0.1455"
@@ -271,7 +286,7 @@ resource "gpcn_network" "test" {
 					Config: providerConfig + `
 resource "gpcn_network" "test" {
   name = "terraform-demo-standard"
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = "any-datacenter-id"
   network_type = "standard"
   cidr_block = "10.0.0.0/24"
   dhcp_start_address = "10.0.0.10"
@@ -293,7 +308,7 @@ resource "gpcn_network" "test" {
 					Config: providerConfig + `
 resource "gpcn_network" "test" {
   name = "terraform-demo-standard"
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = "any-datacenter-id"
   network_type = "standard"
   cidr_block = "10.0.0.0/24"
   dhcp_start_address = "192.0.0.10"
@@ -317,7 +332,7 @@ func TestNetworksResourceCIDRValidator(t *testing.T) {
 					Config: providerConfig + `
 resource "gpcn_network" "test" {
   name = "terraform-demo-standard"
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = "any-datacenter-id"
   network_type = "standard"
   cidr_block = "10.0.0.0/245"
   dhcp_start_address = "10.0.0.10"
@@ -339,7 +354,7 @@ resource "gpcn_network" "test" {
 					Config: providerConfig + `
 resource "gpcn_network" "test" {
   name = "terraform-demo-standard"
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = "any-datacenter-id"
   network_type = "standard"
   cidr_block = "100.0.0.0/24"
   dhcp_start_address = "10.0.0.10"
@@ -363,7 +378,7 @@ func TestNetworksResourceDNSServersValidator(t *testing.T) {
 					Config: providerConfig + `
 resource "gpcn_network" "test" {
   name = "terraform-demo-standard"
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = "any-datacenter-id"
   network_type = "standard"
   cidr_block = "10.0.0.0/24"
   dhcp_start_address = "10.0.0.10"
@@ -385,7 +400,7 @@ resource "gpcn_network" "test" {
 					Config: providerConfig + `
 resource "gpcn_network" "test" {
   name = "terraform-demo-standard"
-  datacenter_id = "1ea6b709-0671-46fa-aea8-bdc8eb897d3d"
+  datacenter_id = "any-datacenter-id"
   network_type = "standard"
   cidr_block = "10.0.0.0/24"
   dhcp_start_address = "10.0.0.10"

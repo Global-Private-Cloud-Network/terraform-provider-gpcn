@@ -32,18 +32,17 @@ type datacenterDataSourceModel struct {
 }
 
 type datacenterResponse struct {
-	Success bool                     `json:"success"`
-	Message string                   `json:"message"`
-	Data    []datacenterDataResponse `json:"data"`
-}
-type datacenterDataResponse struct {
-	ID                  string `json:"id"`
-	Name                string `json:"name"`
-	RegionID            int64  `json:"regionId"`
-	RegionName          string `json:"regionName"`
-	CountryID           int64  `json:"countryId"`
-	CountryName         string `json:"countryName"`
-	CountryAbbreviation string `json:"countryAbbreviation"`
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    []struct {
+		ID                  string `json:"id"`
+		Name                string `json:"name"`
+		RegionID            int64  `json:"regionId"`
+		RegionName          string `json:"regionName"`
+		CountryID           int64  `json:"countryId"`
+		CountryName         string `json:"countryName"`
+		CountryAbbreviation string `json:"countryAbbreviation"`
+	} `json:"data"`
 }
 type datacenterDataResponseTF struct {
 	ID                  types.String `tfsdk:"id"`
@@ -56,26 +55,24 @@ type datacenterDataResponseTF struct {
 }
 
 type datacenterRegionResponse struct {
-	Success bool                           `json:"success"`
-	Message string                         `json:"message"`
-	Data    []datacenterRegionDataResponse `json:"data"`
-}
-type datacenterRegionDataResponse struct {
-	ID                  int64  `json:"id"`
-	Name                string `json:"name"`
-	CountryID           int64  `json:"countryId"`
-	CountryName         string `json:"countryName"`
-	CountryAbbreviation string `json:"countryAbbreviation"`
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    []struct {
+		ID                  int64  `json:"id"`
+		Name                string `json:"name"`
+		CountryID           int64  `json:"countryId"`
+		CountryName         string `json:"countryName"`
+		CountryAbbreviation string `json:"countryAbbreviation"`
+	} `json:"data"`
 }
 
 type datacenterCountryResponse struct {
-	Success bool                            `json:"success"`
-	Message string                          `json:"message"`
-	Data    []datacenterCountryDataResponse `json:"data"`
-}
-type datacenterCountryDataResponse struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    []struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	} `json:"data"`
 }
 
 func (o datacenterDataResponseTF) AttrTypes() map[string]attr.Type {
@@ -184,7 +181,7 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		additionalQueryString += "&regionName=" + url.QueryEscape(state.RegionName.ValueString())
 	}
 	if !state.Name.IsNull() {
-		additionalQueryString += "&name=" + url.QueryEscape(state.Name.ValueString())
+		additionalQueryString += "&search=" + url.QueryEscape(state.Name.ValueString())
 	}
 
 	datacenterResponse, err := d.getDatacenters(additionalQueryString)

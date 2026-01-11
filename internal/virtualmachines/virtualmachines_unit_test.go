@@ -37,8 +37,8 @@ func createTestVMModel(name, image string, allocatePublicIP bool) ResourceModel 
 	}
 }
 
-// TestMapVirtualMachineResponseToModel tests the mapping function
-func TestMapVirtualMachineResponseToModel_Unit(t *testing.T) {
+// TestMapVirtualMachineResponseToModelUnit tests the mapping function
+func TestMapVirtualMachineResponseToModelUnit(t *testing.T) {
 	ctx := context.Background()
 
 	createdAt := time.Now().Format(time.RFC3339)
@@ -118,8 +118,8 @@ func TestMapVirtualMachineResponseToModel_Unit(t *testing.T) {
 	}
 }
 
-// TestCreateVirtualMachine_MockHTTP tests CreateVirtualMachine with a mock HTTP server
-func TestCreateVirtualMachine_MockHTTP(t *testing.T) {
+// TestCreateVirtualMachineMockHTTP tests CreateVirtualMachine with a mock HTTP server
+func TestCreateVirtualMachineMockHTTP(t *testing.T) {
 	jobID := "job-123"
 	vmID := "vm-456"
 	imageID := int64(10)
@@ -265,8 +265,8 @@ func TestCreateVirtualMachine_MockHTTP(t *testing.T) {
 	}
 }
 
-// TestGetVirtualMachine_MockHTTP tests GetVirtualMachine with a mock HTTP server
-func TestGetVirtualMachine_MockHTTP(t *testing.T) {
+// TestGetVirtualMachineMockHTTP tests GetVirtualMachine with a mock HTTP server
+func TestGetVirtualMachineMockHTTP(t *testing.T) {
 	vmID := "vm-789"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -330,8 +330,8 @@ func TestGetVirtualMachine_MockHTTP(t *testing.T) {
 	}
 }
 
-// TestUpdateVirtualMachine_MockHTTP tests UpdateVirtualMachine with a mock HTTP server
-func TestUpdateVirtualMachine_MockHTTP(t *testing.T) {
+// TestUpdateVirtualMachineMockHTTP tests UpdateVirtualMachine with a mock HTTP server
+func TestUpdateVirtualMachineMockHTTP(t *testing.T) {
 	vmID := "vm-update-123"
 	newName := "updated-vm"
 
@@ -434,8 +434,8 @@ func TestUpdateVirtualMachine_MockHTTP(t *testing.T) {
 	}
 }
 
-// TestPollForVirtualMachineStatus_MockHTTP tests the polling mechanism
-func TestPollForVirtualMachineStatus_MockHTTP(t *testing.T) {
+// TestPollForVirtualMachineStatusMockHTTP tests the polling mechanism
+func TestPollForVirtualMachineStatusMockHTTP(t *testing.T) {
 	vmID := "vm-poll-123"
 	pollCount := 0
 
@@ -505,8 +505,8 @@ func TestPollForVirtualMachineStatus_MockHTTP(t *testing.T) {
 	}
 }
 
-// TestValidatePublicIpValue_MockHTTP tests public IP validation with custom networks
-func TestValidatePublicIpValue_MockHTTP(t *testing.T) {
+// TestValidatePublicIpValueMockHTTP tests public IP validation with custom networks
+func TestValidatePublicIpValueMockHTTP(t *testing.T) {
 	tests := []struct {
 		name             string
 		networkType      string
