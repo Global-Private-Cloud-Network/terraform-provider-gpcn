@@ -14,12 +14,20 @@ import (
 // Response structures for API calls
 type readGPUResponse struct {
 	Data struct {
-		ID         string `json:"id"`
-		Name       string `json:"name"`
-		CreatedAt  string `json:"createdAt"`
-		UpdatedAt  string `json:"updatedAt"`
-		Status     string `json:"status"`
-		IP         string `json:"ip"`
+		ID            string `json:"id"`
+		Name          string `json:"name"`
+		CreatedAt     string `json:"createdAt"`
+		UpdatedAt     string `json:"updatedAt"`
+		Status        string `json:"status"`
+		IP            string `json:"ip"`
+		Configuration struct {
+			Name     string `json:"name"`
+			Code     string `json:"code"`
+			GPUCount int64  `json:"gpuCount"`
+			CPU      int64  `json:"cpu"`
+			RAM      int64  `json:"ram"`
+			Disk     int64  `json:"disk"`
+		} `json:"configuration"`
 		Datacenter struct {
 			ID          string `json:"id"`
 			Name        string `json:"name"`

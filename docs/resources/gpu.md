@@ -72,3 +72,13 @@ resource "gpcn_gpu" "example" {
 - `id` (String) Unique identifier for the GPU in UUID format
 - `last_updated` (String) Timestamp when the GPU was last updated in ISO-8601 format
 - `location` (Map of String) Location details including datacenter, region, and country information
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import gpcn_gpu.example "1abf72f3-e9bb-49bd-a9f5-4bdc357dad59"
+```
