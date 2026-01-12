@@ -69,16 +69,11 @@ func TestMapNetworkResponseToModelUnit(t *testing.T) {
 	response.Data.Gateway = "10.0.0.1"
 	response.Data.ConnectedVMs = "2"
 	response.Data.NetworkType = "standard"
-	response.Data.Country = readNetworkDataLocationResponse{
-		ID:   1,
-		Name: "United States",
-	}
-	response.Data.Region = readNetworkDataLocationResponse{
-		ID:   10,
-		Name: "US-East",
-	}
 	response.Data.Datacenter.ID = "dc-123"
 	response.Data.Datacenter.Name = "US-East-1"
+	response.Data.Datacenter.Region = "US-East"
+	response.Data.Datacenter.Country = "United States"
+	response.Data.Datacenter.CountryAbbr = "US"
 	response.Data.DNSServers = "8.8.8.8, 8.8.4.4"
 	response.Data.AllocationPools = []struct {
 		Start string `json:"start"`
@@ -161,16 +156,11 @@ func TestMapNetworkResponseToModelCustomNetworkUnit(t *testing.T) {
 	response.Data.Gateway = ""
 	response.Data.ConnectedVMs = "0"
 	response.Data.NetworkType = "custom"
-	response.Data.Country = readNetworkDataLocationResponse{
-		ID:   1,
-		Name: "United States",
-	}
-	response.Data.Region = readNetworkDataLocationResponse{
-		ID:   10,
-		Name: "US-East",
-	}
 	response.Data.Datacenter.ID = "dc-123"
 	response.Data.Datacenter.Name = "US-East-1"
+	response.Data.Datacenter.Region = "US-East"
+	response.Data.Datacenter.Country = "United States"
+	response.Data.Datacenter.CountryAbbr = "US"
 	response.Data.DNSServers = ""
 	response.Data.AllocationPools = []struct {
 		Start string `json:"start"`
@@ -226,16 +216,11 @@ func TestCreateNetworkMockHTTP(t *testing.T) {
 				response.Data.Gateway = "10.0.0.1"
 				response.Data.ConnectedVMs = "0"
 				response.Data.NetworkType = "standard"
-				response.Data.Country = readNetworkDataLocationResponse{
-					ID:   1,
-					Name: "United States",
-				}
-				response.Data.Region = readNetworkDataLocationResponse{
-					ID:   10,
-					Name: "US-East",
-				}
 				response.Data.Datacenter.ID = "dc-123"
 				response.Data.Datacenter.Name = "US-East-1"
+				response.Data.Datacenter.Region = "US-East"
+				response.Data.Datacenter.Country = "United States"
+				response.Data.Datacenter.CountryAbbr = "US"
 				response.Data.DNSServers = "8.8.8.8, 8.8.4.4"
 				response.Data.AllocationPools = []struct {
 					Start string `json:"start"`
@@ -302,16 +287,11 @@ func TestGetNetworkMockHTTP(t *testing.T) {
 				response.Data.Gateway = "10.0.0.1"
 				response.Data.ConnectedVMs = "0"
 				response.Data.NetworkType = "standard"
-				response.Data.Country = readNetworkDataLocationResponse{
-					ID:   1,
-					Name: "United States",
-				}
-				response.Data.Region = readNetworkDataLocationResponse{
-					ID:   10,
-					Name: "US-East",
-				}
 				response.Data.Datacenter.ID = "dc-123"
 				response.Data.Datacenter.Name = "US-East-1"
+				response.Data.Datacenter.Region = "US-East"
+				response.Data.Datacenter.Country = "United States"
+				response.Data.Datacenter.CountryAbbr = "US"
 				response.Data.DNSServers = "8.8.8.8, 8.8.4.4"
 				response.Data.AllocationPools = []struct {
 					Start string `json:"start"`
@@ -382,16 +362,11 @@ func TestUpdateNetworkMockHTTP(t *testing.T) {
 				response.Data.Gateway = "10.0.0.1"
 				response.Data.ConnectedVMs = "0"
 				response.Data.NetworkType = "standard"
-				response.Data.Country = readNetworkDataLocationResponse{
-					ID:   1,
-					Name: "United States",
-				}
-				response.Data.Region = readNetworkDataLocationResponse{
-					ID:   10,
-					Name: "US-East",
-				}
 				response.Data.Datacenter.ID = "dc-123"
 				response.Data.Datacenter.Name = "US-East-1"
+				response.Data.Datacenter.Region = "US-East"
+				response.Data.Datacenter.Country = "United States"
+				response.Data.Datacenter.CountryAbbr = "US"
 				response.Data.DNSServers = "8.8.8.8, 8.8.4.4"
 				response.Data.AllocationPools = []struct {
 					Start string `json:"start"`

@@ -46,5 +46,24 @@ func MapVolumeResponseToModel(ctx context.Context, response *readVolumesResponse
 		"datacenter": response.Data.Datacenter.Name,
 	})
 
+	// If model doesn't already have these populated, set them
+	model = setModelValuesNotPresent(response, model)
+
+	return model
+}
+
+func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel) ResourceModel {
+	if model.DatacenterId.IsNull() {
+		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
+	}
+	if model.Name.IsNull() {
+		model.Name = types.StringValue(response.Data.Name)
+	}
+	if model.SizeGb.IsNull() {
+		model.SizeGb = types.Int64Value(response.Data.SizeGb)
+	}
+	if model.VolumeType.IsNull() {
+		model.VolumeType = types.StringValue(response.Data.VolumeType.Name)
+	}
 	return model
 }

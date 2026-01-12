@@ -19,21 +19,22 @@ type readNetworkResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Data    struct {
-		ID           string                          `json:"id"`
-		Name         string                          `json:"name"`
-		Description  string                          `json:"description"`
-		CreatedAt    string                          `json:"createdAt"`
-		UpdatedAt    string                          `json:"updatedAt"`
-		SNAT         string                          `json:"snat"`
-		CIDRBlock    string                          `json:"cidrBlock"`
-		Gateway      string                          `json:"gatewayIp"`
-		ConnectedVMs string                          `json:"connectedVms"`
-		NetworkType  string                          `json:"networkType"`
-		Country      readNetworkDataLocationResponse `json:"country"`
-		Region       readNetworkDataLocationResponse `json:"region"`
+		ID           string `json:"id"`
+		Name         string `json:"name"`
+		Description  string `json:"description"`
+		CreatedAt    string `json:"createdAt"`
+		UpdatedAt    string `json:"updatedAt"`
+		SNAT         string `json:"snat"`
+		CIDRBlock    string `json:"cidrBlock"`
+		Gateway      string `json:"gatewayIp"`
+		ConnectedVMs string `json:"connectedVms"`
+		NetworkType  string `json:"networkType"`
 		Datacenter   struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			Region      string `json:"region"`
+			CountryAbbr string `json:"countryAbbr"`
+			Country     string `json:"country"`
 		} `json:"datacenter"`
 		DNSServers      string `json:"dnsNameservers"`
 		AllocationPools []struct {
@@ -41,10 +42,6 @@ type readNetworkResponse struct {
 			End   string `json:"end"`
 		} `json:"allocationPools"`
 	} `json:"data"`
-}
-type readNetworkDataLocationResponse struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
 }
 
 func CreateNetwork(httpClient *http.Client, ctx context.Context, model ResourceModel) (*readNetworkResponse, error) {

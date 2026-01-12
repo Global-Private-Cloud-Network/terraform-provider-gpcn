@@ -16,6 +16,8 @@ ENHANCEMENTS:
 - Refactored CRUD response handling across all resources to use anonymous inline structs for improved code readability
 - Enhanced structured logging throughout all resource operations
 - Improved error messaging consistency
+- Import logic now correctly imports missing attributes for all resources
+  - Known issue: Importing a gpcn_virtualmachine from scratch does not import attached volumes
 
 TESTING:
 
@@ -27,6 +29,7 @@ BUG FIXES:
 
 - Removed extraneous error messages that weren't used
 - Fixed linting errors across the codebase
+- The name parameter in datacenters now correctly filters by that name, instead of doing nothing
 
 ## 0.2.0 (January 05, 2026)
 
