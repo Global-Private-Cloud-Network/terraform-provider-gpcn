@@ -17,7 +17,7 @@ func TestGPUResource(t *testing.T) {
 			// Create and Read testing
 			{
 				Config: providerConfig + `
-data "gpcn_datacenters" "east_us" {
+data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "central"
   name         = "Kansas"
@@ -25,7 +25,7 @@ data "gpcn_datacenters" "east_us" {
 
 resource "gpcn_gpu" "test" {
   name          = "terraform-demo-gpu"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   series_name   = "RTX A6000 Series"
   gpu_count     = 1
 }
@@ -61,7 +61,7 @@ resource "gpcn_gpu" "test" {
 			// Update and Read testing (name change)
 			{
 				Config: providerConfig + `
-data "gpcn_datacenters" "east_us" {
+data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "central"
   name         = "Kansas"
@@ -69,7 +69,7 @@ data "gpcn_datacenters" "east_us" {
 
 resource "gpcn_gpu" "test" {
   name          = "terraform-demo-gpu-updated"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   series_name   = "RTX A6000 Series"
   gpu_count     = 1
 }
@@ -96,7 +96,7 @@ func TestGPUResourceNoAvailability(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: providerConfig + `
-data "gpcn_datacenters" "east_us" {
+data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "east"
   name = "Beltsville"
@@ -104,7 +104,7 @@ data "gpcn_datacenters" "east_us" {
 
 resource "gpcn_gpu" "test" {
   name          = "terraform-demo-gpu-no-availability"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   series_code   = "a100_series"
   gpu_count     = 4
 }

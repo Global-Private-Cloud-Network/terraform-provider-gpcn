@@ -18,8 +18,8 @@ provider "gpcn" {
   host = "https://api.gpcn.com"
 }
 
-# Lookup datacenter in East US region
-data "gpcn_datacenters" "east_us" {
+# Lookup datacenter in Central US region
+data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "central"
   name         = "Kansas"
@@ -27,7 +27,7 @@ data "gpcn_datacenters" "east_us" {
 
 resource "gpcn_gpu" "example" {
   name          = "terraform-demo-gpu"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
   # Only one can be specified but one must be
   series_name = "RTX A6000 Series"
