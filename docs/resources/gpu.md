@@ -35,8 +35,8 @@ provider "gpcn" {
 # Lookup datacenter in East US region
 data "gpcn_datacenters" "east_us" {
   country_name = "United States"
-  region_name  = "east"
-  name         = "Beltsville"
+  region_name  = "central"
+  name         = "Kansas"
 }
 
 resource "gpcn_gpu" "example" {
@@ -44,8 +44,8 @@ resource "gpcn_gpu" "example" {
   datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
 
   # Only one can be specified but one must be
-  series_name = "A100 Series"
-  # series_code = "a100_series"
+  series_name = "RTX A6000 Series"
+  # series_code = "rtx_a6000_series"
 
   # Can only be one of 1,2, or 4
   gpu_count = 1

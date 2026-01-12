@@ -19,14 +19,14 @@ func TestGPUResource(t *testing.T) {
 				Config: providerConfig + `
 data "gpcn_datacenters" "east_us" {
   country_name = "United States"
-  region_name  = "east"
-  name = "Beltsville"
+  region_name  = "central"
+  name         = "Kansas"
 }
 
 resource "gpcn_gpu" "test" {
   name          = "terraform-demo-gpu"
   datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
-  series_name   = "A100 Series"
+  series_name   = "RTX A6000 Series"
   gpu_count     = 1
 }
 `,
@@ -42,14 +42,14 @@ resource "gpcn_gpu" "test" {
 					resource.TestCheckResourceAttrSet(gpcnGPUTest, "created_time"),
 					resource.TestCheckResourceAttrSet(gpcnGPUTest, "last_updated"),
 					// Verify series_code was computed from series_name
-					resource.TestCheckResourceAttr(gpcnGPUTest, "series_code", "a100_series"),
+					resource.TestCheckResourceAttr(gpcnGPUTest, "series_code", "rtx_a6000_series"),
 					// Verify location map is populated
 					resource.TestCheckResourceAttrSet(gpcnGPUTest, "location.datacenter"),
 					resource.TestCheckResourceAttrSet(gpcnGPUTest, "location.region"),
 					resource.TestCheckResourceAttrSet(gpcnGPUTest, "location.country"),
 					// Verify configured attributes
 					resource.TestCheckResourceAttr(gpcnGPUTest, "name", "terraform-demo-gpu"),
-					resource.TestCheckResourceAttr(gpcnGPUTest, "series_name", "A100 Series"),
+					resource.TestCheckResourceAttr(gpcnGPUTest, "series_name", "RTX A6000 Series"),
 					resource.TestCheckResourceAttr(gpcnGPUTest, "gpu_count", "1"),
 				),
 			},
@@ -63,14 +63,14 @@ resource "gpcn_gpu" "test" {
 				Config: providerConfig + `
 data "gpcn_datacenters" "east_us" {
   country_name = "United States"
-  region_name  = "east"
-  name = "Beltsville"
+  region_name  = "central"
+  name         = "Kansas"
 }
 
 resource "gpcn_gpu" "test" {
   name          = "terraform-demo-gpu-updated"
   datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
-  series_name   = "A100 Series"
+  series_name   = "RTX A6000 Series"
   gpu_count     = 1
 }
 `,
@@ -90,6 +90,7 @@ resource "gpcn_gpu" "test" {
 }
 
 func TestGPUResourceNoAvailability(t *testing.T) {
+	// This is subject to change based on datacenter availability
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
@@ -164,8 +165,8 @@ resource "gpcn_gpu" "test" {
 resource "gpcn_gpu" "test" {
   name          = "terraform-gpu-both-series"
   datacenter_id = "any-datacenter-id"
-  series_name   = "A100 Series"
-  series_code   = "a100_series"
+  series_name   = "RTX A6000 Series"
+  series_code   = "rtx_a6000_series"
   gpu_count     = 1
 }
 `,
@@ -204,7 +205,7 @@ func TestGPUResourceInvalidGPUCount(t *testing.T) {
 resource "gpcn_gpu" "test" {
   name          = "terraform-gpu-invalid-count"
   datacenter_id = "any-datacenter-id"
-  series_name   = "A100 Series"
+  series_name   = "RTX A6000 Series"
   gpu_count     = 0
 }
 `,

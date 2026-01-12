@@ -69,6 +69,7 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 			"series_name": schema.StringAttribute{
 				Description: "Human-readable name of the GPU series. Exactly one of series_name or series_code must be specified",
 				Optional:    true,
+				Computed:    true,
 				Validators: []validator.String{
 					stringvalidator.ExactlyOneOf(path.Expressions{
 						path.MatchRoot("series_code"),
