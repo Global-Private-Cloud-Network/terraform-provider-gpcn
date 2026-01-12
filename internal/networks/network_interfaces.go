@@ -401,7 +401,7 @@ func UpdateNetworkInterfaces(httpClient *http.Client, ctx context.Context, vmId 
 		if interfaceIdx < 0 {
 			continue
 		}
-		tflog.Info(ctx, fmt.Sprintf("Removing network interface for ID: %s", val))
+		tflog.Info(ctx, fmt.Sprintf("Removing network interface for ID %s", val))
 		err := RemoveNetworkInterface(httpClient, ctx, vmId, networkInterfaces[interfaceIdx].ID.ValueString())
 		if err != nil {
 			return fmt.Errorf("error removing network interface with ID %s: %w", val, err)
@@ -410,7 +410,7 @@ func UpdateNetworkInterfaces(httpClient *http.Client, ctx context.Context, vmId 
 
 	// Add new network interfaces
 	for _, val := range addedValues {
-		tflog.Info(ctx, fmt.Sprintf("Adding network interface for ID: %s", val))
+		tflog.Info(ctx, fmt.Sprintf("Adding network interface for ID %s", val))
 		err := AddNetworkInterface(httpClient, ctx, vmId, val)
 		if err != nil {
 			return fmt.Errorf("error adding network interface with ID %s: %w", val, err)

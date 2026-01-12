@@ -16,38 +16,32 @@ import (
 )
 
 type readNetworkResponse struct {
-	Success bool                    `json:"success"`
-	Message string                  `json:"message"`
-	Data    readNetworkDataResponse `json:"data"`
-}
-type readNetworkDataResponse struct {
-	ID              string                                    `json:"id"`
-	Name            string                                    `json:"name"`
-	Description     string                                    `json:"description"`
-	CreatedAt       string                                    `json:"createdAt"`
-	UpdatedAt       string                                    `json:"updatedAt"`
-	SNAT            string                                    `json:"snat"`
-	CIDRBlock       string                                    `json:"cidrBlock"`
-	Gateway         string                                    `json:"gatewayIp"`
-	ConnectedVMs    string                                    `json:"connectedVms"`
-	NetworkType     string                                    `json:"networkType"`
-	Country         readNetworkDataLocationResponse           `json:"country"`
-	Region          readNetworkDataLocationResponse           `json:"region"`
-	Datacenter      readNetworkDataLocationDatacenterResponse `json:"datacenter"`
-	DNSServers      string                                    `json:"dnsNameservers"`
-	AllocationPools []readNetworkDataAllocationPoolResponse   `json:"allocationPools"`
-}
-type readNetworkDataLocationResponse struct {
-	ID   int64  `json:"id"`
-	Name string `json:"name"`
-}
-type readNetworkDataLocationDatacenterResponse struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-type readNetworkDataAllocationPoolResponse struct {
-	Start string `json:"start"`
-	End   string `json:"end"`
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		ID           string `json:"id"`
+		Name         string `json:"name"`
+		Description  string `json:"description"`
+		CreatedAt    string `json:"createdAt"`
+		UpdatedAt    string `json:"updatedAt"`
+		SNAT         string `json:"snat"`
+		CIDRBlock    string `json:"cidrBlock"`
+		Gateway      string `json:"gatewayIp"`
+		ConnectedVMs string `json:"connectedVms"`
+		NetworkType  string `json:"networkType"`
+		Datacenter   struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			Region      string `json:"region"`
+			CountryAbbr string `json:"countryAbbr"`
+			Country     string `json:"country"`
+		} `json:"datacenter"`
+		DNSServers      string `json:"dnsNameservers"`
+		AllocationPools []struct {
+			Start string `json:"start"`
+			End   string `json:"end"`
+		} `json:"allocationPools"`
+	} `json:"data"`
 }
 
 func CreateNetwork(httpClient *http.Client, ctx context.Context, model ResourceModel) (*readNetworkResponse, error) {

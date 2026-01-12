@@ -15,16 +15,16 @@ const (
 	LogSuccessfullyCreatedVMMayNotBeRunning       = "Creating the Virtual Machine complete. The Virtual Machine was attempted to be started, but may not be running yet. Check the GPCN Dashboard for more information"
 
 	// GetVirtualMachine messages
-	LogStartingGetVMWithID           = "Starting GetVirtualMachine for Virtual Machine ID: %s"
-	LogSuccessfullyRetrievedVMWithID = "Successfully retrieved Virtual Machine with ID: %s"
+	LogStartingGetVMWithID           = "Starting GetVirtualMachine for Virtual Machine ID %s"
+	LogSuccessfullyRetrievedVMWithID = "Successfully retrieved Virtual Machine with ID %s"
 
 	// UpdateVirtualMachine messages
-	LogStartingUpdateVMWithID               = "Starting UpdateVirtualMachine for Virtual Machine ID: %s"
-	LogSuccessfullyUpdatedVMWithID          = "Successfully updated Virtual Machine with ID: %s"
+	LogStartingUpdateVMWithID               = "Starting UpdateVirtualMachine for Virtual Machine ID %s"
+	LogSuccessfullyUpdatedVMWithID          = "Successfully updated Virtual Machine with ID %s"
 	LogSuccessfullyUpdatedVMMayNotBeRunning = "Updating the Virtual Machine with ID %s complete. The Virtual Machine was attempted to be started, but may not be running yet. Check the GPCN Dashboard for more information"
 
 	// PollForVirtualMachineStatus messages
-	LogStartingPollForVMStatusWithID = "Starting PollForVirtualMachineStatus for Virtual Machine ID: %s"
+	LogStartingPollForVMStatusWithID = "Starting PollForVirtualMachineStatus for Virtual Machine ID %s"
 	LogStartingLongPollingIteration  = "Starting long polling iteration %d for retrieving information about the Virtual Machine. Seconds spent: %d"
 	LogVMResponseStatus              = "Virtual Machine response status is: %s"
 	LogVMStatusProceedingToAttach    = "Virtual Machine with ID %s is '%s'. Proceeding to attach networks and volumes if possible"
@@ -45,20 +45,20 @@ const (
 	LogSuccessfullyRetrievedVMSizeIDWithName = "Successfully retrived virtual machine size ID for size name: %s"
 
 	// UpdateVirtualMachineSize messages
-	LogStartingUpdateVMSizeWithID = "Starting UpdateVirtualMachineSize for Virtual Machine ID: %s"
+	LogStartingUpdateVMSizeWithID = "Starting UpdateVirtualMachineSize for Virtual Machine ID %s"
 	LogSuccessfullyUpdatedVMSize  = "Successfully updated Virtual Machine size"
 
 	// ValidatePlanSizeLargerThanStateSize messages
 	LogSizeChangedVerifyingLarger = "Size has changed, verifying the new size is larger than the old"
 
 	// StartVirtualMachine messages
-	LogStartingStartVMWithID       = "Starting StartVirtualMachine for Virtual Machine ID: %s"
-	LogSuccessfullyStartedVMWithID = "Successfully started Virtual Machine with ID: %s"
+	LogStartingStartVMWithID       = "Starting StartVirtualMachine for Virtual Machine ID %s"
+	LogSuccessfullyStartedVMWithID = "Successfully started Virtual Machine with ID %s"
 	LogStartingIteration           = "Starting iteration %d to attempt to start virtual machine"
 
 	// StopVirtualMachine messages
-	LogStartingStopVMWithID        = "Starting StopVirtualMachine for Virtual Machine ID: %s"
-	LogSuccessfullyStoppedVMWithID = "Successfully stopped Virtual Machine with ID: %s"
+	LogStartingStopVMWithID        = "Starting StopVirtualMachine for Virtual Machine ID %s"
+	LogSuccessfullyStoppedVMWithID = "Successfully stopped Virtual Machine with ID %s"
 
 	// Resource-level CRUD operation messages
 	LogStartingCreateGPCNVirtualMachine             = "Starting Create GPCN Virtual machine"

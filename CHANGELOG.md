@@ -1,3 +1,36 @@
+## 0.3.0 (January 10, 2026)
+
+FEATURES:
+
+- **GPU Resource**: Added new `gpcn_gpu` resource for managing dedicated GPU instances
+  - Support for multiple GPU series: H100 Series, A100 Series, RTX A6000 Series, RTX PRO 6000 Blackwell Series
+  - Flexible series specification via human-readable `series_name` or machine-readable `series_code`
+  - Automatic series name to code lookup using static mapping
+  - GPU count options: 1, 2, or 4 GPUs per instance
+  - Inventory validation to ensure availability before creation
+  - Datacenter-specific deployment
+  - Full lifecycle support including terraform import
+
+ENHANCEMENTS:
+
+- Refactored CRUD response handling across all resources to use anonymous inline structs for improved code readability
+- Enhanced structured logging throughout all resource operations
+- Improved error messaging consistency
+- Import logic now correctly imports missing attributes for all resources
+  - Known issue: Importing a gpcn_virtualmachine from scratch does not import attached volumes
+
+TESTING:
+
+- Added comprehensive unit tests for GPU resources using mock HTTP servers
+- Added acceptance tests for GPU resource lifecycle operations
+- Improved datacenter specification in tests to avoid region-specific issues
+
+BUG FIXES:
+
+- Removed extraneous error messages that weren't used
+- Fixed linting errors across the codebase
+- The name parameter in datacenters now correctly filters by that name, instead of doing nothing
+
 ## 0.2.0 (January 05, 2026)
 
 BREAKING CHANGES:

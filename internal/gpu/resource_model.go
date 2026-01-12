@@ -1,4 +1,4 @@
-package volumes
+package gpu
 
 import (
 	"context"
@@ -11,19 +11,17 @@ type ResourceModel struct {
 	ID           types.String `tfsdk:"id"`
 	Name         types.String `tfsdk:"name"`
 	DatacenterId types.String `tfsdk:"datacenter_id"`
-	VolumeType   types.String `tfsdk:"volume_type"`
-	VolumeTypeId types.Int64  `tfsdk:"volume_type_id"`
-	SizeGb       types.Int64  `tfsdk:"size_gb"`
+	SeriesName   types.String `tfsdk:"series_name"`
+	SeriesCode   types.String `tfsdk:"series_code"`
+	GPUCount     types.Int64  `tfsdk:"gpu_count"`
 	CreatedTime  types.String `tfsdk:"created_time"`
 	LastUpdated  types.String `tfsdk:"last_updated"`
 	Location     types.Map    `tfsdk:"location"`
 }
 
 // Update the plan or state with new values from the GET response
-func MapVolumeResponseToModel(ctx context.Context, response *readVolumesResponse, model ResourceModel) ResourceModel {
-	// Construct most of the data object
+func MapGPUResponseToModel(ctx context.Context, response *readGPUResponse, model ResourceModel) ResourceModel {
 	model.ID = types.StringValue(response.Data.ID)
-	model.VolumeTypeId = types.Int64Value(response.Data.VolumeType.ID)
 
 	// Construct time entries
 	createdTime, err := time.Parse(time.RFC3339, response.Data.CreatedAt)
@@ -52,18 +50,21 @@ func MapVolumeResponseToModel(ctx context.Context, response *readVolumesResponse
 	return model
 }
 
-func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel) ResourceModel {
+func setModelValuesNotPresent(response *readGPUResponse, model ResourceModel) ResourceModel {
 	if model.DatacenterId.IsNull() {
 		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
 	}
 	if model.Name.IsNull() {
 		model.Name = types.StringValue(response.Data.Name)
 	}
-	if model.SizeGb.IsNull() {
-		model.SizeGb = types.Int64Value(response.Data.SizeGb)
+	if model.SeriesName.IsNull() || model.SeriesName.ValueString() == "" {
+		model.SeriesName = types.StringValue(response.Data.Configuration.Name)
 	}
-	if model.VolumeType.IsNull() {
-		model.VolumeType = types.StringValue(response.Data.VolumeType.Name)
+	if model.SeriesCode.IsNull() || model.SeriesCode.ValueString() == "" {
+		model.SeriesCode = types.StringValue(response.Data.Configuration.Code)
+	}
+	if model.GPUCount.IsNull() {
+		model.GPUCount = types.Int64Value(response.Data.Configuration.GPUCount)
 	}
 	return model
 }

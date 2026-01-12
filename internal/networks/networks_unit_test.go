@@ -48,8 +48,8 @@ func createTestResourceModel(networkType, cidr, dhcpStart, dhcpEnd, dnsServers s
 	return model
 }
 
-// TestMapNetworkResponseToModel tests the mapping function
-func TestMapNetworkResponseToModel_Unit(t *testing.T) {
+// TestMapNetworkResponseToModelUnit tests the mapping function
+func TestMapNetworkResponseToModelUnit(t *testing.T) {
 	ctx := context.Background()
 
 	createdAt := time.Now().Format(time.RFC3339)
@@ -58,34 +58,28 @@ func TestMapNetworkResponseToModel_Unit(t *testing.T) {
 	response := &readNetworkResponse{
 		Success: true,
 		Message: "Network retrieved successfully",
-		Data: readNetworkDataResponse{
-			ID:           "network-123",
-			Name:         "test-network",
-			Description:  "Test network description",
-			CreatedAt:    createdAt,
-			UpdatedAt:    updatedAt,
-			SNAT:         "true",
-			CIDRBlock:    "10.0.0.0/24",
-			Gateway:      "10.0.0.1",
-			ConnectedVMs: "2",
-			NetworkType:  "standard",
-			Country: readNetworkDataLocationResponse{
-				ID:   1,
-				Name: "United States",
-			},
-			Region: readNetworkDataLocationResponse{
-				ID:   10,
-				Name: "US-East",
-			},
-			Datacenter: readNetworkDataLocationDatacenterResponse{
-				ID:   "dc-123",
-				Name: "US-East-1",
-			},
-			DNSServers: "8.8.8.8, 8.8.4.4",
-			AllocationPools: []readNetworkDataAllocationPoolResponse{
-				{Start: "10.0.0.10", End: "10.0.0.254"},
-			},
-		},
+	}
+	response.Data.ID = "network-123"
+	response.Data.Name = "test-network"
+	response.Data.Description = "Test network description"
+	response.Data.CreatedAt = createdAt
+	response.Data.UpdatedAt = updatedAt
+	response.Data.SNAT = "true"
+	response.Data.CIDRBlock = "10.0.0.0/24"
+	response.Data.Gateway = "10.0.0.1"
+	response.Data.ConnectedVMs = "2"
+	response.Data.NetworkType = "standard"
+	response.Data.Datacenter.ID = "dc-123"
+	response.Data.Datacenter.Name = "US-East-1"
+	response.Data.Datacenter.Region = "US-East"
+	response.Data.Datacenter.Country = "United States"
+	response.Data.Datacenter.CountryAbbr = "US"
+	response.Data.DNSServers = "8.8.8.8, 8.8.4.4"
+	response.Data.AllocationPools = []struct {
+		Start string `json:"start"`
+		End   string `json:"end"`
+	}{
+		{Start: "10.0.0.10", End: "10.0.0.254"},
 	}
 
 	model := createTestResourceModel("standard", "10.0.0.0/24", "10.0.0.10", "10.0.0.254", "8.8.8.8, 8.8.4.4")
@@ -144,40 +138,34 @@ func TestMapNetworkResponseToModel_Unit(t *testing.T) {
 	}
 }
 
-// TestMapNetworkResponseToModel_CustomNetwork tests mapping for custom network type
-func TestMapNetworkResponseToModel_CustomNetwork_Unit(t *testing.T) {
+// TestMapNetworkResponseToModelCustomNetworkUnit tests mapping for custom network type
+func TestMapNetworkResponseToModelCustomNetworkUnit(t *testing.T) {
 	ctx := context.Background()
 
 	response := &readNetworkResponse{
 		Success: true,
 		Message: "Network retrieved successfully",
-		Data: readNetworkDataResponse{
-			ID:           "network-456",
-			Name:         "custom-network",
-			Description:  "Custom network",
-			CreatedAt:    time.Now().Format(time.RFC3339),
-			UpdatedAt:    time.Now().Format(time.RFC3339),
-			SNAT:         "false",
-			CIDRBlock:    "",
-			Gateway:      "",
-			ConnectedVMs: "0",
-			NetworkType:  "custom",
-			Country: readNetworkDataLocationResponse{
-				ID:   1,
-				Name: "United States",
-			},
-			Region: readNetworkDataLocationResponse{
-				ID:   10,
-				Name: "US-East",
-			},
-			Datacenter: readNetworkDataLocationDatacenterResponse{
-				ID:   "dc-123",
-				Name: "US-East-1",
-			},
-			DNSServers:      "",
-			AllocationPools: []readNetworkDataAllocationPoolResponse{},
-		},
 	}
+	response.Data.ID = "network-456"
+	response.Data.Name = "custom-network"
+	response.Data.Description = "Custom network"
+	response.Data.CreatedAt = time.Now().Format(time.RFC3339)
+	response.Data.UpdatedAt = time.Now().Format(time.RFC3339)
+	response.Data.SNAT = "false"
+	response.Data.CIDRBlock = ""
+	response.Data.Gateway = ""
+	response.Data.ConnectedVMs = "0"
+	response.Data.NetworkType = "custom"
+	response.Data.Datacenter.ID = "dc-123"
+	response.Data.Datacenter.Name = "US-East-1"
+	response.Data.Datacenter.Region = "US-East"
+	response.Data.Datacenter.Country = "United States"
+	response.Data.Datacenter.CountryAbbr = "US"
+	response.Data.DNSServers = ""
+	response.Data.AllocationPools = []struct {
+		Start string `json:"start"`
+		End   string `json:"end"`
+	}{}
 
 	model := createTestResourceModel("custom", "", "", "", "")
 
@@ -194,8 +182,8 @@ func TestMapNetworkResponseToModel_CustomNetwork_Unit(t *testing.T) {
 	}
 }
 
-// TestCreateNetwork_MockHTTP tests CreateNetwork with a mock HTTP server
-func TestCreateNetwork_MockHTTP(t *testing.T) {
+// TestCreateNetworkMockHTTP tests CreateNetwork with a mock HTTP server
+func TestCreateNetworkMockHTTP(t *testing.T) {
 	jobID := "job-123"
 	networkID := "network-456"
 
@@ -217,34 +205,28 @@ func TestCreateNetwork_MockHTTP(t *testing.T) {
 				response := readNetworkResponse{
 					Success: true,
 					Message: "Network retrieved",
-					Data: readNetworkDataResponse{
-						ID:           networkID,
-						Name:         "test-network",
-						Description:  "Test network",
-						CreatedAt:    time.Now().Format(time.RFC3339),
-						UpdatedAt:    time.Now().Format(time.RFC3339),
-						SNAT:         "true",
-						CIDRBlock:    "10.0.0.0/24",
-						Gateway:      "10.0.0.1",
-						ConnectedVMs: "0",
-						NetworkType:  "standard",
-						Country: readNetworkDataLocationResponse{
-							ID:   1,
-							Name: "United States",
-						},
-						Region: readNetworkDataLocationResponse{
-							ID:   10,
-							Name: "US-East",
-						},
-						Datacenter: readNetworkDataLocationDatacenterResponse{
-							ID:   "dc-123",
-							Name: "US-East-1",
-						},
-						DNSServers: "8.8.8.8, 8.8.4.4",
-						AllocationPools: []readNetworkDataAllocationPoolResponse{
-							{Start: "10.0.0.10", End: "10.0.0.254"},
-						},
-					},
+				}
+				response.Data.ID = networkID
+				response.Data.Name = "test-network"
+				response.Data.Description = "Test network"
+				response.Data.CreatedAt = time.Now().Format(time.RFC3339)
+				response.Data.UpdatedAt = time.Now().Format(time.RFC3339)
+				response.Data.SNAT = "true"
+				response.Data.CIDRBlock = "10.0.0.0/24"
+				response.Data.Gateway = "10.0.0.1"
+				response.Data.ConnectedVMs = "0"
+				response.Data.NetworkType = "standard"
+				response.Data.Datacenter.ID = "dc-123"
+				response.Data.Datacenter.Name = "US-East-1"
+				response.Data.Datacenter.Region = "US-East"
+				response.Data.Datacenter.Country = "United States"
+				response.Data.Datacenter.CountryAbbr = "US"
+				response.Data.DNSServers = "8.8.8.8, 8.8.4.4"
+				response.Data.AllocationPools = []struct {
+					Start string `json:"start"`
+					End   string `json:"end"`
+				}{
+					{Start: "10.0.0.10", End: "10.0.0.254"},
 				}
 				testutil.WriteJSONResponse(w, response)
 			} else {
@@ -283,8 +265,8 @@ func TestCreateNetwork_MockHTTP(t *testing.T) {
 	}
 }
 
-// TestGetNetwork_MockHTTP tests GetNetwork with a mock HTTP server
-func TestGetNetwork_MockHTTP(t *testing.T) {
+// TestGetNetworkMockHTTP tests GetNetwork with a mock HTTP server
+func TestGetNetworkMockHTTP(t *testing.T) {
 	networkID := "network-789"
 
 	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
@@ -294,34 +276,28 @@ func TestGetNetwork_MockHTTP(t *testing.T) {
 				response := readNetworkResponse{
 					Success: true,
 					Message: "Network retrieved",
-					Data: readNetworkDataResponse{
-						ID:           networkID,
-						Name:         "test-network",
-						Description:  "Test network",
-						CreatedAt:    time.Now().Format(time.RFC3339),
-						UpdatedAt:    time.Now().Format(time.RFC3339),
-						SNAT:         "true",
-						CIDRBlock:    "10.0.0.0/24",
-						Gateway:      "10.0.0.1",
-						ConnectedVMs: "0",
-						NetworkType:  "standard",
-						Country: readNetworkDataLocationResponse{
-							ID:   1,
-							Name: "United States",
-						},
-						Region: readNetworkDataLocationResponse{
-							ID:   10,
-							Name: "US-East",
-						},
-						Datacenter: readNetworkDataLocationDatacenterResponse{
-							ID:   "dc-123",
-							Name: "US-East-1",
-						},
-						DNSServers: "8.8.8.8, 8.8.4.4",
-						AllocationPools: []readNetworkDataAllocationPoolResponse{
-							{Start: "10.0.0.10", End: "10.0.0.254"},
-						},
-					},
+				}
+				response.Data.ID = networkID
+				response.Data.Name = "test-network"
+				response.Data.Description = "Test network"
+				response.Data.CreatedAt = time.Now().Format(time.RFC3339)
+				response.Data.UpdatedAt = time.Now().Format(time.RFC3339)
+				response.Data.SNAT = "true"
+				response.Data.CIDRBlock = "10.0.0.0/24"
+				response.Data.Gateway = "10.0.0.1"
+				response.Data.ConnectedVMs = "0"
+				response.Data.NetworkType = "standard"
+				response.Data.Datacenter.ID = "dc-123"
+				response.Data.Datacenter.Name = "US-East-1"
+				response.Data.Datacenter.Region = "US-East"
+				response.Data.Datacenter.Country = "United States"
+				response.Data.Datacenter.CountryAbbr = "US"
+				response.Data.DNSServers = "8.8.8.8, 8.8.4.4"
+				response.Data.AllocationPools = []struct {
+					Start string `json:"start"`
+					End   string `json:"end"`
+				}{
+					{Start: "10.0.0.10", End: "10.0.0.254"},
 				}
 				testutil.WriteJSONResponse(w, response)
 			} else {
@@ -348,8 +324,8 @@ func TestGetNetwork_MockHTTP(t *testing.T) {
 	}
 }
 
-// TestUpdateNetwork_MockHTTP tests UpdateNetwork with a mock HTTP server
-func TestUpdateNetwork_MockHTTP(t *testing.T) {
+// TestUpdateNetworkMockHTTP tests UpdateNetwork with a mock HTTP server
+func TestUpdateNetworkMockHTTP(t *testing.T) {
 	networkID := "network-update-123"
 
 	var updateCalled, getCalled bool
@@ -375,34 +351,28 @@ func TestUpdateNetwork_MockHTTP(t *testing.T) {
 				response := readNetworkResponse{
 					Success: true,
 					Message: "Network retrieved",
-					Data: readNetworkDataResponse{
-						ID:           networkID,
-						Name:         "updated-network",
-						Description:  "Updated description",
-						CreatedAt:    time.Now().Format(time.RFC3339),
-						UpdatedAt:    time.Now().Format(time.RFC3339),
-						SNAT:         "true",
-						CIDRBlock:    "10.0.0.0/24",
-						Gateway:      "10.0.0.1",
-						ConnectedVMs: "0",
-						NetworkType:  "standard",
-						Country: readNetworkDataLocationResponse{
-							ID:   1,
-							Name: "United States",
-						},
-						Region: readNetworkDataLocationResponse{
-							ID:   10,
-							Name: "US-East",
-						},
-						Datacenter: readNetworkDataLocationDatacenterResponse{
-							ID:   "dc-123",
-							Name: "US-East-1",
-						},
-						DNSServers: "8.8.8.8, 8.8.4.4",
-						AllocationPools: []readNetworkDataAllocationPoolResponse{
-							{Start: "10.0.0.10", End: "10.0.0.254"},
-						},
-					},
+				}
+				response.Data.ID = networkID
+				response.Data.Name = "updated-network"
+				response.Data.Description = "Updated description"
+				response.Data.CreatedAt = time.Now().Format(time.RFC3339)
+				response.Data.UpdatedAt = time.Now().Format(time.RFC3339)
+				response.Data.SNAT = "true"
+				response.Data.CIDRBlock = "10.0.0.0/24"
+				response.Data.Gateway = "10.0.0.1"
+				response.Data.ConnectedVMs = "0"
+				response.Data.NetworkType = "standard"
+				response.Data.Datacenter.ID = "dc-123"
+				response.Data.Datacenter.Name = "US-East-1"
+				response.Data.Datacenter.Region = "US-East"
+				response.Data.Datacenter.Country = "United States"
+				response.Data.Datacenter.CountryAbbr = "US"
+				response.Data.DNSServers = "8.8.8.8, 8.8.4.4"
+				response.Data.AllocationPools = []struct {
+					Start string `json:"start"`
+					End   string `json:"end"`
+				}{
+					{Start: "10.0.0.10", End: "10.0.0.254"},
 				}
 				testutil.WriteJSONResponse(w, response)
 			} else {

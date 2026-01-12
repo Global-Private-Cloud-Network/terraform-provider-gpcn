@@ -51,8 +51,8 @@ func MapNetworkResponseToModel(ctx context.Context, response *readNetworkRespons
 
 	// Construct the location object
 	model.Location, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{
-		"country":    response.Data.Country.Name,
-		"region":     response.Data.Region.Name,
+		"country":    response.Data.Datacenter.Country,
+		"region":     response.Data.Datacenter.Region,
 		"datacenter": response.Data.Datacenter.Name,
 	})
 
@@ -63,5 +63,27 @@ func MapNetworkResponseToModel(ctx context.Context, response *readNetworkRespons
 		model.DHCPEndAddress = types.StringValue(response.Data.AllocationPools[0].End)
 	}
 
+	// If model doesn't already have these populated, set them
+	model = setModelValuesNotPresent(response, model)
+
+	return model
+}
+
+func setModelValuesNotPresent(response *readNetworkResponse, model ResourceModel) ResourceModel {
+	if model.DatacenterId.IsNull() {
+		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
+	}
+	if model.Name.IsNull() {
+		model.Name = types.StringValue(response.Data.Name)
+	}
+	if model.NetworkType.IsNull() {
+		model.NetworkType = types.StringValue(response.Data.NetworkType)
+	}
+	if model.DHCPStartAddress.IsNull() && len(response.Data.AllocationPools) > 0 {
+		model.DHCPStartAddress = types.StringValue(response.Data.AllocationPools[0].Start)
+	}
+	if model.DHCPEndAddress.IsNull() && len(response.Data.AllocationPools) > 0 {
+		model.DHCPEndAddress = types.StringValue(response.Data.AllocationPools[0].End)
+	}
 	return model
 }

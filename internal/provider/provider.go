@@ -183,5 +183,6 @@ func (p *gpcnProvider) Resources(_ context.Context) []func() resource.Resource {
 		NewNetworksResource,
 		NewVolumesResource,
 		NewVirtualMachinesResource,
+		NewGPUResource,
 	}
 }

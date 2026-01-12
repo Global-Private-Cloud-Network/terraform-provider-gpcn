@@ -14,32 +14,30 @@ import (
 )
 
 type readVolumesResponse struct {
-	Success bool                    `json:"success"`
-	Message string                  `json:"message"`
-	Data    readVolumesDataResponse `json:"data"`
-}
-type readVolumesDataResponse struct {
-	ID                 string                            `json:"id"`
-	Name               string                            `json:"name"`
-	SizeGb             int64                             `json:"sizeGb"`
-	VolumeSizeId       int64                             `json:"volumeSizeId"`
-	VolumeType         readVolumesDataVolumeTypeResponse `json:"volumeType"`
-	Datacenter         readVolumesDataDatacenterResponse `json:"datacenter"`
-	VirtualMachineId   string                            `json:"virtualMachineId"`
-	VirtualMachineName string                            `json:"virtualMachineName"`
-	CreatedAt          string                            `json:"createdAt"`
-	UpdatedAt          string                            `json:"updatedAt"`
-}
-type readVolumesDataVolumeTypeResponse struct {
-	ID          int64  `json:"id"`
-	Name        string `json:"name"`
-	Description string `json:"description"`
-}
-type readVolumesDataDatacenterResponse struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Region  string `json:"region"`
-	Country string `json:"countryAbbr"`
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		ID           string `json:"id"`
+		Name         string `json:"name"`
+		SizeGb       int64  `json:"sizeGb"`
+		VolumeSizeId int64  `json:"volumeSizeId"`
+		VolumeType   struct {
+			ID          int64  `json:"id"`
+			Name        string `json:"name"`
+			Description string `json:"description"`
+		} `json:"volumeType"`
+		Datacenter struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			Region      string `json:"region"`
+			CountryAbbr string `json:"countryAbbr"`
+			Country     string `json:"country"`
+		} `json:"datacenter"`
+		VirtualMachineId   string `json:"virtualMachineId"`
+		VirtualMachineName string `json:"virtualMachineName"`
+		CreatedAt          string `json:"createdAt"`
+		UpdatedAt          string `json:"updatedAt"`
+	} `json:"data"`
 }
 
 func CreateVolume(httpClient *http.Client, ctx context.Context, model ResourceModel) (*readVolumesResponse, error) {

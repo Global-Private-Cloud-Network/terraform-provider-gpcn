@@ -9,7 +9,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.1.0"
+      version = "~>0.3.0"
     }
   }
 }
@@ -22,6 +22,7 @@ provider "gpcn" {
 data "gpcn_datacenters" "east_us" {
   country_name = "United States"
   region_name  = "east"
+  name         = "Newark"
 }
 
 # Example 1: Standard Network with DHCP and DNS
