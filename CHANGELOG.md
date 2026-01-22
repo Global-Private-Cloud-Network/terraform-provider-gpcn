@@ -1,3 +1,9 @@
+## 0.3.2 (January 22, 2026)
+
+FIXES:
+
+- Fixed case where state could be tainted due to public_ip defaulting to empty string and then being replaced
+
 ## 0.3.1 (January 22, 2026)
 
 FEATURES:
