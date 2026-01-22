@@ -169,6 +169,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				Description: "Secret details. Only populated if export_secrets is True. Contains username, password, and private key for the virtualmachine",
 				ElementType: types.StringType,
 				Computed:    true,
+				Sensitive:   true,
 				PlanModifiers: []planmodifier.Map{
 					virtualmachines.SecretsPlanModifier{},
 				},
