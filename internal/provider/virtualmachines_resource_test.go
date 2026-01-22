@@ -347,7 +347,6 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 }
 
 func TestVirtualMachinesSizeUpgrade(t *testing.T) {
-	t.Skip("Resizing not currently functioning due to root size changes")
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
