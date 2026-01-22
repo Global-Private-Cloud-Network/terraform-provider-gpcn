@@ -1,3 +1,20 @@
+## 0.3.1 (January 22, 2026)
+
+FEATURES:
+
+- **Virtual Machine Secrets**: Added `display_secrets` optional attribute and `secrets` computed attribute to virtual machines
+  - When `display_secrets` is true, fetches username, password, and SSH private key from the API
+  - Secrets are stored in Terraform state (warning included in schema description)
+- **Virtual Machine Public IP**: Added `public_ip` computed attribute to virtual machines, populated when `allocate_public_ip` is true
+
+ENHANCEMENTS:
+
+- Extracted custom plan modifiers into dedicated `plan_modifiers` file for virtual machines
+
+TESTING:
+
+- Significantly reduced complexity of unit tests across all resource packages (networks, volumes, virtual machines, GPUs)
+
 ## 0.3.0 (January 10, 2026)
 
 FEATURES:
@@ -95,7 +112,6 @@ FEATURES:
 **Resources:**
 
 - **gpcn_network** - Manage virtual networks with support for standard (fully managed) and custom network types
-
   - CIDR block configuration with custom IP ranges
   - DHCP allocation pool management
   - DNS server configuration
@@ -103,7 +119,6 @@ FEATURES:
   - Full lifecycle support including terraform import
 
 - **gpcn_volume** - Manage block storage volumes
-
   - SSD and NVMe storage types
   - Dynamic volume sizing with growth support (size increases without replacement)
   - Multi-VM attachment capability (volumes can be attached to up to 5 VMs)
