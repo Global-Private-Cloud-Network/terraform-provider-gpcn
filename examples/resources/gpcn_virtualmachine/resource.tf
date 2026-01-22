@@ -82,6 +82,9 @@ resource "gpcn_virtualmachine" "example" {
     gpcn_network.vm_network_custom.id
   ]
 
+  # Secrets
+  display_secrets = false
+
   # Storage
   volume_ids = [
     gpcn_volume.vm_storage.id

@@ -26,6 +26,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -180,10 +181,35 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				Description: "Hardware configuration details including CPU, RAM, and disk specifications",
 				ElementType: types.StringType,
 				Computed:    true,
+				PlanModifiers: []planmodifier.Map{
+					mapplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"allocate_public_ip": schema.BoolAttribute{
 				Description: "Whether to allocate a public IP address for the virtual machine",
 				Required:    true,
+			},
+			"public_ip": schema.StringAttribute{
+				Description: "The public IP address, if allocate_public_ip is True",
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					virtualmachines.PublicIpPlanModifier{},
+				},
+				Default: stringdefault.StaticString(""),
+			},
+			"display_secrets": schema.BoolAttribute{
+				Description: "Whether to display secret values (username, password, and private key). If not enabled, secrets can be found from the GPCN console instead. WARNING: Enabling this value will save these secrets in your Terraform state file",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"secrets": schema.MapAttribute{
+				Description: "Secret details. Only populated if export_secrets is True. Contains username, password, and private key for the virtualmachine",
+				ElementType: types.StringType,
+				Computed:    true,
+				PlanModifiers: []planmodifier.Map{
+					virtualmachines.SecretsPlanModifier{},
+				},
 			},
 			"network_ids": schema.ListAttribute{
 				Description: "List of network IDs to attach to the virtual machine. Maximum of 5 networks allowed",

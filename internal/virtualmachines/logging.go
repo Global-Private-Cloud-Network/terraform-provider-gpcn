@@ -75,4 +75,12 @@ const (
 	LogConstructedDeleteGPCNVirtualMachineRequest   = "Constructed Delete GPCN Virtual Machine request successfully"
 	LogIssuedDeleteGPCNVirtualMachineJob            = "Successfully issued job to delete GPCN Virtual Machine. Beginning long-polling to check the status"
 	LogSuccessfullyFinishedDeleteGPCNVirtualMachine = "Successfully finished Delete GPCN Virtual Machine"
+
+	// GetSSHKey messages
+	LogStartingGetSSHKeyWithID           = "Starting GetSSHKey for Virtual Machine ID %s"
+	LogSuccessfullyRetrievedSSHKeyWithID = "Successfully retrieved SSH key for Virtual Machine with ID %s"
+
+	// GetPassword messages
+	LogStartingGetPasswordWithID           = "Starting GetPassword for Virtual Machine ID %s"
+	LogSuccessfullyRetrievedPasswordWithID = "Successfully retrieved password for Virtual Machine with ID %s"
 )

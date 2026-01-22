@@ -96,6 +96,9 @@ resource "gpcn_virtualmachine" "example" {
     gpcn_network.vm_network_custom.id
   ]
 
+  # Secrets
+  display_secrets = false
+
   # Storage
   volume_ids = [
     gpcn_volume.vm_storage.id
@@ -120,6 +123,7 @@ output "example_gpcn_virtualmachine" {
 
 ### Optional
 
+- `display_secrets` (Boolean) Whether to display secret values (username, password, and private key). If not enabled, secrets can be found from the GPCN console instead. WARNING: Enabling this value will save these secrets in your Terraform state file
 - `network_ids` (List of String) List of network IDs to attach to the virtual machine. Maximum of 5 networks allowed
 - `volume_ids` (List of String) List of volume IDs to attach to the virtual machine. Maximum of 5 volumes allowed. A volume can only be attached to a single virtual machine, so this parameter will not work as expected when using Terraform's count meta-attribute
 - `wait_for_startup` (Boolean) Determines if Terraform should wait for the virtual machine to start running before exiting. This will add a few minutes to virtual machine creation. Defaults to true
@@ -131,6 +135,8 @@ output "example_gpcn_virtualmachine" {
 - `id` (String) Unique identifier for the virtual machine in UUID format
 - `last_updated` (String) Timestamp when the virtual machine was last updated in ISO-8601 format
 - `location` (Map of String) Location details including datacenter, region, and country information
+- `public_ip` (String) The public IP address, if allocate_public_ip is True
+- `secrets` (Map of String) Secret details. Only populated if export_secrets is True. Contains username, password, and private key for the virtualmachine
 
 <a id="nestedatt--size"></a>
 ### Nested Schema for `size`

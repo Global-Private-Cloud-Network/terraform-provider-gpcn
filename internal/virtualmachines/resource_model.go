@@ -23,6 +23,9 @@ type ResourceModel struct {
 	Location         types.Map    `tfsdk:"location"`
 	Configuration    types.Map    `tfsdk:"configuration"`
 	AllocatePublicIp types.Bool   `tfsdk:"allocate_public_ip"`
+	PublicIp         types.String `tfsdk:"public_ip"`
+	DisplaySecrets   types.Bool   `tfsdk:"display_secrets"`
+	Secrets          types.Map    `tfsdk:"secrets"`
 	NetworkIds       types.List   `tfsdk:"network_ids"`
 	VolumeIds        types.List   `tfsdk:"volume_ids"`
 }
@@ -75,6 +78,9 @@ func MapVirtualMachineResponseToModel(ctx context.Context, httpClient *http.Clie
 	// If model doesn't already have these populated, set them
 	model = setModelValuesNotPresent(ctx, httpClient, response, model)
 
+	// If user requested secret values, fetch them now if needed
+	model = setSecretValues(ctx, httpClient, response, model)
+
 	return model
 }
 
@@ -95,33 +101,67 @@ func setModelValuesNotPresent(ctx context.Context, httpClient *http.Client, resp
 			Tier:     types.StringValue(response.Data.VirtualMachine.ConfigurationCode),
 		})
 	}
-	if model.NetworkIds.IsNull() {
-		// Fetch network interfaces for the virtual machine
-		networkInterfaces, err := networks.GetNetworkInterfaces(httpClient, ctx, response.Data.VirtualMachine.ID)
-		if err == nil && len(networkInterfaces) > 0 {
-			// Extract network IDs from network interfaces
-			var networkIds []string
-			hasPublicIp := false
-			for _, iface := range networkInterfaces {
-				networkIds = append(networkIds, iface.NetworkID.ValueString())
-				// Check if this interface has a public IP
-				if !iface.PublicIP.IsNull() && iface.PublicIP.ValueString() != "" {
-					hasPublicIp = true
-				}
-			}
-			// Set the network IDs in the model
-			model.NetworkIds, _ = types.ListValueFrom(ctx, types.StringType, networkIds)
 
-			// Set AllocatePublicIp if it's currently null
-			if model.AllocatePublicIp.IsNull() {
-				model.AllocatePublicIp = types.BoolValue(hasPublicIp)
-			}
-		}
-	}
+	model = setNetworkModelValuesNotPresent(ctx, httpClient, response.Data.VirtualMachine.ID, model)
+
 	if model.WaitForStartup.IsNull() {
 		// Set WaitForStartup to the default value
 		model.WaitForStartup = types.BoolValue(true)
 	}
 
+	return model
+}
+
+func setNetworkModelValuesNotPresent(ctx context.Context, httpClient *http.Client, virtualMachineID string, model ResourceModel) ResourceModel {
+	// Set the base public IP, might be replaced later
+	model.PublicIp = types.StringValue("")
+	// Fetch network interfaces for the virtual machine
+	networkInterfaces, err := networks.GetNetworkInterfaces(httpClient, ctx, virtualMachineID)
+	if err == nil && len(networkInterfaces) > 0 {
+		// Extract network IDs from network interfaces
+		var networkIds []string
+		hasPublicIp := false
+		for _, iface := range networkInterfaces {
+			networkIds = append(networkIds, iface.NetworkID.ValueString())
+			// Check if this interface has a public IP
+			if !iface.PublicIP.IsNull() && iface.PublicIP.ValueString() != "" {
+				hasPublicIp = true
+				// If it does, set the model's public IP here
+				model.PublicIp = iface.PublicIP
+			}
+		}
+		// Set the network IDs in the model
+		if model.NetworkIds.IsNull() {
+			model.NetworkIds, _ = types.ListValueFrom(ctx, types.StringType, networkIds)
+		}
+
+		// Set AllocatePublicIp if it's currently null
+		if model.AllocatePublicIp.IsNull() {
+			model.AllocatePublicIp = types.BoolValue(hasPublicIp)
+		}
+	}
+	return model
+}
+
+func setSecretValues(ctx context.Context, httpClient *http.Client, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
+	// Construct the base object
+	model.Secrets, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{
+		"username": "",
+		"password": "",
+		"ssh_key":  "",
+	})
+
+	if model.DisplaySecrets.ValueBool() {
+		virtualMachineID := response.Data.VirtualMachine.ID
+		// TODO: Handle errors better
+		sshKeyResponse, _ := GetSSHKey(httpClient, ctx, virtualMachineID)
+		sshPasswordResponse, _ := GetPassword(httpClient, ctx, virtualMachineID)
+		// Construct the secrets object
+		model.Secrets, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{
+			"username": response.Data.VirtualMachine.Username,
+			"password": sshPasswordResponse.Data.SSHPassword,
+			"ssh_key":  sshKeyResponse.Data.PrivateKey,
+		})
+	}
 	return model
 }
