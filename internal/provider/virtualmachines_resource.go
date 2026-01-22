@@ -25,7 +25,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -159,7 +158,6 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				PlanModifiers: []planmodifier.String{
 					virtualmachines.PublicIpPlanModifier{},
 				},
-				Default: stringdefault.StaticString(""),
 			},
 			"display_secrets": schema.BoolAttribute{
 				Description: "Whether to display secret values (username, password, and private key). If not enabled, secrets can be found from the GPCN console instead. WARNING: Enabling this value will save these secrets in your Terraform state file",
