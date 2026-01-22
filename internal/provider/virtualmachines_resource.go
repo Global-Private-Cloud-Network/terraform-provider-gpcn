@@ -24,8 +24,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -108,42 +108,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 					},
 				},
 				PlanModifiers: []planmodifier.Object{
-					// Changing the size requires us to destroy and create a new VM if:
-					// 1. The category changes, OR
-					// 2. The tier decreases within the same category
-					objectplanmodifier.RequiresReplaceIf(func(ctx context.Context, req planmodifier.ObjectRequest, resp *objectplanmodifier.RequiresReplaceIfFuncResponse) {
-						var stateSize virtualmachines.ResourceModelSize
-						req.StateValue.As(ctx, &stateSize, basetypes.ObjectAsOptions{})
-						var planSize virtualmachines.ResourceModelSize
-						req.PlanValue.As(ctx, &planSize, basetypes.ObjectAsOptions{})
-
-						// If the category changes, require replacement
-						if stateSize.Category.ValueString() != planSize.Category.ValueString() {
-							resp.RequiresReplace = true
-							return
-						}
-
-						// Categories are the same, check if tier is decreasing
-						// Determine which tier list to use based on category
-						var tierList []string
-						if stateSize.Category.ValueString() == virtualmachines.CategoryGeneral {
-							tierList = virtualmachines.GeneralTiers
-						} else {
-							tierList = virtualmachines.MemoryTiers
-						}
-
-						// Find the index of state and plan tiers in the list
-						stateIdx := slices.Index(tierList, stateSize.Tier.ValueString())
-						planIdx := slices.Index(tierList, planSize.Tier.ValueString())
-
-						// If either tier is not found (shouldn't happen due to validators), don't require replacement
-						if stateIdx < 0 || planIdx < 0 {
-							return
-						}
-
-						// Require replacement if the plan tier has a lower index (smaller size) than state tier
-						resp.RequiresReplace = planIdx < stateIdx
-					}, "Requires a replacement if the category changes or the tier decreases within the same category", "Requires a replacement if the category changes or the tier decreases within the same category"),
+					virtualmachines.SizePlanModifier{},
 				},
 			},
 			"image": schema.StringAttribute{
@@ -180,10 +145,35 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				Description: "Hardware configuration details including CPU, RAM, and disk specifications",
 				ElementType: types.StringType,
 				Computed:    true,
+				PlanModifiers: []planmodifier.Map{
+					virtualmachines.ConfigurationPlanModifier{},
+				},
 			},
 			"allocate_public_ip": schema.BoolAttribute{
 				Description: "Whether to allocate a public IP address for the virtual machine",
 				Required:    true,
+			},
+			"public_ip": schema.StringAttribute{
+				Description: "The public IP address, if allocate_public_ip is True",
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					virtualmachines.PublicIpPlanModifier{},
+				},
+				Default: stringdefault.StaticString(""),
+			},
+			"display_secrets": schema.BoolAttribute{
+				Description: "Whether to display secret values (username, password, and private key). If not enabled, secrets can be found from the GPCN console instead. WARNING: Enabling this value will save these secrets in your Terraform state file",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
+			},
+			"secrets": schema.MapAttribute{
+				Description: "Secret details. Only populated if export_secrets is True. Contains username, password, and private key for the virtualmachine",
+				ElementType: types.StringType,
+				Computed:    true,
+				PlanModifiers: []planmodifier.Map{
+					virtualmachines.SecretsPlanModifier{},
+				},
 			},
 			"network_ids": schema.ListAttribute{
 				Description: "List of network IDs to attach to the virtual machine. Maximum of 5 networks allowed",

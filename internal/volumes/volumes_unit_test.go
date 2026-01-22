@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -16,205 +15,140 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// Helper function to create a mock ResourceModel for testing
+const testDatacenterID = "datacenter-123"
+
 func createTestVolumeModel(name, volumeType string, sizeGb int64) ResourceModel {
 	return ResourceModel{
 		Name:         types.StringValue(name),
-		DatacenterId: types.StringValue("datacenter-123"),
+		DatacenterId: types.StringValue(testDatacenterID),
 		VolumeType:   types.StringValue(volumeType),
 		SizeGb:       types.Int64Value(sizeGb),
 	}
 }
 
-// TestMapVolumeResponseToModelUnit tests the mapping function
-func TestMapVolumeResponseToModelUnit(t *testing.T) {
-	ctx := context.Background()
+func newVolumeResponse(id, name string, sizeGb, volumeSizeID int64) *readVolumesResponse {
+	resp := &readVolumesResponse{Success: true, Message: "Volume retrieved"}
+	resp.Data.ID = id
+	resp.Data.Name = name
+	resp.Data.SizeGb = sizeGb
+	resp.Data.VolumeType.ID = 1
+	resp.Data.VolumeType.Name = "SSD"
+	resp.Data.VolumeType.Description = "Solid State Drive"
+	resp.Data.VolumeSizeId = volumeSizeID
+	resp.Data.Datacenter.ID = testDatacenterID
+	resp.Data.Datacenter.Name = "US-East-1"
+	resp.Data.Datacenter.Region = "US-East"
+	resp.Data.Datacenter.Country = "US"
+	resp.Data.VirtualMachineId = ""
+	resp.Data.VirtualMachineName = ""
+	resp.Data.CreatedAt = time.Now().Format(time.RFC3339)
+	resp.Data.UpdatedAt = time.Now().Format(time.RFC3339)
+	return resp
+}
 
-	createdAt := time.Now().Format(time.RFC3339)
-	updatedAt := time.Now().Add(1 * time.Hour).Format(time.RFC3339)
-
-	response := &readVolumesResponse{
+func newVolumeSizesResponse(datacenterID string, sizes []volumeSizesDataVolumeTypesAvailableSizesResponse) volumeSizesResponse {
+	return volumeSizesResponse{
 		Success: true,
-		Message: "Volume retrieved successfully",
+		Message: "Volume sizes retrieved",
+		Data: volumeSizesDataResponse{
+			DatacenterId: datacenterID,
+			VolumeTypes: []volumeSizesDataVolumeTypesResponse{{
+				ID:             1,
+				Name:           "SSD",
+				Description:    "Solid State Drive",
+				AvailableSizes: sizes,
+			}},
+		},
 	}
-	response.Data.ID = "volume-123"
-	response.Data.Name = "test-volume"
-	response.Data.SizeGb = 256
-	response.Data.VolumeType.ID = 1
-	response.Data.VolumeType.Name = "SSD"
-	response.Data.VolumeType.Description = "Solid State Drive"
-	response.Data.VolumeSizeId = 10
-	response.Data.Datacenter.ID = "dc-123"
-	response.Data.Datacenter.Name = "US-East-1"
-	response.Data.Datacenter.Region = "US-East"
-	response.Data.Datacenter.Country = "US"
-	response.Data.VirtualMachineId = ""
-	response.Data.VirtualMachineName = ""
-	response.Data.CreatedAt = createdAt
-	response.Data.UpdatedAt = updatedAt
+}
 
+func TestMapVolumeResponseToModelUnit(t *testing.T) {
+	response := newVolumeResponse("volume-123", "test-volume", 256, 10)
 	model := createTestVolumeModel("test-volume", "SSD", 256)
 
-	result := MapVolumeResponseToModel(ctx, response, model)
+	result := MapVolumeResponseToModel(context.Background(), response, model)
 
-	// Verify all fields are mapped correctly
 	if result.ID.ValueString() != "volume-123" {
 		t.Errorf("Expected ID 'volume-123', got '%s'", result.ID.ValueString())
 	}
-
 	if result.VolumeTypeId.ValueInt64() != 1 {
 		t.Errorf("Expected VolumeTypeId 1, got %d", result.VolumeTypeId.ValueInt64())
 	}
-
-	// Verify times are set
 	if result.CreatedTime.IsNull() || result.CreatedTime.ValueString() == "unknown" {
 		t.Errorf("Expected CreatedTime to be set, got '%s'", result.CreatedTime.ValueString())
 	}
-
 	if result.LastUpdated.IsNull() || result.LastUpdated.ValueString() == "unknown" {
 		t.Errorf("Expected LastUpdated to be set, got '%s'", result.LastUpdated.ValueString())
 	}
-
-	// Verify location map is set
 	if result.Location.IsNull() {
 		t.Error("Expected Location to be set")
 	}
 }
 
-// TestCreateVolumeMockHTTP tests CreateVolume with a mock HTTP server
 func TestCreateVolumeMockHTTP(t *testing.T) {
-	jobID := "job-123"
-	volumeID := "volume-456"
-	volumeSizeID := int64(10)
+	const (
+		jobID        = "job-123"
+		volumeID     = "volume-456"
+		volumeSizeID = int64(10)
+	)
 
-	// Track which endpoints were called
 	var volumeSizesCalled, createCalled, jobStatusCalled, getCalled bool
 
-	// Create a mock HTTP server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && strings.Contains(r.URL.Path, "/data-centers/") && strings.HasSuffix(r.URL.Path, "/volume-sizes") {
-			volumeSizesCalled = true
-			// Return volume sizes response
-			response := volumeSizesResponse{
-				Success: true,
-				Message: "Volume sizes retrieved",
-				Data: volumeSizesDataResponse{
-					DatacenterId: "datacenter-123",
-					VolumeTypes: []volumeSizesDataVolumeTypesResponse{
-						{
-							ID:          1,
-							Name:        "SSD",
-							Description: "Solid State Drive",
-							AvailableSizes: []volumeSizesDataVolumeTypesAvailableSizesResponse{
-								{ID: volumeSizeID, SizeGb: 256},
-								{ID: 11, SizeGb: 512},
-							},
-						},
-					},
-				},
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(response)
-		} else if r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/volumes/") {
-			createCalled = true
-			// Verify request body
-			body, _ := io.ReadAll(r.Body)
-			var requestBody map[string]any
-			_ = json.Unmarshal(body, &requestBody)
+	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/data-centers/") && strings.HasSuffix(r.URL.Path, "/volume-sizes"):
+				volumeSizesCalled = true
+				testutil.WriteJSONResponse(w, newVolumeSizesResponse(testDatacenterID, []volumeSizesDataVolumeTypesAvailableSizesResponse{
+					{ID: volumeSizeID, SizeGb: 256},
+					{ID: 11, SizeGb: 512},
+				}))
 
-			if requestBody["name"] != "test-volume" {
-				t.Errorf("Expected name 'test-volume', got '%v'", requestBody["name"])
-			}
-			if int64(requestBody["sizeGb"].(float64)) != 256 {
-				t.Errorf("Expected sizeGb 256, got '%v'", requestBody["sizeGb"])
-			}
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/volumes/"):
+				createCalled = true
+				body, _ := io.ReadAll(r.Body)
+				var req map[string]any
+				_ = json.Unmarshal(body, &req)
 
-			// Return job response
-			response := client.JobStatusSingularResponse{
-				Success: true,
-				Message: "Volume creation job started",
-				Data: client.JobResponse{
-					JobID: jobID,
-				},
+				if req["name"] != "test-volume" {
+					t.Errorf("Expected name 'test-volume', got '%v'", req["name"])
+				}
+				if int64(req["sizeGb"].(float64)) != 256 {
+					t.Errorf("Expected sizeGb 256, got '%v'", req["sizeGb"])
+				}
+
+				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
+					Success: true,
+					Message: "Volume creation job started",
+					Data:    client.JobResponse{JobID: jobID},
+				})
+
+			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+				jobStatusCalled = true
+				testutil.HandleJobResponse(w, jobID, volumeID, true)
+
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID):
+				getCalled = true
+				testutil.WriteJSONResponse(w, newVolumeResponse(volumeID, "test-volume", 256, volumeSizeID))
+
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(response)
-		} else if r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs") {
-			jobStatusCalled = true
-			// Return completed job
-			response := client.JobStatusMultiResponse{
-				Success: true,
-				Message: "Job completed",
-				Data: client.JobStatusDataResponse{
-					Jobs: []client.JobResponse{
-						{
-							JobID:       jobID,
-							ResourceId:  volumeID,
-							IsCompleted: true,
-							HasFailed:   false,
-						},
-					},
-				},
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(response)
-		} else if r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID) {
-			getCalled = true
-			// Return volume details
-			response := readVolumesResponse{
-				Success: true,
-				Message: "Volume retrieved",
-			}
-			response.Data.ID = volumeID
-			response.Data.Name = "test-volume"
-			response.Data.SizeGb = 256
-			response.Data.VolumeType.ID = 1
-			response.Data.VolumeType.Name = "SSD"
-			response.Data.VolumeType.Description = "Solid State Drive"
-			response.Data.VolumeSizeId = volumeSizeID
-			response.Data.Datacenter.ID = "datacenter-123"
-			response.Data.Datacenter.Name = "US-East-1"
-			response.Data.Datacenter.Region = "US-East"
-			response.Data.Datacenter.Country = "US"
-			response.Data.VirtualMachineId = ""
-			response.Data.VirtualMachineName = ""
-			response.Data.CreatedAt = time.Now().Format(time.RFC3339)
-			response.Data.UpdatedAt = time.Now().Format(time.RFC3339)
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(response)
-		} else {
-			t.Logf("Unexpected request: %s %s", r.Method, r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
+		},
+	})
 	defer server.Close()
 
-	// Create a custom HTTP client that points to our mock server
-	httpClient := &http.Client{
-		Transport: &testutil.MockTransport{
-			BaseURL: server.URL,
-		},
-	}
-
-	ctx := context.Background()
-	model := createTestVolumeModel("test-volume", "SSD", 256)
-
-	// Call CreateVolume
-	response, err := CreateVolume(httpClient, ctx, model)
-
+	response, err := CreateVolume(httpClient, context.Background(), createTestVolumeModel("test-volume", "SSD", 256))
 	if err != nil {
 		t.Fatalf("CreateVolume failed: %v", err)
 	}
-
 	if response == nil {
 		t.Fatal("Expected response, got nil")
 	}
-
 	if response.Data.ID != volumeID {
 		t.Errorf("Expected volume ID '%s', got '%s'", volumeID, response.Data.ID)
 	}
-
-	// Verify all endpoints were called
 	if !volumeSizesCalled {
 		t.Error("Expected volume sizes endpoint to be called")
 	}
@@ -229,190 +163,97 @@ func TestCreateVolumeMockHTTP(t *testing.T) {
 	}
 }
 
-// TestGetVolumeMockHTTP tests GetVolume with a mock HTTP server
 func TestGetVolumeMockHTTP(t *testing.T) {
-	volumeID := "volume-789"
+	const volumeID = "volume-789"
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID) {
-			response := readVolumesResponse{
-				Success: true,
-				Message: "Volume retrieved",
+	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID) {
+				testutil.WriteJSONResponse(w, newVolumeResponse(volumeID, "test-volume", 256, 10))
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
 			}
-			response.Data.ID = volumeID
-			response.Data.Name = "test-volume"
-			response.Data.SizeGb = 256
-			response.Data.VolumeType.ID = 1
-			response.Data.VolumeType.Name = "SSD"
-			response.Data.VolumeType.Description = "Solid State Drive"
-			response.Data.VolumeSizeId = 10
-			response.Data.Datacenter.ID = "datacenter-123"
-			response.Data.Datacenter.Name = "US-East-1"
-			response.Data.Datacenter.Region = "US-East"
-			response.Data.Datacenter.Country = "US"
-			response.Data.VirtualMachineId = ""
-			response.Data.VirtualMachineName = ""
-			response.Data.CreatedAt = time.Now().Format(time.RFC3339)
-			response.Data.UpdatedAt = time.Now().Format(time.RFC3339)
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(response)
-		} else {
-			t.Logf("Unexpected request: %s %s", r.Method, r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
+		},
+	})
 	defer server.Close()
 
-	httpClient := &http.Client{
-		Transport: &testutil.MockTransport{
-			BaseURL: server.URL,
-		},
-	}
-
-	ctx := context.Background()
-
-	response, err := GetVolume(httpClient, ctx, volumeID)
-
+	response, err := GetVolume(httpClient, context.Background(), volumeID)
 	if err != nil {
 		t.Fatalf("GetVolume failed: %v", err)
 	}
-
 	if response == nil {
 		t.Fatal("Expected response, got nil")
 	}
-
 	if response.Data.ID != volumeID {
 		t.Errorf("Expected volume ID '%s', got '%s'", volumeID, response.Data.ID)
 	}
 }
 
-// TestUpdateVolumeMockHTTP tests UpdateVolume with a mock HTTP server
 func TestUpdateVolumeMockHTTP(t *testing.T) {
-	volumeID := "volume-update-123"
-	newSizeGb := int64(512)
-	volumeSizeID := int64(11)
+	const (
+		volumeID     = "volume-update-123"
+		newSizeGb    = int64(512)
+		volumeSizeID = int64(11)
+	)
 
 	var volumeSizesCalled, updateCalled, jobStatusCalled, getCalled bool
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && strings.Contains(r.URL.Path, "/data-centers/") && strings.HasSuffix(r.URL.Path, "/volume-sizes") {
-			volumeSizesCalled = true
-			// Return volume sizes response
-			response := volumeSizesResponse{
-				Success: true,
-				Message: "Volume sizes retrieved",
-				Data: volumeSizesDataResponse{
-					DatacenterId: "datacenter-123",
-					VolumeTypes: []volumeSizesDataVolumeTypesResponse{
-						{
-							ID:          1,
-							Name:        "SSD",
-							Description: "Solid State Drive",
-							AvailableSizes: []volumeSizesDataVolumeTypesAvailableSizesResponse{
-								{ID: 10, SizeGb: 256},
-								{ID: volumeSizeID, SizeGb: newSizeGb},
-							},
-						},
-					},
-				},
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(response)
-		} else if r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+volumeID+"/resize") {
-			updateCalled = true
+	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/data-centers/") && strings.HasSuffix(r.URL.Path, "/volume-sizes"):
+				volumeSizesCalled = true
+				testutil.WriteJSONResponse(w, newVolumeSizesResponse(testDatacenterID, []volumeSizesDataVolumeTypesAvailableSizesResponse{
+					{ID: 10, SizeGb: 256},
+					{ID: volumeSizeID, SizeGb: newSizeGb},
+				}))
 
-			// Verify request body contains expected fields
-			body, _ := io.ReadAll(r.Body)
-			var requestBody map[string]any
-			_ = json.Unmarshal(body, &requestBody)
+			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+volumeID+"/resize"):
+				updateCalled = true
+				body, _ := io.ReadAll(r.Body)
+				var req map[string]any
+				_ = json.Unmarshal(body, &req)
+				if int64(req["newSizeGb"].(float64)) != newSizeGb {
+					t.Errorf("Expected newSizeGb %d, got '%v'", newSizeGb, req["newSizeGb"])
+				}
+				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
+					Success: true,
+					Message: "Volume resize job started",
+					Data:    client.JobResponse{JobID: "job-456"},
+				})
 
-			if int64(requestBody["newSizeGb"].(float64)) != newSizeGb {
-				t.Errorf("Expected newSizeGb %d, got '%v'", newSizeGb, requestBody["newSizeGb"])
-			}
+			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+				jobStatusCalled = true
+				testutil.HandleJobResponse(w, "job-456", volumeID, true)
 
-			// Return job response
-			response := client.JobStatusSingularResponse{
-				Success: true,
-				Message: "Volume resize job started",
-				Data: client.JobResponse{
-					JobID: "job-456",
-				},
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID):
+				getCalled = true
+				resp := newVolumeResponse(volumeID, "test-volume", newSizeGb, volumeSizeID)
+				resp.Data.CreatedAt = time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
+				testutil.WriteJSONResponse(w, resp)
+
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(response)
-		} else if r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs") {
-			jobStatusCalled = true
-			// Return completed job
-			response := client.JobStatusMultiResponse{
-				Success: true,
-				Message: "Job completed",
-				Data: client.JobStatusDataResponse{
-					Jobs: []client.JobResponse{
-						{
-							JobID:       "job-456",
-							ResourceId:  volumeID,
-							IsCompleted: true,
-							HasFailed:   false,
-						},
-					},
-				},
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(response)
-		} else if r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID) {
-			getCalled = true
-			response := readVolumesResponse{
-				Success: true,
-				Message: "Volume retrieved",
-			}
-			response.Data.ID = volumeID
-			response.Data.Name = "test-volume"
-			response.Data.SizeGb = newSizeGb
-			response.Data.VolumeType.ID = 1
-			response.Data.VolumeType.Name = "SSD"
-			response.Data.VolumeType.Description = "Solid State Drive"
-			response.Data.VolumeSizeId = volumeSizeID
-			response.Data.Datacenter.ID = "datacenter-123"
-			response.Data.Datacenter.Name = "US-East-1"
-			response.Data.Datacenter.Region = "US-East"
-			response.Data.Datacenter.Country = "US"
-			response.Data.VirtualMachineId = ""
-			response.Data.VirtualMachineName = ""
-			response.Data.CreatedAt = time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
-			response.Data.UpdatedAt = time.Now().Format(time.RFC3339)
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(response)
-		} else {
-			t.Logf("Unexpected request: %s %s", r.Method, r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
+		},
+	})
 	defer server.Close()
 
-	httpClient := &http.Client{
-		Transport: &testutil.MockTransport{
-			BaseURL: server.URL,
-		},
-	}
-
-	ctx := context.Background()
 	model := createTestVolumeModel("test-volume", "SSD", newSizeGb)
 	model.ID = types.StringValue(volumeID)
 
-	response, err := UpdateVolume(httpClient, ctx, volumeID, model)
-
+	response, err := UpdateVolume(httpClient, context.Background(), volumeID, model)
 	if err != nil {
 		t.Fatalf("UpdateVolume failed: %v", err)
 	}
-
 	if response == nil {
 		t.Fatal("Expected response, got nil")
 	}
-
 	if response.Data.SizeGb != newSizeGb {
 		t.Errorf("Expected volume size %d, got %d", newSizeGb, response.Data.SizeGb)
 	}
-
 	if !volumeSizesCalled {
 		t.Error("Expected volume sizes endpoint to be called")
 	}
@@ -427,114 +268,65 @@ func TestUpdateVolumeMockHTTP(t *testing.T) {
 	}
 }
 
-// TestGetVolumeSizeIdMockHTTP tests GetVolumeSizeId with a mock HTTP server
 func TestGetVolumeSizeIdMockHTTP(t *testing.T) {
-	datacenterID := "datacenter-123"
-	volumeTypeID := int64(1)
-	sizeGb := int64(256)
-	expectedVolumeSizeID := int64(10)
+	const (
+		volumeTypeID         = int64(1)
+		sizeGb               = int64(256)
+		expectedVolumeSizeID = int64(10)
+	)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && strings.Contains(r.URL.Path, "/data-centers/") && strings.HasSuffix(r.URL.Path, "/volume-sizes") {
-			response := volumeSizesResponse{
-				Success: true,
-				Message: "Volume sizes retrieved",
-				Data: volumeSizesDataResponse{
-					DatacenterId: datacenterID,
-					VolumeTypes: []volumeSizesDataVolumeTypesResponse{
-						{
-							ID:          volumeTypeID,
-							Name:        "SSD",
-							Description: "Solid State Drive",
-							AvailableSizes: []volumeSizesDataVolumeTypesAvailableSizesResponse{
-								{ID: expectedVolumeSizeID, SizeGb: sizeGb},
-								{ID: 11, SizeGb: 512},
-								{ID: 12, SizeGb: 1024},
-							},
-						},
-					},
-				},
+	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/data-centers/") && strings.HasSuffix(r.URL.Path, "/volume-sizes") {
+				testutil.WriteJSONResponse(w, newVolumeSizesResponse(testDatacenterID, []volumeSizesDataVolumeTypesAvailableSizesResponse{
+					{ID: expectedVolumeSizeID, SizeGb: sizeGb},
+					{ID: 11, SizeGb: 512},
+					{ID: 12, SizeGb: 1024},
+				}))
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(response)
-		} else {
-			t.Logf("Unexpected request: %s %s", r.Method, r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
+		},
+	})
 	defer server.Close()
 
-	httpClient := &http.Client{
-		Transport: &testutil.MockTransport{
-			BaseURL: server.URL,
-		},
-	}
-
-	ctx := context.Background()
-
-	volumeSizeID, err := GetVolumeSizeId(httpClient, ctx, datacenterID, volumeTypeID, sizeGb)
-
+	volumeSizeID, err := GetVolumeSizeId(httpClient, context.Background(), testDatacenterID, volumeTypeID, sizeGb)
 	if err != nil {
 		t.Fatalf("GetVolumeSizeId failed: %v", err)
 	}
-
 	if volumeSizeID != expectedVolumeSizeID {
 		t.Errorf("Expected volume size ID %d, got %d", expectedVolumeSizeID, volumeSizeID)
 	}
 }
 
-// TestGetVolumeSizeIdInvalidSizeMockHTTP tests that GetVolumeSizeId returns an error for invalid size
 func TestGetVolumeSizeIdInvalidSizeMockHTTP(t *testing.T) {
-	datacenterID := "datacenter-123"
-	volumeTypeID := int64(1)
-	invalidSizeGb := int64(555) // Not in available sizes
+	const (
+		volumeTypeID  = int64(1)
+		invalidSizeGb = int64(555)
+	)
 
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "GET" && strings.Contains(r.URL.Path, "/data-centers/") && strings.HasSuffix(r.URL.Path, "/volume-sizes") {
-			response := volumeSizesResponse{
-				Success: true,
-				Message: "Volume sizes retrieved",
-				Data: volumeSizesDataResponse{
-					DatacenterId: datacenterID,
-					VolumeTypes: []volumeSizesDataVolumeTypesResponse{
-						{
-							ID:          volumeTypeID,
-							Name:        "SSD",
-							Description: "Solid State Drive",
-							AvailableSizes: []volumeSizesDataVolumeTypesAvailableSizesResponse{
-								{ID: 10, SizeGb: 256},
-								{ID: 11, SizeGb: 512},
-								{ID: 12, SizeGb: 1024},
-							},
-						},
-					},
-				},
+	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/data-centers/") && strings.HasSuffix(r.URL.Path, "/volume-sizes") {
+				testutil.WriteJSONResponse(w, newVolumeSizesResponse(testDatacenterID, []volumeSizesDataVolumeTypesAvailableSizesResponse{
+					{ID: 10, SizeGb: 256},
+					{ID: 11, SizeGb: 512},
+					{ID: 12, SizeGb: 1024},
+				}))
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
 			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(response)
-		} else {
-			t.Logf("Unexpected request: %s %s", r.Method, r.URL.Path)
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
+		},
+	})
 	defer server.Close()
 
-	httpClient := &http.Client{
-		Transport: &testutil.MockTransport{
-			BaseURL: server.URL,
-		},
-	}
-
-	ctx := context.Background()
-
-	_, err := GetVolumeSizeId(httpClient, ctx, datacenterID, volumeTypeID, invalidSizeGb)
-
+	_, err := GetVolumeSizeId(httpClient, context.Background(), testDatacenterID, volumeTypeID, invalidSizeGb)
 	if err == nil {
 		t.Fatal("Expected error for invalid size, got nil")
 	}
-
-	expectedErrorMsg := "the specified volume size is not available for this datacenter"
-	if !strings.Contains(err.Error(), expectedErrorMsg) {
-		t.Errorf("Expected error to contain '%s', got '%s'", expectedErrorMsg, err.Error())
+	if !strings.Contains(err.Error(), "the specified volume size is not available for this datacenter") {
+		t.Errorf("Expected error to contain validation message, got '%s'", err.Error())
 	}
 }

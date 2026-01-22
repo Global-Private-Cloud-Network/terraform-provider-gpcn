@@ -9,7 +9,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.3.0"
+      version = "~>0.3.1"
     }
   }
 }
@@ -81,6 +81,9 @@ resource "gpcn_virtualmachine" "example" {
     gpcn_network.vm_network.id,
     gpcn_network.vm_network_custom.id
   ]
+
+  # Secrets
+  display_secrets = false
 
   # Storage
   volume_ids = [

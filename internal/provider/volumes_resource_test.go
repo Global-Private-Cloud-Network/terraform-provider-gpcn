@@ -142,7 +142,7 @@ resource "gpcn_volume" "test" {
 
 func TestVolumesResourceInvalidSize(t *testing.T) {
 	t.Run("invalid_size", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
+		resource.Test(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
 				{
