@@ -92,10 +92,10 @@ func CheckInventory(httpClient *http.Client, ctx context.Context, model Resource
 		return nil, errors.New(ErrDetailMalformedResponseMissingData)
 	}
 	if len(gpuInventoryResponse.Data[0].Availability) == 0 {
-		return nil, errors.New(ErrDetailMalformedResponseMissingAvailability)
+		return nil, fmt.Errorf(ErrDetailNoInventoryAvailable, seriesCode, datacenterId, gpuCount)
 	}
 	if len(gpuInventoryResponse.Data[0].Availability[0].GPUCounts) == 0 {
-		return nil, errors.New(ErrDetailMalformedResponseMissingGPUCounts)
+		return nil, fmt.Errorf(ErrDetailNoInventoryAvailable, seriesCode, datacenterId, gpuCount)
 	}
 
 	// Check if inventory is available

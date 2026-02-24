@@ -101,7 +101,7 @@ func TestGPUResourceNoAvailability(t *testing.T) {
 data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "east"
-  name = "Beltsville"
+  name = "Maryland"
 }
 
 resource "gpcn_gpu" "test" {
