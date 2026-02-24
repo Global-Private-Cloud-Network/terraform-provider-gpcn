@@ -1,3 +1,14 @@
+## 0.4.0 (February 23, 2026)
+
+BREAKING CHANGES:
+
+- **GPU Resource**: Added required `image_name` attribute to `gpcn_gpu` resource. Existing configurations must be updated to include this attribute. Valid values are `"ubuntu-22.04"` or `"ubuntu-24.04"`
+
+ENHANCEMENTS:
+
+- Updated GPU inventory response handling to use `availableSkus` array instead of `available` count
+- Marked virtual machine `secrets` attribute as sensitive in the schema
+
 ## 0.3.2 (January 22, 2026)
 
 FIXES:
