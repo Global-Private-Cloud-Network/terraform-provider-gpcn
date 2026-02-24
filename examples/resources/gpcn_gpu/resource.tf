@@ -35,4 +35,7 @@ resource "gpcn_gpu" "example" {
 
   # Can only be one of 1,2, or 4
   gpu_count = 1
+
+  # Must be one of "ubuntu-22.04" or "ubuntu-24.04"
+  image_name = "ubuntu-22.04"
 }

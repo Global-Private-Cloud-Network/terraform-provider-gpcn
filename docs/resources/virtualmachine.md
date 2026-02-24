@@ -23,7 +23,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.3.1"
+      version = "~>0.3.2"
     }
   }
 }
@@ -136,7 +136,7 @@ output "example_gpcn_virtualmachine" {
 - `last_updated` (String) Timestamp when the virtual machine was last updated in ISO-8601 format
 - `location` (Map of String) Location details including datacenter, region, and country information
 - `public_ip` (String) The public IP address, if allocate_public_ip is True
-- `secrets` (Map of String) Secret details. Only populated if export_secrets is True. Contains username, password, and private key for the virtualmachine
+- `secrets` (Map of String, Sensitive) Secret details. Only populated if export_secrets is True. Contains username, password, and private key for the virtualmachine
 
 <a id="nestedatt--size"></a>
 ### Nested Schema for `size`

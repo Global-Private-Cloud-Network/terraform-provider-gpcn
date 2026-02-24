@@ -108,6 +108,17 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					int64validator.OneOf(1, 2, 4),
 				},
 			},
+			"image_name": schema.StringAttribute{
+				Description: "The operating system image to use for the GPU. Must be one of: \"ubuntu-22.04\" or \"ubuntu-24.04\"",
+				Required:    true,
+				PlanModifiers: []planmodifier.String{
+					// Changing the image_name requires us to destroy and create a new GPU
+					stringplanmodifier.RequiresReplace(),
+				},
+				Validators: []validator.String{
+					stringvalidator.OneOf(gpu.GPUImageNames...),
+				},
+			},
 			"created_time": schema.StringAttribute{
 				Description: "Timestamp when the GPU was created in ISO-8601 format",
 				Computed:    true,

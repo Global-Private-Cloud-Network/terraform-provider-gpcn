@@ -24,9 +24,9 @@ type gpuInventoryResponse struct {
 			DatacenterName string `json:"datacenterName"`
 			DatacenterCode string `json:"datacenterCode"`
 			GPUCounts      []struct {
-				Count     int64 `json:"count"`
-				Available int64 `json:"available"`
-				Specs     struct {
+				Count         int64      `json:"count"`
+				AvailableSkus []struct{} `json:"availableSkus"`
+				Specs         struct {
 					GPUDescription string `json:"gpuDescription"`
 					VCPU           int64  `json:"vcpu"`
 					Memory         int64  `json:"memoryGiB"`
@@ -99,7 +99,7 @@ func CheckInventory(httpClient *http.Client, ctx context.Context, model Resource
 	}
 
 	// Check if inventory is available
-	if gpuInventoryResponse.Data[0].Availability[0].GPUCounts[0].Available <= 0 {
+	if len(gpuInventoryResponse.Data[0].Availability[0].GPUCounts[0].AvailableSkus) <= 0 {
 		return nil, fmt.Errorf(ErrDetailNoInventoryAvailable, seriesCode, datacenterId, gpuCount)
 	}
 
