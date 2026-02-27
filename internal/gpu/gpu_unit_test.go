@@ -16,12 +16,14 @@ import (
 )
 
 const testDatacenterID = "datacenter-123"
+const testImageName = "ubuntu-22.04"
 
-func createTestGPUModel(name, seriesName, seriesCode string, gpuCount int64) ResourceModel {
+func createTestGPUModel(name, seriesName, seriesCode, imageName string, gpuCount int64) ResourceModel {
 	model := ResourceModel{
 		Name:         types.StringValue(name),
 		DatacenterId: types.StringValue(testDatacenterID),
 		GPUCount:     types.Int64Value(gpuCount),
+		ImageName:    types.StringValue(imageName),
 	}
 	if seriesName != "" {
 		model.SeriesName = types.StringValue(seriesName)
@@ -52,7 +54,10 @@ func newGPUResponse(id, name string) *readGPUResponse {
 	return resp
 }
 
-func newInventoryResponse(seriesID, seriesCode, datacenterID string, gpuCount, available int64) gpuInventoryResponse {
+func newInventoryResponse(seriesID, seriesCode, datacenterID string, gpuCount, availableCount int64) gpuInventoryResponse {
+	// Create a slice of empty structs with length equal to availableCount
+	availableSkus := make([]struct{}, availableCount)
+
 	return gpuInventoryResponse{
 		Data: []struct {
 			ID           string `json:"id"`
@@ -64,9 +69,9 @@ func newInventoryResponse(seriesID, seriesCode, datacenterID string, gpuCount, a
 				DatacenterName string `json:"datacenterName"`
 				DatacenterCode string `json:"datacenterCode"`
 				GPUCounts      []struct {
-					Count     int64 `json:"count"`
-					Available int64 `json:"available"`
-					Specs     struct {
+					Count         int64      `json:"count"`
+					AvailableSkus []struct{} `json:"availableSkus"`
+					Specs         struct {
 						GPUDescription string `json:"gpuDescription"`
 						VCPU           int64  `json:"vcpu"`
 						Memory         int64  `json:"memoryGiB"`
@@ -85,9 +90,9 @@ func newInventoryResponse(seriesID, seriesCode, datacenterID string, gpuCount, a
 					DatacenterName string `json:"datacenterName"`
 					DatacenterCode string `json:"datacenterCode"`
 					GPUCounts      []struct {
-						Count     int64 `json:"count"`
-						Available int64 `json:"available"`
-						Specs     struct {
+						Count         int64      `json:"count"`
+						AvailableSkus []struct{} `json:"availableSkus"`
+						Specs         struct {
 							GPUDescription string `json:"gpuDescription"`
 							VCPU           int64  `json:"vcpu"`
 							Memory         int64  `json:"memoryGiB"`
@@ -100,9 +105,9 @@ func newInventoryResponse(seriesID, seriesCode, datacenterID string, gpuCount, a
 						DatacenterName: "US-East-1",
 						DatacenterCode: "us-east-1",
 						GPUCounts: []struct {
-							Count     int64 `json:"count"`
-							Available int64 `json:"available"`
-							Specs     struct {
+							Count         int64      `json:"count"`
+							AvailableSkus []struct{} `json:"availableSkus"`
+							Specs         struct {
 								GPUDescription string `json:"gpuDescription"`
 								VCPU           int64  `json:"vcpu"`
 								Memory         int64  `json:"memoryGiB"`
@@ -110,8 +115,8 @@ func newInventoryResponse(seriesID, seriesCode, datacenterID string, gpuCount, a
 							} `json:"specs"`
 						}{
 							{
-								Count:     gpuCount,
-								Available: available,
+								Count:         gpuCount,
+								AvailableSkus: availableSkus,
 								Specs: struct {
 									GPUDescription string `json:"gpuDescription"`
 									VCPU           int64  `json:"vcpu"`
@@ -134,7 +139,7 @@ func newInventoryResponse(seriesID, seriesCode, datacenterID string, gpuCount, a
 
 func TestMapGPUResponseToModelUnit(t *testing.T) {
 	response := newGPUResponse("gpu-123", "test-gpu")
-	model := createTestGPUModel("test-gpu", "H100 Series", "h100_series", 2)
+	model := createTestGPUModel("test-gpu", "H100 Series", "h100_series", testImageName, 2)
 
 	result := MapGPUResponseToModel(context.Background(), response, model)
 
@@ -198,7 +203,7 @@ func TestCheckInventoryMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	model := createTestGPUModel("test-gpu", "", seriesCode, gpuCount)
+	model := createTestGPUModel("test-gpu", "", seriesCode, testImageName, gpuCount)
 
 	response, err := CheckInventory(httpClient, context.Background(), model)
 	if err != nil {
@@ -216,8 +221,8 @@ func TestCheckInventoryMockHTTP(t *testing.T) {
 	if response.Data[0].ID != "series-123" {
 		t.Errorf("Expected series ID 'series-123', got '%s'", response.Data[0].ID)
 	}
-	if response.Data[0].Availability[0].GPUCounts[0].Available != 5 {
-		t.Errorf("Expected 5 available GPUs, got %d", response.Data[0].Availability[0].GPUCounts[0].Available)
+	if len(response.Data[0].Availability[0].GPUCounts[0].AvailableSkus) != 5 {
+		t.Errorf("Expected 5 available SKUs, got %d", len(response.Data[0].Availability[0].GPUCounts[0].AvailableSkus))
 	}
 }
 
@@ -237,7 +242,7 @@ func TestCheckInventoryNoAvailabilityMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	model := createTestGPUModel("test-gpu", "", seriesCode, gpuCount)
+	model := createTestGPUModel("test-gpu", "", seriesCode, testImageName, gpuCount)
 
 	_, err := CheckInventory(httpClient, context.Background(), model)
 	if err == nil {
@@ -279,6 +284,9 @@ func TestCreateGPUMockHTTP(t *testing.T) {
 				if req["datacenterId"] != testDatacenterID {
 					t.Errorf("Expected datacenterId '%s', got '%v'", testDatacenterID, req["datacenterId"])
 				}
+				if req["imageName"] != testImageName {
+					t.Errorf("Expected imageName '%s', got '%v'", testImageName, req["imageName"])
+				}
 
 				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
 					Success: true,
@@ -303,7 +311,7 @@ func TestCreateGPUMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	model := createTestGPUModel("test-gpu", "H100 Series", "h100_series", 2)
+	model := createTestGPUModel("test-gpu", "H100 Series", "h100_series", testImageName, 2)
 
 	response, err := CreateGPU(httpClient, context.Background(), seriesID, model)
 	if err != nil {

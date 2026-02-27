@@ -15,3 +15,6 @@ var GPUSeriesNameToCode = map[string]string{
 	"RTX PRO 6000 Blackwell Series": "rtx_pro_6000_blackwell_series",
 	"A100 Series":                   "a100_series",
 }
+
+// Supported GPU Image Names
+var GPUImageNames = []string{"ubuntu-22.04", "ubuntu-24.04"}

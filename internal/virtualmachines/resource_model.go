@@ -153,7 +153,6 @@ func setSecretValues(ctx context.Context, httpClient *http.Client, response *Rea
 
 	if model.DisplaySecrets.ValueBool() {
 		virtualMachineID := response.Data.VirtualMachine.ID
-		// TODO: Handle errors better
 		sshKeyResponse, _ := GetSSHKey(httpClient, ctx, virtualMachineID)
 		sshPasswordResponse, _ := GetPassword(httpClient, ctx, virtualMachineID)
 		// Construct the secrets object

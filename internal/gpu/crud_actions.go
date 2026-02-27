@@ -47,6 +47,7 @@ func CreateGPU(httpClient *http.Client, ctx context.Context, seriesId string, pl
 		"seriesId":     seriesId,
 		"gpuCount":     plan.GPUCount.ValueInt64(),
 		"name":         plan.Name.ValueString(),
+		"imageName":    plan.ImageName.ValueString(),
 	}
 
 	jsonCreateGPURequestBody, err := json.Marshal(createGPURequestBody)

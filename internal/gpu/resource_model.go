@@ -14,6 +14,7 @@ type ResourceModel struct {
 	SeriesName   types.String `tfsdk:"series_name"`
 	SeriesCode   types.String `tfsdk:"series_code"`
 	GPUCount     types.Int64  `tfsdk:"gpu_count"`
+	ImageName    types.String `tfsdk:"image_name"`
 	CreatedTime  types.String `tfsdk:"created_time"`
 	LastUpdated  types.String `tfsdk:"last_updated"`
 	Location     types.Map    `tfsdk:"location"`

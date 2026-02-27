@@ -28,6 +28,7 @@ resource "gpcn_gpu" "test" {
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   series_name   = "RTX A6000 Series"
   gpu_count     = 1
+  image_name    = "ubuntu-22.04"
 }
 `,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
@@ -72,6 +73,7 @@ resource "gpcn_gpu" "test" {
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   series_name   = "RTX A6000 Series"
   gpu_count     = 1
+  image_name    = "ubuntu-22.04"
 }
 `,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
@@ -99,7 +101,7 @@ func TestGPUResourceNoAvailability(t *testing.T) {
 data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "east"
-  name = "Beltsville"
+  name = "Maryland"
 }
 
 resource "gpcn_gpu" "test" {
@@ -107,6 +109,7 @@ resource "gpcn_gpu" "test" {
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   series_code   = "a100_series"
   gpu_count     = 4
+  image_name    = "ubuntu-22.04"
 }
 `,
 				// This should fail due to insufficient GPU availability
@@ -129,6 +132,7 @@ resource "gpcn_gpu" "test" {
   datacenter_id = "any-datacenter-id"
   series_code   = "invalid_series_code"
   gpu_count     = 1
+  image_name    = "ubuntu-22.04"
 }
 `,
 					ExpectError: regexp.MustCompile("Attribute series_code value must be one of"),
@@ -148,6 +152,7 @@ resource "gpcn_gpu" "test" {
   datacenter_id = "any-datacenter-id"
   series_name   = "Invalid GPU Series"
   gpu_count     = 1
+  image_name    = "ubuntu-22.04"
 }
 `,
 					ExpectError: regexp.MustCompile("Attribute series_name value must be one of"),
@@ -168,6 +173,7 @@ resource "gpcn_gpu" "test" {
   series_name   = "RTX A6000 Series"
   series_code   = "rtx_a6000_series"
   gpu_count     = 1
+  image_name    = "ubuntu-22.04"
 }
 `,
 					ExpectError: regexp.MustCompile("2 attributes specified"),
@@ -186,12 +192,33 @@ resource "gpcn_gpu" "test" {
   name          = "terraform-gpu-no-series"
   datacenter_id = "any-datacenter-id"
   gpu_count     = 1
+  image_name    = "ubuntu-22.04"
 }
 `,
 					ExpectError: regexp.MustCompile("No attribute specified when one"),
 				},
 			},
 		})
+	})
+}
+
+func TestGPUResourceInvalidImageName(t *testing.T) {
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: providerConfig + `
+resource "gpcn_gpu" "test" {
+  name          = "terraform-gpu-invalid-image"
+  datacenter_id = "any-datacenter-id"
+  series_name   = "RTX A6000 Series"
+  gpu_count     = 1
+  image_name    = "Invalid Image Name"
+}
+`,
+				ExpectError: regexp.MustCompile("Attribute image_name value must be one of"),
+			},
+		},
 	})
 }
 
@@ -207,6 +234,7 @@ resource "gpcn_gpu" "test" {
   datacenter_id = "any-datacenter-id"
   series_name   = "RTX A6000 Series"
   gpu_count     = 0
+  image_name    = "ubuntu-22.04"
 }
 `,
 					ExpectError: regexp.MustCompile("Attribute gpu_count value must be one of"),

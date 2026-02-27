@@ -23,7 +23,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.3.1"
+      version = "~>0.4.0"
     }
   }
 }
@@ -49,6 +49,9 @@ resource "gpcn_gpu" "example" {
 
   # Can only be one of 1,2, or 4
   gpu_count = 1
+
+  # Must be one of "ubuntu-22.04" or "ubuntu-24.04"
+  image_name = "ubuntu-22.04"
 }
 ```
 
@@ -59,6 +62,7 @@ resource "gpcn_gpu" "example" {
 
 - `datacenter_id` (String) Unique identifier of the datacenter where the GPU will be created. Changing this value requires replacing the GPU
 - `gpu_count` (Number) The number of GPUs tied to the Virtual Machine. Must be 1, 2, or 4
+- `image_name` (String) The operating system image to use for the GPU. Must be one of: "ubuntu-22.04" or "ubuntu-24.04"
 - `name` (String) Human-readable name for the GPU
 
 ### Optional

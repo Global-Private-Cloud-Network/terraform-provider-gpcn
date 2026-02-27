@@ -63,6 +63,7 @@ Resource schema definitions live in `internal/provider/{resource}_resource.go`.
 
 - Specify GPU series by `series_name` (human-readable) or `series_code`; exactly one required
 - GPU count must be 1, 2, or 4
+- `image_name` specifies the OS image; must be `"ubuntu-22.04"` or `"ubuntu-24.04"` (required, changing requires replacement)
 - Inventory is checked before creation via `CheckInventory()`
 
 ## Testing
