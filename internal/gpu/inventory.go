@@ -68,13 +68,13 @@ func CheckInventory(gpcnClient *client.GpcnClient, ctx context.Context, model Re
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
 	// Read the response body and process it as inventoryResp
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
 	var invResp inventoryResp
 	err = json.Unmarshal(body, &invResp)

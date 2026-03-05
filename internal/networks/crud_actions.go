@@ -90,6 +90,7 @@ func CreateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, model Res
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 	tflog.Info(ctx, LogIssuedCreateNetworkJob)
 
 	// Read the response body and process it as createNetworkResponse
@@ -97,7 +98,6 @@ func CreateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, model Res
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
 	var createNetworkResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &createNetworkResponse)
@@ -141,12 +141,12 @@ func GetNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkID st
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
 	var networkResp readNetworkResponse
 	err = json.Unmarshal(body, &networkResp)
@@ -199,7 +199,7 @@ func UpdateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkId
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
+	defer response.Body.Close()
 
 	tflog.Info(ctx, LogUpdateRequestSentSuccessfully)
 	// Perform a GET call to retrieve actual information about the Network
@@ -254,11 +254,11 @@ func DeleteNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkId
 		tflog.Info(ctx, LogIssuedDeleteNetworkJob)
 
 		// Read the response body and process it as deleteNetworkResponse
+		defer response.Body.Close()
 		body, err := io.ReadAll(response.Body)
 		if err != nil {
 			return err
 		}
-		_ = response.Body.Close()
 
 		var deleteNetworkResponse client.JobStatusSingularResponse
 		err = json.Unmarshal(body, &deleteNetworkResponse)

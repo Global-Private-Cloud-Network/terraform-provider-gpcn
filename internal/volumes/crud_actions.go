@@ -78,6 +78,7 @@ func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model Reso
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 	tflog.Info(ctx, LogIssuedCreateVolumeJob)
 
 	// Read the response body and process it as createVolumeResponse
@@ -85,7 +86,6 @@ func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model Reso
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
 	var createVolumeResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &createVolumeResponse)
@@ -129,12 +129,12 @@ func GetVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId stri
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
 	var volResp readVolumesResponse
 	err = json.Unmarshal(body, &volResp)
@@ -182,13 +182,13 @@ func UpdateVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 	tflog.Info(ctx, LogIssuedUpdateVolumeJob)
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
 	var updateVolumeResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &updateVolumeResponse)
@@ -248,6 +248,7 @@ func DeleteVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 	if err != nil {
 		return err
 	}
+	defer response.Body.Close()
 	tflog.Info(ctx, LogIssuedDeleteVolumeJob)
 
 	// Read the response body and process it as deleteVolumeResponse
@@ -255,7 +256,6 @@ func DeleteVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 	if err != nil {
 		return err
 	}
-	_ = response.Body.Close()
 
 	var deleteVolumeResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &deleteVolumeResponse)

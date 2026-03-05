@@ -71,11 +71,11 @@ func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId stri
 	tflog.Info(ctx, LogIssuedCreateGPUJob)
 
 	// Read the response body and process it as JobStatusMultiResponse
+	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
 	var createGPUResponse client.JobStatusMultiResponse
 	err = json.Unmarshal(body, &createGPUResponse)
@@ -125,12 +125,12 @@ func GetGPU(gpcnClient *client.GpcnClient, ctx context.Context, id string) (*rea
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
 	var gpuResp readGPUResponse
 	err = json.Unmarshal(body, &gpuResp)
@@ -164,7 +164,7 @@ func UpdateGPU(gpcnClient *client.GpcnClient, ctx context.Context, id, name stri
 	if err != nil {
 		return err
 	}
-	_ = response.Body.Close()
+	defer response.Body.Close()
 
 	tflog.Info(ctx, LogSuccessfullyFinishedUpdateGPU)
 	return nil
@@ -182,6 +182,7 @@ func DeleteGPU(gpcnClient *client.GpcnClient, ctx context.Context, id string) er
 	if err != nil {
 		return err
 	}
+	defer response.Body.Close()
 	tflog.Info(ctx, LogIssuedDeleteGPUJob)
 
 	// Read the response body and process it as JobStatusSingularResponse
@@ -189,7 +190,6 @@ func DeleteGPU(gpcnClient *client.GpcnClient, ctx context.Context, id string) er
 	if err != nil {
 		return err
 	}
-	_ = response.Body.Close()
 
 	var deleteGPUResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &deleteGPUResponse)

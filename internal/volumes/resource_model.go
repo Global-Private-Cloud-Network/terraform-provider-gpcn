@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -40,11 +41,15 @@ func MapVolumeResponseToModel(ctx context.Context, response *readVolumesResponse
 	}
 
 	// Construct the location object
-	model.Location, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{
+	var diags diag.Diagnostics
+	model.Location, diags = types.MapValueFrom(ctx, types.StringType, map[string]string{
 		"country":    response.Data.Datacenter.Country,
 		"region":     response.Data.Datacenter.Region,
 		"datacenter": response.Data.Datacenter.Name,
 	})
+	if diags.HasError() {
+		model.Location = types.MapNull(types.StringType)
+	}
 
 	// If model doesn't already have these populated, set them
 	model = setModelValuesNotPresent(response, model)

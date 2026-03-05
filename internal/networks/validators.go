@@ -247,6 +247,7 @@ func (v DNSServersValidator) ValidateString(ctx context.Context, request validat
 				ErrSummaryInvalidAttr,
 				fmt.Sprintf(ErrDetailNotValidIPv4WithValue, request.Path.Expression().String(), addr),
 			)
+			continue
 		}
 	}
 }

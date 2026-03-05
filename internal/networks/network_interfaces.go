@@ -92,12 +92,12 @@ func GetVirtualMachinesAttachedToNetworks(gpcnClient *client.GpcnClient, ctx con
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
 	var ntwkToVMsResp readNetworksToVMsResponse
 	err = json.Unmarshal(body, &ntwkToVMsResp)
@@ -122,12 +122,12 @@ func GetNetworkInterfaces(gpcnClient *client.GpcnClient, ctx context.Context, vi
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
 	var vmNetworkResp readVirtualMachineNetworkResponse
 	err = json.Unmarshal(body, &vmNetworkResp)
@@ -177,12 +177,12 @@ func AddNetworkInterface(gpcnClient *client.GpcnClient, ctx context.Context, vir
 	if err != nil {
 		return err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
-	_ = response.Body.Close()
 
 	var addNetworkInterfaceResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &addNetworkInterfaceResponse)
@@ -230,7 +230,7 @@ func SetNextNetworkInterfaceToPrimary(gpcnClient *client.GpcnClient, ctx context
 	if err != nil {
 		return err
 	}
-	_ = response.Body.Close()
+	defer response.Body.Close()
 
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullySetNetworkInterfaceAsPrimary, nextPrimaryNetworkInterfaceID))
 	return nil
@@ -248,13 +248,13 @@ func RemoveNetworkInterface(gpcnClient *client.GpcnClient, ctx context.Context, 
 	if err != nil {
 		return err
 	}
+	defer response.Body.Close()
 
 	// Read the response body and process it as removeNetworkInterfaceResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
-	_ = response.Body.Close()
 
 	var removeNetworkInterfaceResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &removeNetworkInterfaceResponse)
@@ -313,13 +313,13 @@ func AllocatePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, virtua
 	if err != nil {
 		return err
 	}
+	defer response.Body.Close()
 
 	// Read the response body and process it as allocatePublicIpResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
-	_ = response.Body.Close()
 
 	var allocatePublicIpResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &allocatePublicIpResponse)
@@ -348,13 +348,13 @@ func ReleasePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, virtual
 	if err != nil {
 		return err
 	}
+	defer response.Body.Close()
 
 	// Read the response body and process it as releasePublicIpResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
-	_ = response.Body.Close()
 
 	var releasePublicIpResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &releasePublicIpResponse)

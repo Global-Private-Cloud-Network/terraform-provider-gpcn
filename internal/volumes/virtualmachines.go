@@ -30,12 +30,12 @@ func AddVolumeToVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Contex
 	if err != nil {
 		return err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
-	_ = response.Body.Close()
 
 	var attachVolumeResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &attachVolumeResponse)
@@ -64,12 +64,12 @@ func RemoveVolumeFromVirtualMachine(gpcnClient *client.GpcnClient, ctx context.C
 	if err != nil {
 		return err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
-	_ = response.Body.Close()
 
 	var detachVolumeResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &detachVolumeResponse)

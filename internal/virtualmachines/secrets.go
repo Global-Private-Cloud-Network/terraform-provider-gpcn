@@ -40,12 +40,12 @@ func GetSSHKey(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachin
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
 	var getSSHKeyResponse GetSSHKeyResponse
 	err = json.Unmarshal(body, &getSSHKeyResponse)
@@ -70,12 +70,12 @@ func GetPassword(gpcnClient *client.GpcnClient, ctx context.Context, virtualMach
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
 	var getPasswordResponse GetPasswordResponse
 	err = json.Unmarshal(body, &getPasswordResponse)

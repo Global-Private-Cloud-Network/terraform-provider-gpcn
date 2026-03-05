@@ -108,11 +108,11 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 	tflog.Info(ctx, LogIssuedCreateVMJob)
 
 	// Read the response body and process it as createVirtualMachineResponse
+	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
 	var createVirtualMachineResponse client.JobStatusMultiResponse
 	err = json.Unmarshal(body, &createVirtualMachineResponse)
@@ -162,12 +162,12 @@ func GetVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, virtu
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
 	var readVirtualMachinesResponse ReadVirtualMachinesResponse
 	err = json.Unmarshal(body, &readVirtualMachinesResponse)
@@ -201,7 +201,7 @@ func UpdateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, vi
 	if err != nil {
 		return err
 	}
-	_ = response.Body.Close()
+	defer response.Body.Close()
 
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyUpdatedVMWithID, virtualMachineId))
 	return nil

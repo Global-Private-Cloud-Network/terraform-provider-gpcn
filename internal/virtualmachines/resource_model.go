@@ -9,6 +9,7 @@ import (
 	"terraform-provider-gpcn/internal/networks"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -62,19 +63,26 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 	}
 
 	// Construct the location object
-	model.Location, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{
+	var diags diag.Diagnostics
+	model.Location, diags = types.MapValueFrom(ctx, types.StringType, map[string]string{
 		"country":    response.Data.VirtualMachine.Datacenter.Country,
 		"region":     response.Data.VirtualMachine.Datacenter.Region,
 		"datacenter": response.Data.VirtualMachine.Datacenter.Name,
 	})
+	if diags.HasError() {
+		model.Location = types.MapNull(types.StringType)
+	}
 
 	// Construct the configuration object
-	model.Configuration, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{
+	model.Configuration, diags = types.MapValueFrom(ctx, types.StringType, map[string]string{
 		"name":         response.Data.VirtualMachine.Configuration,
 		"cpu":          strconv.FormatInt(response.Data.VirtualMachine.CPU, 10) + " cores",
 		"ram":          strconv.FormatInt(response.Data.VirtualMachine.RAM, 10) + " GB",
 		"base_storage": strconv.FormatInt(response.Data.VirtualMachine.Disk, 10) + " GB",
 	})
+	if diags.HasError() {
+		model.Configuration = types.MapNull(types.StringType)
+	}
 
 	// If model doesn't already have these populated, set them
 	model = setModelValuesNotPresent(ctx, gpcnClient, response, model)
@@ -97,10 +105,14 @@ func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient
 	}
 	if model.Size.IsNull() {
 		size := ResourceModelSize{}
-		model.Size, _ = types.ObjectValueFrom(ctx, size.AttrTypes(), ResourceModelSize{
+		var sizeDiags diag.Diagnostics
+		model.Size, sizeDiags = types.ObjectValueFrom(ctx, size.AttrTypes(), ResourceModelSize{
 			Category: types.StringValue(response.Data.VirtualMachine.ConfigurationCategoryCode),
 			Tier:     types.StringValue(response.Data.VirtualMachine.ConfigurationCode),
 		})
+		if sizeDiags.HasError() {
+			model.Size = types.ObjectNull(size.AttrTypes())
+		}
 	}
 
 	model = setNetworkModelValuesNotPresent(ctx, gpcnClient, response.Data.VirtualMachine.ID, model)
@@ -133,7 +145,11 @@ func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.Gpc
 		}
 		// Set the network IDs in the model
 		if model.NetworkIds.IsNull() {
-			model.NetworkIds, _ = types.ListValueFrom(ctx, types.StringType, networkIds)
+			var networkDiags diag.Diagnostics
+			model.NetworkIds, networkDiags = types.ListValueFrom(ctx, types.StringType, networkIds)
+			if networkDiags.HasError() {
+				model.NetworkIds = types.ListNull(types.StringType)
+			}
 		}
 
 		// Set AllocatePublicIp if it's currently null
@@ -146,22 +162,29 @@ func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.Gpc
 
 func setSecretValues(ctx context.Context, gpcnClient *client.GpcnClient, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
 	// Construct the base object
-	model.Secrets, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{
+	var secretsDiags diag.Diagnostics
+	model.Secrets, secretsDiags = types.MapValueFrom(ctx, types.StringType, map[string]string{
 		"username": "",
 		"password": "",
 		"ssh_key":  "",
 	})
+	if secretsDiags.HasError() {
+		model.Secrets = types.MapNull(types.StringType)
+	}
 
 	if model.DisplaySecrets.ValueBool() {
 		virtualMachineID := response.Data.VirtualMachine.ID
 		sshKeyResponse, _ := GetSSHKey(gpcnClient, ctx, virtualMachineID)
 		sshPasswordResponse, _ := GetPassword(gpcnClient, ctx, virtualMachineID)
 		// Construct the secrets object
-		model.Secrets, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{
+		model.Secrets, secretsDiags = types.MapValueFrom(ctx, types.StringType, map[string]string{
 			"username": response.Data.VirtualMachine.Username,
 			"password": sshPasswordResponse.Data.SSHPassword,
 			"ssh_key":  sshKeyResponse.Data.PrivateKey,
 		})
+		if secretsDiags.HasError() {
+			model.Secrets = types.MapNull(types.StringType)
+		}
 	}
 	return model
 }

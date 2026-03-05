@@ -48,12 +48,12 @@ func GetVolumeSizeId(gpcnClient *client.GpcnClient, ctx context.Context, datacen
 	if err != nil {
 		return -1, err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return -1, err
 	}
-	_ = response.Body.Close()
 
 	var volSizesResp volumeSizesResponse
 	err = json.Unmarshal(body, &volSizesResp)

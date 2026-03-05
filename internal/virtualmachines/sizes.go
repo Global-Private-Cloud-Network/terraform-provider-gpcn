@@ -96,12 +96,12 @@ func GetVirtualMachineSizeConfigurationId(gpcnClient *client.GpcnClient, ctx con
 	if err != nil {
 		return -1, sizes, err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return -1, sizes, err
 	}
-	_ = response.Body.Close()
 
 	var sizesResp virtualMachineSizesResponse
 	err = json.Unmarshal(body, &sizesResp)
@@ -165,13 +165,13 @@ func UpdateVirtualMachineSize(gpcnClient *client.GpcnClient, ctx context.Context
 	if err != nil {
 		return err
 	}
+	defer response.Body.Close()
 
 	// Read the response body and process it as updateVirtualMachineSizeResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
-	_ = response.Body.Close()
 
 	var updateVirtualMachineSizeResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &updateVirtualMachineSizeResponse)
