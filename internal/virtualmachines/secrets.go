@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 
+	"terraform-provider-gpcn/internal/client"
+
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
@@ -25,15 +27,15 @@ type GetPasswordResponse struct {
 }
 
 // GetSSHKey retrieves the SSH private key for a Virtual Machine by its ID
-func GetSSHKey(httpClient *http.Client, ctx context.Context, virtualMachineId string) (*GetSSHKeyResponse, error) {
+func GetSSHKey(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string) (*GetSSHKeyResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetSSHKeyWithID, virtualMachineId))
 
-	request, err := http.NewRequest("GET", BASE_URL_V1+virtualMachineId+"/ssh-key", nil)
+	request, err := http.NewRequestWithContext(ctx, "GET", BASE_URL_V1+virtualMachineId+"/ssh-key", nil)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -55,15 +57,15 @@ func GetSSHKey(httpClient *http.Client, ctx context.Context, virtualMachineId st
 }
 
 // GetPassword retrieves the SSH password for a Virtual Machine by its ID
-func GetPassword(httpClient *http.Client, ctx context.Context, virtualMachineId string) (*GetPasswordResponse, error) {
+func GetPassword(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string) (*GetPasswordResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetPasswordWithID, virtualMachineId))
 
-	request, err := http.NewRequest("GET", BASE_URL_V1+virtualMachineId+"/password", nil)
+	request, err := http.NewRequestWithContext(ctx, "GET", BASE_URL_V1+virtualMachineId+"/password", nil)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return nil, err
 	}

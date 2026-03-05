@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+
 	"terraform-provider-gpcn/internal/client"
 
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -38,7 +40,7 @@ type readGPUResponse struct {
 	} `json:"data"`
 }
 
-func CreateGPU(httpClient *http.Client, ctx context.Context, seriesId string, plan ResourceModel) (*readGPUResponse, error) {
+func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId string, plan ResourceModel) (*readGPUResponse, error) {
 	tflog.Info(ctx, LogStartingCreateGPU)
 
 	// Create a new request from the model
@@ -56,13 +58,13 @@ func CreateGPU(httpClient *http.Client, ctx context.Context, seriesId string, pl
 	}
 
 	// Create API request
-	request, err := http.NewRequest("POST", BASE_URL_V1, bytes.NewBuffer(jsonCreateGPURequestBody))
+	request, err := http.NewRequestWithContext(ctx, "POST", BASE_URL_V1, bytes.NewBuffer(jsonCreateGPURequestBody))
 	if err != nil {
 		return nil, err
 	}
 
 	// Perform API request
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -81,16 +83,28 @@ func CreateGPU(httpClient *http.Client, ctx context.Context, seriesId string, pl
 		return nil, err
 	}
 
-	// Perform long polling to wait for job completion
-	jobResp, err := client.PerformLongPolling(httpClient, ctx, "Create GPCN GPU", createGPUResponse.Data.Jobs[0].JobID)
+	// Extract job ID with bounds checking
+	jobID, err := client.GetJobID(&createGPUResponse)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get job ID from create GPU response: %w", err)
+	}
+
+	// Perform long polling to wait for job completion
+	jobResp, err := client.PerformLongPolling(gpcnClient, ctx, "Create GPCN GPU", jobID)
+	if err != nil {
+		return nil, fmt.Errorf("create GPU polling failed: %w", err)
 	}
 
 	tflog.Info(ctx, LogLongPollingCompletedCreateGPU)
 
+	// Extract resource ID with bounds checking
+	resourceID, err := client.GetJobResourceID(jobResp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get resource ID from create GPU job response: %w", err)
+	}
+
 	// Get the GPU details after creation
-	getGPUResponse, err := GetGPU(httpClient, ctx, jobResp.Data.Jobs[0].ResourceId)
+	getGPUResponse, err := GetGPU(gpcnClient, ctx, resourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -99,15 +113,15 @@ func CreateGPU(httpClient *http.Client, ctx context.Context, seriesId string, pl
 	return getGPUResponse, nil
 }
 
-func GetGPU(httpClient *http.Client, ctx context.Context, id string) (*readGPUResponse, error) {
+func GetGPU(gpcnClient *client.GpcnClient, ctx context.Context, id string) (*readGPUResponse, error) {
 	tflog.Info(ctx, LogStartingReadGPU)
 
-	request, err := http.NewRequest("GET", BASE_URL_V1+id, nil)
+	request, err := http.NewRequestWithContext(ctx, "GET", BASE_URL_V1+id, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -118,17 +132,17 @@ func GetGPU(httpClient *http.Client, ctx context.Context, id string) (*readGPURe
 	}
 	_ = response.Body.Close()
 
-	var readGPUResponse readGPUResponse
-	err = json.Unmarshal(body, &readGPUResponse)
+	var gpuResp readGPUResponse
+	err = json.Unmarshal(body, &gpuResp)
 	if err != nil {
 		return nil, err
 	}
 
 	tflog.Info(ctx, LogSuccessfullyFinishedReadGPU)
-	return &readGPUResponse, nil
+	return &gpuResp, nil
 }
 
-func UpdateGPU(httpClient *http.Client, ctx context.Context, id, name string) error {
+func UpdateGPU(gpcnClient *client.GpcnClient, ctx context.Context, id, name string) error {
 	tflog.Info(ctx, LogStartingUpdateGPU)
 
 	// Create a new request with the name
@@ -141,29 +155,30 @@ func UpdateGPU(httpClient *http.Client, ctx context.Context, id, name string) er
 		return err
 	}
 
-	request, err := http.NewRequest("PUT", BASE_URL_V1+id, bytes.NewBuffer(jsonUpdateGPURequestBody))
+	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+id, bytes.NewBuffer(jsonUpdateGPURequestBody))
 	if err != nil {
 		return err
 	}
 
-	_, err = httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return err
 	}
+	_ = response.Body.Close()
 
 	tflog.Info(ctx, LogSuccessfullyFinishedUpdateGPU)
 	return nil
 }
 
-func DeleteGPU(httpClient *http.Client, ctx context.Context, id string) error {
+func DeleteGPU(gpcnClient *client.GpcnClient, ctx context.Context, id string) error {
 	tflog.Info(ctx, LogStartingDeleteGPU)
 
-	request, err := http.NewRequest("DELETE", BASE_URL_V1+id, nil)
+	request, err := http.NewRequestWithContext(ctx, "DELETE", BASE_URL_V1+id, nil)
 	if err != nil {
 		return err
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return err
 	}
@@ -183,7 +198,7 @@ func DeleteGPU(httpClient *http.Client, ctx context.Context, id string) error {
 	}
 
 	// Perform long polling to wait for job completion
-	_, err = client.PerformLongPolling(httpClient, ctx, "Delete GPCN GPU", deleteGPUResponse.Data.JobID)
+	_, err = client.PerformLongPolling(gpcnClient, ctx, "Delete GPCN GPU", deleteGPUResponse.Data.JobID)
 	if err != nil {
 		return err
 	}

@@ -11,12 +11,10 @@ const (
 
 // Error detail message templates
 const (
-	ErrDetailExpectedHTTPClient                   = "Expected *http.Client, got: %T. Please report this issue to the provider developers."
-	ErrDetailReadGPUFailed                        = "Failed to read GPU with ID %s"
-	ErrDetailUpdateGPUFailed                      = "Failed to update GPU with ID %s"
-	ErrDetailDeleteGPUFailed                      = "Failed to delete GPU with ID %s"
-	ErrDetailMalformedResponseMissingData         = "malformed inventory response: missing Data"
-	ErrDetailMalformedResponseMissingAvailability = "malformed inventory response: missing Availability for datacenter"
-	ErrDetailMalformedResponseMissingGPUCounts    = "malformed inventory response: missing GPUCounts"
-	ErrDetailNoInventoryAvailable                 = "no GPU availability for series code %s in datacenter %s with GPU count %d"
+	ErrDetailExpectedGpcnClient           = "Expected *client.GpcnClient, got: %T. Please report this issue to the provider developers."
+	ErrDetailReadGPUFailed                = "Failed to read GPU with ID %s"
+	ErrDetailUpdateGPUFailed              = "Failed to update GPU with ID %s"
+	ErrDetailDeleteGPUFailed              = "Failed to delete GPU with ID %s"
+	ErrDetailMalformedResponseMissingData = "malformed inventory response: missing Data"
+	ErrDetailNoInventoryAvailable         = "no GPU availability for series code %s in datacenter %s with GPU count %d"
 )

@@ -10,10 +10,12 @@ import (
 	"net/url"
 	"strconv"
 
+	"terraform-provider-gpcn/internal/client"
+
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-type gpuInventoryResponse struct {
+type inventoryResp struct {
 	Data []struct {
 		ID           string `json:"id"`
 		Name         string `json:"name"`
@@ -37,7 +39,7 @@ type gpuInventoryResponse struct {
 	} `json:"data"`
 }
 
-func CheckInventory(httpClient *http.Client, ctx context.Context, model ResourceModel) (*gpuInventoryResponse, error) {
+func CheckInventory(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*inventoryResp, error) {
 	seriesCode := model.SeriesCode.ValueString()
 	datacenterId := model.DatacenterId.ValueString()
 	gpuCount := model.GPUCount.ValueInt64()
@@ -45,7 +47,10 @@ func CheckInventory(httpClient *http.Client, ctx context.Context, model Resource
 	tflog.Info(ctx, fmt.Sprintf(LogStartingCheckInventory, seriesCode, datacenterId, gpuCount))
 
 	// Format URL
-	u, _ := url.Parse(BASE_URL_V1 + "inventory")
+	u, err := url.Parse(BASE_URL_V1 + "inventory")
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse inventory URL: %w", err)
+	}
 	q := u.Query()
 	q.Add("code", seriesCode)
 	q.Add("datacenterId", datacenterId)
@@ -54,25 +59,25 @@ func CheckInventory(httpClient *http.Client, ctx context.Context, model Resource
 
 	tflog.Info(ctx, LogConstructedInventoryRequestURL)
 
-	request, err := http.NewRequest("GET", u.String(), nil)
+	request, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return nil, err
 	}
 
-	// Read the response body and process it as gpuInventoryResponse
+	// Read the response body and process it as inventoryResp
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
 	_ = response.Body.Close()
 
-	var gpuInventoryResponse gpuInventoryResponse
-	err = json.Unmarshal(body, &gpuInventoryResponse)
+	var invResp inventoryResp
+	err = json.Unmarshal(body, &invResp)
 
 	if err != nil {
 		return nil, err
@@ -88,21 +93,21 @@ func CheckInventory(httpClient *http.Client, ctx context.Context, model Resource
 	tflog.Info(ctx, LogValidatingInventoryResponseStructure)
 
 	// Validate response structure
-	if len(gpuInventoryResponse.Data) == 0 {
+	if len(invResp.Data) == 0 {
 		return nil, errors.New(ErrDetailMalformedResponseMissingData)
 	}
-	if len(gpuInventoryResponse.Data[0].Availability) == 0 {
+	if len(invResp.Data[0].Availability) == 0 {
 		return nil, fmt.Errorf(ErrDetailNoInventoryAvailable, seriesCode, datacenterId, gpuCount)
 	}
-	if len(gpuInventoryResponse.Data[0].Availability[0].GPUCounts) == 0 {
+	if len(invResp.Data[0].Availability[0].GPUCounts) == 0 {
 		return nil, fmt.Errorf(ErrDetailNoInventoryAvailable, seriesCode, datacenterId, gpuCount)
 	}
 
 	// Check if inventory is available
-	if len(gpuInventoryResponse.Data[0].Availability[0].GPUCounts[0].AvailableSkus) <= 0 {
+	if len(invResp.Data[0].Availability[0].GPUCounts[0].AvailableSkus) <= 0 {
 		return nil, fmt.Errorf(ErrDetailNoInventoryAvailable, seriesCode, datacenterId, gpuCount)
 	}
 
 	tflog.Info(ctx, fmt.Sprintf(LogInventoryAvailable, seriesCode, datacenterId, gpuCount))
-	return &gpuInventoryResponse, nil
+	return &invResp, nil
 }

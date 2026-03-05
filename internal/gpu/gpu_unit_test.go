@@ -48,17 +48,17 @@ func newGPUResponse(id, name string) *readGPUResponse {
 	resp.Data.IP = "192.168.1.100"
 	resp.Data.Datacenter.ID = testDatacenterID
 	resp.Data.Datacenter.Name = "US-East-1"
-	resp.Data.Datacenter.Region = "US-East"
+	resp.Data.Datacenter.Region = "East"
 	resp.Data.Datacenter.CountryAbbr = "US"
 	resp.Data.Datacenter.Country = "United States"
 	return resp
 }
 
-func newInventoryResponse(seriesID, seriesCode, datacenterID string, gpuCount, availableCount int64) gpuInventoryResponse {
+func newInventoryResponse(seriesID, seriesCode, datacenterID string, gpuCount, availableCount int64) inventoryResp {
 	// Create a slice of empty structs with length equal to availableCount
 	availableSkus := make([]struct{}, availableCount)
 
-	return gpuInventoryResponse{
+	return inventoryResp{
 		Data: []struct {
 			ID           string `json:"id"`
 			Name         string `json:"name"`
@@ -164,8 +164,8 @@ func TestMapGPUResponseToModelUnit(t *testing.T) {
 	if locationMap["country"] != "United States" {
 		t.Errorf("Expected country 'United States', got '%s'", locationMap["country"])
 	}
-	if locationMap["region"] != "US-East" {
-		t.Errorf("Expected region 'US-East', got '%s'", locationMap["region"])
+	if locationMap["region"] != "East" {
+		t.Errorf("Expected region 'East', got '%s'", locationMap["region"])
 	}
 	if locationMap["datacenter"] != "US-East-1" {
 		t.Errorf("Expected datacenter 'US-East-1', got '%s'", locationMap["datacenter"])
@@ -180,7 +180,7 @@ func TestCheckInventoryMockHTTP(t *testing.T) {
 
 	var inventoryCalled bool
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/inventory") {
@@ -205,7 +205,7 @@ func TestCheckInventoryMockHTTP(t *testing.T) {
 
 	model := createTestGPUModel("test-gpu", "", seriesCode, testImageName, gpuCount)
 
-	response, err := CheckInventory(httpClient, context.Background(), model)
+	response, err := CheckInventory(gpcnClient, context.Background(), model)
 	if err != nil {
 		t.Fatalf("CheckInventory failed: %v", err)
 	}
@@ -232,7 +232,7 @@ func TestCheckInventoryNoAvailabilityMockHTTP(t *testing.T) {
 		gpuCount   = int64(2)
 	)
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/inventory") {
@@ -244,7 +244,7 @@ func TestCheckInventoryNoAvailabilityMockHTTP(t *testing.T) {
 
 	model := createTestGPUModel("test-gpu", "", seriesCode, testImageName, gpuCount)
 
-	_, err := CheckInventory(httpClient, context.Background(), model)
+	_, err := CheckInventory(gpcnClient, context.Background(), model)
 	if err == nil {
 		t.Fatal("Expected error for no availability, got nil")
 	}
@@ -262,7 +262,7 @@ func TestCreateGPUMockHTTP(t *testing.T) {
 
 	var createCalled, jobStatusCalled, gpuStatusCalled bool
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
@@ -313,7 +313,7 @@ func TestCreateGPUMockHTTP(t *testing.T) {
 
 	model := createTestGPUModel("test-gpu", "H100 Series", "h100_series", testImageName, 2)
 
-	response, err := CreateGPU(httpClient, context.Background(), seriesID, model)
+	response, err := CreateGPU(gpcnClient, context.Background(), seriesID, model)
 	if err != nil {
 		t.Fatalf("CreateGPU failed: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestCreateGPUMockHTTP(t *testing.T) {
 func TestGetGPUMockHTTP(t *testing.T) {
 	const gpuID = "gpu-789"
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/"+gpuID) {
@@ -349,7 +349,7 @@ func TestGetGPUMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	response, err := GetGPU(httpClient, context.Background(), gpuID)
+	response, err := GetGPU(gpcnClient, context.Background(), gpuID)
 	if err != nil {
 		t.Fatalf("GetGPU failed: %v", err)
 	}
@@ -375,7 +375,7 @@ func TestUpdateGPUMockHTTP(t *testing.T) {
 
 	var updateCalled bool
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "PUT" && strings.Contains(r.URL.Path, "/gpu/"+gpuID) {
@@ -394,7 +394,7 @@ func TestUpdateGPUMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	err := UpdateGPU(httpClient, context.Background(), gpuID, newName)
+	err := UpdateGPU(gpcnClient, context.Background(), gpuID, newName)
 	if err != nil {
 		t.Fatalf("UpdateGPU failed: %v", err)
 	}
@@ -411,7 +411,7 @@ func TestDeleteGPUMockHTTP(t *testing.T) {
 
 	var deleteCalled, jobStatusCalled bool
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
@@ -434,7 +434,7 @@ func TestDeleteGPUMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	err := DeleteGPU(httpClient, context.Background(), gpuID)
+	err := DeleteGPU(gpcnClient, context.Background(), gpuID)
 	if err != nil {
 		t.Fatalf("DeleteGPU failed: %v", err)
 	}

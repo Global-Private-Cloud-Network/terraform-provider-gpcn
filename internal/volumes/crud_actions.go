@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+
 	"terraform-provider-gpcn/internal/client"
 
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -40,14 +41,14 @@ type readVolumesResponse struct {
 	} `json:"data"`
 }
 
-func CreateVolume(httpClient *http.Client, ctx context.Context, model ResourceModel) (*readVolumesResponse, error) {
+func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*readVolumesResponse, error) {
 	tflog.Info(ctx, LogStartingCreateVolume)
 	// Find volumeTypeId based on volumeType. This will always be populated because of Schema validation
 	volumeTypeId := volumeTypeMapping[model.VolumeType.ValueString()]
 
 	tflog.Info(ctx, LogLookingUpVolumeSizeID)
 	// Find volumeSizeId and do validation that sizeGb is valid
-	volumeSizeId, err := GetVolumeSizeId(httpClient, ctx, model.DatacenterId.ValueString(), volumeTypeId, model.SizeGb.ValueInt64())
+	volumeSizeId, err := GetVolumeSizeId(gpcnClient, ctx, model.DatacenterId.ValueString(), volumeTypeId, model.SizeGb.ValueInt64())
 
 	if err != nil {
 		return nil, err
@@ -67,13 +68,13 @@ func CreateVolume(httpClient *http.Client, ctx context.Context, model ResourceMo
 		return nil, err
 	}
 
-	request, err := http.NewRequest("POST", BASE_URL_V1, bytes.NewBuffer(jsonCreateVolumeRequestBody))
+	request, err := http.NewRequestWithContext(ctx, "POST", BASE_URL_V1, bytes.NewBuffer(jsonCreateVolumeRequestBody))
 	if err != nil {
 		return nil, err
 	}
 	tflog.Info(ctx, LogConstructedCreateVolumeRequest)
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -93,15 +94,21 @@ func CreateVolume(httpClient *http.Client, ctx context.Context, model ResourceMo
 		return nil, err
 	}
 
-	jobResp, err := client.PerformLongPolling(httpClient, ctx, "Create GPCN Volume", createVolumeResponse.Data.JobID)
-
+	jobResp, err := client.PerformLongPolling(gpcnClient, ctx, "Create GPCN Volume", createVolumeResponse.Data.JobID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create volume polling failed: %w", err)
 	}
 
 	tflog.Info(ctx, LogLongPollingCompletedCreateVolume)
+
+	// Extract resource ID with bounds checking
+	resourceID, err := client.GetJobResourceID(jobResp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get resource ID from create volume job response: %w", err)
+	}
+
 	// Perform a GET call to retrieve actual information about the Volume
-	getVolumeResponse, err := GetVolume(httpClient, ctx, jobResp.Data.Jobs[0].ResourceId)
+	getVolumeResponse, err := GetVolume(gpcnClient, ctx, resourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -111,14 +118,14 @@ func CreateVolume(httpClient *http.Client, ctx context.Context, model ResourceMo
 }
 
 // Helper function to get a volume by ID. Shared between Read and the final action of Create and Update
-func GetVolume(httpClient *http.Client, ctx context.Context, volumeId string) (*readVolumesResponse, error) {
+func GetVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId string) (*readVolumesResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVolumeWithID, volumeId))
-	request, err := http.NewRequest("GET", BASE_URL_V1+volumeId, nil)
+	request, err := http.NewRequestWithContext(ctx, "GET", BASE_URL_V1+volumeId, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -129,25 +136,25 @@ func GetVolume(httpClient *http.Client, ctx context.Context, volumeId string) (*
 	}
 	_ = response.Body.Close()
 
-	var readVolumesResponse readVolumesResponse
-	err = json.Unmarshal(body, &readVolumesResponse)
+	var volResp readVolumesResponse
+	err = json.Unmarshal(body, &volResp)
 
 	if err != nil {
 		return nil, err
 	}
 
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyRetrievedVolumeWithID, volumeId))
-	return &readVolumesResponse, nil
+	return &volResp, nil
 }
 
-func UpdateVolume(httpClient *http.Client, ctx context.Context, volumeId string, model ResourceModel) (*readVolumesResponse, error) {
+func UpdateVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId string, model ResourceModel) (*readVolumesResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateVolumeWithID, volumeId))
 	// Find volumeTypeId based on volumeType. This will always be populated because of Schema validation
 	volumeTypeId := volumeTypeMapping[model.VolumeType.ValueString()]
 
 	tflog.Info(ctx, LogValidatingVolumeSizeForUpdate)
 	// Do validation that sizeGb is valid
-	_, err := GetVolumeSizeId(httpClient, ctx, model.DatacenterId.ValueString(), volumeTypeId, model.SizeGb.ValueInt64())
+	_, err := GetVolumeSizeId(gpcnClient, ctx, model.DatacenterId.ValueString(), volumeTypeId, model.SizeGb.ValueInt64())
 
 	if err != nil {
 		return nil, err
@@ -165,13 +172,13 @@ func UpdateVolume(httpClient *http.Client, ctx context.Context, volumeId string,
 	}
 
 	// The only possible update is a resizing since everything else triggers a re-create
-	request, err := http.NewRequest("PUT", BASE_URL_V1+volumeId+"/resize", bytes.NewBuffer(jsonUpdateVolumeRequestBody))
+	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/resize", bytes.NewBuffer(jsonUpdateVolumeRequestBody))
 	if err != nil {
 		return nil, err
 	}
 	tflog.Info(ctx, LogConstructedUpdateVolumeRequest)
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -194,15 +201,21 @@ func UpdateVolume(httpClient *http.Client, ctx context.Context, volumeId string,
 		return nil, errors.New("the job to update the GPCN Volume failed to start")
 	}
 
-	jobResp, err := client.PerformLongPolling(httpClient, ctx, "Update GPCN Volume", updateVolumeResponse.Data.JobID)
-
+	jobResp, err := client.PerformLongPolling(gpcnClient, ctx, "Update GPCN Volume", updateVolumeResponse.Data.JobID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("update volume polling failed: %w", err)
 	}
 
 	tflog.Info(ctx, LogLongPollingCompletedUpdateVolume)
+
+	// Extract resource ID with bounds checking
+	updateResourceID, err := client.GetJobResourceID(jobResp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get resource ID from update volume job response: %w", err)
+	}
+
 	// Perform a GET call to retrieve actual information about the Volume
-	getVolumeResponse, err := GetVolume(httpClient, ctx, jobResp.Data.Jobs[0].ResourceId)
+	getVolumeResponse, err := GetVolume(gpcnClient, ctx, updateResourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -211,9 +224,9 @@ func UpdateVolume(httpClient *http.Client, ctx context.Context, volumeId string,
 	return getVolumeResponse, nil
 }
 
-func DeleteVolume(httpClient *http.Client, ctx context.Context, volumeId string) error {
+func DeleteVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteVolumeWithID, volumeId))
-	request, err := http.NewRequest("DELETE", BASE_URL_V1+volumeId, nil)
+	request, err := http.NewRequestWithContext(ctx, "DELETE", BASE_URL_V1+volumeId, nil)
 	if err != nil {
 		return err
 	}
@@ -221,17 +234,17 @@ func DeleteVolume(httpClient *http.Client, ctx context.Context, volumeId string)
 
 	// Detach this volume if possible
 	// Verify the volume is attached to a virtual machine before attempting to detach it
-	getVolumeResponse, err := GetVolume(httpClient, ctx, volumeId)
+	getVolumeResponse, err := GetVolume(gpcnClient, ctx, volumeId)
 	if err != nil {
 		return err
 	}
 	if getVolumeResponse.Data.VirtualMachineId != "" {
-		err = RemoveVolumeFromVirtualMachine(httpClient, ctx, volumeId)
+		err = RemoveVolumeFromVirtualMachine(gpcnClient, ctx, volumeId)
 		if err != nil {
 			return err
 		}
 	}
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return err
 	}
@@ -251,7 +264,7 @@ func DeleteVolume(httpClient *http.Client, ctx context.Context, volumeId string)
 		return err
 	}
 
-	_, err = client.PerformLongPolling(httpClient, ctx, "Delete GPCN Volume", deleteVolumeResponse.Data.JobID)
+	_, err = client.PerformLongPolling(gpcnClient, ctx, "Delete GPCN Volume", deleteVolumeResponse.Data.JobID)
 
 	if err != nil {
 		return err

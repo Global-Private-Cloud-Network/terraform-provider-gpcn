@@ -232,12 +232,12 @@ func (v DNSServersValidator) ValidateString(ctx context.Context, request validat
 
 	ipAddresses := strings.SplitSeq(value, ", ")
 	for address := range ipAddresses {
-		address := strings.TrimSpace(address)
-		parsedIPAddress := net.ParseIP(address)
+		addr := strings.TrimSpace(address)
+		parsedIPAddress := net.ParseIP(addr)
 		if parsedIPAddress == nil {
 			response.Diagnostics.AddError(
 				ErrSummaryInvalidAttr,
-				fmt.Sprintf(ErrDetailNotValidIPv4WithValue, request.Path.Expression().String(), address),
+				fmt.Sprintf(ErrDetailNotValidIPv4WithValue, request.Path.Expression().String(), addr),
 			)
 			continue
 		}
@@ -245,7 +245,7 @@ func (v DNSServersValidator) ValidateString(ctx context.Context, request validat
 		if parsedIPAddressv4 == nil {
 			response.Diagnostics.AddError(
 				ErrSummaryInvalidAttr,
-				fmt.Sprintf(ErrDetailNotValidIPv4WithValue, request.Path.Expression().String(), address),
+				fmt.Sprintf(ErrDetailNotValidIPv4WithValue, request.Path.Expression().String(), addr),
 			)
 		}
 	}

@@ -10,6 +10,8 @@ import (
 	"slices"
 	"strings"
 
+	"terraform-provider-gpcn/internal/client"
+
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -37,16 +39,16 @@ func (o VirtualMachineImagesDataResponseTF) AttrTypes() map[string]attr.Type {
 }
 
 // Get virtual machine image ID for a given datacenterId and virtual machine image name
-func GetVirtualMachineImageId(client *http.Client, ctx context.Context, datacenterId, virtualMachineImageName string) (int64, []VirtualMachineImagesDataResponseTF, error) {
+func GetVirtualMachineImageId(gpcnClient *client.GpcnClient, ctx context.Context, datacenterId, virtualMachineImageName string) (int64, []VirtualMachineImagesDataResponseTF, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVMImageIDWithName, virtualMachineImageName))
-	request, err := http.NewRequest("GET", DATA_CENTERS_BASE_URL_V1+datacenterId+"/virtual-machine-images", nil)
+	request, err := http.NewRequestWithContext(ctx, "GET", DATA_CENTERS_BASE_URL_V1+datacenterId+"/virtual-machine-images", nil)
 
 	var images []VirtualMachineImagesDataResponseTF
 	if err != nil {
 		return -1, images, err
 	}
 
-	response, err := client.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return -1, images, err
 	}
@@ -57,20 +59,20 @@ func GetVirtualMachineImageId(client *http.Client, ctx context.Context, datacent
 	}
 	_ = response.Body.Close()
 
-	var virtualMachineImagesResponse virtualMachineImagesResponse
-	err = json.Unmarshal(body, &virtualMachineImagesResponse)
+	var imagesResp virtualMachineImagesResponse
+	err = json.Unmarshal(body, &imagesResp)
 
 	if err != nil {
 		return -1, images, err
 	}
 
 	// Verify the image name specified is available
-	imageIdx := slices.IndexFunc(virtualMachineImagesResponse.Data, func(virtualMachineImage virtualMachineImagesDataResponse) bool {
+	imageIdx := slices.IndexFunc(imagesResp.Data, func(virtualMachineImage virtualMachineImagesDataResponse) bool {
 		return strings.EqualFold(virtualMachineImage.Name, virtualMachineImageName)
 	})
 
 	var names []string
-	for _, image := range virtualMachineImagesResponse.Data {
+	for _, image := range imagesResp.Data {
 		// Used for actual data
 		images = append(images, VirtualMachineImagesDataResponseTF{
 			ID:   types.Int64Value(image.ID),
@@ -87,5 +89,5 @@ func GetVirtualMachineImageId(client *http.Client, ctx context.Context, datacent
 	}
 
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyRetrievedVMImageIDWithName, virtualMachineImageName))
-	return virtualMachineImagesResponse.Data[imageIdx].ID, images, nil
+	return imagesResp.Data[imageIdx].ID, images, nil
 }

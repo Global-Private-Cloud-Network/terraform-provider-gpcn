@@ -2,11 +2,19 @@ package client
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
 	"time"
 )
+
+// GpcnClient wraps http.Client with configuration and retry support
+type GpcnClient struct {
+	httpClient *http.Client
+	config     *Config
+}
 
 type authTransport struct {
 	Host      string
@@ -19,10 +27,15 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	req.Header.Add("x-api-key", t.ApiKey)
 
+	// Add correlation ID to request headers if present
+	if correlationID := GetCorrelationID(req.Context()); correlationID != "" {
+		req.Header.Add("x-Correlation-ID", correlationID)
+	}
+
 	// Gather base URL from Host
 	baseUrl, err := url.Parse(t.Host)
 	if err != nil {
-		return nil, errors.New("Unable to parse base URL: " + t.Host)
+		return nil, fmt.Errorf("unable to parse base URL %q: %w", t.Host, err)
 	}
 	// Gather path URL from request
 	pathUrl := req.URL.String()
@@ -30,26 +43,131 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	finalUrl := baseUrl.String() + pathUrl
 	req.URL, err = url.Parse(finalUrl)
 	if err != nil {
-		return nil, errors.New("Unable to combine base URL: " + t.Host + " with path URL: " + pathUrl)
+		return nil, fmt.Errorf("unable to combine base URL %q with path URL %q: %w", t.Host, pathUrl, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := t.Transport.RoundTrip(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
-	if resp.StatusCode > 400 {
-		return nil, errors.New("Error processing data. Status code: " + strconv.Itoa(resp.StatusCode))
+
+	// Handle HTTP errors - read and include response body in error for debugging
+	if resp.StatusCode >= 400 {
+		bodyBytes, readErr := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if readErr != nil {
+			return nil, fmt.Errorf("HTTP error %d, failed to read response body: %w", resp.StatusCode, readErr)
+		}
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode,
+			Body:       string(bodyBytes),
+		}
 	}
 
 	return resp, nil
 }
 
-func NewHttpClient(host, apiKey string) (*http.Client, error) {
-	// Use an extremely long timeout for synchronous calls like attaching/detaching networks
-	return &http.Client{Timeout: time.Duration(60) * time.Second, Transport: &authTransport{
-		Host:      host,
-		ApiKey:    apiKey,
-		Transport: http.DefaultTransport,
-	}}, nil
+// HTTPError represents an HTTP error response with status code and body
+type HTTPError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *HTTPError) Error() string {
+	if e.Body != "" {
+		return fmt.Sprintf("HTTP error %d: %s", e.StatusCode, e.Body)
+	}
+	return "HTTP error " + strconv.Itoa(e.StatusCode)
+}
+
+// IsRetryable returns true if the error is a transient failure that can be retried
+func (e *HTTPError) IsRetryable() bool {
+	// Retry on 5xx server errors and 429 rate limiting
+	return e.StatusCode >= 500 || e.StatusCode == 429
+}
+
+// NewGpcnClient creates a new GPCN client with the given configuration
+func NewGpcnClient(config *Config) (*GpcnClient, error) {
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid client configuration: %w", err)
+	}
+
+	httpClient := &http.Client{
+		Timeout: config.RequestTimeout,
+		Transport: &authTransport{
+			Host:      config.Host,
+			ApiKey:    config.APIKey,
+			Transport: http.DefaultTransport,
+		},
+	}
+
+	return &GpcnClient{
+		httpClient: httpClient,
+		config:     config,
+	}, nil
+}
+
+// HTTPClient returns the underlying http.Client for backwards compatibility
+func (c *GpcnClient) HTTPClient() *http.Client {
+	return c.httpClient
+}
+
+// NewGpcnClientFromHTTPClient creates a GpcnClient from an existing http.Client (for testing)
+func NewGpcnClientFromHTTPClient(httpClient *http.Client) *GpcnClient {
+	return &GpcnClient{
+		httpClient: httpClient,
+		config:     DefaultConfig("", ""),
+	}
+}
+
+// Config returns the client configuration
+func (c *GpcnClient) Config() *Config {
+	return c.config
+}
+
+// DoWithRetry performs an HTTP request with exponential backoff retry
+func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
+	var lastErr error
+	delay := c.config.InitialRetryDelay
+
+	for attempt := 0; attempt <= c.config.MaxRetries; attempt++ {
+		// Clone the request for retry (body needs special handling)
+		reqClone := req.Clone(req.Context())
+
+		resp, err := c.httpClient.Do(reqClone)
+		if err == nil {
+			return resp, nil
+		}
+
+		lastErr = err
+
+		// Check if error is retryable
+		var httpErr *HTTPError
+		if ok := isHTTPError(err, &httpErr); ok && !httpErr.IsRetryable() {
+			return nil, err // Don't retry non-retryable errors
+		}
+
+		// Don't sleep after the last attempt
+		if attempt < c.config.MaxRetries {
+			time.Sleep(delay)
+			// Exponential backoff with cap
+			delay *= 2
+			if delay > c.config.MaxRetryDelay {
+				delay = c.config.MaxRetryDelay
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("%w: %w", ErrMaxRetriesExceeded, lastErr)
+}
+
+// isHTTPError checks if the error is an HTTPError and assigns it to target
+func isHTTPError(err error, target **HTTPError) bool {
+	var httpErr *HTTPError
+	if errors.As(err, &httpErr) {
+		*target = httpErr
+		return true
+	}
+	return false
 }

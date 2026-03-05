@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/helpers"
 
@@ -80,14 +81,14 @@ type readNetworksToVMsDataResponse struct {
 	NetworkId string `json:"networkId"`
 }
 
-func GetVirtualMachinesAttachedToNetworks(httpClient *http.Client, ctx context.Context, networkId string) (*readNetworksToVMsResponse, error) {
+func GetVirtualMachinesAttachedToNetworks(gpcnClient *client.GpcnClient, ctx context.Context, networkId string) (*readNetworksToVMsResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVirtualMachinesAttachedToNetworks, networkId))
-	request, err := http.NewRequest("GET", BASE_URL_V1+networkId+"/virtual-machines", nil)
+	request, err := http.NewRequestWithContext(ctx, "GET", BASE_URL_V1+networkId+"/virtual-machines", nil)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -98,26 +99,26 @@ func GetVirtualMachinesAttachedToNetworks(httpClient *http.Client, ctx context.C
 	}
 	_ = response.Body.Close()
 
-	var readNetworksToVMsResponse readNetworksToVMsResponse
-	err = json.Unmarshal(body, &readNetworksToVMsResponse)
+	var ntwkToVMsResp readNetworksToVMsResponse
+	err = json.Unmarshal(body, &ntwkToVMsResp)
 
 	if err != nil {
 		return nil, err
 	}
 
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyRetrievedVirtualMachinesAttachedToNetworks, networkId))
-	return &readNetworksToVMsResponse, nil
+	return &ntwkToVMsResp, nil
 }
 
 // Fetch all network interfaces attached to the VM
-func GetNetworkInterfaces(httpClient *http.Client, ctx context.Context, virtualMachineId string) ([]ReadVirtualMachineNetworkDataResponseTF, error) {
+func GetNetworkInterfaces(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string) ([]ReadVirtualMachineNetworkDataResponseTF, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetNetworkInterfacesWithID, virtualMachineId))
-	request, err := http.NewRequest("GET", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces", nil)
+	request, err := http.NewRequestWithContext(ctx, "GET", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces", nil)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return nil, err
 	}
@@ -128,15 +129,15 @@ func GetNetworkInterfaces(httpClient *http.Client, ctx context.Context, virtualM
 	}
 	_ = response.Body.Close()
 
-	var readVirtualMachineNetworkResponse readVirtualMachineNetworkResponse
-	err = json.Unmarshal(body, &readVirtualMachineNetworkResponse)
+	var vmNetworkResp readVirtualMachineNetworkResponse
+	err = json.Unmarshal(body, &vmNetworkResp)
 
 	if err != nil {
 		return nil, err
 	}
 
 	var networkInterfaces []ReadVirtualMachineNetworkDataResponseTF
-	for _, inter := range readVirtualMachineNetworkResponse.Data {
+	for _, inter := range vmNetworkResp.Data {
 		networkInterfaces = append(networkInterfaces, ReadVirtualMachineNetworkDataResponseTF{
 			ID:               types.StringValue(inter.ID),
 			NetworkInterface: types.Int64Value(inter.NetworkInterface),
@@ -157,7 +158,7 @@ func GetNetworkInterfaces(httpClient *http.Client, ctx context.Context, virtualM
 }
 
 // Attach a network interface to the virtual machine
-func AddNetworkInterface(httpClient *http.Client, ctx context.Context, virtualMachineId, networkId string) error {
+func AddNetworkInterface(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId, networkId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingAddNetworkInterfaceWithIDs, virtualMachineId, networkId))
 	attachNetworkInterfaceRequestBody := map[string]string{
 		"networkId": networkId,
@@ -167,12 +168,12 @@ func AddNetworkInterface(httpClient *http.Client, ctx context.Context, virtualMa
 	if err != nil {
 		return errors.New("error marshaling the json request body GPCN Virtual Machines - Attach Network")
 	}
-	request, err := http.NewRequest("POST", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces", bytes.NewBuffer(jsonAttachNetworkInterfaceRequestBody))
+	request, err := http.NewRequestWithContext(ctx, "POST", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces", bytes.NewBuffer(jsonAttachNetworkInterfaceRequestBody))
 	if err != nil {
 		return err
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return err
 	}
@@ -190,7 +191,7 @@ func AddNetworkInterface(httpClient *http.Client, ctx context.Context, virtualMa
 		return err
 	}
 
-	_, err = client.PerformLongPolling(httpClient, ctx, "Add GPCN Network Interface to Virtual Machine", addNetworkInterfaceResponse.Data.JobID)
+	_, err = client.PerformLongPolling(gpcnClient, ctx, "Add GPCN Network Interface to Virtual Machine", addNetworkInterfaceResponse.Data.JobID)
 
 	if err != nil {
 		return err
@@ -201,8 +202,8 @@ func AddNetworkInterface(httpClient *http.Client, ctx context.Context, virtualMa
 }
 
 // Attach a network interface to the virtual machine
-func SetNextNetworkInterfaceToPrimary(httpClient *http.Client, ctx context.Context, virtualMachineId string, allNetworkInterfaces []ReadVirtualMachineNetworkDataResponseTF) error {
-	tflog.Info(ctx, fmt.Sprintf(LogStartingSetNextNetworkInterfaceToPrimary, virtualMachineId))
+func SetNextNetworkInterfaceToPrimary(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineID string, allNetworkInterfaces []ReadVirtualMachineNetworkDataResponseTF) error {
+	tflog.Info(ctx, fmt.Sprintf(LogStartingSetNextNetworkInterfaceToPrimary, virtualMachineID))
 	updateNetworkInterfaceRequestBody := map[string]bool{
 		"setPrimary": true,
 	}
@@ -218,31 +219,32 @@ func SetNextNetworkInterfaceToPrimary(httpClient *http.Client, ctx context.Conte
 	if networkInterfaceIdx < -1 {
 		return errors.New("no network interfaces found that were not marked as primary")
 	}
-	nextPrimaryNetworkInterfaceId := allNetworkInterfaces[networkInterfaceIdx].ID.ValueString()
-	tflog.Info(ctx, fmt.Sprintf(LogSettingNetworkInterfaceAsPrimary, nextPrimaryNetworkInterfaceId))
-	request, err := http.NewRequest("PUT", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces/"+nextPrimaryNetworkInterfaceId, bytes.NewBuffer(jsonUpdateNetworkInterfaceRequestBody))
+	nextPrimaryNetworkInterfaceID := allNetworkInterfaces[networkInterfaceIdx].ID.ValueString()
+	tflog.Info(ctx, fmt.Sprintf(LogSettingNetworkInterfaceAsPrimary, nextPrimaryNetworkInterfaceID))
+	request, err := http.NewRequestWithContext(ctx, "PUT", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineID+"/network-interfaces/"+nextPrimaryNetworkInterfaceID, bytes.NewBuffer(jsonUpdateNetworkInterfaceRequestBody))
 	if err != nil {
 		return err
 	}
 
-	_, err = httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return err
 	}
+	_ = response.Body.Close()
 
-	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullySetNetworkInterfaceAsPrimary, nextPrimaryNetworkInterfaceId))
+	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullySetNetworkInterfaceAsPrimary, nextPrimaryNetworkInterfaceID))
 	return nil
 }
 
 // Remove a network interface from the virtual machine
-func RemoveNetworkInterface(httpClient *http.Client, ctx context.Context, virtualMachineId, networkInterfaceId string) error {
+func RemoveNetworkInterface(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId, networkInterfaceId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingRemoveNetworkInterfaceWithIDs, virtualMachineId, networkInterfaceId))
-	request, err := http.NewRequest("DELETE", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces/"+networkInterfaceId, nil)
+	request, err := http.NewRequestWithContext(ctx, "DELETE", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces/"+networkInterfaceId, nil)
 	if err != nil {
 		return err
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return err
 	}
@@ -261,7 +263,7 @@ func RemoveNetworkInterface(httpClient *http.Client, ctx context.Context, virtua
 		return err
 	}
 
-	_, err = client.PerformLongPolling(httpClient, ctx, "Remove GPCN Network Interface from Virtual Machine", removeNetworkInterfaceResponse.Data.JobID)
+	_, err = client.PerformLongPolling(gpcnClient, ctx, "Remove GPCN Network Interface from Virtual Machine", removeNetworkInterfaceResponse.Data.JobID)
 
 	if err != nil {
 		return err
@@ -272,10 +274,10 @@ func RemoveNetworkInterface(httpClient *http.Client, ctx context.Context, virtua
 	return nil
 }
 
-func RemoveNetworkInterfaceByNetworkId(httpClient *http.Client, ctx context.Context, virtualMachineId, networkId string) error {
+func RemoveNetworkInterfaceByNetworkId(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId, networkId string) error {
 	// Using the virtual machine id, find the corresponding networkId
 	// No GET :id endpoint, use the list and find it
-	networkInterfaces, err := GetNetworkInterfaces(httpClient, ctx, virtualMachineId)
+	networkInterfaces, err := GetNetworkInterfaces(gpcnClient, ctx, virtualMachineId)
 	if err != nil {
 		return err
 	}
@@ -292,7 +294,7 @@ func RemoveNetworkInterfaceByNetworkId(httpClient *http.Client, ctx context.Cont
 	}
 
 	// If it does, remove it
-	err = RemoveNetworkInterface(httpClient, ctx, virtualMachineId, networkInterfaceId)
+	err = RemoveNetworkInterface(gpcnClient, ctx, virtualMachineId, networkInterfaceId)
 	if err != nil {
 		return err
 	}
@@ -300,14 +302,14 @@ func RemoveNetworkInterfaceByNetworkId(httpClient *http.Client, ctx context.Cont
 	return nil
 }
 
-func AllocatePublicIp(httpClient *http.Client, ctx context.Context, virtualMachineId, networkInterfaceId string) error {
+func AllocatePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId, networkInterfaceId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingAllocatePublicIp, virtualMachineId, networkInterfaceId))
-	request, err := http.NewRequest("POST", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces/"+networkInterfaceId+"/public-ip", nil)
+	request, err := http.NewRequestWithContext(ctx, "POST", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces/"+networkInterfaceId+"/public-ip", nil)
 	if err != nil {
 		return err
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return err
 	}
@@ -326,7 +328,7 @@ func AllocatePublicIp(httpClient *http.Client, ctx context.Context, virtualMachi
 		return err
 	}
 
-	_, err = client.PerformLongPolling(httpClient, ctx, "Allocate Public IP Address", allocatePublicIpResponse.Data.JobID)
+	_, err = client.PerformLongPolling(gpcnClient, ctx, "Allocate Public IP Address", allocatePublicIpResponse.Data.JobID)
 	if err != nil {
 		return err
 	}
@@ -335,14 +337,14 @@ func AllocatePublicIp(httpClient *http.Client, ctx context.Context, virtualMachi
 	return nil
 }
 
-func ReleasePublicIp(httpClient *http.Client, ctx context.Context, virtualMachineId, networkInterfaceId string) error {
+func ReleasePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId, networkInterfaceId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingReleasePublicIp, virtualMachineId, networkInterfaceId))
-	request, err := http.NewRequest("DELETE", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces/"+networkInterfaceId+"/public-ip", nil)
+	request, err := http.NewRequestWithContext(ctx, "DELETE", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces/"+networkInterfaceId+"/public-ip", nil)
 	if err != nil {
 		return err
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return err
 	}
@@ -361,7 +363,7 @@ func ReleasePublicIp(httpClient *http.Client, ctx context.Context, virtualMachin
 		return err
 	}
 
-	_, err = client.PerformLongPolling(httpClient, ctx, "Release Public IP Address", releasePublicIpResponse.Data.JobID)
+	_, err = client.PerformLongPolling(gpcnClient, ctx, "Release Public IP Address", releasePublicIpResponse.Data.JobID)
 	if err != nil {
 		return err
 	}
@@ -370,8 +372,8 @@ func ReleasePublicIp(httpClient *http.Client, ctx context.Context, virtualMachin
 	return nil
 }
 
-// Helper funtion to consolidate logic for adding and removing network interfaces for a virtual machine
-func UpdateNetworkInterfaces(httpClient *http.Client, ctx context.Context, vmId string, oldNetworksList, newNetworksList []string, networkInterfaces []ReadVirtualMachineNetworkDataResponseTF) error {
+// Helper function to consolidate logic for adding and removing network interfaces for a virtual machine
+func UpdateNetworkInterfaces(gpcnClient *client.GpcnClient, ctx context.Context, vmId string, oldNetworksList, newNetworksList []string, networkInterfaces []ReadVirtualMachineNetworkDataResponseTF) error {
 	tflog.Info(ctx, "NetworkIds have changed, performing detaches and attaches in that order")
 
 	addedValues, removedValues := helpers.CheckListForDifferences(oldNetworksList, newNetworksList)
@@ -385,7 +387,7 @@ func UpdateNetworkInterfaces(httpClient *http.Client, ctx context.Context, vmId 
 		})
 		if interfaceIdx > -1 && networkInterfaces[interfaceIdx].IsPrimary.ValueInt64() == 1 {
 			// Issue a call to set the next interface to be the primary
-			err := SetNextNetworkInterfaceToPrimary(httpClient, ctx, vmId, networkInterfaces)
+			err := SetNextNetworkInterfaceToPrimary(gpcnClient, ctx, vmId, networkInterfaces)
 			if err != nil {
 				return fmt.Errorf("error replacing primary interface: %w", err)
 			}
@@ -402,7 +404,7 @@ func UpdateNetworkInterfaces(httpClient *http.Client, ctx context.Context, vmId 
 			continue
 		}
 		tflog.Info(ctx, fmt.Sprintf("Removing network interface for ID %s", val))
-		err := RemoveNetworkInterface(httpClient, ctx, vmId, networkInterfaces[interfaceIdx].ID.ValueString())
+		err := RemoveNetworkInterface(gpcnClient, ctx, vmId, networkInterfaces[interfaceIdx].ID.ValueString())
 		if err != nil {
 			return fmt.Errorf("error removing network interface with ID %s: %w", val, err)
 		}
@@ -411,7 +413,7 @@ func UpdateNetworkInterfaces(httpClient *http.Client, ctx context.Context, vmId 
 	// Add new network interfaces
 	for _, val := range addedValues {
 		tflog.Info(ctx, fmt.Sprintf("Adding network interface for ID %s", val))
-		err := AddNetworkInterface(httpClient, ctx, vmId, val)
+		err := AddNetworkInterface(gpcnClient, ctx, vmId, val)
 		if err != nil {
 			return fmt.Errorf("error adding network interface with ID %s: %w", val, err)
 		}

@@ -34,7 +34,7 @@ const (
 
 // Error detail message templates
 const (
-	ErrDetailExpectedHTTPClient                      = "Expected *http.Client, got: %T. Please report this issue to the provider developers."
+	ErrDetailExpectedGpcnClient                      = "Expected *client.GpcnClient, got: %T. Please report this issue to the provider developers."
 	ErrDetailSizeNoLongerAvailable                   = "The size in the state is no longer available for this datacenter. This will require a re-create with a new value"
 	ErrDetailSizeNotAvailableForDatacenter           = "the category '%s' and size '%s' is not available for this datacenter. The available values are: %s"
 	ErrDetailSizeNotAvailableForDatacenterNoCategory = "the size '%s' is not available for this datacenter. The available values are: %s"

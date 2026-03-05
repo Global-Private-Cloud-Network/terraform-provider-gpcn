@@ -1,0 +1,37 @@
+# Dependabot configuration
+# https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # Go modules
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "deps"
+    groups:
+      terraform-plugin:
+        patterns:
+          - "github.com/hashicorp/terraform-plugin-*"
+      all-dependencies:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "github.com/hashicorp/terraform-plugin-*"
+    open-pull-requests-limit: 10
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns:
+          - "*"
+    open-pull-requests-limit: 5

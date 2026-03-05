@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 
+	"terraform-provider-gpcn/internal/client"
+
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
@@ -35,14 +37,14 @@ type volumeSizesDataVolumeTypesAvailableSizesResponse struct {
 }
 
 // Get volume size ID for a given datacenterId and volume type and verify typeId and sizeGb are valid
-func GetVolumeSizeId(httpClient *http.Client, ctx context.Context, datacenterId string, volumeTypeId, sizeGb int64) (int64, error) {
+func GetVolumeSizeId(gpcnClient *client.GpcnClient, ctx context.Context, datacenterId string, volumeTypeId, sizeGb int64) (int64, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVolumeSizeIDWithParams, strconv.FormatInt(volumeTypeId, 10), strconv.FormatInt(sizeGb, 10)))
-	request, err := http.NewRequest("GET", DATA_CENTERS_BASE_URL_V1+datacenterId+"/volume-sizes", nil)
+	request, err := http.NewRequestWithContext(ctx, "GET", DATA_CENTERS_BASE_URL_V1+datacenterId+"/volume-sizes", nil)
 	if err != nil {
 		return -1, err
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.HTTPClient().Do(request)
 	if err != nil {
 		return -1, err
 	}
@@ -53,8 +55,8 @@ func GetVolumeSizeId(httpClient *http.Client, ctx context.Context, datacenterId 
 	}
 	_ = response.Body.Close()
 
-	var volumeSizesResponse volumeSizesResponse
-	err = json.Unmarshal(body, &volumeSizesResponse)
+	var volSizesResp volumeSizesResponse
+	err = json.Unmarshal(body, &volSizesResp)
 
 	if err != nil {
 		return -1, err
@@ -62,12 +64,12 @@ func GetVolumeSizeId(httpClient *http.Client, ctx context.Context, datacenterId 
 
 	tflog.Info(ctx, LogValidatingVolumeTypeAvailable)
 	// Verify the volumeType specified is available
-	typeIdx := slices.IndexFunc(volumeSizesResponse.Data.VolumeTypes, func(volumeType volumeSizesDataVolumeTypesResponse) bool {
+	typeIdx := slices.IndexFunc(volSizesResp.Data.VolumeTypes, func(volumeType volumeSizesDataVolumeTypesResponse) bool {
 		return volumeType.ID == volumeTypeId
 	})
 	if typeIdx < 0 {
 		var volumeTypes []string
-		for _, volumeType := range volumeSizesResponse.Data.VolumeTypes {
+		for _, volumeType := range volSizesResp.Data.VolumeTypes {
 			volumeTypes = append(volumeTypes, volumeType.Name)
 		}
 		volumeTypesFormatted := strings.Join(volumeTypes, ", ")
@@ -76,12 +78,12 @@ func GetVolumeSizeId(httpClient *http.Client, ctx context.Context, datacenterId 
 
 	tflog.Info(ctx, LogValidatingVolumeSizeAvailable)
 	// Verify the size is available
-	sizeIdx := slices.IndexFunc(volumeSizesResponse.Data.VolumeTypes[typeIdx].AvailableSizes, func(availableSize volumeSizesDataVolumeTypesAvailableSizesResponse) bool {
+	sizeIdx := slices.IndexFunc(volSizesResp.Data.VolumeTypes[typeIdx].AvailableSizes, func(availableSize volumeSizesDataVolumeTypesAvailableSizesResponse) bool {
 		return availableSize.SizeGb == sizeGb
 	})
 	if sizeIdx < 0 {
 		var sizes []string
-		for _, size := range volumeSizesResponse.Data.VolumeTypes[typeIdx].AvailableSizes {
+		for _, size := range volSizesResp.Data.VolumeTypes[typeIdx].AvailableSizes {
 			sizes = append(sizes, strconv.FormatInt(size.SizeGb, 10))
 		}
 		sizesFormatted := strings.Join(sizes, ", ")
@@ -90,5 +92,5 @@ func GetVolumeSizeId(httpClient *http.Client, ctx context.Context, datacenterId 
 
 	// If both are available, we can use the ID
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyRetrievedVolumeSizeIDWithParams, strconv.FormatInt(volumeTypeId, 10), strconv.FormatInt(sizeGb, 10)))
-	return volumeSizesResponse.Data.VolumeTypes[typeIdx].AvailableSizes[sizeIdx].ID, nil
+	return volSizesResp.Data.VolumeTypes[typeIdx].AvailableSizes[sizeIdx].ID, nil
 }

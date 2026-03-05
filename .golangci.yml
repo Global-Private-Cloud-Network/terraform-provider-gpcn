@@ -1,0 +1,94 @@
+version: "2"
+run:
+  modules-download-mode: readonly
+linters:
+  enable:
+    - bodyclose
+    - contextcheck
+    - errorlint
+    - gosec
+    - misspell
+    - nilerr
+    - noctx
+    - prealloc
+    - unconvert
+    - unparam
+    - wastedassign
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close
+    gosec:
+      excludes:
+        - G104
+      config:
+        global:
+          audit: false
+          nosec: true
+          show-ignored: false
+    govet:
+      disable:
+        - fieldalignment
+      enable-all: true
+    misspell:
+      locale: US
+    staticcheck:
+      checks:
+        - all
+        - -ST1003 # Disable naming convention checks (would require breaking API changes)
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - gosec
+          - unparam
+          - errcheck
+        path: _test\.go
+      - linters:
+          - errcheck
+        path: internal/testutil/
+      - linters:
+          - errcheck
+        path: internal/virtualmachines/resource_model\.go
+      - linters:
+          - lll
+        path: docs/
+      - linters:
+          - contextcheck
+        path: internal/client/client\.go
+        text: "Non-inherited new context"
+      - linters:
+          - govet
+        text: "shadow: declaration of .err. shadows"
+      - linters:
+          - prealloc
+        path: internal/virtualmachines/
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 3
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - terraform-provider-gpcn
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

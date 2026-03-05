@@ -2,10 +2,11 @@ package virtualmachines
 
 import (
 	"context"
-	"net/http"
 	"strconv"
-	"terraform-provider-gpcn/internal/networks"
 	"time"
+
+	"terraform-provider-gpcn/internal/client"
+	"terraform-provider-gpcn/internal/networks"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -43,7 +44,7 @@ func (o ResourceModelSize) AttrTypes() map[string]attr.Type {
 }
 
 // Update the plan or state with new values from the GET response
-func MapVirtualMachineResponseToModel(ctx context.Context, httpClient *http.Client, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
+func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.GpcnClient, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
 	model.ID = types.StringValue(response.Data.VirtualMachine.ID)
 
 	// Construct time entries
@@ -76,15 +77,15 @@ func MapVirtualMachineResponseToModel(ctx context.Context, httpClient *http.Clie
 	})
 
 	// If model doesn't already have these populated, set them
-	model = setModelValuesNotPresent(ctx, httpClient, response, model)
+	model = setModelValuesNotPresent(ctx, gpcnClient, response, model)
 
 	// If user requested secret values, fetch them now if needed
-	model = setSecretValues(ctx, httpClient, response, model)
+	model = setSecretValues(ctx, gpcnClient, response, model)
 
 	return model
 }
 
-func setModelValuesNotPresent(ctx context.Context, httpClient *http.Client, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
+func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
 	if model.DatacenterId.IsNull() {
 		model.DatacenterId = types.StringValue(response.Data.VirtualMachine.Datacenter.ID)
 	}
@@ -102,7 +103,7 @@ func setModelValuesNotPresent(ctx context.Context, httpClient *http.Client, resp
 		})
 	}
 
-	model = setNetworkModelValuesNotPresent(ctx, httpClient, response.Data.VirtualMachine.ID, model)
+	model = setNetworkModelValuesNotPresent(ctx, gpcnClient, response.Data.VirtualMachine.ID, model)
 
 	if model.WaitForStartup.IsNull() {
 		// Set WaitForStartup to the default value
@@ -112,11 +113,11 @@ func setModelValuesNotPresent(ctx context.Context, httpClient *http.Client, resp
 	return model
 }
 
-func setNetworkModelValuesNotPresent(ctx context.Context, httpClient *http.Client, virtualMachineID string, model ResourceModel) ResourceModel {
+func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient, virtualMachineID string, model ResourceModel) ResourceModel {
 	// Set the base public IP, might be replaced later
 	model.PublicIp = types.StringValue("")
 	// Fetch network interfaces for the virtual machine
-	networkInterfaces, err := networks.GetNetworkInterfaces(httpClient, ctx, virtualMachineID)
+	networkInterfaces, err := networks.GetNetworkInterfaces(gpcnClient, ctx, virtualMachineID)
 	if err == nil && len(networkInterfaces) > 0 {
 		// Extract network IDs from network interfaces
 		var networkIds []string
@@ -143,7 +144,7 @@ func setNetworkModelValuesNotPresent(ctx context.Context, httpClient *http.Clien
 	return model
 }
 
-func setSecretValues(ctx context.Context, httpClient *http.Client, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
+func setSecretValues(ctx context.Context, gpcnClient *client.GpcnClient, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
 	// Construct the base object
 	model.Secrets, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{
 		"username": "",
@@ -153,8 +154,8 @@ func setSecretValues(ctx context.Context, httpClient *http.Client, response *Rea
 
 	if model.DisplaySecrets.ValueBool() {
 		virtualMachineID := response.Data.VirtualMachine.ID
-		sshKeyResponse, _ := GetSSHKey(httpClient, ctx, virtualMachineID)
-		sshPasswordResponse, _ := GetPassword(httpClient, ctx, virtualMachineID)
+		sshKeyResponse, _ := GetSSHKey(gpcnClient, ctx, virtualMachineID)
+		sshPasswordResponse, _ := GetPassword(gpcnClient, ctx, virtualMachineID)
 		// Construct the secrets object
 		model.Secrets, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{
 			"username": response.Data.VirtualMachine.Username,

@@ -3,7 +3,8 @@ package provider
 import (
 	"context"
 	"fmt"
-	"net/http"
+
+	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/gpu"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
@@ -34,7 +35,7 @@ func NewGPUResource() resource.Resource {
 
 // gpuResource is the resource implementation.
 type gpuResource struct {
-	client *http.Client
+	client *client.GpcnClient
 }
 
 // Metadata returns the resource type name.
@@ -148,22 +149,24 @@ func (r *gpuResource) Configure(_ context.Context, req resource.ConfigureRequest
 		return
 	}
 
-	client, ok := req.ProviderData.(*http.Client)
+	gpcnClient, ok := req.ProviderData.(*client.GpcnClient)
 
 	if !ok {
 		resp.Diagnostics.AddError(
 			gpu.ErrSummaryUnexpectedConfigureType,
-			fmt.Sprintf(gpu.ErrDetailExpectedHTTPClient, req.ProviderData),
+			fmt.Sprintf(gpu.ErrDetailExpectedGpcnClient, req.ProviderData),
 		)
 
 		return
 	}
 
-	r.client = client
+	r.client = gpcnClient
 }
 
 // Create creates the resource and sets the initial Terraform state.
 func (r *gpuResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, gpu.LogStartingCreateGPU)
 
 	// Retrieve values from plan
@@ -217,6 +220,8 @@ func (r *gpuResource) Create(ctx context.Context, req resource.CreateRequest, re
 
 // Read refreshes the Terraform state with the latest data.
 func (r *gpuResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, gpu.LogStartingReadGPU)
 
 	// Get current state
@@ -250,6 +255,8 @@ func (r *gpuResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 
 // Update updates the resource and sets the updated Terraform state on success.
 func (r *gpuResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, gpu.LogStartingUpdateGPU)
 
 	// Retrieve values from plan
@@ -300,6 +307,8 @@ func (r *gpuResource) Update(ctx context.Context, req resource.UpdateRequest, re
 
 // Delete deletes the resource and removes the Terraform state on success.
 func (r *gpuResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, gpu.LogStartingDeleteGPU)
 
 	var state gpu.ResourceModel

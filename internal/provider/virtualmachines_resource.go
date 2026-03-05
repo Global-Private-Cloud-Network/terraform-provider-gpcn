@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/networks"
 	"terraform-provider-gpcn/internal/volumes"
@@ -46,7 +47,7 @@ func NewVirtualMachinesResource() resource.Resource {
 
 // virtualMachinesResource is the resource implementation.
 type virtualMachinesResource struct {
-	client *http.Client
+	client *client.GpcnClient
 }
 
 // Metadata returns the resource type name.
@@ -206,22 +207,24 @@ func (r *virtualMachinesResource) Configure(_ context.Context, req resource.Conf
 		return
 	}
 
-	client, ok := req.ProviderData.(*http.Client)
+	gpcnClient, ok := req.ProviderData.(*client.GpcnClient)
 
 	if !ok {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnexpectedConfigureType,
-			fmt.Sprintf(virtualmachines.ErrDetailExpectedHTTPClient, req.ProviderData),
+			fmt.Sprintf(virtualmachines.ErrDetailExpectedGpcnClient, req.ProviderData),
 		)
 
 		return
 	}
 
-	r.client = client
+	r.client = gpcnClient
 }
 
 // Create creates the resource and sets the initial Terraform state.
 func (r *virtualMachinesResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, virtualmachines.LogStartingCreateGPCNVirtualMachine)
 	// Retrieve values from plan
 	var plan virtualmachines.ResourceModel
@@ -302,6 +305,8 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 
 // Read refreshes the Terraform state with the latest data.
 func (r *virtualMachinesResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, virtualmachines.LogStartingReadGPCNVirtualMachine)
 	// Get current state
 	var state virtualmachines.ResourceModel
@@ -335,6 +340,8 @@ func (r *virtualMachinesResource) Read(ctx context.Context, req resource.ReadReq
 
 // Update updates the resource and sets the updated Terraform state on success.
 func (r *virtualMachinesResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, virtualmachines.LogStartingUpdateGPCNVirtualMachine)
 	// Map both the plan and state to see what's changed
 	var plan virtualmachines.ResourceModel
@@ -560,6 +567,8 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 
 // Delete deletes the resource and removes the Terraform state on success.
 func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, virtualmachines.LogStartingDeleteGPCNVirtualMachine)
 	var state virtualmachines.ResourceModel
 	diags := req.State.Get(ctx, &state)
@@ -619,7 +628,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 		}
 	}
 
-	request, err := http.NewRequest("DELETE", virtualmachines.BASE_URL_V1+state.ID.ValueString(), nil)
+	request, err := http.NewRequestWithContext(ctx, "DELETE", virtualmachines.BASE_URL_V1+state.ID.ValueString(), nil)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToCreateDeleteRequest,
@@ -629,7 +638,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	}
 	tflog.Info(ctx, virtualmachines.LogConstructedDeleteGPCNVirtualMachineRequest)
 
-	response, err := r.client.Do(request)
+	response, err := r.client.HTTPClient().Do(request)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToDeleteVM,
