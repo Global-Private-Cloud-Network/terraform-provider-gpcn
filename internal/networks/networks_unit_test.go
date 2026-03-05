@@ -58,7 +58,7 @@ func newNetworkResponse(id, name, networkType string) *readNetworkResponse {
 	resp.Data.NetworkType = networkType
 	resp.Data.Datacenter.ID = "dc-123"
 	resp.Data.Datacenter.Name = "US-East-1"
-	resp.Data.Datacenter.Region = "US-East"
+	resp.Data.Datacenter.Region = "East"
 	resp.Data.Datacenter.Country = "United States"
 	resp.Data.Datacenter.CountryAbbr = "US"
 	resp.Data.DNSServers = "8.8.8.8, 8.8.4.4"
@@ -142,7 +142,7 @@ func TestCreateNetworkMockHTTP(t *testing.T) {
 
 	var createCalled, jobStatusCalled, getCalled bool
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
@@ -167,7 +167,7 @@ func TestCreateNetworkMockHTTP(t *testing.T) {
 
 	model := createTestResourceModel("standard", "10.0.0.0/24", "10.0.0.10", "10.0.0.254", "8.8.8.8, 8.8.4.4")
 
-	response, err := CreateNetwork(httpClient, context.Background(), model)
+	response, err := CreateNetwork(gpcnClient, context.Background(), model)
 	if err != nil {
 		t.Fatalf("CreateNetwork failed: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestCreateNetworkMockHTTP(t *testing.T) {
 func TestGetNetworkMockHTTP(t *testing.T) {
 	const networkID = "network-789"
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/networks/"+networkID) {
@@ -203,7 +203,7 @@ func TestGetNetworkMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	response, err := GetNetwork(httpClient, context.Background(), networkID)
+	response, err := GetNetwork(gpcnClient, context.Background(), networkID)
 	if err != nil {
 		t.Fatalf("GetNetwork failed: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestUpdateNetworkMockHTTP(t *testing.T) {
 
 	var updateCalled, getCalled bool
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
@@ -250,7 +250,7 @@ func TestUpdateNetworkMockHTTP(t *testing.T) {
 	model.Name = types.StringValue("updated-network")
 	model.Description = types.StringValue("Updated description")
 
-	response, err := UpdateNetwork(httpClient, context.Background(), networkID, model)
+	response, err := UpdateNetwork(gpcnClient, context.Background(), networkID, model)
 	if err != nil {
 		t.Fatalf("UpdateNetwork failed: %v", err)
 	}

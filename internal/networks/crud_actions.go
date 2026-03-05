@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"terraform-provider-gpcn/internal/client"
 	"time"
+
+	"terraform-provider-gpcn/internal/client"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -44,7 +44,7 @@ type readNetworkResponse struct {
 	} `json:"data"`
 }
 
-func CreateNetwork(httpClient *http.Client, ctx context.Context, model ResourceModel) (*readNetworkResponse, error) {
+func CreateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*readNetworkResponse, error) {
 	tflog.Info(ctx, LogStartingCreateNetwork)
 	isStandardNetwork := model.NetworkType == types.StringValue("standard")
 	var defaultRoute string
@@ -56,7 +56,6 @@ func CreateNetwork(httpClient *http.Client, ctx context.Context, model ResourceM
 
 	// Create a new request from the model
 	createNetworkRequestBody := map[string]any{
-		"cidrBlock":              model.CIDRBlock.ValueString(),
 		"defaultRoute":           defaultRoute,
 		"defaultRouteEnabled":    isStandardNetwork,
 		"datacenterId":           model.DatacenterId.ValueString(),
@@ -71,22 +70,27 @@ func CreateNetwork(httpClient *http.Client, ctx context.Context, model ResourceM
 		"snatEnabled":            isStandardNetwork,
 	}
 
+	if !model.CIDRBlock.IsNull() && !model.CIDRBlock.IsUnknown() {
+		createNetworkRequestBody["cidrBlock"] = model.CIDRBlock.ValueString()
+	}
+
 	jsonCreateNetworkRequestBody, err := json.Marshal(createNetworkRequestBody)
 	if err != nil {
 		return nil, err
 	}
 	tflog.Info(ctx, LogConstructedCreateNetworkRequestBody)
 
-	request, err := http.NewRequest("POST", BASE_URL_V1, bytes.NewBuffer(jsonCreateNetworkRequestBody))
+	request, err := http.NewRequestWithContext(ctx, "POST", BASE_URL_V1, bytes.NewBuffer(jsonCreateNetworkRequestBody))
 	if err != nil {
 		return nil, err
 	}
 	tflog.Info(ctx, LogConstructedCreateNetworkRequest)
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 	tflog.Info(ctx, LogIssuedCreateNetworkJob)
 
 	// Read the response body and process it as createNetworkResponse
@@ -94,7 +98,6 @@ func CreateNetwork(httpClient *http.Client, ctx context.Context, model ResourceM
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
 	var createNetworkResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &createNetworkResponse)
@@ -103,15 +106,21 @@ func CreateNetwork(httpClient *http.Client, ctx context.Context, model ResourceM
 		return nil, err
 	}
 
-	jobResp, err := client.PerformLongPolling(httpClient, ctx, "Create GPCN Network", createNetworkResponse.Data.JobID)
-
+	jobResp, err := client.PerformLongPolling(gpcnClient, ctx, "Create GPCN Network", createNetworkResponse.Data.JobID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("create network polling failed: %w", err)
 	}
 
 	tflog.Info(ctx, LogLongPollingCompletedCreateNetwork)
+
+	// Extract resource ID with bounds checking
+	resourceID, err := client.GetJobResourceID(jobResp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get resource ID from create network job response: %w", err)
+	}
+
 	// Perform a GET call to retrieve actual information about the Network
-	getNetworkResponse, err := GetNetwork(httpClient, ctx, jobResp.Data.Jobs[0].ResourceId)
+	getNetworkResponse, err := GetNetwork(gpcnClient, ctx, resourceID)
 	if err != nil {
 		return nil, err
 	}
@@ -121,36 +130,36 @@ func CreateNetwork(httpClient *http.Client, ctx context.Context, model ResourceM
 }
 
 // Helper function to get a network by ID. Shared between Read and the final action of Create and Delete
-func GetNetwork(client *http.Client, ctx context.Context, networkId string) (*readNetworkResponse, error) {
-	tflog.Info(ctx, fmt.Sprintf(LogStartingGetNetworkWithID, networkId))
-	request, err := http.NewRequest("GET", BASE_URL_V1+networkId, nil)
+func GetNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkID string) (*readNetworkResponse, error) {
+	tflog.Info(ctx, fmt.Sprintf(LogStartingGetNetworkWithID, networkID))
+	request, err := http.NewRequestWithContext(ctx, "GET", BASE_URL_V1+networkID, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := client.Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
-	var readNetworkResponse readNetworkResponse
-	err = json.Unmarshal(body, &readNetworkResponse)
+	var networkResp readNetworkResponse
+	err = json.Unmarshal(body, &networkResp)
 
 	if err != nil {
 		return nil, err
 	}
 
-	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyRetrievedNetworkWithID, networkId))
-	return &readNetworkResponse, nil
+	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyRetrievedNetworkWithID, networkID))
+	return &networkResp, nil
 }
 
-func UpdateNetwork(httpClient *http.Client, ctx context.Context, networkId string, model ResourceModel) (*readNetworkResponse, error) {
+func UpdateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkId string, model ResourceModel) (*readNetworkResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateNetworkWithID, networkId))
 	isStandardNetwork := model.NetworkType == types.StringValue("standard")
 	var defaultRoute string
@@ -172,7 +181,6 @@ func UpdateNetwork(httpClient *http.Client, ctx context.Context, networkId strin
 		"dnsServers":             model.DNSServers.ValueString(),
 		"name":                   model.Name.ValueString(),
 		"serveDNSServersEnabled": isStandardNetwork,
-		"snatEnabled":            isStandardNetwork,
 	}
 
 	jsonUpdateNetworkRequestBody, err := json.Marshal(updateNetworkRequestBody)
@@ -181,20 +189,21 @@ func UpdateNetwork(httpClient *http.Client, ctx context.Context, networkId strin
 	}
 	tflog.Info(ctx, LogConstructedUpdateNetworkRequestBody)
 
-	request, err := http.NewRequest("PUT", BASE_URL_V1+model.ID.ValueString(), bytes.NewBuffer(jsonUpdateNetworkRequestBody))
+	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+model.ID.ValueString(), bytes.NewBuffer(jsonUpdateNetworkRequestBody))
 	if err != nil {
 		return nil, err
 	}
 	tflog.Info(ctx, LogConstructedUpdateNetworkRequest)
 
-	_, err = httpClient.Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
 	tflog.Info(ctx, LogUpdateRequestSentSuccessfully)
 	// Perform a GET call to retrieve actual information about the Network
-	getNetworkResponse, err := GetNetwork(httpClient, ctx, model.ID.ValueString())
+	getNetworkResponse, err := GetNetwork(gpcnClient, ctx, model.ID.ValueString())
 	if err != nil {
 		return nil, err
 	}
@@ -203,51 +212,53 @@ func UpdateNetwork(httpClient *http.Client, ctx context.Context, networkId strin
 	return getNetworkResponse, nil
 }
 
-func DeleteNetwork(httpClient *http.Client, ctx context.Context, networkId string) error {
+func DeleteNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteNetworkWithID, networkId))
-	request, err := http.NewRequest("DELETE", BASE_URL_V1+networkId, nil)
+	request, err := http.NewRequestWithContext(ctx, "DELETE", BASE_URL_V1+networkId, nil)
 	if err != nil {
 		return err
 	}
 	tflog.Info(ctx, LogConstructedDeleteNetworkRequest)
 
 	// Detach this network from any virtual machines it may be attached to
-	readNetworksToVMsResponse, err := GetVirtualMachinesAttachedToNetworks(httpClient, ctx, networkId)
+	readNetworksToVMsResponse, err := GetVirtualMachinesAttachedToNetworks(gpcnClient, ctx, networkId)
 	if err != nil {
 		return err
 	}
 
-	for _, virtualmachine := range readNetworksToVMsResponse.Data {
-		err := RemoveNetworkInterfaceByNetworkId(httpClient, ctx, virtualmachine.ID, networkId)
-		if err != nil {
-			return err
+	// Nil check before iterating
+	if readNetworksToVMsResponse != nil {
+		for _, virtualmachine := range readNetworksToVMsResponse.Data {
+			err := RemoveNetworkInterfaceByNetworkId(gpcnClient, ctx, virtualmachine.ID, networkId)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
 	// It's possible for the delete job to fail if we are deleting it and a virtual machine at the same time
 	// If this happens, catch the error and don't process it until we've failed sufficiently enough
-	errorCount := 1
-	var errString string
-	for {
-		response, err := httpClient.Do(request)
+	var lastErr error
+	for errorCount := 1; errorCount <= DELETE_NETWORK_RETRY_COUNT; errorCount++ {
+		// Wait before retry (skip on first attempt)
+		if errorCount > 1 {
+			time.Sleep(time.Second * 5)
+		}
+
+		response, err := gpcnClient.DoWithRetry(request)
 		if err != nil {
-			errorCount += 1
+			lastErr = err
 			tflog.Info(ctx, fmt.Sprintf(LogDeleteNetworkFailedRetrying, networkId, errorCount, DELETE_NETWORK_RETRY_COUNT))
-			if errorCount > DELETE_NETWORK_RETRY_COUNT {
-				errString = err.Error()
-				// Wait a few seconds before retrying
-				time.Sleep(time.Second * 5)
-				break
-			}
+			continue
 		}
 		tflog.Info(ctx, LogIssuedDeleteNetworkJob)
 
 		// Read the response body and process it as deleteNetworkResponse
+		defer response.Body.Close()
 		body, err := io.ReadAll(response.Body)
 		if err != nil {
 			return err
 		}
-		_ = response.Body.Close()
 
 		var deleteNetworkResponse client.JobStatusSingularResponse
 		err = json.Unmarshal(body, &deleteNetworkResponse)
@@ -256,25 +267,21 @@ func DeleteNetwork(httpClient *http.Client, ctx context.Context, networkId strin
 			return err
 		}
 
-		_, err = client.PerformLongPolling(httpClient, ctx, "Delete GPCN Network", deleteNetworkResponse.Data.JobID)
+		_, err = client.PerformLongPolling(gpcnClient, ctx, "Delete GPCN Network", deleteNetworkResponse.Data.JobID)
 
 		if err != nil {
-			errorCount += 1
+			lastErr = err
 			tflog.Info(ctx, fmt.Sprintf(LogDeleteNetworkFailedRetrying, networkId, errorCount, DELETE_NETWORK_RETRY_COUNT))
-			if errorCount > DELETE_NETWORK_RETRY_COUNT {
-				errString = err.Error()
-				// Wait a few seconds before retrying
-				time.Sleep(time.Second * 5)
-				break
-			}
-		} else {
-			// If we got here safely, we can be done
-			break
+			continue
 		}
+
+		// Success - exit the loop
+		lastErr = nil
+		break
 	}
 
-	if errString != "" {
-		return errors.New(errString)
+	if lastErr != nil {
+		return lastErr
 	}
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyCompletedDeleteNetworkWithID, networkId))
 	return nil

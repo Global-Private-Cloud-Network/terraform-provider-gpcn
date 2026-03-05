@@ -22,7 +22,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.4.0"
+      version = "~>0.4.1"
     }
   }
 }
@@ -31,17 +31,17 @@ provider "gpcn" {
   host = "https://api.gpcn.com"
 }
 
-# Lookup datacenter in East US region
-data "gpcn_datacenters" "east_us" {
+# Lookup datacenter in Central US region
+data "gpcn_datacenters" "central_us" {
   country_name = "United States"
-  region_name  = "east"
-  name         = "Newark"
+  region_name  = "Central"
+  name         = "Chicago"
 }
 
 # SSD Volume
 resource "gpcn_volume" "example_ssd" {
   name          = "terraform-demo-ssd"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   volume_type   = "SSD"
   size_gb       = 256
 }

@@ -1,3 +1,27 @@
+## 0.4.1 (March 5, 2026)
+
+FEATURES:
+
+- **GPCN Client is now more configurable**: New provider configuration options for customizing HTTP behavior:
+  - `request_timeout`: Individual HTTP request timeout (default: 60s)
+  - `polling_timeout`: Maximum wait time for async operations (default: 10m)
+  - `max_retries`: Retry count for transient failures (default: 3)
+- **Correlation IDs**: All API requests now include correlation IDs for improved tracing and debugging
+
+ENHANCEMENTS:
+
+- Added GitHub Actions workflows for automated testing, security scanning, and dependency management
+- Added golangci-lint configuration for consistent code quality
+- Added Dependabot configuration for automated dependency updates
+- Upgraded Go dependencies from 1.25.0 to 1.26.0
+
+BUG FIXES:
+
+- Fixed custom network creation and updates to match latest API changes
+- Fixed VM creation to reflect latest API changes
+- Fixed gosec security issues with explanatory annotations
+- Resolved dependency vulnerabilities
+
 ## 0.4.0 (February 23, 2026)
 
 BREAKING CHANGES:

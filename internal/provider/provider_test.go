@@ -8,7 +8,9 @@ import (
 // Uses environment variable configuration to populate provider values
 const (
 	providerConfig = `
-provider "gpcn" {}
+provider "gpcn" {
+  polling_timeout = 1200
+}
 `
 )
 

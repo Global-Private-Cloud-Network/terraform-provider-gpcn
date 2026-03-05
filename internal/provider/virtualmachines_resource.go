@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/networks"
 	"terraform-provider-gpcn/internal/volumes"
@@ -17,6 +18,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
@@ -46,7 +48,7 @@ func NewVirtualMachinesResource() resource.Resource {
 
 // virtualMachinesResource is the resource implementation.
 type virtualMachinesResource struct {
-	client *http.Client
+	client *client.GpcnClient
 }
 
 // Metadata returns the resource type name.
@@ -95,7 +97,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 						Description: "Short code representing the category. Must be one of: 'general' or 'memory'",
 						Required:    true,
 						Validators: []validator.String{
-							stringvalidator.OneOf(virtualmachines.CategoryGeneral, virtualmachines.CategoryMemory),
+							stringvalidator.OneOf(virtualmachines.AllCategoryStrings()...),
 						},
 					},
 					"tier": schema.StringAttribute{
@@ -206,22 +208,24 @@ func (r *virtualMachinesResource) Configure(_ context.Context, req resource.Conf
 		return
 	}
 
-	client, ok := req.ProviderData.(*http.Client)
+	gpcnClient, ok := req.ProviderData.(*client.GpcnClient)
 
 	if !ok {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnexpectedConfigureType,
-			fmt.Sprintf(virtualmachines.ErrDetailExpectedHTTPClient, req.ProviderData),
+			fmt.Sprintf(virtualmachines.ErrDetailExpectedGpcnClient, req.ProviderData),
 		)
 
 		return
 	}
 
-	r.client = client
+	r.client = gpcnClient
 }
 
 // Create creates the resource and sets the initial Terraform state.
 func (r *virtualMachinesResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, virtualmachines.LogStartingCreateGPCNVirtualMachine)
 	// Retrieve values from plan
 	var plan virtualmachines.ResourceModel
@@ -237,7 +241,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryErrorVerifyingImage,
-			fmt.Sprintf(virtualmachines.ErrDetailImageVerificationFailed, plan.Image.ValueString(), plan.DatacenterId.ValueString())+": "+err.Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailImageVerificationFailed, plan.Image.ValueString(), plan.DatacenterId.ValueString()), err).Error(),
 		)
 		return
 	}
@@ -249,7 +253,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryErrorVerifyingSize,
-			fmt.Sprintf(virtualmachines.ErrDetailSizeVerificationFailed, size.Category.ValueString(), size.Tier.ValueString(), plan.DatacenterId.ValueString())+": "+err.Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailSizeVerificationFailed, size.Category.ValueString(), size.Tier.ValueString(), plan.DatacenterId.ValueString()), err).Error(),
 		)
 		return
 	}
@@ -263,7 +267,9 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
-	plan = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
+	var mapDiags diag.Diagnostics
+	plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
+	resp.Diagnostics.Append(mapDiags...)
 
 	// Attach each volume
 	if !plan.VolumeIds.IsNull() {
@@ -274,7 +280,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 			if err != nil {
 				resp.Diagnostics.AddWarning(
 					virtualmachines.WarnSummaryAttachingVolumeFailed,
-					fmt.Sprintf(virtualmachines.WarnDetailAttachingVolumeWithIDFailed, volumeId)+": "+err.Error(),
+					fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.WarnDetailAttachingVolumeWithIDFailed, volumeId), err).Error(),
 				)
 			}
 		}
@@ -285,7 +291,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 	if err != nil {
 		resp.Diagnostics.AddWarning(
 			virtualmachines.WarnSummaryUnableToStartVM,
-			fmt.Sprintf(virtualmachines.ErrDetailStartingVM, plan.ID.ValueString())+": "+err.Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStartingVM, plan.ID.ValueString()), err).Error(),
 		)
 	}
 	tflog.Debug(ctx, virtualmachines.LogSuccessfullyCreatedVMMayNotBeRunning)
@@ -302,6 +308,8 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 
 // Read refreshes the Terraform state with the latest data.
 func (r *virtualMachinesResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, virtualmachines.LogStartingReadGPCNVirtualMachine)
 	// Get current state
 	var state virtualmachines.ResourceModel
@@ -316,12 +324,14 @@ func (r *virtualMachinesResource) Read(ctx context.Context, req resource.ReadReq
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryRetrievingVMInfoFailed,
-			virtualmachines.ErrDetailVMInfoFailedCanImport+": "+err.Error(),
+			fmt.Errorf("%s: %w", virtualmachines.ErrDetailVMInfoFailedCanImport, err).Error(),
 		)
 		return
 	}
 
-	state = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, state)
+	var mapDiags diag.Diagnostics
+	state, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, state)
+	resp.Diagnostics.Append(mapDiags...)
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, state)
@@ -335,6 +345,8 @@ func (r *virtualMachinesResource) Read(ctx context.Context, req resource.ReadReq
 
 // Update updates the resource and sets the updated Terraform state on success.
 func (r *virtualMachinesResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, virtualmachines.LogStartingUpdateGPCNVirtualMachine)
 	// Map both the plan and state to see what's changed
 	var plan virtualmachines.ResourceModel
@@ -383,143 +395,45 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		if err != nil {
 			resp.Diagnostics.AddError(
 				virtualmachines.ErrSummaryUnableToUpdateVM,
-				fmt.Sprintf(virtualmachines.ErrDetailStoppingVM, state.ID.ValueString())+": "+err.Error(),
+				fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStoppingVM, state.ID.ValueString()), err).Error(),
 			)
 			return
 		}
 	}
 
-	// If network ids are updated, need to call add/remove network interface
-	if !slices.Equal(plan.NetworkIds.Elements(), state.NetworkIds.Elements()) {
-		networkInterfaces, err := networks.GetNetworkInterfaces(r.client, ctx, state.ID.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError(
-				virtualmachines.ErrSummaryErrorRetrievingNetworkIfaces,
-				err.Error(),
-			)
-			return
-		}
-
-		var oldNetworksList, newNetworksList []string
-		state.NetworkIds.ElementsAs(ctx, &oldNetworksList, true)
-		plan.NetworkIds.ElementsAs(ctx, &newNetworksList, true)
-		// Validate new network interface size will not increase beyond network cap
-		err = virtualmachines.ValidateNetworkInterfacesDoesNotExceedCap(oldNetworksList, newNetworksList, networkInterfaces)
-		if err != nil {
-			resp.Diagnostics.AddError(
-				virtualmachines.ErrSummaryErrorUpdatingNetworkInterfaces,
-				err.Error(),
-			)
-			return
-		}
-
-		err = networks.UpdateNetworkInterfaces(r.client, ctx, plan.ID.ValueString(), oldNetworksList, newNetworksList, networkInterfaces)
-		if err != nil {
-			resp.Diagnostics.AddError(
-				virtualmachines.ErrSummaryErrorUpdatingNetworkInterfaces,
-				err.Error(),
-			)
-			return
-		}
+	// Update network interfaces if changed
+	networkDiags := virtualmachines.UpdateNetworkInterfacesIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+	resp.Diagnostics.Append(networkDiags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	// If we are changing our public IP allocation, need to call public-ip
-	if plan.AllocatePublicIp != state.AllocatePublicIp {
-		// Cannot use the call from above since these were just updated
-		networkInterfaces, err := networks.GetNetworkInterfaces(r.client, ctx, state.ID.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError(
-				virtualmachines.ErrSummaryErrorRetrievingNetworkIfaces,
-				err.Error(),
-			)
-			return
-		}
-		// Find the primary network interface
-		interfaceIdx := slices.IndexFunc(networkInterfaces, func(inter networks.ReadVirtualMachineNetworkDataResponseTF) bool {
-			return inter.IsPrimary == types.Int64Value(1)
-		})
-		// This means none are set to primary as far as we can tell, which should be impossible since there must always be one
-		if interfaceIdx < 0 {
-			resp.Diagnostics.AddError(
-				virtualmachines.ErrSummaryErrorRetrievingNetworkIfaces,
-				virtualmachines.ErrDetailNetworkInterfacesForVM,
-			)
-			return
-		}
-		primaryNetworkInterfaceId := networkInterfaces[interfaceIdx].ID.ValueString()
-
-		// If this is true, allocate IP
-		if plan.AllocatePublicIp.ValueBool() {
-			err := networks.AllocatePublicIp(r.client, ctx, plan.ID.ValueString(), primaryNetworkInterfaceId)
-			if err != nil {
-				resp.Diagnostics.AddError(
-					virtualmachines.ErrSummaryUnableToUpdatePublicIPConfiguration,
-					err.Error(),
-				)
-				return
-			}
-		} else {
-			err := networks.ReleasePublicIp(r.client, ctx, plan.ID.ValueString(), primaryNetworkInterfaceId)
-			if err != nil {
-				resp.Diagnostics.AddError(
-					virtualmachines.ErrSummaryUnableToUpdatePublicIPConfiguration,
-					err.Error(),
-				)
-				return
-			}
-		}
+	// Update public IP allocation if changed
+	publicIPDiags := virtualmachines.UpdatePublicIPIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+	resp.Diagnostics.Append(publicIPDiags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	// If size is updated, need to call resize
-	if !maps.Equal(plan.Size.Attributes(), state.Size.Attributes()) {
-		newSizeId, err := virtualmachines.ValidatePlanSizeLargerThanStateSize(r.client, ctx, state, plan)
-		if err != nil {
-			resp.Diagnostics.AddError(
-				virtualmachines.ErrSummaryErrorUpdatingVMSize,
-				err.Error(),
-			)
-			return
-		}
-
-		tflog.Info(ctx, virtualmachines.LogPerformingVirtualMachineResize)
-		// Re-size the virtual machine
-		err = virtualmachines.UpdateVirtualMachineSize(r.client, ctx, plan.ID.ValueString(), newSizeId)
-		if err != nil {
-			resp.Diagnostics.AddError(
-				virtualmachines.ErrSummaryErrorUpdatingVMSize,
-				err.Error(),
-			)
-			return
-		}
+	// Update size if changed
+	sizeDiags := virtualmachines.UpdateSizeIfChanged(r.client, ctx, plan.ID.ValueString(), state, plan)
+	resp.Diagnostics.Append(sizeDiags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	// Check for name updated
-	if plan.Name != state.Name {
-		tflog.Info(ctx, virtualmachines.LogNameChangedUpdatingVirtualMachine)
-		err := virtualmachines.UpdateVirtualMachine(r.client, ctx, state.ID.ValueString(), plan.Name.ValueString())
-		if err != nil {
-			resp.Diagnostics.AddError(
-				virtualmachines.ErrSummaryErrorUpdatingVMName,
-				err.Error(),
-			)
-			return
-		}
+	// Update name if changed
+	nameDiags := virtualmachines.UpdateNameIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+	resp.Diagnostics.Append(nameDiags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
-	// If volume ids are updated, need to call attach/detach volume
-	if !slices.Equal(plan.VolumeIds.Elements(), state.VolumeIds.Elements()) {
-		var oldVolumesList, newVolumesList []string
-		state.VolumeIds.ElementsAs(ctx, &oldVolumesList, true)
-		plan.VolumeIds.ElementsAs(ctx, &newVolumesList, true)
-
-		err := virtualmachines.UpdateVolumes(r.client, ctx, plan.ID.ValueString(), oldVolumesList, newVolumesList)
-		if err != nil {
-			resp.Diagnostics.AddError(
-				virtualmachines.ErrSummaryErrorUpdatingVolumes,
-				err.Error(),
-			)
-			return
-		}
+	// Update volumes if changed
+	volumeDiags := virtualmachines.UpdateVolumesIfChanged(r.client, ctx, plan.ID.ValueString(), state, plan)
+	resp.Diagnostics.Append(volumeDiags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	// Perform a GET call to retrieve actual information about the Virtual Machine
@@ -528,13 +442,15 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryRetrievingVMInfoFailed,
-			virtualmachines.ErrDetailVMInfoFailedCanImport+": "+err.Error(),
+			fmt.Errorf("%s: %w", virtualmachines.ErrDetailVMInfoFailedCanImport, err).Error(),
 		)
 		return
 	}
 
 	tflog.Info(ctx, virtualmachines.LogRetrievedLatestVMInfoMappingToModel)
-	plan = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
+	var mapDiags diag.Diagnostics
+	plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
+	resp.Diagnostics.Append(mapDiags...)
 
 	// Once finished, conditionally start the virtual machine again
 	if needStopVM {
@@ -542,7 +458,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		if err != nil {
 			resp.Diagnostics.AddWarning(
 				virtualmachines.WarnSummaryUnableToStartVM,
-				fmt.Sprintf(virtualmachines.ErrDetailStartingVM, state.ID.ValueString())+": "+err.Error(),
+				fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStartingVM, state.ID.ValueString()), err).Error(),
 			)
 		}
 	}
@@ -560,6 +476,8 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 
 // Delete deletes the resource and removes the Terraform state on success.
 func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, virtualmachines.LogStartingDeleteGPCNVirtualMachine)
 	var state virtualmachines.ResourceModel
 	diags := req.State.Get(ctx, &state)
@@ -573,7 +491,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToDeleteVM,
-			fmt.Sprintf(virtualmachines.ErrDetailStoppingVM, state.ID.ValueString())+": "+err.Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStoppingVM, state.ID.ValueString()), err).Error(),
 		)
 		return
 	}
@@ -585,7 +503,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 		if err != nil {
 			resp.Diagnostics.AddError(
 				virtualmachines.ErrSummaryErrorRetrievingNetworkIfaces,
-				fmt.Sprintf(virtualmachines.ErrDetailNetworkInterfacesForVM, state.ID.ValueString())+": "+err.Error(),
+				fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailNetworkInterfacesForVM, state.ID.ValueString()), err).Error(),
 			)
 			return
 		}
@@ -597,7 +515,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 				if err != nil {
 					resp.Diagnostics.AddWarning(
 						virtualmachines.WarnSummaryRemovingNetworkInterfaceFailed,
-						fmt.Sprintf(virtualmachines.WarnDetailRemovingNetworkInterfaceWithIDFailed, adapter.ID.ValueString())+": "+err.Error(),
+						fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.WarnDetailRemovingNetworkInterfaceWithIDFailed, adapter.ID.ValueString()), err).Error(),
 					)
 				}
 			}
@@ -613,13 +531,13 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 			if err != nil {
 				resp.Diagnostics.AddWarning(
 					virtualmachines.WarnSummaryRemovingVolumeFailed,
-					fmt.Sprintf(virtualmachines.WarnDetailRemovingVolumeWithIDFailed, volumeId)+": "+err.Error()+". This warning should only be treated as an error if you are not trying to delete the virtual machine and volume in quick succession.",
+					fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.WarnDetailRemovingVolumeWithIDFailed, volumeId), err).Error()+". This warning should only be treated as an error if you are not trying to delete the virtual machine and volume in quick succession.",
 				)
 			}
 		}
 	}
 
-	request, err := http.NewRequest("DELETE", virtualmachines.BASE_URL_V1+state.ID.ValueString(), nil)
+	request, err := http.NewRequestWithContext(ctx, "DELETE", virtualmachines.BASE_URL_V1+state.ID.ValueString(), nil)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToCreateDeleteRequest,
@@ -629,14 +547,15 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	}
 	tflog.Info(ctx, virtualmachines.LogConstructedDeleteGPCNVirtualMachineRequest)
 
-	response, err := r.client.Do(request)
+	response, err := r.client.DoWithRetry(request)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToDeleteVM,
-			fmt.Sprintf(virtualmachines.ErrDetailUnableToDeleteVMWithID, state.ID.ValueString())+": "+err.Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailUnableToDeleteVMWithID, state.ID.ValueString()), err).Error(),
 		)
 		return
 	}
+	defer response.Body.Close()
 	tflog.Info(ctx, virtualmachines.LogIssuedDeleteGPCNVirtualMachineJob)
 
 	// Read the response body and process it as deleteVirtualMachineResponse
@@ -648,7 +567,6 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 		)
 		return
 	}
-	_ = response.Body.Close()
 
 	var deleteVirtualMachineResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &deleteVirtualMachineResponse)
@@ -656,7 +574,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryErrorUnmarshalingDelete,
-			fmt.Sprintf(virtualmachines.ErrDetailUnmarshalingDeleteWithID, state.ID.ValueString())+": "+err.Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailUnmarshalingDeleteWithID, state.ID.ValueString()), err).Error(),
 		)
 		return
 	}
@@ -666,7 +584,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryEncounteredErrorGettingJobInfo,
-			virtualmachines.ErrDetailJobInfoCheckDashboard+": "+err.Error(),
+			fmt.Errorf("%s: %w", virtualmachines.ErrDetailJobInfoCheckDashboard, err).Error(),
 		)
 		return
 	}

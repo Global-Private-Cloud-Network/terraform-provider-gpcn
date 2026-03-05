@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"os"
+	"time"
 
 	"terraform-provider-gpcn/internal/client"
 
@@ -47,6 +48,7 @@ func (p *gpcnProvider) Metadata(_ context.Context, _ provider.MetadataRequest, r
 // Schema defines the provider-level schema for configuration data.
 func (p *gpcnProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
+		Description: "The GPCN provider allows you to manage GPCN cloud infrastructure resources.",
 		Attributes: map[string]schema.Attribute{
 			"host": schema.StringAttribute{
 				Description: "The hostname of the GPCN API. For most users, this is https://api.gpcn.com. This must be set either in the provider configuration block, or as an environment variable exposed via GPCN_HOST",
@@ -57,13 +59,28 @@ func (p *gpcnProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp 
 				Optional:    true,
 				Sensitive:   true,
 			},
+			"request_timeout": schema.Int64Attribute{
+				Description: "Timeout in seconds for individual HTTP requests to the GPCN API. Defaults to 60 seconds.",
+				Optional:    true,
+			},
+			"polling_timeout": schema.Int64Attribute{
+				Description: "Timeout in seconds for async operations (create, update, delete). Defaults to 600 seconds (10 minutes).",
+				Optional:    true,
+			},
+			"max_retries": schema.Int64Attribute{
+				Description: "Maximum number of retries for transient failures. Defaults to 3.",
+				Optional:    true,
+			},
 		},
 	}
 }
 
 type gpcnProviderModel struct {
-	Host   types.String `tfsdk:"host"`
-	APIKey types.String `tfsdk:"api_key"`
+	Host           types.String `tfsdk:"host"`
+	APIKey         types.String `tfsdk:"api_key"`
+	RequestTimeout types.Int64  `tfsdk:"request_timeout"`
+	PollingTimeout types.Int64  `tfsdk:"polling_timeout"`
+	MaxRetries     types.Int64  `tfsdk:"max_retries"`
 }
 
 func (p *gpcnProvider) Configure(ctx context.Context, req provider.ConfigureRequest, resp *provider.ConfigureResponse) {
@@ -158,16 +175,39 @@ func (p *gpcnProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 	ctx = tflog.MaskFieldValuesWithFieldKeys(ctx, "gpcn_api_key")
 	tflog.Debug(ctx, "Creating HTTP Client...")
 
-	httpClient, err := client.NewHttpClient(host, apiKey)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			"Unable to create new HTTP Client", err.Error(),
-		)
+	// Build client configuration with defaults
+	clientConfig := client.DefaultConfig(host, apiKey)
+
+	// Override with user-provided values
+	if !config.RequestTimeout.IsNull() {
+		clientConfig.RequestTimeout = time.Duration(config.RequestTimeout.ValueInt64()) * time.Second
+	}
+	if !config.PollingTimeout.IsNull() {
+		clientConfig.PollingTimeout = time.Duration(config.PollingTimeout.ValueInt64()) * time.Second
+	}
+	if !config.MaxRetries.IsNull() {
+		clientConfig.MaxRetries = int(config.MaxRetries.ValueInt64())
 	}
 
-	resp.DataSourceData = httpClient
-	resp.ResourceData = httpClient
-	tflog.Debug(ctx, "HTTP Client successfully created. GPCN provider online")
+	tflog.Debug(ctx, "Client configuration",
+		map[string]any{
+			"request_timeout_seconds": clientConfig.RequestTimeout.Seconds(),
+			"polling_timeout_seconds": clientConfig.PollingTimeout.Seconds(),
+			"max_retries":             clientConfig.MaxRetries,
+		})
+
+	gpcnClient, err := client.NewGpcnClient(clientConfig)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			"Unable to create GPCN client", err.Error(),
+		)
+		return
+	}
+
+	// Pass the full GpcnClient so resources can access both HTTP client and config
+	resp.DataSourceData = gpcnClient
+	resp.ResourceData = gpcnClient
+	tflog.Debug(ctx, "GPCN client successfully created. Provider online")
 }
 
 // DataSources defines the data sources implemented in the provider.

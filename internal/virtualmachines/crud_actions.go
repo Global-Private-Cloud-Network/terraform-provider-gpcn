@@ -10,49 +10,52 @@ import (
 	"net/http"
 	"slices"
 	"strings"
+	"time"
+
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/networks"
-	"time"
 
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
+
+type ConfigurationResponse struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Code         string `json:"code"`
+	CategoryCode string `json:"categoryCode"`
+	CPU          int64  `json:"cpu"`
+	RAM          int64  `json:"ram"`
+	Disk         int64  `json:"disk"`
+}
 
 type ReadVirtualMachinesResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Data    struct {
-		Status         string `json:"status"`
-		VirtualMachine struct {
-			ID                        string `json:"id"`
-			Name                      string `json:"name"`
-			CreatedAt                 string `json:"createdAt"`
-			UpdatedAt                 string `json:"updatedAt"`
-			ConfigurationId           int64  `json:"configurationId"`
-			Configuration             string `json:"configuration"`
-			ConfigurationCode         string `json:"configurationCode"`
-			ConfigurationCategoryCode string `json:"configurationCategoryCode"`
-			CPU                       int64  `json:"cpu"`
-			RAM                       int64  `json:"ram"`
-			Disk                      int64  `json:"disk"`
-			Image                     string `json:"image"`
-			Username                  string `json:"username"`
-			Datacenter                struct {
-				ID          string `json:"id"`
-				Name        string `json:"name"`
-				Region      string `json:"region"`
-				CountryAbbr string `json:"countryAbbr"`
-				Country     string `json:"country"`
-			} `json:"datacenter"`
-		} `json:"virtualmachine"`
+		Status        string                `json:"status"`
+		ID            string                `json:"id"`
+		Name          string                `json:"name"`
+		CreatedAt     string                `json:"createdAt"`
+		UpdatedAt     string                `json:"updatedAt"`
+		Configuration ConfigurationResponse `json:"configuration"`
+		Image         string                `json:"image"`
+		Username      string                `json:"username"`
+		Datacenter    struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			Region      string `json:"region"`
+			CountryAbbr string `json:"countryAbbr"`
+			Country     string `json:"country"`
+		} `json:"datacenter"`
 	} `json:"data"`
 }
 
-func CreateVirtualMachine(httpClient *http.Client, ctx context.Context, imageId, sizeId int64, model ResourceModel) (*ReadVirtualMachinesResponse, error) {
+func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, imageId, sizeId int64, model ResourceModel) (*ReadVirtualMachinesResponse, error) {
 	tflog.Info(ctx, LogStartingCreateVirtualMachine)
 
 	// Allocate public Ip cannot be true if we are attaching a network of type custom
 	tflog.Info(ctx, LogValidatingPublicIPConfiguration)
-	err := ValidatePublicIpValue(httpClient, ctx, model)
+	err := ValidatePublicIpValue(gpcnClient, ctx, model)
 	if err != nil {
 		return nil, err
 	}
@@ -93,25 +96,25 @@ func CreateVirtualMachine(httpClient *http.Client, ctx context.Context, imageId,
 	}
 
 	// Create API request
-	request, err := http.NewRequest("POST", BASE_URL_V1, bytes.NewBuffer(jsonCreateVMRequestBody))
+	request, err := http.NewRequestWithContext(ctx, "POST", BASE_URL_V1, bytes.NewBuffer(jsonCreateVMRequestBody))
 	if err != nil {
 		return nil, err
 	}
 	tflog.Info(ctx, LogConstructedCreateVMRequest)
 
 	// Perform API request
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
 	tflog.Info(ctx, LogIssuedCreateVMJob)
 
 	// Read the response body and process it as createVirtualMachineResponse
+	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
 	var createVirtualMachineResponse client.JobStatusMultiResponse
 	err = json.Unmarshal(body, &createVirtualMachineResponse)
@@ -120,15 +123,27 @@ func CreateVirtualMachine(httpClient *http.Client, ctx context.Context, imageId,
 		return nil, err
 	}
 
-	jobResp, err := client.PerformLongPolling(httpClient, ctx, "Create GPCN Virtual Machine", createVirtualMachineResponse.Data.Jobs[0].JobID)
-
+	// Extract job ID with bounds checking
+	jobID, err := client.GetJobID(&createVirtualMachineResponse)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get job ID from create VM response: %w", err)
+	}
+
+	jobResp, err := client.PerformLongPolling(gpcnClient, ctx, "Create GPCN Virtual Machine", jobID)
+	if err != nil {
+		return nil, fmt.Errorf("create VM polling failed: %w", err)
 	}
 
 	tflog.Info(ctx, LogLongPollingCompletedCreateVM)
+
+	// Extract resource ID with bounds checking
+	resourceID, err := client.GetJobResourceID(jobResp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get resource ID from create VM job response: %w", err)
+	}
+
 	// Wait for the VM to actually be spun up before doing anything more
-	getVirtualMachineResponse, err := PollForVirtualMachineStatus(httpClient, ctx, jobResp.Data.Jobs[0].ResourceId, []string{Running, Shutoff}, DEFAULT_NETWORK_TIMEOUT_SECONDS)
+	getVirtualMachineResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, resourceID, []string{VMStatusRunning.String(), VMStatusShutoff.String()}, DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS)
 	if err != nil {
 		return nil, err
 	}
@@ -138,23 +153,23 @@ func CreateVirtualMachine(httpClient *http.Client, ctx context.Context, imageId,
 }
 
 // Gets a Virtual Machine by its ID
-func GetVirtualMachine(httpClient *http.Client, ctx context.Context, virtualMachineId string) (*ReadVirtualMachinesResponse, error) {
+func GetVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string) (*ReadVirtualMachinesResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVMWithID, virtualMachineId))
-	request, err := http.NewRequest("GET", BASE_URL_V1+virtualMachineId, nil)
+	request, err := http.NewRequestWithContext(ctx, "GET", BASE_URL_V1+virtualMachineId, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
 	var readVirtualMachinesResponse ReadVirtualMachinesResponse
 	err = json.Unmarshal(body, &readVirtualMachinesResponse)
@@ -168,7 +183,7 @@ func GetVirtualMachine(httpClient *http.Client, ctx context.Context, virtualMach
 }
 
 // Updates a Virtual Machine by its ID
-func UpdateVirtualMachine(httpClient *http.Client, ctx context.Context, virtualMachineId, name string) error {
+func UpdateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId, name string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateVMWithID, virtualMachineId))
 	// Create a new request from the plan
 	updateVMRequestBody := map[string]any{
@@ -179,45 +194,46 @@ func UpdateVirtualMachine(httpClient *http.Client, ctx context.Context, virtualM
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequest("PUT", BASE_URL_V1+virtualMachineId, bytes.NewBuffer(jsonUpdateVMRequestBody))
+	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+virtualMachineId, bytes.NewBuffer(jsonUpdateVMRequestBody))
 	if err != nil {
 		return err
 	}
 
-	_, err = httpClient.Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return err
 	}
+	defer response.Body.Close()
 
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyUpdatedVMWithID, virtualMachineId))
 	return nil
 }
 
 // Iteratively calls getVirtualMachine until the machine is in a target status, or it times out
-func PollForVirtualMachineStatus(httpClient *http.Client, ctx context.Context, virtualMachineId string, targetStatuses []string, timeoutMaxSec int) (*ReadVirtualMachinesResponse, error) {
+func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string, targetStatuses []string, timeoutMaxSec int) (*ReadVirtualMachinesResponse, error) {
 	// Make all statuses lowercase for ease of comparison
 	targetStatusesLower := make([]string, len(targetStatuses))
 	for _, status := range targetStatuses {
 		targetStatusesLower = append(targetStatusesLower, strings.ToLower(status))
 	}
 	tflog.Info(ctx, fmt.Sprintf(LogStartingPollForVMStatusWithID, virtualMachineId))
-	var getVirtualMachineResponse *ReadVirtualMachinesResponse
+	var getResp *ReadVirtualMachinesResponse
+	var err error
 	secondsElapsed := 0
 	longPollIteration := 1
 	var errString string
 	for {
 		tflog.Info(ctx, fmt.Sprintf(LogStartingLongPollingIteration, longPollIteration, secondsElapsed))
 
-		getResp, err := GetVirtualMachine(httpClient, ctx, virtualMachineId)
+		getResp, err = GetVirtualMachine(gpcnClient, ctx, virtualMachineId)
 		if err != nil {
 			errString = err.Error()
 			break
 		}
-		getVirtualMachineResponse = getResp
-		tflog.Info(ctx, fmt.Sprintf(LogVMResponseStatus, getVirtualMachineResponse.Data.Status))
+		tflog.Info(ctx, fmt.Sprintf(LogVMResponseStatus, getResp.Data.Status))
 
-		if slices.Contains(targetStatusesLower, strings.ToLower(getVirtualMachineResponse.Data.Status)) {
-			tflog.Info(ctx, fmt.Sprintf(LogVMStatusProceedingToAttach, getVirtualMachineResponse.Data.VirtualMachine.ID, getVirtualMachineResponse.Data.Status))
+		if slices.Contains(targetStatusesLower, strings.ToLower(getResp.Data.Status)) {
+			tflog.Info(ctx, fmt.Sprintf(LogVMStatusProceedingToAttach, getResp.Data.ID, getResp.Data.Status))
 			// Don't trust the API and do actions too quick. Wait an additional 5 seconds to verify it's actually in the status we want
 			time.Sleep(time.Second * 5)
 			break
@@ -227,18 +243,18 @@ func PollForVirtualMachineStatus(httpClient *http.Client, ctx context.Context, v
 		longPollIteration += 1
 
 		if secondsElapsed > timeoutMaxSec {
-			errString = ErrVirtualMachineStatusTimeout
+			errString = fmt.Sprintf(ErrVirtualMachineStatusTimeoutTemplate, timeoutMaxSec)
 			break
 		}
 	}
 	if errString != "" {
 		return nil, errors.New(errString)
 	}
-	return getVirtualMachineResponse, nil
+	return getResp, nil
 }
 
 // Verify if public IP is set to true, the first network cannot be of type custom
-func ValidatePublicIpValue(httpClient *http.Client, ctx context.Context, model ResourceModel) error {
+func ValidatePublicIpValue(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) error {
 	tflog.Info(ctx, LogStartingValidatePublicIPValue)
 	// If false, no error
 	if !model.AllocatePublicIp.ValueBool() {
@@ -255,7 +271,7 @@ func ValidatePublicIpValue(httpClient *http.Client, ctx context.Context, model R
 	model.NetworkIds.ElementsAs(ctx, &networkIds, true)
 
 	tflog.Info(ctx, LogValidatingPublicIPSettingByNetworkType)
-	getNetworkResponse, err := networks.GetNetwork(httpClient, ctx, networkIds[0])
+	getNetworkResponse, err := networks.GetNetwork(gpcnClient, ctx, networkIds[0])
 	if err != nil {
 		return err
 	}

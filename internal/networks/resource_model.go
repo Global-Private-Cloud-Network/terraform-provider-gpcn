@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -23,6 +24,15 @@ type ResourceModel struct {
 	DNSServers       types.String `tfsdk:"dns_servers"`
 	DHCPStartAddress types.String `tfsdk:"dhcp_start_address"`
 	DHCPEndAddress   types.String `tfsdk:"dhcp_end_address"`
+}
+
+// getDHCPAddresses safely extracts DHCP start and end addresses from allocation pools.
+// Returns empty strings if no allocation pools are available.
+func getDHCPAddresses(response *readNetworkResponse) (start, end string) {
+	if len(response.Data.AllocationPools) > 0 {
+		return response.Data.AllocationPools[0].Start, response.Data.AllocationPools[0].End
+	}
+	return "", ""
 }
 
 // Update the plan or state with new values from the GET response
@@ -50,17 +60,27 @@ func MapNetworkResponseToModel(ctx context.Context, response *readNetworkRespons
 	}
 
 	// Construct the location object
-	model.Location, _ = types.MapValueFrom(ctx, types.StringType, map[string]string{
+	var diags diag.Diagnostics
+	model.Location, diags = types.MapValueFrom(ctx, types.StringType, map[string]string{
 		"country":    response.Data.Datacenter.Country,
 		"region":     response.Data.Datacenter.Region,
 		"datacenter": response.Data.Datacenter.Name,
 	})
+	if diags.HasError() {
+		// Log the error but continue with a null value
+		model.Location = types.MapNull(types.StringType)
+	}
 
-	// Construct the DHCPStart and EndAddresses
+	// Construct the DHCPStart and EndAddresses for standard networks
 	isStandardNetwork := model.NetworkType == types.StringValue("standard")
 	if isStandardNetwork {
-		model.DHCPStartAddress = types.StringValue(response.Data.AllocationPools[0].Start)
-		model.DHCPEndAddress = types.StringValue(response.Data.AllocationPools[0].End)
+		start, end := getDHCPAddresses(response)
+		if start != "" {
+			model.DHCPStartAddress = types.StringValue(start)
+		}
+		if end != "" {
+			model.DHCPEndAddress = types.StringValue(end)
+		}
 	}
 
 	// If model doesn't already have these populated, set them
@@ -79,11 +99,12 @@ func setModelValuesNotPresent(response *readNetworkResponse, model ResourceModel
 	if model.NetworkType.IsNull() {
 		model.NetworkType = types.StringValue(response.Data.NetworkType)
 	}
-	if model.DHCPStartAddress.IsNull() && len(response.Data.AllocationPools) > 0 {
-		model.DHCPStartAddress = types.StringValue(response.Data.AllocationPools[0].Start)
+	start, end := getDHCPAddresses(response)
+	if model.DHCPStartAddress.IsNull() && start != "" {
+		model.DHCPStartAddress = types.StringValue(start)
 	}
-	if model.DHCPEndAddress.IsNull() && len(response.Data.AllocationPools) > 0 {
-		model.DHCPEndAddress = types.StringValue(response.Data.AllocationPools[0].End)
+	if model.DHCPEndAddress.IsNull() && end != "" {
+		model.DHCPEndAddress = types.StringValue(end)
 	}
 	return model
 }

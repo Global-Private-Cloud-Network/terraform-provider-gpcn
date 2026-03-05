@@ -3,7 +3,8 @@ package provider
 import (
 	"context"
 	"fmt"
-	"net/http"
+
+	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/volumes"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -33,7 +34,7 @@ func NewVolumesResource() resource.Resource {
 
 // volumesResource is the resource implementation.
 type volumesResource struct {
-	client *http.Client
+	client *client.GpcnClient
 }
 
 // Metadata returns the resource type name.
@@ -126,22 +127,24 @@ func (r *volumesResource) Configure(_ context.Context, req resource.ConfigureReq
 		return
 	}
 
-	client, ok := req.ProviderData.(*http.Client)
+	gpcnClient, ok := req.ProviderData.(*client.GpcnClient)
 
 	if !ok {
 		resp.Diagnostics.AddError(
 			volumes.ErrSummaryUnexpectedConfigureType,
-			fmt.Sprintf(volumes.ErrDetailExpectedHTTPClient, req.ProviderData),
+			fmt.Sprintf(volumes.ErrDetailExpectedGpcnClient, req.ProviderData),
 		)
 
 		return
 	}
 
-	r.client = client
+	r.client = gpcnClient
 }
 
 // Create creates the resource and sets the initial Terraform state.
 func (r *volumesResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, volumes.LogStartingCreateGPCNVolume)
 	// Retrieve values from plan
 	var plan volumes.ResourceModel
@@ -174,6 +177,8 @@ func (r *volumesResource) Create(ctx context.Context, req resource.CreateRequest
 
 // Read refreshes the Terraform state with the latest data.
 func (r *volumesResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, volumes.LogStartingReadGPCNVolume)
 	// Get current state
 	var state volumes.ResourceModel
@@ -206,6 +211,8 @@ func (r *volumesResource) Read(ctx context.Context, req resource.ReadRequest, re
 
 // Update updates the resource and sets the updated Terraform state on success.
 func (r *volumesResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, volumes.LogStartingUpdateGPCNVolume)
 	var plan volumes.ResourceModel
 	diags := req.Plan.Get(ctx, &plan)
@@ -237,6 +244,8 @@ func (r *volumesResource) Update(ctx context.Context, req resource.UpdateRequest
 
 // Delete deletes the resource and removes the Terraform state on success.
 func (r *volumesResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, volumes.LogStartingDeleteGPCNVolume)
 	var state volumes.ResourceModel
 	diags := req.State.Get(ctx, &state)

@@ -8,11 +8,14 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+
+	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/datacenters"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -21,7 +24,7 @@ func NewDatacenterDataSource() datasource.DataSource {
 }
 
 type datacenterDataSource struct {
-	client *http.Client
+	client *client.GpcnClient
 }
 
 type datacenterDataSourceModel struct {
@@ -151,20 +154,23 @@ func (d *datacenterDataSource) Configure(_ context.Context, req datasource.Confi
 		return
 	}
 
-	client, ok := req.ProviderData.(*http.Client)
+	gpcnClient, ok := req.ProviderData.(*client.GpcnClient)
 	if !ok {
 		resp.Diagnostics.AddError(
 			"Unexpected Data Source Configure Type",
-			fmt.Sprintf("Expected *http.Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+			fmt.Sprintf("Expected *client.GpcnClient, got: %T. Please report this issue to the provider developers.", req.ProviderData),
 		)
 
 		return
 	}
 
-	d.client = client
+	d.client = gpcnClient
 }
 
 func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
+
 	var state datacenterDataSourceModel
 	diags := req.Config.Get(ctx, &state)
 	resp.Diagnostics.Append(diags...)
@@ -184,7 +190,7 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		additionalQueryString += "&search=" + url.QueryEscape(state.Name.ValueString())
 	}
 
-	datacenterResponse, err := d.getDatacenters(additionalQueryString)
+	datacenterResponse, err := d.getDatacenters(ctx, additionalQueryString)
 	if err != nil {
 		// Big failure, no helpful error message
 		resp.Diagnostics.AddError(
@@ -196,7 +202,7 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 
 	// If no data centers found, search with just country name to make a friendly error message
 	if len(datacenterResponse.Data) < 1 {
-		datacenterRegionResponse, err := d.getCountriesAndRegions(url.QueryEscape(state.CountryName.ValueString()))
+		datacenterRegionResponse, err := d.getCountriesAndRegions(ctx, state.CountryName.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError(
 				datacenters.ErrSummaryUnableGetDatacenters,
@@ -216,7 +222,7 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		}
 
 		// If no data centers found still, search with nothing and return first 10
-		datacenterCountryResponse, err := d.getAllCountries()
+		datacenterCountryResponse, err := d.getAllCountries(ctx)
 		if err != nil {
 			resp.Diagnostics.AddError(
 				datacenters.ErrSummaryUnableGetDatacenters,
@@ -246,7 +252,12 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		})
 	}
 
-	state.DataCenters, _ = types.ListValueFrom(ctx, types.ObjectType{AttrTypes: datacenterDataResponseTF{}.AttrTypes()}, datacenters)
+	var listDiags diag.Diagnostics
+	state.DataCenters, listDiags = types.ListValueFrom(ctx, types.ObjectType{AttrTypes: datacenterDataResponseTF{}.AttrTypes()}, datacenters)
+	if listDiags.HasError() {
+		resp.Diagnostics.Append(listDiags...)
+		return
+	}
 
 	// Set state
 	diags = resp.State.Set(ctx, &state)
@@ -256,88 +267,89 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 	}
 }
 
-func (d *datacenterDataSource) getDatacenters(queryString string) (*datacenterResponse, error) {
+func (d *datacenterDataSource) getDatacenters(ctx context.Context, queryString string) (*datacenterResponse, error) {
 	datacenterUrl := datacenters.BASE_URL_V1 + "?page=1&limit=100"
-	request, err := http.NewRequest("GET", datacenterUrl+queryString, nil)
+	request, err := http.NewRequestWithContext(ctx, "GET", datacenterUrl+queryString, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := d.client.Do(request)
+	response, err := d.client.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
 	// Read the response body and process it as datacenterResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
-	var datacenterResponse datacenterResponse
-	err = json.Unmarshal(body, &datacenterResponse)
+	var dcResp datacenterResponse
+	err = json.Unmarshal(body, &dcResp)
 
 	if err != nil {
 		return nil, err
 	}
-	return &datacenterResponse, nil
+	return &dcResp, nil
 }
 
-func (d *datacenterDataSource) getCountriesAndRegions(countryName string) (*datacenterRegionResponse, error) {
+func (d *datacenterDataSource) getCountriesAndRegions(ctx context.Context, countryName string) (*datacenterRegionResponse, error) {
 	// Safe to use since it'll default to empty string if not provided, which will just search all countries
-	datacenterUrl := datacenters.BASE_URL_V1 + "regions?page=1&limit=100&countryName=" + countryName
-	request, err := http.NewRequest("GET", datacenterUrl, nil)
+	// countryName is already URL-encoded by the caller
+	datacenterUrl := datacenters.BASE_URL_V1 + "regions?page=1&limit=100&countryName=" + url.QueryEscape(countryName)
+	request, err := http.NewRequestWithContext(ctx, "GET", datacenterUrl, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := d.client.Do(request)
+	response, err := d.client.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
 	// Read the response body and process it as datacenterRegionResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
-	var datacenterRegionResponse datacenterRegionResponse
-	err = json.Unmarshal(body, &datacenterRegionResponse)
+	var dcRegionResp datacenterRegionResponse
+	err = json.Unmarshal(body, &dcRegionResp)
 
 	if err != nil {
 		return nil, err
 	}
-	return &datacenterRegionResponse, nil
+	return &dcRegionResp, nil
 }
 
-func (d *datacenterDataSource) getAllCountries() (*datacenterCountryResponse, error) {
+func (d *datacenterDataSource) getAllCountries(ctx context.Context) (*datacenterCountryResponse, error) {
 	// Safe to use since it'll default to empty string if not provided, which will just search all countries
 	datacenterUrl := datacenters.BASE_URL_V1 + "countries?page=1&limit=100"
-	request, err := http.NewRequest("GET", datacenterUrl, nil)
+	request, err := http.NewRequestWithContext(ctx, "GET", datacenterUrl, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	response, err := d.client.Do(request)
+	response, err := d.client.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
+	defer response.Body.Close()
 
 	// Read the response body and process it as datacenterCountryResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}
-	_ = response.Body.Close()
 
-	var datacenterCountryResponse datacenterCountryResponse
-	err = json.Unmarshal(body, &datacenterCountryResponse)
+	var dcCountryResp datacenterCountryResponse
+	err = json.Unmarshal(body, &dcCountryResp)
 
 	if err != nil {
 		return nil, err
 	}
-	return &datacenterCountryResponse, nil
+	return &dcCountryResp, nil
 }

@@ -51,6 +51,13 @@ func SetupMockServer(config MockServerConfig) (*httptest.Server, *http.Client) {
 	return server, httpClient
 }
 
+// SetupMockServerWithGpcnClient creates a mock HTTP server and returns the server and configured GpcnClient
+func SetupMockServerWithGpcnClient(config MockServerConfig) (*httptest.Server, *client.GpcnClient) {
+	server, httpClient := SetupMockServer(config)
+	gpcnClient := client.NewGpcnClientFromHTTPClient(httpClient)
+	return server, gpcnClient
+}
+
 // HandleJobResponse is a helper function to handle job status polling requests
 func HandleJobResponse(w http.ResponseWriter, jobID, resourceID string, completed bool) {
 	response := client.JobStatusMultiResponse{

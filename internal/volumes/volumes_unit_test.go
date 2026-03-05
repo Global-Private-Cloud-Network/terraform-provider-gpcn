@@ -37,7 +37,7 @@ func newVolumeResponse(id, name string, sizeGb, volumeSizeID int64) *readVolumes
 	resp.Data.VolumeSizeId = volumeSizeID
 	resp.Data.Datacenter.ID = testDatacenterID
 	resp.Data.Datacenter.Name = "US-East-1"
-	resp.Data.Datacenter.Region = "US-East"
+	resp.Data.Datacenter.Region = "East"
 	resp.Data.Datacenter.Country = "US"
 	resp.Data.VirtualMachineId = ""
 	resp.Data.VirtualMachineName = ""
@@ -94,7 +94,7 @@ func TestCreateVolumeMockHTTP(t *testing.T) {
 
 	var volumeSizesCalled, createCalled, jobStatusCalled, getCalled bool
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
@@ -139,7 +139,7 @@ func TestCreateVolumeMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	response, err := CreateVolume(httpClient, context.Background(), createTestVolumeModel("test-volume", "SSD", 256))
+	response, err := CreateVolume(gpcnClient, context.Background(), createTestVolumeModel("test-volume", "SSD", 256))
 	if err != nil {
 		t.Fatalf("CreateVolume failed: %v", err)
 	}
@@ -166,7 +166,7 @@ func TestCreateVolumeMockHTTP(t *testing.T) {
 func TestGetVolumeMockHTTP(t *testing.T) {
 	const volumeID = "volume-789"
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID) {
@@ -178,7 +178,7 @@ func TestGetVolumeMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	response, err := GetVolume(httpClient, context.Background(), volumeID)
+	response, err := GetVolume(gpcnClient, context.Background(), volumeID)
 	if err != nil {
 		t.Fatalf("GetVolume failed: %v", err)
 	}
@@ -199,7 +199,7 @@ func TestUpdateVolumeMockHTTP(t *testing.T) {
 
 	var volumeSizesCalled, updateCalled, jobStatusCalled, getCalled bool
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
@@ -244,7 +244,7 @@ func TestUpdateVolumeMockHTTP(t *testing.T) {
 	model := createTestVolumeModel("test-volume", "SSD", newSizeGb)
 	model.ID = types.StringValue(volumeID)
 
-	response, err := UpdateVolume(httpClient, context.Background(), volumeID, model)
+	response, err := UpdateVolume(gpcnClient, context.Background(), volumeID, model)
 	if err != nil {
 		t.Fatalf("UpdateVolume failed: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestGetVolumeSizeIdMockHTTP(t *testing.T) {
 		expectedVolumeSizeID = int64(10)
 	)
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/data-centers/") && strings.HasSuffix(r.URL.Path, "/volume-sizes") {
@@ -291,7 +291,7 @@ func TestGetVolumeSizeIdMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	volumeSizeID, err := GetVolumeSizeId(httpClient, context.Background(), testDatacenterID, volumeTypeID, sizeGb)
+	volumeSizeID, err := GetVolumeSizeId(gpcnClient, context.Background(), testDatacenterID, volumeTypeID, sizeGb)
 	if err != nil {
 		t.Fatalf("GetVolumeSizeId failed: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestGetVolumeSizeIdInvalidSizeMockHTTP(t *testing.T) {
 		invalidSizeGb = int64(555)
 	)
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/data-centers/") && strings.HasSuffix(r.URL.Path, "/volume-sizes") {
@@ -322,7 +322,7 @@ func TestGetVolumeSizeIdInvalidSizeMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	_, err := GetVolumeSizeId(httpClient, context.Background(), testDatacenterID, volumeTypeID, invalidSizeGb)
+	_, err := GetVolumeSizeId(gpcnClient, context.Background(), testDatacenterID, volumeTypeID, invalidSizeGb)
 	if err == nil {
 		t.Fatal("Expected error for invalid size, got nil")
 	}

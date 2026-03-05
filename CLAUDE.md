@@ -74,3 +74,53 @@ Resource schema definitions live in `internal/provider/{resource}_resource.go`.
 ## Documentation
 
 Generated via `make generate` using terraform-plugin-docs. Examples in `examples/resources/gpcn_{resource}/`.
+
+## Code Quality
+
+### Linting
+
+The project uses golangci-lint (`.golangci.yml`). Key enabled linters:
+- `gosec`: Security scanner - use `//nolint:gosec` with explanation for false positives
+- `bodyclose`: Ensures HTTP response bodies are closed
+- `contextcheck`: Validates context usage
+- `errorlint`: Proper error wrapping patterns
+- `noctx`: Ensures HTTP requests use context
+
+Run `make lint` before committing.
+
+### Code Style Requirements
+
+1. **Handle all return values**: Never use blank identifiers (`_`) to ignore errors from `types.*ValueFrom()`. Always check `diag.Diagnostics` and handle errors (typically by setting a null value as fallback).
+
+2. **Unexport internal fields**: Struct fields used only within a package should be unexported (lowercase), e.g., `apiKey` not `ApiKey`.
+
+3. **gosec annotations**: When suppressing gosec warnings, always include an explanation:
+   ```go
+   //nolint:gosec // G704: URL is constructed from validated config, not user input
+   ```
+
+### GPCN Client
+
+The `internal/client/` package provides a configurable HTTP client:
+
+- **Correlation IDs**: All requests include a correlation ID for tracing. Use `client.WithCorrelationID(ctx)` at the start of CRUD operations. The ID appears in logs and is sent via request headers.
+
+- **Configurable timeouts**: Users can customize via provider config:
+  - `request_timeout`: Individual HTTP request timeout (default: 60s)
+  - `polling_timeout`: Max wait for async operations (default: 10m)
+  - `max_retries`: Retry count for transient failures (default: 3)
+
+- **Retry with backoff**: Use `client.DoWithRetry(req)` for requests that should retry on transient failures.
+
+## Releasing
+
+To prepare a new release:
+
+1. Update `CHANGELOG.md` with the new version and release notes
+2. Update the provider version in all example `.tf` files under `examples/`:
+   - `examples/resources/gpcn_*/resource.tf`
+   - `examples/data-sources/gpcn_*/data-source.tf`
+   - `examples/provider-install-verification/main.tf`
+3. Run `make` to regenerate documentation (this copies examples into `docs/`)
+4. Commit all changes
+5. Create and push the version tag: `git tag vX.Y.Z && git push origin vX.Y.Z`

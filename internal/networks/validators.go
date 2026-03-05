@@ -9,13 +9,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
 
-/*
-*
-
-	Custom validator for asserting attributes are present when using a Standard network
-
-*
-*/
+// StandardNetworkValidator validates that required attributes are present when
+// network_type is "standard".
+//
+// Accumulates all errors to show user all missing required attributes at once,
+// since each check is independent.
 type StandardNetworkValidator struct{}
 
 func (v StandardNetworkValidator) Description(ctx context.Context) string {
@@ -59,13 +57,12 @@ func (v StandardNetworkValidator) ValidateString(ctx context.Context, request va
 	}
 }
 
-/*
-*
-
-	Custom validator for asserting attributes are a valid IPv4 address
-
-*
-*/
+// IpAddressValidator validates that a string attribute is a valid IPv4 address
+// and optionally validates it's within the configured CIDR block.
+//
+// Returns early on first error since subsequent validations depend on earlier ones:
+// - If the value isn't a valid IP, checking IPv4 compatibility is meaningless
+// - If it's not IPv4, checking CIDR containment is meaningless
 type IpAddressValidator struct{}
 
 func (v IpAddressValidator) Description(ctx context.Context) string {
@@ -128,13 +125,11 @@ func (v IpAddressValidator) ValidateString(ctx context.Context, request validato
 	}
 }
 
-/*
-*
-
-	Custom validator for asserting attributes are a valid IP address
-
-*
-*/
+// CIDRValidator validates that a string attribute is a valid CIDR block.
+//
+// Returns early on first error since subsequent validations depend on earlier ones:
+// - If the value isn't valid CIDR syntax, checking network address is meaningless
+// - If it's not the network address, checking IPv4 compatibility is meaningless
 type CIDRValidator struct{}
 
 func (v CIDRValidator) Description(ctx context.Context) string {
@@ -176,13 +171,11 @@ func (v CIDRValidator) ValidateString(ctx context.Context, request validator.Str
 	}
 }
 
-/*
-*
-
-	Custom validator for asserting all values in comma-delimited string are valid
-
-*
-*/
+// DNSServersValidator validates that a comma-delimited string contains valid IPv4 addresses.
+//
+// Error handling pattern:
+// - Returns early on delimiter format errors (can't reliably parse with wrong delimiter)
+// - Accumulates IP validation errors to show all invalid addresses at once
 type DNSServersValidator struct{}
 
 func (v DNSServersValidator) Description(ctx context.Context) string {
@@ -207,37 +200,39 @@ func (v DNSServersValidator) ValidateString(ctx context.Context, request validat
 
 	value := request.ConfigValue.ValueString()
 
-	// Check if the value contains comma without space after it
+	// Validate delimiter format first - if invalid, we can't reliably parse individual IPs
 	if strings.Contains(value, ",") {
-		// Check for comma followed by non-space or comma followed by nothing
-		if strings.Contains(value, ", ") {
-			// Has proper ", " separator - this is valid
-		} else {
+		hasValidDelimiter := strings.Contains(value, ", ")
+		hasSpaceBeforeComma := strings.Contains(value, " ,")
+
+		if !hasValidDelimiter {
 			response.Diagnostics.AddError(
 				ErrSummaryInvalidAttr,
 				fmt.Sprintf(ErrDetailDNSInvalidDelimiter, request.Path.Expression().String()),
 			)
+			// Return early - can't reliably parse IPs with invalid delimiter
 			return
 		}
 
-		// Additional check: ensure no space before comma
-		if strings.Contains(value, " ,") {
+		if hasSpaceBeforeComma {
 			response.Diagnostics.AddError(
 				ErrSummaryInvalidAttr,
 				fmt.Sprintf(ErrDetailDNSSpaceBeforeComma, request.Path.Expression().String()),
 			)
+			// Return early - can't reliably parse IPs with invalid delimiter
 			return
 		}
 	}
 
+	// Validate each IP address - accumulate all errors to show user all invalid IPs at once
 	ipAddresses := strings.SplitSeq(value, ", ")
 	for address := range ipAddresses {
-		address := strings.TrimSpace(address)
-		parsedIPAddress := net.ParseIP(address)
+		addr := strings.TrimSpace(address)
+		parsedIPAddress := net.ParseIP(addr)
 		if parsedIPAddress == nil {
 			response.Diagnostics.AddError(
 				ErrSummaryInvalidAttr,
-				fmt.Sprintf(ErrDetailNotValidIPv4WithValue, request.Path.Expression().String(), address),
+				fmt.Sprintf(ErrDetailNotValidIPv4WithValue, request.Path.Expression().String(), addr),
 			)
 			continue
 		}
@@ -245,8 +240,9 @@ func (v DNSServersValidator) ValidateString(ctx context.Context, request validat
 		if parsedIPAddressv4 == nil {
 			response.Diagnostics.AddError(
 				ErrSummaryInvalidAttr,
-				fmt.Sprintf(ErrDetailNotValidIPv4WithValue, request.Path.Expression().String(), address),
+				fmt.Sprintf(ErrDetailNotValidIPv4WithValue, request.Path.Expression().String(), addr),
 			)
+			continue
 		}
 	}
 }

@@ -38,11 +38,11 @@ const (
 
 	// GetVirtualMachineImageId messages
 	LogStartingGetVMImageIDWithName           = "Starting GetVirtualMachineImageId for image name: %s"
-	LogSuccessfullyRetrievedVMImageIDWithName = "Successfully retrived virtual machine image ID for image name: %s"
+	LogSuccessfullyRetrievedVMImageIDWithName = "Successfully retrieved virtual machine image ID for image name: %s"
 
 	// GetVirtualMachineSizeConfigurationId messages
 	LogStartingGetVMSizeIDWithName           = "Starting GetVirtualMachineSizeConfigurationId for size name: %s"
-	LogSuccessfullyRetrievedVMSizeIDWithName = "Successfully retrived virtual machine size ID for size name: %s"
+	LogSuccessfullyRetrievedVMSizeIDWithName = "Successfully retrieved virtual machine size ID for size name: %s"
 
 	// UpdateVirtualMachineSize messages
 	LogStartingUpdateVMSizeWithID = "Starting UpdateVirtualMachineSize for Virtual Machine ID %s"

@@ -7,11 +7,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
+
 	"terraform-provider-gpcn/internal/client"
 )
 
 // Attach a volume to the virtual machine
-func AddVolumeToVirtualMachine(httpClient *http.Client, ctx context.Context, virtualMachineId, volumeId string) error {
+func AddVolumeToVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId, volumeId string) error {
 	attachVolumeRequestBody := map[string]string{
 		"virtualMachineId": virtualMachineId,
 	}
@@ -20,21 +21,21 @@ func AddVolumeToVirtualMachine(httpClient *http.Client, ctx context.Context, vir
 	if err != nil {
 		return errors.New("error marshaling the json request body GPCN Virtual Machines - Attach Volume")
 	}
-	request, err := http.NewRequest("PUT", BASE_URL_V1+volumeId+"/attach", bytes.NewBuffer(jsonAttachVolumeRequestBody))
+	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/attach", bytes.NewBuffer(jsonAttachVolumeRequestBody))
 	if err != nil {
 		return err
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
-	_ = response.Body.Close()
 
 	var attachVolumeResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &attachVolumeResponse)
@@ -43,7 +44,7 @@ func AddVolumeToVirtualMachine(httpClient *http.Client, ctx context.Context, vir
 		return err
 	}
 
-	_, err = client.PerformLongPolling(httpClient, ctx, "Attach GPCN Volume to VM", attachVolumeResponse.Data.JobID)
+	_, err = client.PerformLongPolling(gpcnClient, ctx, "Attach GPCN Volume to VM", attachVolumeResponse.Data.JobID)
 
 	if err != nil {
 		return err
@@ -53,22 +54,22 @@ func AddVolumeToVirtualMachine(httpClient *http.Client, ctx context.Context, vir
 }
 
 // Remove a volume from the virtual machine
-func RemoveVolumeFromVirtualMachine(httpClient *http.Client, ctx context.Context, volumeId string) error {
-	request, err := http.NewRequest("PUT", BASE_URL_V1+volumeId+"/detach", nil)
+func RemoveVolumeFromVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, volumeId string) error {
+	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/detach", nil)
 	if err != nil {
 		return err
 	}
 
-	response, err := httpClient.Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return err
 	}
+	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return err
 	}
-	_ = response.Body.Close()
 
 	var detachVolumeResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &detachVolumeResponse)
@@ -77,7 +78,7 @@ func RemoveVolumeFromVirtualMachine(httpClient *http.Client, ctx context.Context
 		return err
 	}
 
-	_, err = client.PerformLongPolling(httpClient, ctx, "Detach GPCN Volume from VM", detachVolumeResponse.Data.JobID)
+	_, err = client.PerformLongPolling(gpcnClient, ctx, "Detach GPCN Volume from VM", detachVolumeResponse.Data.JobID)
 
 	if err != nil {
 		return err

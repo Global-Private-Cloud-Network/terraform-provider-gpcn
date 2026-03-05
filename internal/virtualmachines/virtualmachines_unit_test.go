@@ -43,24 +43,26 @@ func createTestVMModel(name, image string, allocatePublicIP bool) ResourceModel 
 func newVMResponse(id, name string) *ReadVirtualMachinesResponse {
 	resp := &ReadVirtualMachinesResponse{Success: true, Message: "VM retrieved"}
 	resp.Data.Status = "Running"
-	resp.Data.VirtualMachine.ID = id
-	resp.Data.VirtualMachine.Name = name
-	resp.Data.VirtualMachine.CreatedAt = time.Now().Format(time.RFC3339)
-	resp.Data.VirtualMachine.UpdatedAt = time.Now().Format(time.RFC3339)
-	resp.Data.VirtualMachine.ConfigurationId = 1
-	resp.Data.VirtualMachine.Configuration = "General - Micro - 1"
-	resp.Data.VirtualMachine.ConfigurationCode = "g-micro-1"
-	resp.Data.VirtualMachine.ConfigurationCategoryCode = "general"
-	resp.Data.VirtualMachine.CPU = 1
-	resp.Data.VirtualMachine.RAM = 2
-	resp.Data.VirtualMachine.Disk = 20
-	resp.Data.VirtualMachine.Image = testVMImage
-	resp.Data.VirtualMachine.Username = "admin"
-	resp.Data.VirtualMachine.Datacenter.ID = testDatacenterID
-	resp.Data.VirtualMachine.Datacenter.Name = "US-East-1"
-	resp.Data.VirtualMachine.Datacenter.Region = "US-East"
-	resp.Data.VirtualMachine.Datacenter.CountryAbbr = "US"
-	resp.Data.VirtualMachine.Datacenter.Country = "United States"
+	resp.Data.ID = id
+	resp.Data.Name = name
+	resp.Data.CreatedAt = time.Now().Format(time.RFC3339)
+	resp.Data.UpdatedAt = time.Now().Format(time.RFC3339)
+	resp.Data.Configuration = ConfigurationResponse{
+		ID:           1,
+		Name:         "General - Micro - 1",
+		Code:         "g-micro-1",
+		CategoryCode: "general",
+		CPU:          1,
+		RAM:          2,
+		Disk:         20,
+	}
+	resp.Data.Image = testVMImage
+	resp.Data.Username = "admin"
+	resp.Data.Datacenter.ID = testDatacenterID
+	resp.Data.Datacenter.Name = "US-East-1"
+	resp.Data.Datacenter.Region = "East"
+	resp.Data.Datacenter.CountryAbbr = "US"
+	resp.Data.Datacenter.Country = "United States"
 	return resp
 }
 
@@ -69,7 +71,7 @@ func emptyNetworkInterfacesResponse() map[string]any {
 }
 
 func TestMapVirtualMachineResponseToModelUnit(t *testing.T) {
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces") {
@@ -82,7 +84,10 @@ func TestMapVirtualMachineResponseToModelUnit(t *testing.T) {
 	response := newVMResponse("vm-123", "test-vm")
 	model := createTestVMModel("test-vm", testVMImage, false)
 
-	result := MapVirtualMachineResponseToModel(context.Background(), httpClient, response, model)
+	result, diags := MapVirtualMachineResponseToModel(context.Background(), gpcnClient, response, model)
+	if diags.HasError() {
+		t.Fatalf("Unexpected error: %v", diags)
+	}
 
 	if result.ID.ValueString() != "vm-123" {
 		t.Errorf("Expected ID 'vm-123', got '%s'", result.ID.ValueString())
@@ -111,7 +116,7 @@ func TestCreateVirtualMachineMockHTTP(t *testing.T) {
 
 	var createCalled, jobStatusCalled, vmStatusCalled bool
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
@@ -154,15 +159,15 @@ func TestCreateVirtualMachineMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	response, err := CreateVirtualMachine(httpClient, context.Background(), imageID, sizeID, createTestVMModel("test-vm", testVMImage, false))
+	response, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, createTestVMModel("test-vm", testVMImage, false))
 	if err != nil {
 		t.Fatalf("CreateVirtualMachine failed: %v", err)
 	}
 	if response == nil {
 		t.Fatal("Expected response, got nil")
 	}
-	if response.Data.VirtualMachine.ID != vmID {
-		t.Errorf("Expected VM ID '%s', got '%s'", vmID, response.Data.VirtualMachine.ID)
+	if response.Data.ID != vmID {
+		t.Errorf("Expected VM ID '%s', got '%s'", vmID, response.Data.ID)
 	}
 	if !createCalled {
 		t.Error("Expected create endpoint to be called")
@@ -178,7 +183,7 @@ func TestCreateVirtualMachineMockHTTP(t *testing.T) {
 func TestGetVirtualMachineMockHTTP(t *testing.T) {
 	const vmID = "vm-789"
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID) {
@@ -190,15 +195,15 @@ func TestGetVirtualMachineMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	response, err := GetVirtualMachine(httpClient, context.Background(), vmID)
+	response, err := GetVirtualMachine(gpcnClient, context.Background(), vmID)
 	if err != nil {
 		t.Fatalf("GetVirtualMachine failed: %v", err)
 	}
 	if response == nil {
 		t.Fatal("Expected response, got nil")
 	}
-	if response.Data.VirtualMachine.ID != vmID {
-		t.Errorf("Expected VM ID '%s', got '%s'", vmID, response.Data.VirtualMachine.ID)
+	if response.Data.ID != vmID {
+		t.Errorf("Expected VM ID '%s', got '%s'", vmID, response.Data.ID)
 	}
 	if response.Data.Status != "Running" {
 		t.Errorf("Expected status 'Running', got '%s'", response.Data.Status)
@@ -213,7 +218,7 @@ func TestUpdateVirtualMachineMockHTTP(t *testing.T) {
 
 	var updateCalled, vmStatusCalled bool
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
@@ -230,7 +235,7 @@ func TestUpdateVirtualMachineMockHTTP(t *testing.T) {
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
 				vmStatusCalled = true
 				resp := newVMResponse(vmID, newName)
-				resp.Data.VirtualMachine.CreatedAt = time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
+				resp.Data.CreatedAt = time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
 				testutil.WriteJSONResponse(w, resp)
 
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces"):
@@ -243,16 +248,16 @@ func TestUpdateVirtualMachineMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	if err := UpdateVirtualMachine(httpClient, context.Background(), vmID, newName); err != nil {
+	if err := UpdateVirtualMachine(gpcnClient, context.Background(), vmID, newName); err != nil {
 		t.Fatalf("UpdateVirtualMachine failed: %v", err)
 	}
 
-	response, err := GetVirtualMachine(httpClient, context.Background(), vmID)
+	response, err := GetVirtualMachine(gpcnClient, context.Background(), vmID)
 	if err != nil {
 		t.Fatalf("GetVirtualMachine failed: %v", err)
 	}
-	if response.Data.VirtualMachine.Name != newName {
-		t.Errorf("Expected VM name '%s', got '%s'", newName, response.Data.VirtualMachine.Name)
+	if response.Data.Name != newName {
+		t.Errorf("Expected VM name '%s', got '%s'", newName, response.Data.Name)
 	}
 	if !updateCalled {
 		t.Error("Expected update endpoint to be called")
@@ -266,7 +271,7 @@ func TestPollForVirtualMachineStatusMockHTTP(t *testing.T) {
 	const vmID = "vm-poll-123"
 	pollCount := 0
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID) {
@@ -281,7 +286,7 @@ func TestPollForVirtualMachineStatusMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	response, err := PollForVirtualMachineStatus(httpClient, context.Background(), vmID, []string{"Running"}, 10)
+	response, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, []string{"Running"}, 10)
 	if err != nil {
 		t.Fatalf("PollForVirtualMachineStatus failed: %v", err)
 	}
@@ -312,7 +317,7 @@ func TestValidatePublicIpValueMockHTTP(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			networkID := "network-test-123"
 
-			server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+			server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 				T: t,
 				Handler: func(w http.ResponseWriter, r *http.Request) {
 					if r.Method == "GET" && strings.Contains(r.URL.Path, "/networks/"+networkID) {
@@ -329,7 +334,7 @@ func TestValidatePublicIpValueMockHTTP(t *testing.T) {
 			model := createTestVMModel("test-vm", testVMImage, tc.allocatePublicIP)
 			model.NetworkIds, _ = types.ListValueFrom(context.Background(), types.StringType, []string{networkID})
 
-			err := ValidatePublicIpValue(httpClient, context.Background(), model)
+			err := ValidatePublicIpValue(gpcnClient, context.Background(), model)
 
 			if tc.expectError && err == nil {
 				t.Error("Expected error but got none")
@@ -352,7 +357,7 @@ func TestGetSSHKeyMockHTTP(t *testing.T) {
 		privateKey = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQ...\n-----END RSA PRIVATE KEY-----"
 	)
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID+"/ssh-key") {
@@ -368,7 +373,7 @@ func TestGetSSHKeyMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	response, err := GetSSHKey(httpClient, context.Background(), vmID)
+	response, err := GetSSHKey(gpcnClient, context.Background(), vmID)
 	if err != nil {
 		t.Fatalf("GetSSHKey failed: %v", err)
 	}
@@ -386,7 +391,7 @@ func TestGetPasswordMockHTTP(t *testing.T) {
 		password = "SecureP@ssw0rd123!"
 	)
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID+"/password") {
@@ -402,7 +407,7 @@ func TestGetPasswordMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	response, err := GetPassword(httpClient, context.Background(), vmID)
+	response, err := GetPassword(gpcnClient, context.Background(), vmID)
 	if err != nil {
 		t.Fatalf("GetPassword failed: %v", err)
 	}
@@ -422,7 +427,7 @@ func TestSetSecretValuesDisplaySecretsTrue(t *testing.T) {
 		privateKey = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQ...\n-----END RSA PRIVATE KEY-----"
 	)
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
@@ -444,12 +449,12 @@ func TestSetSecretValuesDisplaySecretsTrue(t *testing.T) {
 	defer server.Close()
 
 	response := newVMResponse(vmID, "test-vm")
-	response.Data.VirtualMachine.Username = username
+	response.Data.Username = username
 
 	model := createTestVMModel("test-vm", testVMImage, false)
 	model.DisplaySecrets = types.BoolValue(true)
 
-	result := setSecretValues(context.Background(), httpClient, response, model)
+	result, _ := setSecretValues(context.Background(), gpcnClient, response, model)
 
 	if result.Secrets.IsNull() || result.Secrets.IsUnknown() {
 		t.Fatal("Expected secrets to be set")
@@ -465,7 +470,7 @@ func TestSetSecretValuesDisplaySecretsFalse(t *testing.T) {
 	const vmID = "vm-secrets-456"
 	sshKeyCalled, passwordCalled := false, false
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if strings.Contains(r.URL.Path, "/ssh-key") {
@@ -482,7 +487,7 @@ func TestSetSecretValuesDisplaySecretsFalse(t *testing.T) {
 	model := createTestVMModel("test-vm", testVMImage, false)
 	model.DisplaySecrets = types.BoolValue(false)
 
-	result := setSecretValues(context.Background(), httpClient, response, model)
+	result, _ := setSecretValues(context.Background(), gpcnClient, response, model)
 
 	if sshKeyCalled {
 		t.Error("SSH key endpoint should not be called when display_secrets is false")
@@ -518,7 +523,7 @@ func TestSetNetworkModelValuesNotPresentWithPublicIP(t *testing.T) {
 		networkID = "network-456"
 	)
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces") {
@@ -547,7 +552,7 @@ func TestSetNetworkModelValuesNotPresentWithPublicIP(t *testing.T) {
 		NetworkIds:       types.ListNull(types.StringType),
 	}
 
-	result := setNetworkModelValuesNotPresent(context.Background(), httpClient, vmID, model)
+	result, _ := setNetworkModelValuesNotPresent(context.Background(), gpcnClient, vmID, model)
 
 	if result.PublicIp.ValueString() != publicIP {
 		t.Errorf("Expected public IP '%s', got '%s'", publicIP, result.PublicIp.ValueString())
@@ -566,7 +571,7 @@ func TestSetNetworkModelValuesNotPresentWithoutPublicIP(t *testing.T) {
 		networkID = "network-789"
 	)
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces") {
@@ -595,7 +600,7 @@ func TestSetNetworkModelValuesNotPresentWithoutPublicIP(t *testing.T) {
 		NetworkIds:       types.ListNull(types.StringType),
 	}
 
-	result := setNetworkModelValuesNotPresent(context.Background(), httpClient, vmID, model)
+	result, _ := setNetworkModelValuesNotPresent(context.Background(), gpcnClient, vmID, model)
 
 	if result.PublicIp.ValueString() != "" {
 		t.Errorf("Expected empty public IP, got '%s'", result.PublicIp.ValueString())
@@ -614,7 +619,7 @@ func TestMapVirtualMachineResponseToModelWithSecrets(t *testing.T) {
 		publicIP   = "198.51.100.50"
 	)
 
-	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
@@ -646,12 +651,15 @@ func TestMapVirtualMachineResponseToModelWithSecrets(t *testing.T) {
 	defer server.Close()
 
 	response := newVMResponse(vmID, "test-vm-full")
-	response.Data.VirtualMachine.Username = username
+	response.Data.Username = username
 
 	model := createTestVMModel("test-vm-full", testVMImage, true)
 	model.DisplaySecrets = types.BoolValue(true)
 
-	result := MapVirtualMachineResponseToModel(context.Background(), httpClient, response, model)
+	result, diags := MapVirtualMachineResponseToModel(context.Background(), gpcnClient, response, model)
+	if diags.HasError() {
+		t.Fatalf("Unexpected error: %v", diags)
+	}
 
 	if result.ID.ValueString() != vmID {
 		t.Errorf("Expected ID '%s', got '%s'", vmID, result.ID.ValueString())

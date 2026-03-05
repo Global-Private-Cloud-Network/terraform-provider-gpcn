@@ -3,8 +3,8 @@ package provider
 import (
 	"context"
 	"fmt"
-	"net/http"
 
+	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/networks"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -34,7 +34,7 @@ func NewNetworksResource() resource.Resource {
 
 // networksResource is the resource implementation.
 type networksResource struct {
-	client *http.Client
+	client *client.GpcnClient
 }
 
 // Metadata returns the resource type name.
@@ -178,22 +178,24 @@ func (r *networksResource) Configure(_ context.Context, req resource.ConfigureRe
 		return
 	}
 
-	client, ok := req.ProviderData.(*http.Client)
+	gpcnClient, ok := req.ProviderData.(*client.GpcnClient)
 
 	if !ok {
 		resp.Diagnostics.AddError(
-			"Unexpected Data Source Configure Type",
-			fmt.Sprintf("Expected *http.Client, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+			networks.ErrSummaryUnexpectedConfigureType,
+			fmt.Sprintf(networks.ErrDetailExpectedGpcnClient, req.ProviderData),
 		)
 
 		return
 	}
 
-	r.client = client
+	r.client = gpcnClient
 }
 
 // Create creates the resource and sets the initial Terraform state.
 func (r *networksResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, networks.LogStartingCreateGPCNNetwork)
 	// Retrieve values from plan
 	var plan networks.ResourceModel
@@ -206,7 +208,7 @@ func (r *networksResource) Create(ctx context.Context, req resource.CreateReques
 	getNetworkResponse, err := networks.CreateNetwork(r.client, ctx, plan)
 	if err != nil {
 		resp.Diagnostics.AddError(
-			"Unable to create GPCN Network",
+			networks.ErrSummaryUnableToCreateNetwork,
 			err.Error(),
 		)
 		return
@@ -226,6 +228,8 @@ func (r *networksResource) Create(ctx context.Context, req resource.CreateReques
 
 // Read refreshes the Terraform state with the latest data.
 func (r *networksResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, networks.LogStartingReadGPCNNetwork)
 	// Get current state
 	var state networks.ResourceModel
@@ -237,7 +241,10 @@ func (r *networksResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	getNetworkResponse, err := networks.GetNetwork(r.client, ctx, state.ID.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("Unable to get GPCN Network with ID "+state.ID.ValueString(), err.Error())
+		resp.Diagnostics.AddError(
+			networks.ErrSummaryUnableToGetNetwork,
+			fmt.Sprintf(networks.ErrDetailUnableToGetNetworkWithID, state.ID.ValueString())+": "+err.Error(),
+		)
 		return
 	}
 	tflog.Info(ctx, networks.LogSuccessfullyRetrievedGPCNNetworkRead)
@@ -255,6 +262,8 @@ func (r *networksResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 // Update updates the resource and sets the updated Terraform state on success.
 func (r *networksResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, networks.LogStartingUpdateGPCNNetwork)
 	// Retrieve values from plan
 	var plan networks.ResourceModel
@@ -267,8 +276,8 @@ func (r *networksResource) Update(ctx context.Context, req resource.UpdateReques
 	getNetworkResponse, err := networks.UpdateNetwork(r.client, ctx, plan.ID.ValueString(), plan)
 	if err != nil {
 		resp.Diagnostics.AddError(
-			"Unable to update GPCN Network with ID "+plan.ID.ValueString(),
-			err.Error(),
+			networks.ErrSummaryUnableToUpdateNetwork,
+			fmt.Sprintf(networks.ErrDetailUnableToUpdateNetworkWithID, plan.ID.ValueString())+": "+err.Error(),
 		)
 		return
 	}
@@ -287,6 +296,8 @@ func (r *networksResource) Update(ctx context.Context, req resource.UpdateReques
 
 // Delete deletes the resource and removes the Terraform state on success.
 func (r *networksResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, networks.LogStartingDeleteGPCNNetwork)
 	var state networks.ResourceModel
 	diags := req.State.Get(ctx, &state)
@@ -298,8 +309,8 @@ func (r *networksResource) Delete(ctx context.Context, req resource.DeleteReques
 	err := networks.DeleteNetwork(r.client, ctx, state.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
-			"Unable to delete GPCN Network with ID "+state.ID.ValueString(),
-			err.Error(),
+			networks.ErrSummaryUnableToDeleteNetwork,
+			fmt.Sprintf(networks.ErrDetailUnableToDeleteNetworkWithID, state.ID.ValueString())+": "+err.Error(),
 		)
 		return
 	}

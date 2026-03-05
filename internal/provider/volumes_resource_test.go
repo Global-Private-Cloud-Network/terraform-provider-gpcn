@@ -20,16 +20,16 @@ func TestVolumesResource(t *testing.T) {
 			// Create and Read testing
 			{
 				Config: providerConfig + `
-data "gpcn_datacenters" "east_us" {
+data "gpcn_datacenters" "central_us" {
   country_name = "United States"
-  region_name  = "east"
-  name = "Newark"
+  region_name  = "Central"
+  name = "Chicago"
 }
 
 resource "gpcn_volume" "test" {
   name = "terraform-demo"
 
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
   volume_type = "SSD"
 
@@ -66,15 +66,15 @@ resource "gpcn_volume" "test" {
 			// Increasing the size does not result in a replace
 			{
 				Config: providerConfig + `
-data "gpcn_datacenters" "east_us" {
+data "gpcn_datacenters" "central_us" {
   country_name = "United States"
-  region_name  = "east"
-  name = "Newark"
+  region_name  = "Central"
+  name = "Chicago"
 }
 
 resource "gpcn_volume" "test" {
   name = "terraform-demo"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   volume_type = "SSD"
   size_gb = 512
 }
@@ -103,15 +103,15 @@ resource "gpcn_volume" "test" {
 			// Decreasing the size forces a replace
 			{
 				Config: providerConfig + `
-data "gpcn_datacenters" "east_us" {
+data "gpcn_datacenters" "central_us" {
   country_name = "United States"
-  region_name  = "east"
-  name = "Newark"
+  region_name  = "Central"
+  name = "Chicago"
 }
 
 resource "gpcn_volume" "test" {
   name = "terraform-demo"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   volume_type = "SSD"
   size_gb = 256
 }
@@ -147,15 +147,15 @@ func TestVolumesResourceInvalidSize(t *testing.T) {
 			Steps: []resource.TestStep{
 				{
 					Config: providerConfig + `
-data "gpcn_datacenters" "east_us" {
+data "gpcn_datacenters" "central_us" {
   country_name = "United States"
-  region_name  = "east"
-  name = "Newark"
+  region_name  = "Central"
+  name = "Chicago"
 }
 
 resource "gpcn_volume" "test" {
   name = "terraform-demo"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   volume_type = "SSD"
   size_gb = 555
 }

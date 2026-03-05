@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"slices"
 	"strings"
+
+	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/helpers"
 	"terraform-provider-gpcn/internal/networks"
 
@@ -16,14 +17,14 @@ import (
 )
 
 // Validates that the planned virtual machine size is larger than the current. Returns the new sizeId if so
-func ValidatePlanSizeLargerThanStateSize(httpClient *http.Client, ctx context.Context, state, plan ResourceModel) (int64, error) {
+func ValidatePlanSizeLargerThanStateSize(gpcnClient *client.GpcnClient, ctx context.Context, state, plan ResourceModel) (int64, error) {
 	tflog.Info(ctx, LogSizeChangedVerifyingLarger)
 	var planSize ResourceModelSize
 	plan.Size.As(ctx, &planSize, basetypes.ObjectAsOptions{})
 	var stateSize ResourceModelSize
 	state.Size.As(ctx, &stateSize, basetypes.ObjectAsOptions{})
 	// This had preliminary validation, but verify it's up-to-date
-	_, sizes, err := GetVirtualMachineSizeConfigurationId(httpClient, ctx, plan.DatacenterId.ValueString(), planSize.Tier.ValueString())
+	_, sizes, err := GetVirtualMachineSizeConfigurationId(gpcnClient, ctx, plan.DatacenterId.ValueString(), planSize.Tier.ValueString())
 	if err != nil {
 		return -1, err
 	}

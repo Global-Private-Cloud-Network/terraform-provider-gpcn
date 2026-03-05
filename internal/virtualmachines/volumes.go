@@ -3,8 +3,9 @@ package virtualmachines
 import (
 	"context"
 	"fmt"
-	"net/http"
 	"strings"
+
+	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/helpers"
 	"terraform-provider-gpcn/internal/volumes"
 
@@ -12,7 +13,7 @@ import (
 )
 
 // UpdateVolumes handles attaching and detaching volumes for a virtual machine
-func UpdateVolumes(httpClient *http.Client, ctx context.Context, vmId string, oldVolumesList, newVolumesList []string) error {
+func UpdateVolumes(gpcnClient *client.GpcnClient, ctx context.Context, vmId string, oldVolumesList, newVolumesList []string) error {
 	tflog.Info(ctx, "VolumeIds have changed, performing detaches and attaches in that order")
 
 	addedValues, removedValues := helpers.CheckListForDifferences(oldVolumesList, newVolumesList)
@@ -25,12 +26,12 @@ func UpdateVolumes(httpClient *http.Client, ctx context.Context, vmId string, ol
 
 		// Make sure volume actually needs to be removed
 		// If the volume was deleted outside of terraform, it would've detached first and the volumeIds wouldn't be updated
-		_, err := volumes.GetVolume(httpClient, ctx, val)
+		_, err := volumes.GetVolume(gpcnClient, ctx, val)
 		if err != nil && strings.Contains(err.Error(), "404") {
 			// If we are unable to get the volume, this is likely due to it already being deleted. Skip past it
 			continue
 		}
-		err = volumes.RemoveVolumeFromVirtualMachine(httpClient, ctx, val)
+		err = volumes.RemoveVolumeFromVirtualMachine(gpcnClient, ctx, val)
 		if err != nil {
 			return fmt.Errorf("error removing volume with ID %s: %w", val, err)
 		}
@@ -39,7 +40,7 @@ func UpdateVolumes(httpClient *http.Client, ctx context.Context, vmId string, ol
 	// Add new volumes
 	for _, val := range addedValues {
 		tflog.Info(ctx, fmt.Sprintf("Adding volume for ID %s", val))
-		err := volumes.AddVolumeToVirtualMachine(httpClient, ctx, vmId, val)
+		err := volumes.AddVolumeToVirtualMachine(gpcnClient, ctx, vmId, val)
 		if err != nil {
 			return fmt.Errorf("error adding volume with ID %s: %w", val, err)
 		}
