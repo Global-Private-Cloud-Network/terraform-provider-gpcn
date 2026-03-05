@@ -43,24 +43,26 @@ func createTestVMModel(name, image string, allocatePublicIP bool) ResourceModel 
 func newVMResponse(id, name string) *ReadVirtualMachinesResponse {
 	resp := &ReadVirtualMachinesResponse{Success: true, Message: "VM retrieved"}
 	resp.Data.Status = "Running"
-	resp.Data.VirtualMachine.ID = id
-	resp.Data.VirtualMachine.Name = name
-	resp.Data.VirtualMachine.CreatedAt = time.Now().Format(time.RFC3339)
-	resp.Data.VirtualMachine.UpdatedAt = time.Now().Format(time.RFC3339)
-	resp.Data.VirtualMachine.ConfigurationId = 1
-	resp.Data.VirtualMachine.Configuration = "General - Micro - 1"
-	resp.Data.VirtualMachine.ConfigurationCode = "g-micro-1"
-	resp.Data.VirtualMachine.ConfigurationCategoryCode = "general"
-	resp.Data.VirtualMachine.CPU = 1
-	resp.Data.VirtualMachine.RAM = 2
-	resp.Data.VirtualMachine.Disk = 20
-	resp.Data.VirtualMachine.Image = testVMImage
-	resp.Data.VirtualMachine.Username = "admin"
-	resp.Data.VirtualMachine.Datacenter.ID = testDatacenterID
-	resp.Data.VirtualMachine.Datacenter.Name = "US-East-1"
-	resp.Data.VirtualMachine.Datacenter.Region = "East"
-	resp.Data.VirtualMachine.Datacenter.CountryAbbr = "US"
-	resp.Data.VirtualMachine.Datacenter.Country = "United States"
+	resp.Data.ID = id
+	resp.Data.Name = name
+	resp.Data.CreatedAt = time.Now().Format(time.RFC3339)
+	resp.Data.UpdatedAt = time.Now().Format(time.RFC3339)
+	resp.Data.Configuration = ConfigurationResponse{
+		ID:           1,
+		Name:         "General - Micro - 1",
+		Code:         "g-micro-1",
+		CategoryCode: "general",
+		CPU:          1,
+		RAM:          2,
+		Disk:         20,
+	}
+	resp.Data.Image = testVMImage
+	resp.Data.Username = "admin"
+	resp.Data.Datacenter.ID = testDatacenterID
+	resp.Data.Datacenter.Name = "US-East-1"
+	resp.Data.Datacenter.Region = "East"
+	resp.Data.Datacenter.CountryAbbr = "US"
+	resp.Data.Datacenter.Country = "United States"
 	return resp
 }
 
@@ -164,8 +166,8 @@ func TestCreateVirtualMachineMockHTTP(t *testing.T) {
 	if response == nil {
 		t.Fatal("Expected response, got nil")
 	}
-	if response.Data.VirtualMachine.ID != vmID {
-		t.Errorf("Expected VM ID '%s', got '%s'", vmID, response.Data.VirtualMachine.ID)
+	if response.Data.ID != vmID {
+		t.Errorf("Expected VM ID '%s', got '%s'", vmID, response.Data.ID)
 	}
 	if !createCalled {
 		t.Error("Expected create endpoint to be called")
@@ -200,8 +202,8 @@ func TestGetVirtualMachineMockHTTP(t *testing.T) {
 	if response == nil {
 		t.Fatal("Expected response, got nil")
 	}
-	if response.Data.VirtualMachine.ID != vmID {
-		t.Errorf("Expected VM ID '%s', got '%s'", vmID, response.Data.VirtualMachine.ID)
+	if response.Data.ID != vmID {
+		t.Errorf("Expected VM ID '%s', got '%s'", vmID, response.Data.ID)
 	}
 	if response.Data.Status != "Running" {
 		t.Errorf("Expected status 'Running', got '%s'", response.Data.Status)
@@ -233,7 +235,7 @@ func TestUpdateVirtualMachineMockHTTP(t *testing.T) {
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
 				vmStatusCalled = true
 				resp := newVMResponse(vmID, newName)
-				resp.Data.VirtualMachine.CreatedAt = time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
+				resp.Data.CreatedAt = time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
 				testutil.WriteJSONResponse(w, resp)
 
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces"):
@@ -254,8 +256,8 @@ func TestUpdateVirtualMachineMockHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetVirtualMachine failed: %v", err)
 	}
-	if response.Data.VirtualMachine.Name != newName {
-		t.Errorf("Expected VM name '%s', got '%s'", newName, response.Data.VirtualMachine.Name)
+	if response.Data.Name != newName {
+		t.Errorf("Expected VM name '%s', got '%s'", newName, response.Data.Name)
 	}
 	if !updateCalled {
 		t.Error("Expected update endpoint to be called")
@@ -447,7 +449,7 @@ func TestSetSecretValuesDisplaySecretsTrue(t *testing.T) {
 	defer server.Close()
 
 	response := newVMResponse(vmID, "test-vm")
-	response.Data.VirtualMachine.Username = username
+	response.Data.Username = username
 
 	model := createTestVMModel("test-vm", testVMImage, false)
 	model.DisplaySecrets = types.BoolValue(true)
@@ -649,7 +651,7 @@ func TestMapVirtualMachineResponseToModelWithSecrets(t *testing.T) {
 	defer server.Close()
 
 	response := newVMResponse(vmID, "test-vm-full")
-	response.Data.VirtualMachine.Username = username
+	response.Data.Username = username
 
 	model := createTestVMModel("test-vm-full", testVMImage, true)
 	model.DisplaySecrets = types.BoolValue(true)

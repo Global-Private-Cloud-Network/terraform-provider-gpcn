@@ -18,33 +18,35 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
+type ConfigurationResponse struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Code         string `json:"code"`
+	CategoryCode string `json:"categoryCode"`
+	CPU          int64  `json:"cpu"`
+	RAM          int64  `json:"ram"`
+	Disk         int64  `json:"disk"`
+}
+
 type ReadVirtualMachinesResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Data    struct {
-		Status         string `json:"status"`
-		VirtualMachine struct {
-			ID                        string `json:"id"`
-			Name                      string `json:"name"`
-			CreatedAt                 string `json:"createdAt"`
-			UpdatedAt                 string `json:"updatedAt"`
-			ConfigurationId           int64  `json:"configurationId"`
-			Configuration             string `json:"configuration"`
-			ConfigurationCode         string `json:"configurationCode"`
-			ConfigurationCategoryCode string `json:"configurationCategoryCode"`
-			CPU                       int64  `json:"cpu"`
-			RAM                       int64  `json:"ram"`
-			Disk                      int64  `json:"disk"`
-			Image                     string `json:"image"`
-			Username                  string `json:"username"`
-			Datacenter                struct {
-				ID          string `json:"id"`
-				Name        string `json:"name"`
-				Region      string `json:"region"`
-				CountryAbbr string `json:"countryAbbr"`
-				Country     string `json:"country"`
-			} `json:"datacenter"`
-		} `json:"virtualmachine"`
+		Status        string                `json:"status"`
+		ID            string                `json:"id"`
+		Name          string                `json:"name"`
+		CreatedAt     string                `json:"createdAt"`
+		UpdatedAt     string                `json:"updatedAt"`
+		Configuration ConfigurationResponse `json:"configuration"`
+		Image         string                `json:"image"`
+		Username      string                `json:"username"`
+		Datacenter    struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			Region      string `json:"region"`
+			CountryAbbr string `json:"countryAbbr"`
+			Country     string `json:"country"`
+		} `json:"datacenter"`
 	} `json:"data"`
 }
 
@@ -231,7 +233,7 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 		tflog.Info(ctx, fmt.Sprintf(LogVMResponseStatus, getResp.Data.Status))
 
 		if slices.Contains(targetStatusesLower, strings.ToLower(getResp.Data.Status)) {
-			tflog.Info(ctx, fmt.Sprintf(LogVMStatusProceedingToAttach, getResp.Data.VirtualMachine.ID, getResp.Data.Status))
+			tflog.Info(ctx, fmt.Sprintf(LogVMStatusProceedingToAttach, getResp.Data.ID, getResp.Data.Status))
 			// Don't trust the API and do actions too quick. Wait an additional 5 seconds to verify it's actually in the status we want
 			time.Sleep(time.Second * 5)
 			break

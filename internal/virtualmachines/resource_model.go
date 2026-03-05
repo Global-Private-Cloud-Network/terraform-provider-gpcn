@@ -50,16 +50,16 @@ func (o ResourceModelSize) AttrTypes() map[string]attr.Type {
 func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.GpcnClient, response *ReadVirtualMachinesResponse, model ResourceModel) (ResourceModel, diag.Diagnostics) {
 	var allDiags diag.Diagnostics
 
-	model.ID = types.StringValue(response.Data.VirtualMachine.ID)
+	model.ID = types.StringValue(response.Data.ID)
 
 	// Construct time entries
-	createdTime, err := time.Parse(time.RFC3339, response.Data.VirtualMachine.CreatedAt)
+	createdTime, err := time.Parse(time.RFC3339, response.Data.CreatedAt)
 	if err != nil {
 		model.CreatedTime = types.StringValue("unknown")
 	} else {
 		model.CreatedTime = types.StringValue(createdTime.Format(time.RFC850))
 	}
-	updatedTime, err := time.Parse(time.RFC3339, response.Data.VirtualMachine.UpdatedAt)
+	updatedTime, err := time.Parse(time.RFC3339, response.Data.UpdatedAt)
 	if err != nil {
 		model.LastUpdated = types.StringValue("unknown")
 	} else {
@@ -69,9 +69,9 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 	// Construct the location object
 	var diags diag.Diagnostics
 	model.Location, diags = types.MapValueFrom(ctx, types.StringType, map[string]string{
-		"country":    response.Data.VirtualMachine.Datacenter.Country,
-		"region":     response.Data.VirtualMachine.Datacenter.Region,
-		"datacenter": response.Data.VirtualMachine.Datacenter.Name,
+		"country":    response.Data.Datacenter.Country,
+		"region":     response.Data.Datacenter.Region,
+		"datacenter": response.Data.Datacenter.Name,
 	})
 	if diags.HasError() {
 		allDiags.Append(diags...)
@@ -80,10 +80,10 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 
 	// Construct the configuration object
 	model.Configuration, diags = types.MapValueFrom(ctx, types.StringType, map[string]string{
-		"name":         response.Data.VirtualMachine.Configuration,
-		"cpu":          strconv.FormatInt(response.Data.VirtualMachine.CPU, 10) + " cores",
-		"ram":          strconv.FormatInt(response.Data.VirtualMachine.RAM, 10) + " GB",
-		"base_storage": strconv.FormatInt(response.Data.VirtualMachine.Disk, 10) + " GB",
+		"name":         response.Data.Configuration.Name,
+		"cpu":          strconv.FormatInt(response.Data.Configuration.CPU, 10) + " cores",
+		"ram":          strconv.FormatInt(response.Data.Configuration.RAM, 10) + " GB",
+		"base_storage": strconv.FormatInt(response.Data.Configuration.Disk, 10) + " GB",
 	})
 	if diags.HasError() {
 		allDiags.Append(diags...)
@@ -105,20 +105,20 @@ func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient
 	var allDiags diag.Diagnostics
 
 	if model.DatacenterId.IsNull() {
-		model.DatacenterId = types.StringValue(response.Data.VirtualMachine.Datacenter.ID)
+		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
 	}
 	if model.Image.IsNull() {
-		model.Image = types.StringValue(response.Data.VirtualMachine.Image)
+		model.Image = types.StringValue(response.Data.Image)
 	}
 	if model.Name.IsNull() {
-		model.Name = types.StringValue(response.Data.VirtualMachine.Name)
+		model.Name = types.StringValue(response.Data.Name)
 	}
 	if model.Size.IsNull() {
 		size := ResourceModelSize{}
 		var sizeDiags diag.Diagnostics
 		model.Size, sizeDiags = types.ObjectValueFrom(ctx, size.AttrTypes(), ResourceModelSize{
-			Category: types.StringValue(response.Data.VirtualMachine.ConfigurationCategoryCode),
-			Tier:     types.StringValue(response.Data.VirtualMachine.ConfigurationCode),
+			Category: types.StringValue(response.Data.Configuration.CategoryCode),
+			Tier:     types.StringValue(response.Data.Configuration.Code),
 		})
 		if sizeDiags.HasError() {
 			allDiags.Append(sizeDiags...)
@@ -127,7 +127,7 @@ func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient
 	}
 
 	var networkDiags diag.Diagnostics
-	model, networkDiags = setNetworkModelValuesNotPresent(ctx, gpcnClient, response.Data.VirtualMachine.ID, model)
+	model, networkDiags = setNetworkModelValuesNotPresent(ctx, gpcnClient, response.Data.ID, model)
 	allDiags.Append(networkDiags...)
 
 	if model.WaitForStartup.IsNull() {
@@ -200,7 +200,7 @@ func setSecretValues(ctx context.Context, gpcnClient *client.GpcnClient, respons
 	}
 
 	if model.DisplaySecrets.ValueBool() {
-		virtualMachineID := response.Data.VirtualMachine.ID
+		virtualMachineID := response.Data.ID
 		sshKeyResponse, err := GetSSHKey(gpcnClient, ctx, virtualMachineID)
 		if err != nil {
 			allDiags.AddWarning(
@@ -227,7 +227,7 @@ func setSecretValues(ctx context.Context, gpcnClient *client.GpcnClient, respons
 		}
 
 		model.Secrets, secretsDiags = types.MapValueFrom(ctx, types.StringType, map[string]string{
-			"username": response.Data.VirtualMachine.Username,
+			"username": response.Data.Username,
 			"password": password,
 			"ssh_key":  sshKey,
 		})

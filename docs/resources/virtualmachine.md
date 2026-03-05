@@ -68,12 +68,12 @@ resource "gpcn_network" "vm_network_custom" {
 }
 
 # Create storage volume for the VM
-# resource "gpcn_volume" "vm_storage" {
-#   name          = "vm-storage-primary"
-#   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-#   volume_type   = "SSD"
-#   size_gb       = 256
-# }
+resource "gpcn_volume" "vm_storage" {
+  name          = "vm-storage-primary"
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+  volume_type   = "SSD"
+  size_gb       = 256
+}
 
 # Create the virtual machine
 resource "gpcn_virtualmachine" "example" {
@@ -101,7 +101,7 @@ resource "gpcn_virtualmachine" "example" {
 
   # Storage
   volume_ids = [
-    # gpcn_volume.vm_storage.id
+    gpcn_volume.vm_storage.id
   ]
 }
 ```
