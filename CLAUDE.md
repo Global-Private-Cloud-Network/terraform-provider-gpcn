@@ -111,3 +111,16 @@ The `internal/client/` package provides a configurable HTTP client:
   - `max_retries`: Retry count for transient failures (default: 3)
 
 - **Retry with backoff**: Use `client.DoWithRetry(req)` for requests that should retry on transient failures.
+
+## Releasing
+
+To prepare a new release:
+
+1. Update `CHANGELOG.md` with the new version and release notes
+2. Update the provider version in all example `.tf` files under `examples/`:
+   - `examples/resources/gpcn_*/resource.tf`
+   - `examples/data-sources/gpcn_*/data-source.tf`
+   - `examples/provider-install-verification/main.tf`
+3. Run `make` to regenerate documentation (this copies examples into `docs/`)
+4. Commit all changes
+5. Create and push the version tag: `git tag vX.Y.Z && git push origin vX.Y.Z`
