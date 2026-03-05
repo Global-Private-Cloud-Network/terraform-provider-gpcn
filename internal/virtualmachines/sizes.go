@@ -17,48 +17,42 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-type virtualMachineSizesResponse struct {
-	Success bool                            `json:"success"`
-	Message string                          `json:"message"`
-	Data    virtualMachineSizesDataResponse `json:"data"`
+type sizesResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+	Data    struct {
+		DatacenterId string `json:"datacenterId"`
+		Categories   []struct {
+			ID    int64  `json:"id"`
+			Name  string `json:"name"`
+			Code  string `json:"code"`
+			Tiers []struct {
+				ID             int64  `json:"id"`
+				Name           string `json:"name"`
+				Code           string `json:"code"`
+				Configurations []struct {
+					ConfigurationID int64 `json:"configurationId"`
+					CPU             struct {
+						ID          int64  `json:"id"`
+						Cores       int64  `json:"cores"`
+						DisplayName string `json:"displayName"`
+					} `json:"cpu"`
+					Memory struct {
+						ID          int64  `json:"id"`
+						SizeGb      int64  `json:"sizeGb"`
+						DisplayName string `json:"displayName"`
+					} `json:"memory"`
+					Disk struct {
+						ID          int64  `json:"id"`
+						SizeGb      int64  `json:"sizeGb"`
+						DisplayName string `json:"displayName"`
+					} `json:"disk"`
+				} `json:"configurations"`
+			} `json:"tiers"`
+		} `json:"categories"`
+	} `json:"data"`
 }
-type virtualMachineSizesDataResponse struct {
-	DatacenterId string                                      `json:"datacenterId"`
-	Categories   []virtualMachineSizesDataCategoriesResponse `json:"categories"`
-}
-type virtualMachineSizesDataCategoriesResponse struct {
-	ID    int64                                            `json:"id"`
-	Name  string                                           `json:"name"`
-	Code  string                                           `json:"code"`
-	Tiers []virtualMachineSizesDataCategoriesTiersResponse `json:"tiers"`
-}
-type virtualMachineSizesDataCategoriesTiersResponse struct {
-	ID             int64                                                          `json:"id"`
-	Name           string                                                         `json:"name"`
-	Code           string                                                         `json:"code"`
-	Configurations []virtualMachineSizesDataCategoriesTiersConfigurationsResponse `json:"configurations"`
-}
-type virtualMachineSizesDataCategoriesTiersConfigurationsResponse struct {
-	ConfigurationID int64                                                              `json:"configurationId"`
-	CPU             virtualMachineSizesDataCategoriesTiersConfigurationsCPUResponse    `json:"cpu"`
-	Memory          virtualMachineSizesDataCategoriesTiersConfigurationsMemoryResponse `json:"memory"`
-	Disk            virtualMachineSizesDataCategoriesTiersConfigurationsDiskResponse   `json:"disk"`
-}
-type virtualMachineSizesDataCategoriesTiersConfigurationsCPUResponse struct {
-	ID          int64  `json:"id"`
-	Cores       int64  `json:"cores"`
-	DisplayName string `json:"displayName"`
-}
-type virtualMachineSizesDataCategoriesTiersConfigurationsMemoryResponse struct {
-	ID          int64  `json:"id"`
-	SizeGb      int64  `json:"sizeGb"`
-	DisplayName string `json:"displayName"`
-}
-type virtualMachineSizesDataCategoriesTiersConfigurationsDiskResponse struct {
-	ID          int64  `json:"id"`
-	SizeGb      int64  `json:"sizeGb"`
-	DisplayName string `json:"displayName"`
-}
+
 type VirtualMachineConfigurationsTF struct {
 	ID           types.Int64  `tfsdk:"id"`
 	Category     types.String `tfsdk:"category"`
@@ -103,7 +97,7 @@ func GetVirtualMachineSizeConfigurationId(gpcnClient *client.GpcnClient, ctx con
 		return -1, sizes, err
 	}
 
-	var sizesResp virtualMachineSizesResponse
+	var sizesResp sizesResponse
 	err = json.Unmarshal(body, &sizesResp)
 
 	if err != nil {

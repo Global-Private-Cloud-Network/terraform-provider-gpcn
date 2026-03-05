@@ -56,3 +56,7 @@ terraform-provider-gpcn
 
 # Environment variables
 .env
+
+# Coverage
+coverage.out
+coverage.html
