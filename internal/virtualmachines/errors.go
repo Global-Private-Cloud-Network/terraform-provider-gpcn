@@ -62,5 +62,5 @@ const (
 
 // Polling constants
 const (
-	ErrVirtualMachineStatusTimeout = "After 5 minutes, the virtual machine was still not in the target status. Please check the GPCN API for more information"
+	ErrVirtualMachineStatusTimeoutTemplate = "After %d seconds, the virtual machine was still not in the target status. Please check the GPCN API for more information"
 )

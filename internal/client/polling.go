@@ -60,11 +60,11 @@ func PerformLongPolling(gpcnClient *GpcnClient, ctx context.Context, action, job
 	if gpcnClient.config != nil && gpcnClient.config.PollingTimeout > 0 {
 		config.Timeout = gpcnClient.config.PollingTimeout
 	}
-	return PerformLongPollingWithConfig(gpcnClient.httpClient, ctx, action, jobId, config)
+	return PerformLongPollingWithConfig(gpcnClient, ctx, action, jobId, config)
 }
 
 // PerformLongPollingWithConfig polls with custom configuration
-func PerformLongPollingWithConfig(client *http.Client, ctx context.Context, action, jobId string, config *PollingConfig) (*JobStatusMultiResponse, error) {
+func PerformLongPollingWithConfig(gpcnClient *GpcnClient, ctx context.Context, action, jobId string, config *PollingConfig) (*JobStatusMultiResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingPerformLongPollingWithAction, action),
 		map[string]any{"job_id": jobId})
 
@@ -77,7 +77,7 @@ func PerformLongPollingWithConfig(client *http.Client, ctx context.Context, acti
 		tflog.Info(ctx, fmt.Sprintf(LogStartingLongPollingIteration, iteration, action, int(elapsed.Seconds())),
 			map[string]any{"job_id": jobId, "iteration": iteration})
 
-		jobResponse, err := poll(client, ctx, jobId)
+		jobResponse, err := poll(gpcnClient, ctx, jobId)
 		if err != nil {
 			return nil, fmt.Errorf("polling for job %s failed: %w", jobId, err)
 		}
@@ -114,7 +114,7 @@ func PerformLongPollingWithConfig(client *http.Client, ctx context.Context, acti
 	}
 }
 
-func poll(client *http.Client, ctx context.Context, jobId string) (*JobStatusMultiResponse, error) {
+func poll(gpcnClient *GpcnClient, ctx context.Context, jobId string) (*JobStatusMultiResponse, error) {
 	jobStatusRequestBody := map[string][]string{
 		"jobIds": {jobId},
 	}
@@ -129,8 +129,8 @@ func poll(client *http.Client, ctx context.Context, jobId string) (*JobStatusMul
 		return nil, fmt.Errorf("failed to create job status request: %w", err)
 	}
 
-	//nolint:gosec // G704: URL is constructed from validated config, not user input
-	response, err := client.Do(request)
+	// Use DoWithRetry to propagate correlation IDs and benefit from retry logic
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, fmt.Errorf("job status request failed: %w", err)
 	}

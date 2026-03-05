@@ -18,18 +18,18 @@ provider "gpcn" {
   host = "https://api.gpcn.com"
 }
 
-# Lookup datacenter in East US region
-data "gpcn_datacenters" "east_us" {
+# Lookup datacenter in Central US region
+data "gpcn_datacenters" "central_us" {
   country_name = "United States"
-  region_name  = "east"
-  name         = "Newark"
+  region_name  = "Central"
+  name         = "Chicago"
 }
 
 # Example 1: Standard Network with DHCP and DNS
 resource "gpcn_network" "example_standard" {
   name          = "terraform-demo-standard"
   network_type  = "standard"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
   description = "Standard network for web application VMs"
 
@@ -52,7 +52,7 @@ output "gpcn_network_example_standard" {
 resource "gpcn_network" "example_custom" {
   name          = "terraform-demo-custom"
   network_type  = "custom"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
   description = "Custom network for advanced networking configuration"
 }

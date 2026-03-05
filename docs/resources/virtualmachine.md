@@ -32,18 +32,18 @@ provider "gpcn" {
   host = "https://api.gpcn.com"
 }
 
-# Lookup datacenter in East US region
-data "gpcn_datacenters" "east_us" {
+# Lookup datacenter in Central US region
+data "gpcn_datacenters" "central_us" {
   country_name = "United States"
-  region_name  = "east"
-  name         = "Newark"
+  region_name  = "Central"
+  name         = "Chicago"
 }
 
 # Create a standard network for the VM
 resource "gpcn_network" "vm_network" {
   name          = "vm-network-standard"
   network_type  = "standard"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
   description = "Standard network for virtual machine connectivity"
 
@@ -62,23 +62,23 @@ resource "gpcn_network" "vm_network" {
 resource "gpcn_network" "vm_network_custom" {
   name          = "vm-network-custom"
   network_type  = "custom"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
   description = "Custom network for advanced networking configuration"
 }
 
 # Create storage volume for the VM
-resource "gpcn_volume" "vm_storage" {
-  name          = "vm-storage-primary"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
-  volume_type   = "SSD"
-  size_gb       = 256
-}
+# resource "gpcn_volume" "vm_storage" {
+#   name          = "vm-storage-primary"
+#   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+#   volume_type   = "SSD"
+#   size_gb       = 256
+# }
 
 # Create the virtual machine
 resource "gpcn_virtualmachine" "example" {
   name          = "terraform-demo-vm"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
   # Compute configuration
   size = {
@@ -101,12 +101,8 @@ resource "gpcn_virtualmachine" "example" {
 
   # Storage
   volume_ids = [
-    gpcn_volume.vm_storage.id
+    # gpcn_volume.vm_storage.id
   ]
-}
-
-output "example_gpcn_virtualmachine" {
-  value = gpcn_virtualmachine.example
 }
 ```
 

@@ -141,7 +141,7 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 	}
 
 	// Wait for the VM to actually be spun up before doing anything more
-	getVirtualMachineResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, resourceID, []string{Running, Shutoff}, DEFAULT_NETWORK_TIMEOUT_SECONDS)
+	getVirtualMachineResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, resourceID, []string{VMStatusRunning.String(), VMStatusShutoff.String()}, DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS)
 	if err != nil {
 		return nil, err
 	}
@@ -215,23 +215,23 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 		targetStatusesLower = append(targetStatusesLower, strings.ToLower(status))
 	}
 	tflog.Info(ctx, fmt.Sprintf(LogStartingPollForVMStatusWithID, virtualMachineId))
-	var getVirtualMachineResponse *ReadVirtualMachinesResponse
+	var getResp *ReadVirtualMachinesResponse
+	var err error
 	secondsElapsed := 0
 	longPollIteration := 1
 	var errString string
 	for {
 		tflog.Info(ctx, fmt.Sprintf(LogStartingLongPollingIteration, longPollIteration, secondsElapsed))
 
-		getResp, err := GetVirtualMachine(gpcnClient, ctx, virtualMachineId)
+		getResp, err = GetVirtualMachine(gpcnClient, ctx, virtualMachineId)
 		if err != nil {
 			errString = err.Error()
 			break
 		}
-		getVirtualMachineResponse = getResp
-		tflog.Info(ctx, fmt.Sprintf(LogVMResponseStatus, getVirtualMachineResponse.Data.Status))
+		tflog.Info(ctx, fmt.Sprintf(LogVMResponseStatus, getResp.Data.Status))
 
-		if slices.Contains(targetStatusesLower, strings.ToLower(getVirtualMachineResponse.Data.Status)) {
-			tflog.Info(ctx, fmt.Sprintf(LogVMStatusProceedingToAttach, getVirtualMachineResponse.Data.VirtualMachine.ID, getVirtualMachineResponse.Data.Status))
+		if slices.Contains(targetStatusesLower, strings.ToLower(getResp.Data.Status)) {
+			tflog.Info(ctx, fmt.Sprintf(LogVMStatusProceedingToAttach, getResp.Data.VirtualMachine.ID, getResp.Data.Status))
 			// Don't trust the API and do actions too quick. Wait an additional 5 seconds to verify it's actually in the status we want
 			time.Sleep(time.Second * 5)
 			break
@@ -241,14 +241,14 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 		longPollIteration += 1
 
 		if secondsElapsed > timeoutMaxSec {
-			errString = ErrVirtualMachineStatusTimeout
+			errString = fmt.Sprintf(ErrVirtualMachineStatusTimeoutTemplate, timeoutMaxSec)
 			break
 		}
 	}
 	if errString != "" {
 		return nil, errors.New(errString)
 	}
-	return getVirtualMachineResponse, nil
+	return getResp, nil
 }
 
 // Verify if public IP is set to true, the first network cannot be of type custom

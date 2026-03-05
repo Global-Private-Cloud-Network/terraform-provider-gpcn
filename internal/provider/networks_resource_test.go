@@ -20,16 +20,16 @@ func TestNetworksResource(t *testing.T) {
 			// Create and Read testing
 			{
 				Config: providerConfig + `
-data "gpcn_datacenters" "east_us" {
+data "gpcn_datacenters" "central_us" {
   country_name = "United States"
-  region_name  = "east"
-  name = "Newark"
+  region_name  = "Central"
+  name = "Chicago"
 }
 
 resource "gpcn_network" "test" {
   name = "terraform-demo-standard"
   description = "An example Network for a demo of Terraform! This one uses the standard network_type."
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   network_type = "standard"
   cidr_block = "10.0.0.0/24"
   dhcp_start_address = "10.0.0.10"
@@ -72,16 +72,16 @@ resource "gpcn_network" "test" {
 			// Update and Read testing with little changes
 			{
 				Config: providerConfig + `
-data "gpcn_datacenters" "east_us" {
+data "gpcn_datacenters" "central_us" {
   country_name = "United States"
-  region_name  = "east"
-  name = "Newark"
+  region_name  = "Central"
+  name = "Chicago"
 }
 
 resource "gpcn_network" "test" {
   name = "terraform-demo-standard"
   description = "An example Network for a demo of Terraform! This one uses the standard network_type."
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   network_type = "standard"
   cidr_block = "10.0.0.0/24"
   dhcp_start_address = "10.0.0.10"
@@ -112,16 +112,16 @@ resource "gpcn_network" "test" {
 			// Changing network_type forces a replace
 			{
 				Config: providerConfig + `
-data "gpcn_datacenters" "east_us" {
+data "gpcn_datacenters" "central_us" {
   country_name = "United States"
-  region_name  = "east"
-  name = "Newark"
+  region_name  = "Central"
+  name = "Chicago"
 }
 
 resource "gpcn_network" "test" {
   name = "terraform-demo-custom"
   description = "An example Network for a demo of Terraform! This one uses the custom network_type."
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   network_type = "custom"
 }
 			`,

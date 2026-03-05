@@ -82,7 +82,10 @@ func TestMapVirtualMachineResponseToModelUnit(t *testing.T) {
 	response := newVMResponse("vm-123", "test-vm")
 	model := createTestVMModel("test-vm", testVMImage, false)
 
-	result := MapVirtualMachineResponseToModel(context.Background(), gpcnClient, response, model)
+	result, diags := MapVirtualMachineResponseToModel(context.Background(), gpcnClient, response, model)
+	if diags.HasError() {
+		t.Fatalf("Unexpected error: %v", diags)
+	}
 
 	if result.ID.ValueString() != "vm-123" {
 		t.Errorf("Expected ID 'vm-123', got '%s'", result.ID.ValueString())
@@ -449,7 +452,7 @@ func TestSetSecretValuesDisplaySecretsTrue(t *testing.T) {
 	model := createTestVMModel("test-vm", testVMImage, false)
 	model.DisplaySecrets = types.BoolValue(true)
 
-	result := setSecretValues(context.Background(), gpcnClient, response, model)
+	result, _ := setSecretValues(context.Background(), gpcnClient, response, model)
 
 	if result.Secrets.IsNull() || result.Secrets.IsUnknown() {
 		t.Fatal("Expected secrets to be set")
@@ -482,7 +485,7 @@ func TestSetSecretValuesDisplaySecretsFalse(t *testing.T) {
 	model := createTestVMModel("test-vm", testVMImage, false)
 	model.DisplaySecrets = types.BoolValue(false)
 
-	result := setSecretValues(context.Background(), gpcnClient, response, model)
+	result, _ := setSecretValues(context.Background(), gpcnClient, response, model)
 
 	if sshKeyCalled {
 		t.Error("SSH key endpoint should not be called when display_secrets is false")
@@ -547,7 +550,7 @@ func TestSetNetworkModelValuesNotPresentWithPublicIP(t *testing.T) {
 		NetworkIds:       types.ListNull(types.StringType),
 	}
 
-	result := setNetworkModelValuesNotPresent(context.Background(), gpcnClient, vmID, model)
+	result, _ := setNetworkModelValuesNotPresent(context.Background(), gpcnClient, vmID, model)
 
 	if result.PublicIp.ValueString() != publicIP {
 		t.Errorf("Expected public IP '%s', got '%s'", publicIP, result.PublicIp.ValueString())
@@ -595,7 +598,7 @@ func TestSetNetworkModelValuesNotPresentWithoutPublicIP(t *testing.T) {
 		NetworkIds:       types.ListNull(types.StringType),
 	}
 
-	result := setNetworkModelValuesNotPresent(context.Background(), gpcnClient, vmID, model)
+	result, _ := setNetworkModelValuesNotPresent(context.Background(), gpcnClient, vmID, model)
 
 	if result.PublicIp.ValueString() != "" {
 		t.Errorf("Expected empty public IP, got '%s'", result.PublicIp.ValueString())
@@ -651,7 +654,10 @@ func TestMapVirtualMachineResponseToModelWithSecrets(t *testing.T) {
 	model := createTestVMModel("test-vm-full", testVMImage, true)
 	model.DisplaySecrets = types.BoolValue(true)
 
-	result := MapVirtualMachineResponseToModel(context.Background(), gpcnClient, response, model)
+	result, diags := MapVirtualMachineResponseToModel(context.Background(), gpcnClient, response, model)
+	if diags.HasError() {
+		t.Fatalf("Unexpected error: %v", diags)
+	}
 
 	if result.ID.ValueString() != vmID {
 		t.Errorf("Expected ID '%s', got '%s'", vmID, result.ID.ValueString())

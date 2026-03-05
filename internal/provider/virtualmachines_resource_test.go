@@ -20,16 +20,16 @@ func TestVirtualMachinesResource(t *testing.T) {
 			// Create and Read testing
 			{
 				Config: providerConfig + `
-data "gpcn_datacenters" "east_us" {
+data "gpcn_datacenters" "central_us" {
   country_name = "United States"
-  region_name  = "east"
-  name = "Newark"
+  region_name  = "Central"
+  name = "Chicago"
 }
 
 resource "gpcn_network" "vm_network" {
   name          = "vm-network-standard"
   network_type  = "standard"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   cidr_block = "10.0.0.0/24"
   dhcp_start_address = "10.0.0.10"
   dhcp_end_address   = "10.0.0.254"
@@ -39,19 +39,19 @@ resource "gpcn_network" "vm_network" {
 resource "gpcn_network" "vm_network_custom" {
   name          = "vm-network-custom"
   network_type  = "custom"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 }
 
 resource "gpcn_volume" "vm_storage" {
   name          = "vm-storage-primary"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   volume_type   = "SSD"
   size_gb       = 256
 }
 
 resource "gpcn_virtualmachine" "test" {
   name          = "terraform-demo-vm"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
   size = {
     category = "general"
@@ -103,16 +103,16 @@ resource "gpcn_virtualmachine" "test" {
 			// Update and Read testing
 			{
 				Config: providerConfig + `
-data "gpcn_datacenters" "east_us" {
+data "gpcn_datacenters" "central_us" {
   country_name = "United States"
-  region_name  = "east"
-  name = "Newark"
+  region_name  = "Central"
+  name = "Chicago"
 }
 
 resource "gpcn_network" "vm_network" {
   name          = "vm-network-standard"
   network_type  = "standard"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   cidr_block = "10.0.0.0/24"
   dhcp_start_address = "10.0.0.10"
   dhcp_end_address   = "10.0.0.254"
@@ -121,7 +121,7 @@ resource "gpcn_network" "vm_network" {
 
 resource "gpcn_virtualmachine" "test" {
   name          = "terraform-demo-vm-update"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   size = {
     category = "general"
     tier     = "g-micro-1"
@@ -152,16 +152,16 @@ resource "gpcn_virtualmachine" "test" {
 			// Changing image forces a replace
 			{
 				Config: providerConfig + `
-data "gpcn_datacenters" "east_us" {
+data "gpcn_datacenters" "central_us" {
   country_name = "United States"
-  region_name  = "east"
-  name = "Newark"
+  region_name  = "Central"
+  name = "Chicago"
 }
 
 resource "gpcn_network" "vm_network" {
   name          = "vm-network-standard"
   network_type  = "standard"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   cidr_block = "10.0.0.0/24"
   dhcp_start_address = "10.0.0.10"
   dhcp_end_address   = "10.0.0.254"
@@ -170,7 +170,7 @@ resource "gpcn_network" "vm_network" {
 
 resource "gpcn_virtualmachine" "test" {
   name          = "terraform-demo-vm-update"
-  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   size = {
     category = "general"
     tier     = "g-micro-1"
@@ -209,16 +209,16 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			{
 				Config: providerConfig + `
 
-			data "gpcn_datacenters" "east_us" {
+			data "gpcn_datacenters" "central_us" {
 				country_name = "United States"
-				region_name  = "east"
-				name = "Newark"
+				region_name  = "Central"
+				name = "Chicago"
 			}
 
 			resource "gpcn_network" "vm_network" {
 			  name          = "vm-network-standard"
 			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
@@ -227,7 +227,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 
 			resource "gpcn_virtualmachine" "test" {
 			  name          = "terraform-demo-vm"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
 			    category = "general"
@@ -253,16 +253,16 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			// Update allocate_public_ip to true
 			{
 				Config: providerConfig + `
-			data "gpcn_datacenters" "east_us" {
+			data "gpcn_datacenters" "central_us" {
 				country_name = "United States"
-				region_name  = "east"
-				name = "Newark"
+				region_name  = "Central"
+				name = "Chicago"
 			}
 
 			resource "gpcn_network" "vm_network" {
 			  name          = "vm-network-standard"
 			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
@@ -271,7 +271,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 
 			resource "gpcn_virtualmachine" "test" {
 			  name          = "terraform-demo-vm"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
 			    category = "general"
@@ -300,15 +300,15 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			// Release the IP
 			{
 				Config: providerConfig + `
-			data "gpcn_datacenters" "east_us" {
+			data "gpcn_datacenters" "central_us" {
 				country_name = "United States"
-				region_name  = "east"
-				name = "Newark"
+				region_name  = "Central"
+				name = "Chicago"
 			}
 			resource "gpcn_network" "vm_network" {
 			  name          = "vm-network-standard"
 			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
@@ -317,7 +317,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 
 			resource "gpcn_virtualmachine" "test" {
 			  name          = "terraform-demo-vm"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
 			    category = "general"
@@ -353,15 +353,15 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 			// Create VM with g-micro-1 size
 			{
 				Config: providerConfig + `
-			data "gpcn_datacenters" "east_us" {
+			data "gpcn_datacenters" "central_us" {
 				country_name = "United States"
-				region_name  = "east"
-				name = "Newark"
+				region_name  = "Central"
+				name = "Chicago"
 			}
 			resource "gpcn_network" "vm_network" {
 			  name          = "vm-network-standard"
 			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
@@ -370,7 +370,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 
 			resource "gpcn_virtualmachine" "test" {
 			  name          = "terraform-size-upgrade-vm"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
 			    category = "general"
@@ -397,15 +397,15 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 			// Upgrade to g-small-1 size - should update in place
 			{
 				Config: providerConfig + `
-			data "gpcn_datacenters" "east_us" {
+			data "gpcn_datacenters" "central_us" {
 				country_name = "United States"
-				region_name  = "east"
-				name = "Newark"
+				region_name  = "Central"
+				name = "Chicago"
 			}
 			resource "gpcn_network" "vm_network" {
 			  name          = "vm-network-standard"
 			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
@@ -414,7 +414,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 
 			resource "gpcn_virtualmachine" "test" {
 			  name          = "terraform-size-upgrade-vm"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
 			    category = "general"
@@ -450,16 +450,16 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			// Create VM with no volumes
 			{
 				Config: providerConfig + `
-			data "gpcn_datacenters" "east_us" {
+			data "gpcn_datacenters" "central_us" {
 				country_name = "United States"
-				region_name  = "east"
-				name = "Newark"
+				region_name  = "Central"
+				name = "Chicago"
 			}
 
 			resource "gpcn_network" "vm_network" {
 			  name          = "vm-network-standard"
 			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
@@ -468,21 +468,21 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 
 			resource "gpcn_volume" "vm_vol1" {
 			  name          = "vm-storage-vol1"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			  volume_type   = "SSD"
 			  size_gb       = 256
 			}
 
 			resource "gpcn_volume" "vm_vol2" {
 			  name          = "vm-storage-vol2"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			  volume_type   = "SSD"
 			  size_gb       = 256
 			}
 
 			resource "gpcn_virtualmachine" "test" {
 			  name          = "terraform-volume-test-vm"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
 			    category = "general"
@@ -509,16 +509,16 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			// Attach one volume
 			{
 				Config: providerConfig + `
-			data "gpcn_datacenters" "east_us" {
+			data "gpcn_datacenters" "central_us" {
 				country_name = "United States"
-				region_name  = "east"
-				name = "Newark"
+				region_name  = "Central"
+				name = "Chicago"
 			}
 
 			resource "gpcn_network" "vm_network" {
 			  name          = "vm-network-standard"
 			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
@@ -527,21 +527,21 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 
 			resource "gpcn_volume" "vm_vol1" {
 			  name          = "vm-storage-vol1"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			  volume_type   = "SSD"
 			  size_gb       = 256
 			}
 
 			resource "gpcn_volume" "vm_vol2" {
 			  name          = "vm-storage-vol2"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			  volume_type   = "SSD"
 			  size_gb       = 256
 			}
 
 			resource "gpcn_virtualmachine" "test" {
 			  name          = "terraform-volume-test-vm"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
 			    category = "general"
@@ -572,16 +572,16 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			// Attach second volume
 			{
 				Config: providerConfig + `
-			data "gpcn_datacenters" "east_us" {
+			data "gpcn_datacenters" "central_us" {
 				country_name = "United States"
-				region_name  = "east"
-				name = "Newark"
+				region_name  = "Central"
+				name = "Chicago"
 			}
 
 			resource "gpcn_network" "vm_network" {
 			  name          = "vm-network-standard"
 			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
@@ -590,21 +590,21 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 
 			resource "gpcn_volume" "vm_vol1" {
 			  name          = "vm-storage-vol1"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			  volume_type   = "SSD"
 			  size_gb       = 256
 			}
 
 			resource "gpcn_volume" "vm_vol2" {
 			  name          = "vm-storage-vol2"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			  volume_type   = "SSD"
 			  size_gb       = 256
 			}
 
 			resource "gpcn_virtualmachine" "test" {
 			  name          = "terraform-volume-test-vm"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
 			    category = "general"
@@ -636,16 +636,16 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			// Remove first volume
 			{
 				Config: providerConfig + `
-			data "gpcn_datacenters" "east_us" {
+			data "gpcn_datacenters" "central_us" {
 				country_name = "United States"
-				region_name  = "east"
-				name = "Newark"
+				region_name  = "Central"
+				name = "Chicago"
 			}
 
 			resource "gpcn_network" "vm_network" {
 			  name          = "vm-network-standard"
 			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
@@ -654,21 +654,21 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 
 			resource "gpcn_volume" "vm_vol1" {
 			  name          = "vm-storage-vol1"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			  volume_type   = "SSD"
 			  size_gb       = 256
 			}
 
 			resource "gpcn_volume" "vm_vol2" {
 			  name          = "vm-storage-vol2"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			  volume_type   = "SSD"
 			  size_gb       = 256
 			}
 
 			resource "gpcn_virtualmachine" "test" {
 			  name          = "terraform-volume-test-vm"
-			  datacenter_id = data.gpcn_datacenters.east_us.datacenters[0].id
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
 			    category = "general"

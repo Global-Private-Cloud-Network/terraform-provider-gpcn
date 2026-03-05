@@ -28,11 +28,11 @@ func StartVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, vir
 		defer response.Body.Close()
 
 		if waitForStatusUpdate {
-			readVirtualMachinesResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, virtualMachineId, []string{Running}, 120)
+			readVirtualMachinesResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, virtualMachineId, []string{VMStatusRunning.String()}, 120)
 			if err != nil {
 				return err
 			}
-			if readVirtualMachinesResponse.Data.Status == Running {
+			if readVirtualMachinesResponse.Data.Status == VMStatusRunning.String() {
 				// If it started running, break a bit earlier
 				break
 			}
@@ -58,7 +58,7 @@ func StopVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, virt
 	}
 	defer response.Body.Close()
 
-	_, err = PollForVirtualMachineStatus(gpcnClient, ctx, virtualMachineId, []string{Shutoff}, DEFAULT_NETWORK_TIMEOUT_SECONDS)
+	_, err = PollForVirtualMachineStatus(gpcnClient, ctx, virtualMachineId, []string{VMStatusShutoff.String()}, DEFAULT_NETWORK_TIMEOUT_SECONDS)
 	if err != nil {
 		return err
 	}

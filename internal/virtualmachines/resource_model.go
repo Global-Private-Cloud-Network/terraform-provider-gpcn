@@ -2,6 +2,7 @@ package virtualmachines
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -44,8 +45,11 @@ func (o ResourceModelSize) AttrTypes() map[string]attr.Type {
 	}
 }
 
-// Update the plan or state with new values from the GET response
-func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.GpcnClient, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
+// MapVirtualMachineResponseToModel updates the plan or state with new values from the GET response.
+// Returns the updated model and any diagnostics encountered during mapping.
+func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.GpcnClient, response *ReadVirtualMachinesResponse, model ResourceModel) (ResourceModel, diag.Diagnostics) {
+	var allDiags diag.Diagnostics
+
 	model.ID = types.StringValue(response.Data.VirtualMachine.ID)
 
 	// Construct time entries
@@ -70,6 +74,7 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 		"datacenter": response.Data.VirtualMachine.Datacenter.Name,
 	})
 	if diags.HasError() {
+		allDiags.Append(diags...)
 		model.Location = types.MapNull(types.StringType)
 	}
 
@@ -81,19 +86,24 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 		"base_storage": strconv.FormatInt(response.Data.VirtualMachine.Disk, 10) + " GB",
 	})
 	if diags.HasError() {
+		allDiags.Append(diags...)
 		model.Configuration = types.MapNull(types.StringType)
 	}
 
 	// If model doesn't already have these populated, set them
-	model = setModelValuesNotPresent(ctx, gpcnClient, response, model)
+	model, diags = setModelValuesNotPresent(ctx, gpcnClient, response, model)
+	allDiags.Append(diags...)
 
 	// If user requested secret values, fetch them now if needed
-	model = setSecretValues(ctx, gpcnClient, response, model)
+	model, diags = setSecretValues(ctx, gpcnClient, response, model)
+	allDiags.Append(diags...)
 
-	return model
+	return model, allDiags
 }
 
-func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
+func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient, response *ReadVirtualMachinesResponse, model ResourceModel) (ResourceModel, diag.Diagnostics) {
+	var allDiags diag.Diagnostics
+
 	if model.DatacenterId.IsNull() {
 		model.DatacenterId = types.StringValue(response.Data.VirtualMachine.Datacenter.ID)
 	}
@@ -111,26 +121,39 @@ func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient
 			Tier:     types.StringValue(response.Data.VirtualMachine.ConfigurationCode),
 		})
 		if sizeDiags.HasError() {
+			allDiags.Append(sizeDiags...)
 			model.Size = types.ObjectNull(size.AttrTypes())
 		}
 	}
 
-	model = setNetworkModelValuesNotPresent(ctx, gpcnClient, response.Data.VirtualMachine.ID, model)
+	var networkDiags diag.Diagnostics
+	model, networkDiags = setNetworkModelValuesNotPresent(ctx, gpcnClient, response.Data.VirtualMachine.ID, model)
+	allDiags.Append(networkDiags...)
 
 	if model.WaitForStartup.IsNull() {
 		// Set WaitForStartup to the default value
 		model.WaitForStartup = types.BoolValue(true)
 	}
 
-	return model
+	return model, allDiags
 }
 
-func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient, virtualMachineID string, model ResourceModel) ResourceModel {
+func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient, virtualMachineID string, model ResourceModel) (ResourceModel, diag.Diagnostics) {
+	var allDiags diag.Diagnostics
+
 	// Set the base public IP, might be replaced later
 	model.PublicIp = types.StringValue("")
 	// Fetch network interfaces for the virtual machine
 	networkInterfaces, err := networks.GetNetworkInterfaces(gpcnClient, ctx, virtualMachineID)
-	if err == nil && len(networkInterfaces) > 0 {
+	if err != nil {
+		allDiags.AddWarning(
+			"Unable to fetch network interfaces",
+			fmt.Sprintf("Failed to fetch network interfaces for VM %s: %s", virtualMachineID, err.Error()),
+		)
+		return model, allDiags
+	}
+
+	if len(networkInterfaces) > 0 {
 		// Extract network IDs from network interfaces
 		var networkIds []string
 		hasPublicIp := false
@@ -148,6 +171,7 @@ func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.Gpc
 			var networkDiags diag.Diagnostics
 			model.NetworkIds, networkDiags = types.ListValueFrom(ctx, types.StringType, networkIds)
 			if networkDiags.HasError() {
+				allDiags.Append(networkDiags...)
 				model.NetworkIds = types.ListNull(types.StringType)
 			}
 		}
@@ -157,10 +181,12 @@ func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.Gpc
 			model.AllocatePublicIp = types.BoolValue(hasPublicIp)
 		}
 	}
-	return model
+	return model, allDiags
 }
 
-func setSecretValues(ctx context.Context, gpcnClient *client.GpcnClient, response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
+func setSecretValues(ctx context.Context, gpcnClient *client.GpcnClient, response *ReadVirtualMachinesResponse, model ResourceModel) (ResourceModel, diag.Diagnostics) {
+	var allDiags diag.Diagnostics
+
 	// Construct the base object
 	var secretsDiags diag.Diagnostics
 	model.Secrets, secretsDiags = types.MapValueFrom(ctx, types.StringType, map[string]string{
@@ -169,22 +195,46 @@ func setSecretValues(ctx context.Context, gpcnClient *client.GpcnClient, respons
 		"ssh_key":  "",
 	})
 	if secretsDiags.HasError() {
+		allDiags.Append(secretsDiags...)
 		model.Secrets = types.MapNull(types.StringType)
 	}
 
 	if model.DisplaySecrets.ValueBool() {
 		virtualMachineID := response.Data.VirtualMachine.ID
-		sshKeyResponse, _ := GetSSHKey(gpcnClient, ctx, virtualMachineID)
-		sshPasswordResponse, _ := GetPassword(gpcnClient, ctx, virtualMachineID)
-		// Construct the secrets object
+		sshKeyResponse, err := GetSSHKey(gpcnClient, ctx, virtualMachineID)
+		if err != nil {
+			allDiags.AddWarning(
+				"Unable to fetch SSH key",
+				fmt.Sprintf("Failed to fetch SSH key for VM %s: %s", virtualMachineID, err.Error()),
+			)
+		}
+		sshPasswordResponse, err := GetPassword(gpcnClient, ctx, virtualMachineID)
+		if err != nil {
+			allDiags.AddWarning(
+				"Unable to fetch password",
+				fmt.Sprintf("Failed to fetch password for VM %s: %s", virtualMachineID, err.Error()),
+			)
+		}
+
+		// Construct the secrets object with whatever values we were able to retrieve
+		sshKey := ""
+		password := ""
+		if sshKeyResponse != nil {
+			sshKey = sshKeyResponse.Data.PrivateKey
+		}
+		if sshPasswordResponse != nil {
+			password = sshPasswordResponse.Data.SSHPassword
+		}
+
 		model.Secrets, secretsDiags = types.MapValueFrom(ctx, types.StringType, map[string]string{
 			"username": response.Data.VirtualMachine.Username,
-			"password": sshPasswordResponse.Data.SSHPassword,
-			"ssh_key":  sshKeyResponse.Data.PrivateKey,
+			"password": password,
+			"ssh_key":  sshKey,
 		})
 		if secretsDiags.HasError() {
+			allDiags.Append(secretsDiags...)
 			model.Secrets = types.MapNull(types.StringType)
 		}
 	}
-	return model
+	return model, allDiags
 }

@@ -136,7 +136,7 @@ func (m SizePlanModifier) PlanModifyObject(ctx context.Context, req planmodifier
 	// Categories are the same, check if tier is decreasing
 	// Determine which tier list to use based on category
 	var tierList []string
-	if stateSize.Category.ValueString() == CategoryGeneral {
+	if stateSize.Category.ValueString() == string(CategoryGeneral) {
 		tierList = GeneralTiers
 	} else {
 		tierList = MemoryTiers

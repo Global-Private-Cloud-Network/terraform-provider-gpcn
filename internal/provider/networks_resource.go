@@ -182,8 +182,8 @@ func (r *networksResource) Configure(_ context.Context, req resource.ConfigureRe
 
 	if !ok {
 		resp.Diagnostics.AddError(
-			"Unexpected Data Source Configure Type",
-			fmt.Sprintf("Expected *client.GpcnClient, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+			networks.ErrSummaryUnexpectedConfigureType,
+			fmt.Sprintf(networks.ErrDetailExpectedGpcnClient, req.ProviderData),
 		)
 
 		return
@@ -208,7 +208,7 @@ func (r *networksResource) Create(ctx context.Context, req resource.CreateReques
 	getNetworkResponse, err := networks.CreateNetwork(r.client, ctx, plan)
 	if err != nil {
 		resp.Diagnostics.AddError(
-			"Unable to create GPCN Network",
+			networks.ErrSummaryUnableToCreateNetwork,
 			err.Error(),
 		)
 		return
@@ -241,7 +241,10 @@ func (r *networksResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	getNetworkResponse, err := networks.GetNetwork(r.client, ctx, state.ID.ValueString())
 	if err != nil {
-		resp.Diagnostics.AddError("Unable to get GPCN Network with ID "+state.ID.ValueString(), err.Error())
+		resp.Diagnostics.AddError(
+			networks.ErrSummaryUnableToGetNetwork,
+			fmt.Sprintf(networks.ErrDetailUnableToGetNetworkWithID, state.ID.ValueString())+": "+err.Error(),
+		)
 		return
 	}
 	tflog.Info(ctx, networks.LogSuccessfullyRetrievedGPCNNetworkRead)
@@ -273,8 +276,8 @@ func (r *networksResource) Update(ctx context.Context, req resource.UpdateReques
 	getNetworkResponse, err := networks.UpdateNetwork(r.client, ctx, plan.ID.ValueString(), plan)
 	if err != nil {
 		resp.Diagnostics.AddError(
-			"Unable to update GPCN Network with ID "+plan.ID.ValueString(),
-			err.Error(),
+			networks.ErrSummaryUnableToUpdateNetwork,
+			fmt.Sprintf(networks.ErrDetailUnableToUpdateNetworkWithID, plan.ID.ValueString())+": "+err.Error(),
 		)
 		return
 	}
@@ -306,8 +309,8 @@ func (r *networksResource) Delete(ctx context.Context, req resource.DeleteReques
 	err := networks.DeleteNetwork(r.client, ctx, state.ID.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
-			"Unable to delete GPCN Network with ID "+state.ID.ValueString(),
-			err.Error(),
+			networks.ErrSummaryUnableToDeleteNetwork,
+			fmt.Sprintf(networks.ErrDetailUnableToDeleteNetworkWithID, state.ID.ValueString())+": "+err.Error(),
 		)
 		return
 	}
