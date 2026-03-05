@@ -167,6 +167,9 @@ func (d *datacenterDataSource) Configure(_ context.Context, req datasource.Confi
 }
 
 func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
+	// Add correlation ID for request tracing
+	ctx = client.WithCorrelationID(ctx)
+
 	var state datacenterDataSourceModel
 	diags := req.Config.Get(ctx, &state)
 	resp.Diagnostics.Append(diags...)
@@ -265,7 +268,7 @@ func (d *datacenterDataSource) getDatacenters(ctx context.Context, queryString s
 		return nil, err
 	}
 
-	response, err := d.client.HTTPClient().Do(request)
+	response, err := d.client.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
@@ -294,7 +297,7 @@ func (d *datacenterDataSource) getCountriesAndRegions(ctx context.Context, count
 		return nil, err
 	}
 
-	response, err := d.client.HTTPClient().Do(request)
+	response, err := d.client.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
@@ -323,7 +326,7 @@ func (d *datacenterDataSource) getAllCountries(ctx context.Context) (*datacenter
 		return nil, err
 	}
 
-	response, err := d.client.HTTPClient().Do(request)
+	response, err := d.client.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}

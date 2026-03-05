@@ -64,7 +64,7 @@ func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId stri
 	}
 
 	// Perform API request
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +121,7 @@ func GetGPU(gpcnClient *client.GpcnClient, ctx context.Context, id string) (*rea
 		return nil, err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +160,7 @@ func UpdateGPU(gpcnClient *client.GpcnClient, ctx context.Context, id, name stri
 		return err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return err
 	}
@@ -178,7 +178,7 @@ func DeleteGPU(gpcnClient *client.GpcnClient, ctx context.Context, id string) er
 		return err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return err
 	}

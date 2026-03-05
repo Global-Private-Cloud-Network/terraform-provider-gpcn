@@ -74,7 +74,7 @@ func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model Reso
 	}
 	tflog.Info(ctx, LogConstructedCreateVolumeRequest)
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +125,7 @@ func GetVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId stri
 		return nil, err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +178,7 @@ func UpdateVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 	}
 	tflog.Info(ctx, LogConstructedUpdateVolumeRequest)
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +244,7 @@ func DeleteVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 			return err
 		}
 	}
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return err
 	}

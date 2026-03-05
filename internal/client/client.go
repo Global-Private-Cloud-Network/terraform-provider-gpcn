@@ -18,14 +18,14 @@ type GpcnClient struct {
 
 type authTransport struct {
 	Host      string
-	ApiKey    string
+	apiKey    string
 	Transport http.RoundTripper
 }
 
 func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
 
-	req.Header.Add("x-api-key", t.ApiKey)
+	req.Header.Add("x-api-key", t.apiKey)
 
 	// Add correlation ID to request headers if present
 	if correlationID := GetCorrelationID(req.Context()); correlationID != "" {
@@ -97,7 +97,7 @@ func NewGpcnClient(config *Config) (*GpcnClient, error) {
 		Timeout: config.RequestTimeout,
 		Transport: &authTransport{
 			Host:      config.Host,
-			ApiKey:    config.APIKey,
+			apiKey:    config.APIKey,
 			Transport: http.DefaultTransport,
 		},
 	}
@@ -135,7 +135,9 @@ func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 		// Clone the request for retry (body needs special handling)
 		reqClone := req.Clone(req.Context())
 
+		//nolint:gosec // G704: URL is constructed from validated config, not user input
 		resp, err := c.httpClient.Do(reqClone)
+
 		if err == nil {
 			return resp, nil
 		}

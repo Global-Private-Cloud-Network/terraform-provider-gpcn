@@ -88,7 +88,7 @@ func GetVirtualMachinesAttachedToNetworks(gpcnClient *client.GpcnClient, ctx con
 		return nil, err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +118,7 @@ func GetNetworkInterfaces(gpcnClient *client.GpcnClient, ctx context.Context, vi
 		return nil, err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +173,7 @@ func AddNetworkInterface(gpcnClient *client.GpcnClient, ctx context.Context, vir
 		return err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return err
 	}
@@ -226,7 +226,7 @@ func SetNextNetworkInterfaceToPrimary(gpcnClient *client.GpcnClient, ctx context
 		return err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return err
 	}
@@ -244,7 +244,7 @@ func RemoveNetworkInterface(gpcnClient *client.GpcnClient, ctx context.Context, 
 		return err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return err
 	}
@@ -309,7 +309,7 @@ func AllocatePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, virtua
 		return err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return err
 	}
@@ -344,7 +344,7 @@ func ReleasePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, virtual
 		return err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return err
 	}

@@ -92,7 +92,7 @@ func GetVirtualMachineSizeConfigurationId(gpcnClient *client.GpcnClient, ctx con
 		return -1, sizes, err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return -1, sizes, err
 	}
@@ -161,7 +161,7 @@ func UpdateVirtualMachineSize(gpcnClient *client.GpcnClient, ctx context.Context
 		return err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return err
 	}

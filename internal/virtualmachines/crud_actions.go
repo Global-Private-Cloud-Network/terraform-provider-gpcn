@@ -101,7 +101,7 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 	tflog.Info(ctx, LogConstructedCreateVMRequest)
 
 	// Perform API request
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +158,7 @@ func GetVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, virtu
 		return nil, err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +197,7 @@ func UpdateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, vi
 		return err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return err
 	}

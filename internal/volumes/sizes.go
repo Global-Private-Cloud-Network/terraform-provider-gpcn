@@ -44,7 +44,7 @@ func GetVolumeSizeId(gpcnClient *client.GpcnClient, ctx context.Context, datacen
 		return -1, err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return -1, err
 	}

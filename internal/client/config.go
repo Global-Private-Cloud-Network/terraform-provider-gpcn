@@ -2,11 +2,12 @@ package client
 
 import "time"
 
-// Config holds configuration options for the HTTP client
+// Config holds configuration options for the GPCN client
 type Config struct {
 	// Host is the base URL for the GPCN API
 	Host string
 	// APIKey is the API key for authentication
+	//nolint:gosec // G117: Field holds user-provided credential, not hardcoded
 	APIKey string
 	// RequestTimeout is the timeout for individual HTTP requests (default: 60s)
 	RequestTimeout time.Duration

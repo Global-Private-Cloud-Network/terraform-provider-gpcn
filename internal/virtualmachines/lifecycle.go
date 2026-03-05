@@ -21,7 +21,7 @@ func StartVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, vir
 			return err
 		}
 
-		response, err := gpcnClient.HTTPClient().Do(request)
+		response, err := gpcnClient.DoWithRetry(request)
 		if err != nil {
 			return err
 		}
@@ -52,7 +52,7 @@ func StopVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, virt
 		return err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return err
 	}

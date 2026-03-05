@@ -236,7 +236,7 @@ func (r *gpuResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	if err != nil {
 		resp.Diagnostics.AddError(
 			gpu.ErrSummaryUnableToReadGPU,
-			fmt.Sprintf(gpu.ErrDetailReadGPUFailed, state.ID.ValueString())+": "+err.Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(gpu.ErrDetailReadGPUFailed, state.ID.ValueString()), err).Error(),
 		)
 		return
 	}
@@ -278,7 +278,7 @@ func (r *gpuResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	if err != nil {
 		resp.Diagnostics.AddError(
 			gpu.ErrSummaryUnableToUpdateGPU,
-			fmt.Sprintf(gpu.ErrDetailUpdateGPUFailed, state.ID.ValueString())+": "+err.Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(gpu.ErrDetailUpdateGPUFailed, state.ID.ValueString()), err).Error(),
 		)
 		return
 	}
@@ -288,7 +288,7 @@ func (r *gpuResource) Update(ctx context.Context, req resource.UpdateRequest, re
 	if err != nil {
 		resp.Diagnostics.AddError(
 			gpu.ErrSummaryUnableToReadGPU,
-			fmt.Sprintf(gpu.ErrDetailReadGPUFailed, state.ID.ValueString())+": "+err.Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(gpu.ErrDetailReadGPUFailed, state.ID.ValueString()), err).Error(),
 		)
 		return
 	}
@@ -322,7 +322,7 @@ func (r *gpuResource) Delete(ctx context.Context, req resource.DeleteRequest, re
 	if err != nil {
 		resp.Diagnostics.AddError(
 			gpu.ErrSummaryUnableToDeleteGPU,
-			fmt.Sprintf(gpu.ErrDetailDeleteGPUFailed, state.ID.ValueString())+": "+err.Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(gpu.ErrDetailDeleteGPUFailed, state.ID.ValueString()), err).Error(),
 		)
 		return
 	}

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -87,7 +86,7 @@ func CreateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, model Res
 	}
 	tflog.Info(ctx, LogConstructedCreateNetworkRequest)
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +137,7 @@ func GetNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkID st
 		return nil, err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
@@ -196,7 +195,7 @@ func UpdateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkId
 	}
 	tflog.Info(ctx, LogConstructedUpdateNetworkRequest)
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
@@ -227,28 +226,30 @@ func DeleteNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkId
 		return err
 	}
 
-	for _, virtualmachine := range readNetworksToVMsResponse.Data {
-		err := RemoveNetworkInterfaceByNetworkId(gpcnClient, ctx, virtualmachine.ID, networkId)
-		if err != nil {
-			return err
+	// Nil check before iterating
+	if readNetworksToVMsResponse != nil {
+		for _, virtualmachine := range readNetworksToVMsResponse.Data {
+			err := RemoveNetworkInterfaceByNetworkId(gpcnClient, ctx, virtualmachine.ID, networkId)
+			if err != nil {
+				return err
+			}
 		}
 	}
 
 	// It's possible for the delete job to fail if we are deleting it and a virtual machine at the same time
 	// If this happens, catch the error and don't process it until we've failed sufficiently enough
-	errorCount := 1
-	var errString string
-	for {
-		response, err := gpcnClient.HTTPClient().Do(request)
+	var lastErr error
+	for errorCount := 1; errorCount <= DELETE_NETWORK_RETRY_COUNT; errorCount++ {
+		// Wait before retry (skip on first attempt)
+		if errorCount > 1 {
+			time.Sleep(time.Second * 5)
+		}
+
+		response, err := gpcnClient.DoWithRetry(request)
 		if err != nil {
-			errorCount += 1
+			lastErr = err
 			tflog.Info(ctx, fmt.Sprintf(LogDeleteNetworkFailedRetrying, networkId, errorCount, DELETE_NETWORK_RETRY_COUNT))
-			if errorCount > DELETE_NETWORK_RETRY_COUNT {
-				errString = err.Error()
-				// Wait a few seconds before retrying
-				time.Sleep(time.Second * 5)
-				break
-			}
+			continue
 		}
 		tflog.Info(ctx, LogIssuedDeleteNetworkJob)
 
@@ -269,22 +270,18 @@ func DeleteNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkId
 		_, err = client.PerformLongPolling(gpcnClient, ctx, "Delete GPCN Network", deleteNetworkResponse.Data.JobID)
 
 		if err != nil {
-			errorCount += 1
+			lastErr = err
 			tflog.Info(ctx, fmt.Sprintf(LogDeleteNetworkFailedRetrying, networkId, errorCount, DELETE_NETWORK_RETRY_COUNT))
-			if errorCount > DELETE_NETWORK_RETRY_COUNT {
-				errString = err.Error()
-				// Wait a few seconds before retrying
-				time.Sleep(time.Second * 5)
-				break
-			}
-		} else {
-			// If we got here safely, we can be done
-			break
+			continue
 		}
+
+		// Success - exit the loop
+		lastErr = nil
+		break
 	}
 
-	if errString != "" {
-		return errors.New(errString)
+	if lastErr != nil {
+		return lastErr
 	}
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyCompletedDeleteNetworkWithID, networkId))
 	return nil

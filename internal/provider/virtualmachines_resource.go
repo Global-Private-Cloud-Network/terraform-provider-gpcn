@@ -240,7 +240,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryErrorVerifyingImage,
-			fmt.Sprintf(virtualmachines.ErrDetailImageVerificationFailed, plan.Image.ValueString(), plan.DatacenterId.ValueString())+": "+err.Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailImageVerificationFailed, plan.Image.ValueString(), plan.DatacenterId.ValueString()), err).Error(),
 		)
 		return
 	}
@@ -252,7 +252,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryErrorVerifyingSize,
-			fmt.Sprintf(virtualmachines.ErrDetailSizeVerificationFailed, size.Category.ValueString(), size.Tier.ValueString(), plan.DatacenterId.ValueString())+": "+err.Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailSizeVerificationFailed, size.Category.ValueString(), size.Tier.ValueString(), plan.DatacenterId.ValueString()), err).Error(),
 		)
 		return
 	}
@@ -277,7 +277,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 			if err != nil {
 				resp.Diagnostics.AddWarning(
 					virtualmachines.WarnSummaryAttachingVolumeFailed,
-					fmt.Sprintf(virtualmachines.WarnDetailAttachingVolumeWithIDFailed, volumeId)+": "+err.Error(),
+					fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.WarnDetailAttachingVolumeWithIDFailed, volumeId), err).Error(),
 				)
 			}
 		}
@@ -288,7 +288,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 	if err != nil {
 		resp.Diagnostics.AddWarning(
 			virtualmachines.WarnSummaryUnableToStartVM,
-			fmt.Sprintf(virtualmachines.ErrDetailStartingVM, plan.ID.ValueString())+": "+err.Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStartingVM, plan.ID.ValueString()), err).Error(),
 		)
 	}
 	tflog.Debug(ctx, virtualmachines.LogSuccessfullyCreatedVMMayNotBeRunning)
@@ -321,7 +321,7 @@ func (r *virtualMachinesResource) Read(ctx context.Context, req resource.ReadReq
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryRetrievingVMInfoFailed,
-			virtualmachines.ErrDetailVMInfoFailedCanImport+": "+err.Error(),
+			fmt.Errorf("%s: %w", virtualmachines.ErrDetailVMInfoFailedCanImport, err).Error(),
 		)
 		return
 	}
@@ -390,7 +390,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		if err != nil {
 			resp.Diagnostics.AddError(
 				virtualmachines.ErrSummaryUnableToUpdateVM,
-				fmt.Sprintf(virtualmachines.ErrDetailStoppingVM, state.ID.ValueString())+": "+err.Error(),
+				fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStoppingVM, state.ID.ValueString()), err).Error(),
 			)
 			return
 		}
@@ -535,7 +535,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryRetrievingVMInfoFailed,
-			virtualmachines.ErrDetailVMInfoFailedCanImport+": "+err.Error(),
+			fmt.Errorf("%s: %w", virtualmachines.ErrDetailVMInfoFailedCanImport, err).Error(),
 		)
 		return
 	}
@@ -549,7 +549,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		if err != nil {
 			resp.Diagnostics.AddWarning(
 				virtualmachines.WarnSummaryUnableToStartVM,
-				fmt.Sprintf(virtualmachines.ErrDetailStartingVM, state.ID.ValueString())+": "+err.Error(),
+				fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStartingVM, state.ID.ValueString()), err).Error(),
 			)
 		}
 	}
@@ -582,7 +582,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToDeleteVM,
-			fmt.Sprintf(virtualmachines.ErrDetailStoppingVM, state.ID.ValueString())+": "+err.Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStoppingVM, state.ID.ValueString()), err).Error(),
 		)
 		return
 	}
@@ -594,7 +594,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 		if err != nil {
 			resp.Diagnostics.AddError(
 				virtualmachines.ErrSummaryErrorRetrievingNetworkIfaces,
-				fmt.Sprintf(virtualmachines.ErrDetailNetworkInterfacesForVM, state.ID.ValueString())+": "+err.Error(),
+				fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailNetworkInterfacesForVM, state.ID.ValueString()), err).Error(),
 			)
 			return
 		}
@@ -606,7 +606,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 				if err != nil {
 					resp.Diagnostics.AddWarning(
 						virtualmachines.WarnSummaryRemovingNetworkInterfaceFailed,
-						fmt.Sprintf(virtualmachines.WarnDetailRemovingNetworkInterfaceWithIDFailed, adapter.ID.ValueString())+": "+err.Error(),
+						fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.WarnDetailRemovingNetworkInterfaceWithIDFailed, adapter.ID.ValueString()), err).Error(),
 					)
 				}
 			}
@@ -622,7 +622,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 			if err != nil {
 				resp.Diagnostics.AddWarning(
 					virtualmachines.WarnSummaryRemovingVolumeFailed,
-					fmt.Sprintf(virtualmachines.WarnDetailRemovingVolumeWithIDFailed, volumeId)+": "+err.Error()+". This warning should only be treated as an error if you are not trying to delete the virtual machine and volume in quick succession.",
+					fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.WarnDetailRemovingVolumeWithIDFailed, volumeId), err).Error()+". This warning should only be treated as an error if you are not trying to delete the virtual machine and volume in quick succession.",
 				)
 			}
 		}
@@ -638,11 +638,11 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	}
 	tflog.Info(ctx, virtualmachines.LogConstructedDeleteGPCNVirtualMachineRequest)
 
-	response, err := r.client.HTTPClient().Do(request)
+	response, err := r.client.DoWithRetry(request)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToDeleteVM,
-			fmt.Sprintf(virtualmachines.ErrDetailUnableToDeleteVMWithID, state.ID.ValueString())+": "+err.Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailUnableToDeleteVMWithID, state.ID.ValueString()), err).Error(),
 		)
 		return
 	}
@@ -665,7 +665,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryErrorUnmarshalingDelete,
-			fmt.Sprintf(virtualmachines.ErrDetailUnmarshalingDeleteWithID, state.ID.ValueString())+": "+err.Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailUnmarshalingDeleteWithID, state.ID.ValueString()), err).Error(),
 		)
 		return
 	}
@@ -675,7 +675,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryEncounteredErrorGettingJobInfo,
-			virtualmachines.ErrDetailJobInfoCheckDashboard+": "+err.Error(),
+			fmt.Errorf("%s: %w", virtualmachines.ErrDetailJobInfoCheckDashboard, err).Error(),
 		)
 		return
 	}

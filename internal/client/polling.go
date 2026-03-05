@@ -129,6 +129,7 @@ func poll(client *http.Client, ctx context.Context, jobId string) (*JobStatusMul
 		return nil, fmt.Errorf("failed to create job status request: %w", err)
 	}
 
+	//nolint:gosec // G704: URL is constructed from validated config, not user input
 	response, err := client.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("job status request failed: %w", err)

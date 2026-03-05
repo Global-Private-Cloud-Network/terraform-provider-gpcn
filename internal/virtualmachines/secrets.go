@@ -15,6 +15,7 @@ import (
 // GetSSHKeyResponse represents the response from the SSH key endpoint
 type GetSSHKeyResponse struct {
 	Data struct {
+		//nolint:gosec // G117: Field holds API response data, not hardcoded secret
 		PrivateKey string `json:"privateKey"`
 	} `json:"data"`
 }
@@ -35,7 +36,7 @@ func GetSSHKey(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachin
 		return nil, err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +66,7 @@ func GetPassword(gpcnClient *client.GpcnClient, ctx context.Context, virtualMach
 		return nil, err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}

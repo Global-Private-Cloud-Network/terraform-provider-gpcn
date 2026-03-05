@@ -64,7 +64,7 @@ func CheckInventory(gpcnClient *client.GpcnClient, ctx context.Context, model Re
 		return nil, err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return nil, err
 	}

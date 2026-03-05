@@ -48,7 +48,7 @@ func GetVirtualMachineImageId(gpcnClient *client.GpcnClient, ctx context.Context
 		return -1, images, err
 	}
 
-	response, err := gpcnClient.HTTPClient().Do(request)
+	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
 		return -1, images, err
 	}
