@@ -1,3 +1,14 @@
+## 0.4.2 (March 11, 2026)
+
+FEATURES:
+
+- **Network Hotplug Support**: Virtual machines now check `network_hotplug` capability to determine if they need to be in Shutoff status before making network or volume changes. VMs with hotplug enabled can be modified while running.
+
+ENHANCEMENTS:
+
+- Added 30-second delay before polling for virtual machine status after creation, improving reliability for VMs that take longer to initialize
+- Upgraded Go dependencies from 1.26.0 to 1.26.1 to fix built-in vulnerabilities
+
 ## 0.4.1 (March 5, 2026)
 
 FEATURES:
