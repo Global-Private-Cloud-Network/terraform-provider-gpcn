@@ -6,6 +6,7 @@ var MAX_NETWORKS_ATTACHED_ALLOWED int = 5
 var MAX_VOLUMES_ATTACHED_ALLOWED int = 5
 var DEFAULT_NETWORK_TIMEOUT_SECONDS int = 300
 var DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS int = 300
+var DEFAULT_INITIAL_POLL_DELAY_SECONDS int = 30
 
 // VMStatus represents the lifecycle status of a virtual machine
 type VMStatus string

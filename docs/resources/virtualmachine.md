@@ -131,6 +131,7 @@ resource "gpcn_virtualmachine" "example" {
 - `id` (String) Unique identifier for the virtual machine in UUID format
 - `last_updated` (String) Timestamp when the virtual machine was last updated in ISO-8601 format
 - `location` (Map of String) Location details including datacenter, region, and country information
+- `network_hotplug` (Boolean) Whether the virtual machine supports hot modifications without the virtual machine being in Shutoff status
 - `public_ip` (String) The public IP address, if allocate_public_ip is True
 - `secrets` (Map of String, Sensitive) Secret details. Only populated if export_secrets is True. Contains username, password, and private key for the virtualmachine
 

@@ -145,6 +145,7 @@ func TestCreateVolumeMockHTTP(t *testing.T) {
 	}
 	if response == nil {
 		t.Fatal("Expected response, got nil")
+		return
 	}
 	if response.Data.ID != volumeID {
 		t.Errorf("Expected volume ID '%s', got '%s'", volumeID, response.Data.ID)
@@ -184,6 +185,7 @@ func TestGetVolumeMockHTTP(t *testing.T) {
 	}
 	if response == nil {
 		t.Fatal("Expected response, got nil")
+		return
 	}
 	if response.Data.ID != volumeID {
 		t.Errorf("Expected volume ID '%s', got '%s'", volumeID, response.Data.ID)
@@ -250,6 +252,7 @@ func TestUpdateVolumeMockHTTP(t *testing.T) {
 	}
 	if response == nil {
 		t.Fatal("Expected response, got nil")
+		return
 	}
 	if response.Data.SizeGb != newSizeGb {
 		t.Errorf("Expected volume size %d, got %d", newSizeGb, response.Data.SizeGb)

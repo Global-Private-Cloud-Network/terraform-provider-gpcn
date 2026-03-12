@@ -211,6 +211,7 @@ func TestCheckInventoryMockHTTP(t *testing.T) {
 	}
 	if response == nil {
 		t.Fatal("Expected response, got nil")
+		return
 	}
 	if !inventoryCalled {
 		t.Error("Expected inventory endpoint to be called")
@@ -319,6 +320,7 @@ func TestCreateGPUMockHTTP(t *testing.T) {
 	}
 	if response == nil {
 		t.Fatal("Expected response, got nil")
+		return
 	}
 	if response.Data.ID != gpuID {
 		t.Errorf("Expected GPU ID '%s', got '%s'", gpuID, response.Data.ID)
@@ -355,6 +357,7 @@ func TestGetGPUMockHTTP(t *testing.T) {
 	}
 	if response == nil {
 		t.Fatal("Expected response, got nil")
+		return
 	}
 	if response.Data.ID != gpuID {
 		t.Errorf("Expected GPU ID '%s', got '%s'", gpuID, response.Data.ID)

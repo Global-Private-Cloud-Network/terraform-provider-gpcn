@@ -25,6 +25,7 @@ const (
 
 	// PollForVirtualMachineStatus messages
 	LogStartingPollForVMStatusWithID = "Starting PollForVirtualMachineStatus for Virtual Machine ID %s"
+	LogInitialPollDelay              = "Waiting %d seconds before starting status polling"
 	LogStartingLongPollingIteration  = "Starting long polling iteration %d for retrieving information about the Virtual Machine. Seconds spent: %d"
 	LogVMResponseStatus              = "Virtual Machine response status is: %s"
 	LogVMStatusProceedingToAttach    = "Virtual Machine with ID %s is '%s'. Proceeding to attach networks and volumes if possible"

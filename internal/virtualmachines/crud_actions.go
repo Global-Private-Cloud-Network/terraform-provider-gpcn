@@ -32,15 +32,16 @@ type ReadVirtualMachinesResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Data    struct {
-		Status        string                `json:"status"`
-		ID            string                `json:"id"`
-		Name          string                `json:"name"`
-		CreatedAt     string                `json:"createdAt"`
-		UpdatedAt     string                `json:"updatedAt"`
-		Configuration ConfigurationResponse `json:"configuration"`
-		Image         string                `json:"image"`
-		Username      string                `json:"username"`
-		Datacenter    struct {
+		Status         string                `json:"status"`
+		ID             string                `json:"id"`
+		Name           string                `json:"name"`
+		CreatedAt      string                `json:"createdAt"`
+		UpdatedAt      string                `json:"updatedAt"`
+		Configuration  ConfigurationResponse `json:"configuration"`
+		Image          string                `json:"image"`
+		Username       string                `json:"username"`
+		NetworkHotplug int                   `json:"networkHotplug"`
+		Datacenter     struct {
 			ID          string `json:"id"`
 			Name        string `json:"name"`
 			Region      string `json:"region"`
@@ -143,7 +144,7 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 	}
 
 	// Wait for the VM to actually be spun up before doing anything more
-	getVirtualMachineResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, resourceID, []string{VMStatusRunning.String(), VMStatusShutoff.String()}, DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS)
+	getVirtualMachineResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, resourceID, []string{VMStatusRunning.String(), VMStatusShutoff.String()}, DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS, DEFAULT_INITIAL_POLL_DELAY_SECONDS)
 	if err != nil {
 		return nil, err
 	}
@@ -210,13 +211,19 @@ func UpdateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, vi
 }
 
 // Iteratively calls getVirtualMachine until the machine is in a target status, or it times out
-func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string, targetStatuses []string, timeoutMaxSec int) (*ReadVirtualMachinesResponse, error) {
+func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string, targetStatuses []string, timeoutMaxSec int, initialDelaySec int) (*ReadVirtualMachinesResponse, error) {
 	// Make all statuses lowercase for ease of comparison
 	targetStatusesLower := make([]string, len(targetStatuses))
 	for _, status := range targetStatuses {
 		targetStatusesLower = append(targetStatusesLower, strings.ToLower(status))
 	}
 	tflog.Info(ctx, fmt.Sprintf(LogStartingPollForVMStatusWithID, virtualMachineId))
+
+	// Wait for initial delay before starting polling
+	if initialDelaySec > 0 {
+		tflog.Info(ctx, fmt.Sprintf(LogInitialPollDelay, initialDelaySec))
+		time.Sleep(time.Duration(initialDelaySec) * time.Second)
+	}
 	var getResp *ReadVirtualMachinesResponse
 	var err error
 	secondsElapsed := 0

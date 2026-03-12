@@ -165,6 +165,7 @@ func TestCreateVirtualMachineMockHTTP(t *testing.T) {
 	}
 	if response == nil {
 		t.Fatal("Expected response, got nil")
+		return
 	}
 	if response.Data.ID != vmID {
 		t.Errorf("Expected VM ID '%s', got '%s'", vmID, response.Data.ID)
@@ -201,6 +202,7 @@ func TestGetVirtualMachineMockHTTP(t *testing.T) {
 	}
 	if response == nil {
 		t.Fatal("Expected response, got nil")
+		return
 	}
 	if response.Data.ID != vmID {
 		t.Errorf("Expected VM ID '%s', got '%s'", vmID, response.Data.ID)
@@ -286,12 +288,13 @@ func TestPollForVirtualMachineStatusMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	response, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, []string{"Running"}, 10)
+	response, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, []string{"Running"}, 10, 0)
 	if err != nil {
 		t.Fatalf("PollForVirtualMachineStatus failed: %v", err)
 	}
 	if response == nil {
 		t.Fatal("Expected response, got nil")
+		return
 	}
 	if response.Data.Status != "Running" {
 		t.Errorf("Expected final status 'Running', got '%s'", response.Data.Status)
@@ -379,6 +382,7 @@ func TestGetSSHKeyMockHTTP(t *testing.T) {
 	}
 	if response == nil {
 		t.Fatal("Expected response, got nil")
+		return
 	}
 	if response.Data.PrivateKey != privateKey {
 		t.Errorf("Expected private key '%s', got '%s'", privateKey, response.Data.PrivateKey)
@@ -413,6 +417,7 @@ func TestGetPasswordMockHTTP(t *testing.T) {
 	}
 	if response == nil {
 		t.Fatal("Expected response, got nil")
+		return
 	}
 	if response.Data.SSHPassword != password {
 		t.Errorf("Expected password '%s', got '%s'", password, response.Data.SSHPassword)

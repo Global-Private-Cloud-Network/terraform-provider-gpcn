@@ -17,8 +17,8 @@ func UpdateVolumes(gpcnClient *client.GpcnClient, ctx context.Context, vmId stri
 	tflog.Info(ctx, "VolumeIds have changed, performing detaches and attaches in that order")
 
 	addedValues, removedValues := helpers.CheckListForDifferences(oldVolumesList, newVolumesList)
-	tflog.Info(ctx, fmt.Sprintf("VolumeIds to be removed are: [%s]", helpers.JoinStrings(removedValues)))
-	tflog.Info(ctx, fmt.Sprintf("VolumeIds to be added are: [%s]", helpers.JoinStrings(addedValues)))
+	tflog.Info(ctx, fmt.Sprintf("VolumeIds to be removed are: [%s]", strings.Join(removedValues, ", ")))
+	tflog.Info(ctx, fmt.Sprintf("VolumeIds to be added are: [%s]", strings.Join(addedValues, ", ")))
 
 	// Do removals first, since there is a cap of 5 volumes
 	for _, val := range removedValues {

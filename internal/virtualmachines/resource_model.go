@@ -31,6 +31,7 @@ type ResourceModel struct {
 	Secrets          types.Map    `tfsdk:"secrets"`
 	NetworkIds       types.List   `tfsdk:"network_ids"`
 	VolumeIds        types.List   `tfsdk:"volume_ids"`
+	NetworkHotplug   types.Bool   `tfsdk:"network_hotplug"`
 }
 
 type ResourceModelSize struct {
@@ -51,6 +52,7 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 	var allDiags diag.Diagnostics
 
 	model.ID = types.StringValue(response.Data.ID)
+	model.NetworkHotplug = types.BoolValue(response.Data.NetworkHotplug == 1)
 
 	// Construct time entries
 	createdTime, err := time.Parse(time.RFC3339, response.Data.CreatedAt)
