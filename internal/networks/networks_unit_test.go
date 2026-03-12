@@ -173,6 +173,7 @@ func TestCreateNetworkMockHTTP(t *testing.T) {
 	}
 	if response == nil {
 		t.Fatal("Expected response, got nil")
+		return
 	}
 	if response.Data.ID != networkID {
 		t.Errorf("Expected network ID '%s', got '%s'", networkID, response.Data.ID)
@@ -209,6 +210,7 @@ func TestGetNetworkMockHTTP(t *testing.T) {
 	}
 	if response == nil {
 		t.Fatal("Expected response, got nil")
+		return
 	}
 	if response.Data.ID != networkID {
 		t.Errorf("Expected network ID '%s', got '%s'", networkID, response.Data.ID)
@@ -256,6 +258,7 @@ func TestUpdateNetworkMockHTTP(t *testing.T) {
 	}
 	if response == nil {
 		t.Fatal("Expected response, got nil")
+		return
 	}
 	if response.Data.Name != "updated-network" {
 		t.Errorf("Expected network name 'updated-network', got '%s'", response.Data.Name)

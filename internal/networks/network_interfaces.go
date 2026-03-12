@@ -377,8 +377,8 @@ func UpdateNetworkInterfaces(gpcnClient *client.GpcnClient, ctx context.Context,
 	tflog.Info(ctx, "NetworkIds have changed, performing detaches and attaches in that order")
 
 	addedValues, removedValues := helpers.CheckListForDifferences(oldNetworksList, newNetworksList)
-	tflog.Info(ctx, fmt.Sprintf("NetworkIds to be removed are: [%s]", helpers.JoinStrings(removedValues)))
-	tflog.Info(ctx, fmt.Sprintf("NetworkIds to be added are: [%s]", helpers.JoinStrings(addedValues)))
+	tflog.Info(ctx, fmt.Sprintf("NetworkIds to be removed are: [%s]", strings.Join(removedValues, ", ")))
+	tflog.Info(ctx, fmt.Sprintf("NetworkIds to be added are: [%s]", strings.Join(addedValues, ", ")))
 
 	// Check if any interfaces slated to be removed are the primary interface. If so, make the next interface available the primary
 	for _, val := range removedValues {

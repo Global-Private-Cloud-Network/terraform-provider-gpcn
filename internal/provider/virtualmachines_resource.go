@@ -198,6 +198,13 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				},
 				Default: listdefault.StaticValue(types.ListValueMust(types.StringType, []attr.Value{})),
 			},
+			"network_hotplug": schema.BoolAttribute{
+				Description: "Whether the virtual machine supports hot modifications without the virtual machine being in Shutoff status",
+				Computed:    true,
+				PlanModifiers: []planmodifier.Bool{
+					boolplanmodifier.UseStateForUnknown(),
+				},
+			},
 		},
 	}
 }
@@ -597,15 +604,20 @@ func (r *virtualMachinesResource) ImportState(ctx context.Context, req resource.
 }
 
 /*
-  - Some actions can be done without stopping the VM. Since it's a heavy time investment to start and stop, determine that and use it for the rest of the update logic
-    Cases where VM needs to be stopped:
+Some actions can be done without stopping the VM. Since it's a heavy time investment to start and stop, determine that and use it for the rest of the update logic.
+Cases where VM needs to be stopped:
+  - NetworkHotplug is disabled AND one of the below
   - NetworkIds change
   - VolumeIds change
   - Size changes
-
-*
 */
 func determineIfVMNeedsStopped(state, plan virtualmachines.ResourceModel) bool {
+	// If network hotplug is enabled, the VM does not need to be stopped
+	if state.NetworkHotplug.ValueBool() {
+		return false
+	}
+
+	// If network hotplug is disabled, the VM needs to be stopped for a few scenarios
 	return (!slices.Equal(plan.NetworkIds.Elements(), state.NetworkIds.Elements())) ||
 		(!slices.Equal(plan.VolumeIds.Elements(), state.VolumeIds.Elements())) ||
 		!maps.Equal(state.Size.Attributes(), plan.Size.Attributes())

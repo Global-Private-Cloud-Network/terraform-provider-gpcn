@@ -22,15 +22,3 @@ func CheckListForDifferences(oldList, newList []string) ([]string, []string) {
 
 	return addedValues, removedValues
 }
-
-// Helper function to join strings with comma separator
-func JoinStrings(strs []string) string {
-	result := ""
-	for i, str := range strs {
-		if i > 0 {
-			result += ","
-		}
-		result += str
-	}
-	return result
-}
