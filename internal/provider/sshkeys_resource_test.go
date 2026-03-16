@@ -155,14 +155,14 @@ resource "gpcn_ssh_key" "test" {
 				Config: providerConfig + `
 resource "gpcn_ssh_key" "test" {
   name      = "terraform-acc-test-upload"
-  algorithm = "ed25519"
+  algorithm = "rsa-4096"
 }
 `,
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnSSHKeyTest, "name", "terraform-acc-test-upload"),
-					resource.TestCheckResourceAttr(gpcnSSHKeyTest, "algorithm", "ed25519"),
-					resource.TestCheckNoResourceAttr(gpcnSSHKeyTest, "public_key"),
+					resource.TestCheckResourceAttr(gpcnSSHKeyTest, "algorithm", "rsa-4096"),
 					resource.TestCheckResourceAttrSet(gpcnSSHKeyTest, "id"),
+					resource.TestCheckResourceAttrSet(gpcnSSHKeyTest, "public_key"),
 					resource.TestCheckResourceAttrSet(gpcnSSHKeyTest, "private_key"),
 					resource.TestCheckResourceAttrSet(gpcnSSHKeyTest, "created_time"),
 					resource.TestCheckResourceAttrSet(gpcnSSHKeyTest, "last_updated"),
@@ -177,6 +177,11 @@ resource "gpcn_ssh_key" "test" {
 	})
 }
 
+/*
+*
+----- Unit tests -----
+*
+*/
 func TestSSHKeyResourceValidation(t *testing.T) {
 	t.Run("public_key_with_algorithm", func(t *testing.T) {
 		resource.UnitTest(t, resource.TestCase{

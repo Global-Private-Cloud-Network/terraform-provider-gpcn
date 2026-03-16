@@ -27,7 +27,7 @@ resource "gpcn_ssh_key" "uploaded" {
   public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
 }
 
-# Generate mode: platform generates an ed25519 key pair
+# Generate mode: platform generates an ed25519 key
 resource "gpcn_ssh_key" "generated" {
   name      = "terraform-demo-key-generated"
   algorithm = "ed25519"

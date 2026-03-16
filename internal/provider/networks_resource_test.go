@@ -146,6 +146,11 @@ resource "gpcn_network" "test" {
 	})
 }
 
+/*
+*
+----- Unit tests -----
+*
+*/
 func TestNetworksResourceInvalidType(t *testing.T) {
 	t.Run("invalid_network_type", func(t *testing.T) {
 		resource.UnitTest(t, resource.TestCase{

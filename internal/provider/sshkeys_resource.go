@@ -59,10 +59,12 @@ func (r *sshKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"public_key": schema.StringAttribute{
-				Description: "The public SSH key to upload. When specified, the key type is set to \"upload\". When omitted, the platform generates a key pair and \"algorithm\" must be provided",
+				Description: "The public SSH key. When provided, the value is used as-is — any key algorithm is accepted, not just those listed in the \"algorithm\" attribute. When omitted, the platform generates a key pair (\"algorithm\" must be provided) and this value is populated after creation",
 				Optional:    true,
+				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"algorithm": schema.StringAttribute{

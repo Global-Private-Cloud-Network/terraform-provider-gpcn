@@ -140,6 +140,11 @@ resource "gpcn_volume" "test" {
 	})
 }
 
+/*
+*
+----- Unit tests -----
+*
+*/
 func TestVolumesResourceInvalidSize(t *testing.T) {
 	t.Run("invalid_size", func(t *testing.T) {
 		resource.Test(t, resource.TestCase{

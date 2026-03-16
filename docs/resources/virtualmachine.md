@@ -39,6 +39,12 @@ data "gpcn_datacenters" "central_us" {
   name         = "Chicago"
 }
 
+# Generate mode: platform generates an ed25519 key pair
+resource "gpcn_ssh_key" "generated" {
+  name      = "terraform-demo-key-generated"
+  algorithm = "ed25519"
+}
+
 # Create a standard network for the VM
 resource "gpcn_network" "vm_network" {
   name          = "vm-network-standard"
@@ -96,8 +102,11 @@ resource "gpcn_virtualmachine" "example" {
     gpcn_network.vm_network_custom.id
   ]
 
-  # Secrets
-  display_secrets = false
+  # Authentication (Username and exactly one of ssh_key_id or password must be specified)
+  auth = {
+    ssh_key_id = gpcn_ssh_key.generated.id
+    username   = "almalinux"
+  }
 
   # Storage
   volume_ids = [
@@ -112,6 +121,7 @@ resource "gpcn_virtualmachine" "example" {
 ### Required
 
 - `allocate_public_ip` (Boolean) Whether to allocate a public IP address for the virtual machine
+- `auth` (Attributes) Authentication configuration for the virtual machine. Either ssh_key_id or password must be specified. Changing any value in this block requires replacing the virtual machine (see [below for nested schema](#nestedatt--auth))
 - `datacenter_id` (String) Unique identifier of the datacenter where the virtual machine will be created. Changing this value requires replacing the virtual machine
 - `image` (String) Operating system image to use for the virtual machine. Must be one of the supported image names. Changing this value requires replacing the virtual machine. Note that not all images are available for every datacenter
 - `name` (String) Human-readable name for the virtual machine
@@ -119,7 +129,6 @@ resource "gpcn_virtualmachine" "example" {
 
 ### Optional
 
-- `display_secrets` (Boolean) Whether to display secret values (username, password, and private key). If not enabled, secrets can be found from the GPCN console instead. WARNING: Enabling this value will save these secrets in your Terraform state file
 - `network_ids` (List of String) List of network IDs to attach to the virtual machine. Maximum of 5 networks allowed
 - `volume_ids` (List of String) List of volume IDs to attach to the virtual machine. Maximum of 5 volumes allowed. A volume can only be attached to a single virtual machine, so this parameter will not work as expected when using Terraform's count meta-attribute
 - `wait_for_startup` (Boolean) Determines if Terraform should wait for the virtual machine to start running before exiting. This will add a few minutes to virtual machine creation. Defaults to true
@@ -133,7 +142,19 @@ resource "gpcn_virtualmachine" "example" {
 - `location` (Map of String) Location details including datacenter, region, and country information
 - `network_hotplug` (Boolean) Whether the virtual machine supports hot modifications without the virtual machine being in Shutoff status
 - `public_ip` (String) The public IP address, if allocate_public_ip is True
-- `secrets` (Map of String, Sensitive) Secret details. Only populated if export_secrets is True. Contains username, password, and private key for the virtualmachine
+
+<a id="nestedatt--auth"></a>
+### Nested Schema for `auth`
+
+Required:
+
+- `username` (String) Username for the virtual machine. Must be 3-20 characters matching ^[a-zA-Z_][a-zA-Z0-9_-]*$
+
+Optional:
+
+- `password` (String, Sensitive) Password for authentication. Must be 12-20 characters, contain only letters, digits, and ! @ # % - _ ., and include at least one uppercase letter, one lowercase letter, one digit, and one symbol. Cannot be set when ssh_key_id is set. username defaults to the image default if not specified
+- `ssh_key_id` (String) ID of the SSH key to use for authentication. Cannot be set together with password
+
 
 <a id="nestedatt--size"></a>
 ### Nested Schema for `size`

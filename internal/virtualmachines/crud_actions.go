@@ -15,6 +15,7 @@ import (
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/networks"
 
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
@@ -40,6 +41,8 @@ type ReadVirtualMachinesResponse struct {
 		Configuration  ConfigurationResponse `json:"configuration"`
 		Image          string                `json:"image"`
 		Username       string                `json:"username"`
+		SshKeyId       string                `json:"sshKeyId"`
+		SshKeyName     string                `json:"sshKeyName"`
 		NetworkHotplug int                   `json:"networkHotplug"`
 		Datacenter     struct {
 			ID          string `json:"id"`
@@ -62,14 +65,39 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 	}
 	tflog.Info(ctx, LogValidatedPublicIPConfigurationSuccessfully)
 
+	// Extract auth configuration and set authMethod fields
+	var auth ResourceModelAuth
+	authDiags := model.Auth.As(ctx, &auth, basetypes.ObjectAsOptions{})
+	if authDiags.HasError() {
+		return nil, fmt.Errorf("failed to read auth configuration")
+	}
+
+	var authMethod string
+	if !auth.SshKeyId.IsNull() && auth.SshKeyId.ValueString() != "" {
+		authMethod = "ssh-key"
+	} else {
+		authMethod = "password"
+	}
+
 	// Create a new request from the model
 	createVMRequestBody := map[string]any{
 		"allocatePublicIp":  model.AllocatePublicIp.ValueBool(),
+		"authMethod":        authMethod,
 		"configurationId":   sizeId,
 		"datacenterId":      model.DatacenterId.ValueString(),
 		"imageId":           imageId,
 		"name":              model.Name.ValueString(),
 		"numberOfInstances": 1,
+	}
+
+	if authMethod == "ssh-key" {
+		createVMRequestBody["sshKeyId"] = auth.SshKeyId.ValueString()
+		if !auth.Username.IsNull() && auth.Username.ValueString() != "" {
+			createVMRequestBody["username"] = auth.Username.ValueString()
+		}
+	} else {
+		createVMRequestBody["username"] = auth.Username.ValueString()
+		createVMRequestBody["password"] = auth.Password.ValueString()
 	}
 
 	// If networkIds is populated, add it to the create request

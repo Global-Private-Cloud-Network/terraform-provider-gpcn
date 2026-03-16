@@ -41,7 +41,7 @@ resource "gpcn_ssh_key" "uploaded" {
   public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
 }
 
-# Generate mode: platform generates an ed25519 key pair
+# Generate mode: platform generates an ed25519 key
 resource "gpcn_ssh_key" "generated" {
   name      = "terraform-demo-key-generated"
   algorithm = "ed25519"
@@ -72,7 +72,7 @@ output "generated_private_key" {
 
 - `algorithm` (String) The algorithm used to generate the SSH key pair. Required when public_key is not set. Must be one of: "ecdsa-p256", "ed25519", "rsa-2048", "rsa-4096". Cannot be set when public_key is provided
 - `passphrase` (String, Sensitive) Optional passphrase for the generated private key. Only valid when public_key is not set (generate mode). Cannot be set when public_key is provided
-- `public_key` (String) The public SSH key to upload. When specified, the key type is set to "upload". When omitted, the platform generates a key pair and "algorithm" must be provided
+- `public_key` (String) The public SSH key. When provided, the value is used as-is — any key algorithm is accepted, not just those listed in the "algorithm" attribute. When omitted, the platform generates a key pair ("algorithm" must be provided) and this value is populated after creation
 
 ### Read-Only
 

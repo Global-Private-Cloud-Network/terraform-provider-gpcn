@@ -120,6 +120,11 @@ resource "gpcn_gpu" "test" {
 	})
 }
 
+/*
+*
+----- Unit tests -----
+*
+*/
 func TestGPUResourceInvalidSeries(t *testing.T) {
 	t.Run("invalid_series_code", func(t *testing.T) {
 		resource.UnitTest(t, resource.TestCase{

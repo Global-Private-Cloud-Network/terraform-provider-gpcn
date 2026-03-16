@@ -29,8 +29,8 @@ type readSSHKeyResponse struct {
 		Name       string `json:"name"`
 		CreatedAt  string `json:"createdAt"`
 		UpdatedAt  string `json:"updatedAt"`
-		Type       string `json:"type"`
 		Algorithm  string `json:"algorithm"`
+		PublicKey  string `json:"publicKey"`
 		PrivateKey string `json:"privateKey"`
 	} `json:"data"`
 }

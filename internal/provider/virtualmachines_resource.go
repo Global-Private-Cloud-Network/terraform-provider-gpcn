@@ -15,6 +15,8 @@ import (
 
 	"terraform-provider-gpcn/internal/virtualmachines"
 
+	"regexp"
+
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -26,6 +28,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -161,21 +164,6 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 					virtualmachines.PublicIpPlanModifier{},
 				},
 			},
-			"display_secrets": schema.BoolAttribute{
-				Description: "Whether to display secret values (username, password, and private key). If not enabled, secrets can be found from the GPCN console instead. WARNING: Enabling this value will save these secrets in your Terraform state file",
-				Optional:    true,
-				Computed:    true,
-				Default:     booldefault.StaticBool(false),
-			},
-			"secrets": schema.MapAttribute{
-				Description: "Secret details. Only populated if export_secrets is True. Contains username, password, and private key for the virtualmachine",
-				ElementType: types.StringType,
-				Computed:    true,
-				Sensitive:   true,
-				PlanModifiers: []planmodifier.Map{
-					virtualmachines.SecretsPlanModifier{},
-				},
-			},
 			"network_ids": schema.ListAttribute{
 				Description: "List of network IDs to attach to the virtual machine. Maximum of 5 networks allowed",
 				ElementType: types.StringType,
@@ -203,6 +191,54 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				Computed:    true,
 				PlanModifiers: []planmodifier.Bool{
 					boolplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"auth": schema.SingleNestedAttribute{
+				Description: "Authentication configuration for the virtual machine. Either ssh_key_id or password must be specified. Changing any value in this block requires replacing the virtual machine",
+				Required:    true,
+				PlanModifiers: []planmodifier.Object{
+					objectplanmodifier.RequiresReplace(),
+				},
+				Attributes: map[string]schema.Attribute{
+					"ssh_key_id": schema.StringAttribute{
+						Description: "ID of the SSH key to use for authentication. Cannot be set together with password",
+						Optional:    true,
+						Validators: []validator.String{
+							stringvalidator.ConflictsWith(
+								path.MatchRelative().AtParent().AtName("password"),
+							),
+							stringvalidator.AtLeastOneOf(
+								path.MatchRelative().AtParent().AtName("ssh_key_id"),
+								path.MatchRelative().AtParent().AtName("password"),
+							),
+						},
+					},
+					"username": schema.StringAttribute{
+						Description: "Username for the virtual machine. Must be 3-20 characters matching ^[a-zA-Z_][a-zA-Z0-9_-]*$",
+						Required:    true,
+						Validators: []validator.String{
+							stringvalidator.LengthBetween(3, 20),
+							stringvalidator.RegexMatches(
+								regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_-]*$`),
+								"Username must start with a letter or underscore and contain only letters, digits, underscores, and hyphens",
+							),
+						},
+					},
+					"password": schema.StringAttribute{
+						Description: "Password for authentication. Must be 12-20 characters, contain only letters, digits, and ! @ # % - _ ., and include at least one uppercase letter, one lowercase letter, one digit, and one symbol. Cannot be set when ssh_key_id is set. username defaults to the image default if not specified",
+						Optional:    true,
+						Sensitive:   true,
+						Validators: []validator.String{
+							virtualmachines.PasswordValidator{},
+							stringvalidator.ConflictsWith(
+								path.MatchRelative().AtParent().AtName("ssh_key_id"),
+							),
+							stringvalidator.AtLeastOneOf(
+								path.MatchRelative().AtParent().AtName("ssh_key_id"),
+								path.MatchRelative().AtParent().AtName("password"),
+							),
+						},
+					},
 				},
 			},
 		},

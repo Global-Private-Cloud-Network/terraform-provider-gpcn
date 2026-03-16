@@ -22,7 +22,6 @@ func newSSHKeyResponse(id, name, privateKey string) *readSSHKeyResponse {
 	resp.Data.Name = name
 	resp.Data.CreatedAt = time.Now().Format(time.RFC3339)
 	resp.Data.UpdatedAt = time.Now().Format(time.RFC3339)
-	resp.Data.Type = "generate"
 	resp.Data.Algorithm = "ed25519"
 	resp.Data.PrivateKey = privateKey
 	return resp

@@ -73,38 +73,6 @@ func (m ConfigurationPlanModifier) PlanModifyMap(ctx context.Context, req planmo
 	resp.PlanValue = req.StateValue
 }
 
-// SecretsPlanModifier marks secrets as unknown when display_secrets changes
-type SecretsPlanModifier struct{}
-
-func (m SecretsPlanModifier) Description(_ context.Context) string {
-	return "Marks secrets as unknown when display_secrets changes"
-}
-
-func (m SecretsPlanModifier) MarkdownDescription(_ context.Context) string {
-	return "Marks secrets as unknown when display_secrets changes"
-}
-
-func (m SecretsPlanModifier) PlanModifyMap(ctx context.Context, req planmodifier.MapRequest, resp *planmodifier.MapResponse) {
-	// If the resource is being created, leave it unknown
-	if req.StateValue.IsNull() {
-		return
-	}
-
-	// Get display_secrets from both state and plan
-	var stateDisplaySecrets, planDisplaySecrets types.Bool
-	req.State.GetAttribute(ctx, path.Root("display_secrets"), &stateDisplaySecrets)
-	req.Plan.GetAttribute(ctx, path.Root("display_secrets"), &planDisplaySecrets)
-
-	// If display_secrets is changing, mark secrets as unknown
-	if !stateDisplaySecrets.Equal(planDisplaySecrets) {
-		resp.PlanValue = types.MapUnknown(types.StringType)
-		return
-	}
-
-	// Otherwise, preserve the state value (like UseStateForUnknown)
-	resp.PlanValue = req.StateValue
-}
-
 // SizePlanModifier requires replacement if category changes or tier decreases
 type SizePlanModifier struct{}
 

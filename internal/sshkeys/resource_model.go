@@ -39,6 +39,12 @@ func MapSSHKeyResponseToModel(response *readSSHKeyResponse, model ResourceModel)
 		model.LastUpdated = types.StringValue(updatedTime.Format(time.RFC850))
 	}
 
+	// Only overwrite public_key if the response includes one and the user didn't provide it.
+	// In upload mode the user already has the value; in generate mode the API returns it.
+	if model.PublicKey.IsNull() || model.PublicKey.IsUnknown() {
+		model.PublicKey = types.StringValue(response.Data.PublicKey)
+	}
+
 	// Only overwrite private_key if the response includes one.
 	// The API only returns the private key immediately after creation (generate mode).
 	// Subsequent GETs will not include it, so we preserve whatever is already in state.
