@@ -49,7 +49,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 				cidr_block = "10.0.0.0/24"
 				dhcp_start_address = "10.0.0.10"
 				dhcp_end_address   = "10.0.0.254"
-				dns_servers = "8.8.8.8, 8.8.4.4"
+				dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 
 			resource "gpcn_network" "vm_network_custom" {
@@ -144,7 +144,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 				cidr_block = "10.0.0.0/24"
 				dhcp_start_address = "10.0.0.10"
 				dhcp_end_address   = "10.0.0.254"
-				dns_servers = "8.8.8.8, 8.8.4.4"
+				dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 
 			resource "gpcn_virtualmachine" "test" {
@@ -202,7 +202,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 				cidr_block = "10.0.0.0/24"
 				dhcp_start_address = "10.0.0.10"
 				dhcp_end_address   = "10.0.0.254"
-				dns_servers = "8.8.8.8, 8.8.4.4"
+				dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 
 			resource "gpcn_virtualmachine" "test" {
@@ -273,7 +273,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = "8.8.8.8, 8.8.4.4"
+			  dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 
 			resource "gpcn_virtualmachine" "test" {
@@ -326,7 +326,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = "8.8.8.8, 8.8.4.4"
+			  dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 
 			resource "gpcn_virtualmachine" "test" {
@@ -382,7 +382,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = "8.8.8.8, 8.8.4.4"
+			  dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 
 			resource "gpcn_virtualmachine" "test" {
@@ -451,7 +451,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = "8.8.8.8, 8.8.4.4"
+			  dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 
 			resource "gpcn_virtualmachine" "test" {
@@ -505,7 +505,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = "8.8.8.8, 8.8.4.4"
+			  dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 
 			resource "gpcn_virtualmachine" "test" {
@@ -576,7 +576,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = "8.8.8.8, 8.8.4.4"
+			  dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 
 			resource "gpcn_volume" "vm_vol1" {
@@ -644,7 +644,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = "8.8.8.8, 8.8.4.4"
+			  dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 
 			resource "gpcn_volume" "vm_vol1" {
@@ -717,7 +717,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = "8.8.8.8, 8.8.4.4"
+			  dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 
 			resource "gpcn_volume" "vm_vol1" {
@@ -791,7 +791,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			  cidr_block = "10.0.0.0/24"
 			  dhcp_start_address = "10.0.0.10"
 			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = "8.8.8.8, 8.8.4.4"
+			  dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 
 			resource "gpcn_volume" "vm_vol1" {
@@ -878,7 +878,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 				cidr_block = "10.0.0.0/24"
 				dhcp_start_address = "10.0.0.10"
 				dhcp_end_address   = "10.0.0.254"
-				dns_servers = "8.8.8.8, 8.8.4.4"
+				dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 
 			resource "gpcn_virtualmachine" "test" {
@@ -929,7 +929,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 				cidr_block = "10.0.0.0/24"
 				dhcp_start_address = "10.0.0.10"
 				dhcp_end_address   = "10.0.0.254"
-				dns_servers = "8.8.8.8, 8.8.4.4"
+				dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 
 			resource "gpcn_virtualmachine" "test" {

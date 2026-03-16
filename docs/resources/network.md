@@ -55,7 +55,7 @@ resource "gpcn_network" "example_standard" {
   dhcp_end_address   = "10.0.0.254"
 
   # DNS servers
-  dns_servers = "8.8.8.8"
+  dns_servers = ["8.8.8.8"]
 }
 
 output "gpcn_network_example_standard" {
@@ -91,7 +91,7 @@ output "gpcn_network_example_custom" {
 - `description` (String) Additional information about the network to provide context for its purpose
 - `dhcp_end_address` (String) Ending IP address of the DHCP range. Must be specified together with dhcp_start_address. Only applicable for standard networks
 - `dhcp_start_address` (String) Starting IP address of the DHCP range. Must be specified together with dhcp_end_address. Only applicable for standard networks
-- `dns_servers` (String) Comma-separated list of DNS server IPv4 addresses. Only applicable for standard networks
+- `dns_servers` (List of String) List of DNS server IPv4 addresses. Only applicable for standard networks
 
 ### Read-Only
 

@@ -41,7 +41,7 @@ func TestNetworksResource(t *testing.T) {
 				cidr_block = "10.0.0.0/24"
 				dhcp_start_address = "10.0.0.10"
 				dhcp_end_address   = "10.0.0.254"
-				dns_servers = "8.8.8.8, 8.8.4.4"
+				dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 			`, nameStandard),
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -50,7 +50,9 @@ func TestNetworksResource(t *testing.T) {
 					resource.TestCheckResourceAttr(gpcnNetworkTest, "description", "An example Network for a demo of Terraform! This one uses the standard network_type."),
 					resource.TestCheckResourceAttr(gpcnNetworkTest, "dhcp_end_address", "10.0.0.254"),
 					resource.TestCheckResourceAttr(gpcnNetworkTest, "dhcp_start_address", "10.0.0.10"),
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "dns_servers", "8.8.8.8, 8.8.4.4"),
+					resource.TestCheckResourceAttr(gpcnNetworkTest, "dns_servers.#", "2"),
+					resource.TestCheckResourceAttr(gpcnNetworkTest, "dns_servers.0", "8.8.8.8"),
+					resource.TestCheckResourceAttr(gpcnNetworkTest, "dns_servers.1", "8.8.4.4"),
 					resource.TestCheckResourceAttr(gpcnNetworkTest, "name", nameStandard),
 					resource.TestCheckResourceAttr(gpcnNetworkTest, "network_type", "standard"),
 					// Verify generated values are generated
@@ -94,7 +96,7 @@ func TestNetworksResource(t *testing.T) {
 				cidr_block = "10.0.0.0/24"
 				dhcp_start_address = "10.0.0.10"
 				dhcp_end_address   = "10.0.0.140"
-				dns_servers = "8.8.8.8, 8.8.4.4"
+				dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 			`, nameStandard),
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -195,7 +197,7 @@ func TestNetworksResourceStandardValidator(t *testing.T) {
 					network_type = "standard"
 					dhcp_start_address = "10.0.0.10"
 					dhcp_end_address   = "10.0.0.140"
-					dns_servers = "8.8.8.8, 8.8.4.4"
+					dns_servers = ["8.8.8.8", "8.8.4.4"]
 				}
 				`,
 					ExpectError: regexp.MustCompile(missingRequiredAttributeErr),
@@ -216,7 +218,7 @@ func TestNetworksResourceStandardValidator(t *testing.T) {
 					network_type = "standard"
 					cidr_block = "10.0.0.0/24"
 					dhcp_end_address   = "10.0.0.140"
-					dns_servers = "8.8.8.8, 8.8.4.4"
+					dns_servers = ["8.8.8.8", "8.8.4.4"]
 				}
 				`,
 					ExpectError: regexp.MustCompile(missingRequiredAttributeErr),
@@ -237,7 +239,7 @@ func TestNetworksResourceStandardValidator(t *testing.T) {
 					network_type = "standard"
 					cidr_block = "10.0.0.0/24"
 					dhcp_start_address = "10.0.0.10"
-					dns_servers = "8.8.8.8, 8.8.4.4"
+					dns_servers = ["8.8.8.8", "8.8.4.4"]
 				}
 				`,
 					ExpectError: regexp.MustCompile(missingRequiredAttributeErr),
@@ -282,7 +284,7 @@ func TestNetworksResourceIpAddressValidator(t *testing.T) {
 					cidr_block = "10.0.0.0/24"
 					dhcp_start_address = "10.0.0.1455"
 					dhcp_end_address   = "10.0.0.140"
-					dns_servers = "8.8.8.8, 8.8.4.4"
+					dns_servers = ["8.8.8.8", "8.8.4.4"]
 				}
 				`,
 					ExpectError: regexp.MustCompile("does not resolve to a valid IPv4 address"),
@@ -304,7 +306,7 @@ func TestNetworksResourceIpAddressValidator(t *testing.T) {
 					cidr_block = "10.0.0.0/24"
 					dhcp_start_address = "10.0.0.10"
 					dhcp_end_address   = "10.0.0.1405"
-					dns_servers = "8.8.8.8, 8.8.4.4"
+					dns_servers = ["8.8.8.8", "8.8.4.4"]
 				}
 				`,
 					ExpectError: regexp.MustCompile("does not resolve to a valid IPv4 address"),
@@ -326,7 +328,7 @@ func TestNetworksResourceIpAddressValidator(t *testing.T) {
 					cidr_block = "10.0.0.0/24"
 					dhcp_start_address = "192.0.0.10"
 					dhcp_end_address   = "10.0.0.140"
-					dns_servers = "8.8.8.8, 8.8.4.4"
+					dns_servers = ["8.8.8.8", "8.8.4.4"]
 				}
 				`,
 					ExpectError: regexp.MustCompile("is not a valid IP address in the CIDR"),
@@ -350,7 +352,7 @@ func TestNetworksResourceCIDRValidator(t *testing.T) {
 					cidr_block = "10.0.0.0/245"
 					dhcp_start_address = "10.0.0.10"
 					dhcp_end_address   = "10.0.0.140"
-					dns_servers = "8.8.8.8, 8.8.4.4"
+					dns_servers = ["8.8.8.8", "8.8.4.4"]
 				}
 				`,
 					ExpectError: regexp.MustCompile("does not contain a valid CIDR block"),
@@ -372,7 +374,7 @@ func TestNetworksResourceCIDRValidator(t *testing.T) {
 					cidr_block = "100.0.0.0/24"
 					dhcp_start_address = "10.0.0.10"
 					dhcp_end_address   = "10.0.0.140"
-					dns_servers = "8.8.8.8, 8.8.4.4"
+					dns_servers = ["8.8.8.8", "8.8.4.4"]
 				}
 				`,
 					ExpectError: regexp.MustCompile("is not a valid IP address in the CIDR"),
@@ -396,7 +398,7 @@ func TestNetworksResourceDNSServersValidator(t *testing.T) {
 					cidr_block = "10.0.0.0/24"
 					dhcp_start_address = "10.0.0.10"
 					dhcp_end_address   = "10.0.0.140"
-					dns_servers = "8.8.8.8, 8.8.4.4, 123.123.123.1234"
+					dns_servers = ["8.8.8.8", "8.8.4.4", "123.123.123.1234"]
 				}
 				`,
 					ExpectError: regexp.MustCompile("is not a valid IPv4 address"),
@@ -405,7 +407,29 @@ func TestNetworksResourceDNSServersValidator(t *testing.T) {
 		})
 	})
 
-	t.Run("dns_servers_hanging_comma", func(t *testing.T) {
+	t.Run("dns_servers_empty_list", func(t *testing.T) {
+		resource.UnitTest(t, resource.TestCase{
+			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			Steps: []resource.TestStep{
+				{
+					Config: providerConfig + `
+			resource "gpcn_network" "test" {
+				name = "terraform-demo-standard"
+				datacenter_id = "any-datacenter-id"
+				network_type = "standard"
+				cidr_block = "10.0.0.0/24"
+				dhcp_start_address = "10.0.0.10"
+				dhcp_end_address   = "10.0.0.140"
+				dns_servers = []
+			}
+			`,
+					ExpectError: regexp.MustCompile("Missing required attribute"),
+				},
+			},
+		})
+	})
+
+	t.Run("dns_servers_empty_element", func(t *testing.T) {
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
@@ -418,7 +442,7 @@ func TestNetworksResourceDNSServersValidator(t *testing.T) {
 					cidr_block = "10.0.0.0/24"
 					dhcp_start_address = "10.0.0.10"
 					dhcp_end_address   = "10.0.0.140"
-					dns_servers = "8.8.8.8, 8.8.4.4, "
+					dns_servers = ["8.8.8.8", ""]
 				}
 				`,
 					ExpectError: regexp.MustCompile("is not a valid IPv4 address"),

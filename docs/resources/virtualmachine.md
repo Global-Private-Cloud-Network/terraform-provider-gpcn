@@ -62,7 +62,7 @@ resource "gpcn_network" "vm_network" {
   dhcp_end_address   = "10.0.0.254"
 
   # DNS servers
-  dns_servers = "8.8.8.8, 8.8.4.4"
+  dns_servers = ["8.8.8.8", "8.8.4.4"]
 }
 
 # Create a custom network for additional connectivity

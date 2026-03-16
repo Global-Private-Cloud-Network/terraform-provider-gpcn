@@ -41,7 +41,7 @@ resource "gpcn_network" "example_standard" {
   dhcp_end_address   = "10.0.0.254"
 
   # DNS servers
-  dns_servers = "8.8.8.8"
+  dns_servers = ["8.8.8.8"]
 }
 
 output "gpcn_network_example_standard" {
