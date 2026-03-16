@@ -332,10 +332,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 	// Once finished, start the virtual machine. It may already be started, in which case this will be a quick call
 	err = virtualmachines.StartVirtualMachine(r.client, ctx, plan.ID.ValueString(), plan.WaitForStartup.ValueBool())
 	if err != nil {
-		resp.Diagnostics.AddWarning(
-			virtualmachines.WarnSummaryUnableToStartVM,
-			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStartingVM, plan.ID.ValueString()), err).Error(),
-		)
+		tflog.Debug(ctx, fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStartingVM, plan.ID.ValueString()), err).Error())
 	}
 	tflog.Debug(ctx, virtualmachines.LogSuccessfullyCreatedVMMayNotBeRunning)
 
@@ -499,10 +496,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	if needStopVM {
 		err = virtualmachines.StartVirtualMachine(r.client, ctx, state.ID.ValueString(), plan.WaitForStartup.ValueBool())
 		if err != nil {
-			resp.Diagnostics.AddWarning(
-				virtualmachines.WarnSummaryUnableToStartVM,
-				fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStartingVM, state.ID.ValueString()), err).Error(),
-			)
+			tflog.Debug(ctx, fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStartingVM, state.ID.ValueString()), err).Error())
 		}
 	}
 	tflog.Debug(ctx, fmt.Sprintf(virtualmachines.LogSuccessfullyUpdatedVMMayNotBeRunning, state.ID.ValueString()))
