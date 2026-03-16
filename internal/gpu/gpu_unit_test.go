@@ -12,11 +12,14 @@ import (
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 const testDatacenterID = "datacenter-123"
 const testImageName = "ubuntu-22.04"
+
+const testSSHKeyID = "ssh-key-abc123"
 
 func createTestGPUModel(name, seriesName, seriesCode, imageName string, gpuCount int64) ResourceModel {
 	model := ResourceModel{
@@ -34,6 +37,12 @@ func createTestGPUModel(name, seriesName, seriesCode, imageName string, gpuCount
 		model.SeriesCode = types.StringValue(seriesCode)
 	} else {
 		model.SeriesCode = types.StringNull()
+	}
+	auth := ResourceModelAuth{SshKeyId: types.StringValue(testSSHKeyID)}
+	var diags diag.Diagnostics
+	model.Auth, diags = types.ObjectValueFrom(context.Background(), auth.AttrTypes(), auth)
+	if diags.HasError() {
+		panic("failed to create auth object in test helper")
 	}
 	return model
 }
@@ -287,6 +296,9 @@ func TestCreateGPUMockHTTP(t *testing.T) {
 				}
 				if req["imageName"] != testImageName {
 					t.Errorf("Expected imageName '%s', got '%v'", testImageName, req["imageName"])
+				}
+				if req["sshKeyId"] != testSSHKeyID {
+					t.Errorf("Expected sshKeyId '%s', got '%v'", testSSHKeyID, req["sshKeyId"])
 				}
 
 				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{

@@ -1,9 +1,11 @@
 package provider
 
 import (
+	"fmt"
 	"regexp"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
@@ -14,31 +16,35 @@ import (
 var gpcnVolumeTest = "gpcn_volume.test"
 
 func TestVolumesResource(t *testing.T) {
+	t.Parallel()
+	rName := acctest.RandString(8)
+	volumeName := fmt.Sprintf("volume-basic-%s", rName)
+
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
-				Config: providerConfig + `
-data "gpcn_datacenters" "central_us" {
-  country_name = "United States"
-  region_name  = "Central"
-  name = "Chicago"
-}
+				Config: providerConfig + fmt.Sprintf(`
+			data "gpcn_datacenters" "central_us" {
+				country_name = "United States"
+				region_name  = "Central"
+				name = "Chicago"
+			}
 
-resource "gpcn_volume" "test" {
-  name = "terraform-demo"
+			resource "gpcn_volume" "test" {
+				name = "%s"
 
-  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
-  volume_type = "SSD"
+				volume_type = "SSD"
 
-  size_gb = 256
-}
-`,
+				size_gb = 256
+			}
+			`, volumeName),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Verify attributes are set to the values from the config
-					resource.TestCheckResourceAttr(gpcnVolumeTest, "name", "terraform-demo"),
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "name", volumeName),
 					resource.TestCheckResourceAttr(gpcnVolumeTest, "size_gb", "256"),
 					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type", "SSD"),
 					// Verify generated values are generated
@@ -59,29 +65,30 @@ resource "gpcn_volume" "test" {
 			},
 			// ImportState testing
 			{
-				ResourceName: gpcnVolumeTest,
-				ImportState:  true,
+				ResourceName:      gpcnVolumeTest,
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 			// Update and Read testing with little changes
 			// Increasing the size does not result in a replace
 			{
-				Config: providerConfig + `
-data "gpcn_datacenters" "central_us" {
-  country_name = "United States"
-  region_name  = "Central"
-  name = "Chicago"
-}
+				Config: providerConfig + fmt.Sprintf(`
+			data "gpcn_datacenters" "central_us" {
+				country_name = "United States"
+				region_name  = "Central"
+				name = "Chicago"
+			}
 
-resource "gpcn_volume" "test" {
-  name = "terraform-demo"
-  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-  volume_type = "SSD"
-  size_gb = 512
-}
-			`,
+			resource "gpcn_volume" "test" {
+				name = "%s"
+				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+				volume_type = "SSD"
+				size_gb = 512
+			}
+			`, volumeName),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Verify attributes are set to the values from the config
-					resource.TestCheckResourceAttr(gpcnVolumeTest, "name", "terraform-demo"),
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "name", volumeName),
 					resource.TestCheckResourceAttr(gpcnVolumeTest, "size_gb", "512"),
 					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type", "SSD"),
 					// Verify generated values are generated
@@ -102,23 +109,23 @@ resource "gpcn_volume" "test" {
 			// Update and Read testing with a replace
 			// Decreasing the size forces a replace
 			{
-				Config: providerConfig + `
-data "gpcn_datacenters" "central_us" {
-  country_name = "United States"
-  region_name  = "Central"
-  name = "Chicago"
-}
+				Config: providerConfig + fmt.Sprintf(`
+			data "gpcn_datacenters" "central_us" {
+				country_name = "United States"
+				region_name  = "Central"
+				name = "Chicago"
+			}
 
-resource "gpcn_volume" "test" {
-  name = "terraform-demo"
-  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-  volume_type = "SSD"
-  size_gb = 256
-}
-			`,
+			resource "gpcn_volume" "test" {
+				name = "%s"
+				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+				volume_type = "SSD"
+				size_gb = 256
+			}
+			`, volumeName),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Verify attributes are set to the values from the config
-					resource.TestCheckResourceAttr(gpcnVolumeTest, "name", "terraform-demo"),
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "name", volumeName),
 					resource.TestCheckResourceAttr(gpcnVolumeTest, "size_gb", "256"),
 					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type", "SSD"),
 					// Verify generated values are generated
@@ -152,19 +159,19 @@ func TestVolumesResourceInvalidSize(t *testing.T) {
 			Steps: []resource.TestStep{
 				{
 					Config: providerConfig + `
-data "gpcn_datacenters" "central_us" {
-  country_name = "United States"
-  region_name  = "Central"
-  name = "Chicago"
-}
+				data "gpcn_datacenters" "central_us" {
+					country_name = "United States"
+					region_name  = "Central"
+					name = "Chicago"
+				}
 
-resource "gpcn_volume" "test" {
-  name = "terraform-demo"
-  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-  volume_type = "SSD"
-  size_gb = 555
-}
-			`,
+				resource "gpcn_volume" "test" {
+					name = "terraform-demo"
+					datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+					volume_type = "SSD"
+					size_gb = 555
+				}
+				`,
 					ExpectError: regexp.MustCompile("the specified volume size is not available for this datacenter"),
 				},
 			},

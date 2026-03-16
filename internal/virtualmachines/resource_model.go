@@ -147,21 +147,42 @@ func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient
 		model.WaitForStartup = types.BoolValue(true)
 	}
 
-	// Update SSHKeyId if set
-	if response.Data.SshKeyId != "" && !model.Auth.IsNull() && !model.Auth.IsUnknown() {
-		var auth ResourceModelAuth
-		authDiags := model.Auth.As(ctx, &auth, basetypes.ObjectAsOptions{})
-		if !authDiags.HasError() && auth.SshKeyId.IsNull() {
-			auth.SshKeyId = types.StringValue(response.Data.SshKeyId)
-			var updateDiags diag.Diagnostics
-			model.Auth, updateDiags = types.ObjectValueFrom(ctx, auth.AttrTypes(), auth)
-			if updateDiags.HasError() {
-				allDiags.Append(updateDiags...)
-			}
+	// Populate auth from response. On import, auth is null and must be constructed from the response.
+	var authDiags diag.Diagnostics
+	model.Auth, authDiags = populateAuth(ctx, model.Auth, response)
+	allDiags.Append(authDiags...)
+
+	return model, allDiags
+}
+
+// populateAuth fills auth fields from the API response. On import, current is null and the struct
+// is built from scratch. Otherwise, any null fields are filled in with values from the response.
+func populateAuth(ctx context.Context, current types.Object, response *ReadVirtualMachinesResponse) (types.Object, diag.Diagnostics) {
+	if current.IsUnknown() {
+		return current, nil
+	}
+
+	var auth ResourceModelAuth
+	if current.IsNull() {
+		auth = ResourceModelAuth{
+			Username: types.StringValue(response.Data.Username),
+			SshKeyId: types.StringNull(),
+			Password: types.StringNull(),
+		}
+	} else {
+		if diags := current.As(ctx, &auth, basetypes.ObjectAsOptions{}); diags.HasError() {
+			return current, diags
+		}
+		if auth.Username.IsNull() && response.Data.Username != "" {
+			auth.Username = types.StringValue(response.Data.Username)
 		}
 	}
 
-	return model, allDiags
+	if auth.SshKeyId.IsNull() && response.Data.SshKeyId != "" {
+		auth.SshKeyId = types.StringValue(response.Data.SshKeyId)
+	}
+
+	return types.ObjectValueFrom(ctx, auth.AttrTypes(), auth)
 }
 
 func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient, virtualMachineID string, model ResourceModel) (ResourceModel, diag.Diagnostics) {

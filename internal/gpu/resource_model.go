@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
@@ -16,9 +17,20 @@ type ResourceModel struct {
 	SeriesCode   types.String `tfsdk:"series_code"`
 	GPUCount     types.Int64  `tfsdk:"gpu_count"`
 	ImageName    types.String `tfsdk:"image_name"`
+	Auth         types.Object `tfsdk:"auth"`
 	CreatedTime  types.String `tfsdk:"created_time"`
 	LastUpdated  types.String `tfsdk:"last_updated"`
 	Location     types.Map    `tfsdk:"location"`
+}
+
+type ResourceModelAuth struct {
+	SshKeyId types.String `tfsdk:"ssh_key_id"`
+}
+
+func (o ResourceModelAuth) AttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"ssh_key_id": types.StringType,
+	}
 }
 
 // Update the plan or state with new values from the GET response
@@ -51,12 +63,12 @@ func MapGPUResponseToModel(ctx context.Context, response *readGPUResponse, model
 	}
 
 	// If model doesn't already have these populated, set them
-	model = setModelValuesNotPresent(response, model)
+	model = setModelValuesNotPresent(ctx, response, model)
 
 	return model
 }
 
-func setModelValuesNotPresent(response *readGPUResponse, model ResourceModel) ResourceModel {
+func setModelValuesNotPresent(ctx context.Context, response *readGPUResponse, model ResourceModel) ResourceModel {
 	if model.DatacenterId.IsNull() {
 		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
 	}
@@ -71,6 +83,17 @@ func setModelValuesNotPresent(response *readGPUResponse, model ResourceModel) Re
 	}
 	if model.GPUCount.IsNull() {
 		model.GPUCount = types.Int64Value(response.Data.Configuration.GPUCount)
+	}
+	if model.ImageName.IsNull() || model.ImageName.ValueString() == "" {
+		model.ImageName = types.StringValue(response.Data.Image)
+	}
+	if model.Auth.IsNull() && response.Data.SshKeyId != "" {
+		authObj, diags := types.ObjectValueFrom(ctx, ResourceModelAuth{}.AttrTypes(), ResourceModelAuth{
+			SshKeyId: types.StringValue(response.Data.SshKeyId),
+		})
+		if !diags.HasError() {
+			model.Auth = authObj
+		}
 	}
 	return model
 }
