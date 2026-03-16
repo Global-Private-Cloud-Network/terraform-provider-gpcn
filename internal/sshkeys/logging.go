@@ -17,9 +17,4 @@ const (
 	// DeleteSSHKey messages
 	LogStartingDeleteSSHKey             = "Starting Delete GPCN SSH Key"
 	LogSuccessfullyFinishedDeleteSSHKey = "Successfully finished Delete GPCN SSH Key"
-
-	// CheckAlgorithms messages
-	LogStartingCheckAlgorithms    = "Starting CheckAlgorithms for algorithm %s"
-	LogAlgorithmCheckPassed       = "Algorithm %s is supported by the API" //nolint:gosec // G101: Not a credential, this is a log message template
-	LogAlgorithmsRetrievedFromAPI = "Successfully retrieved supported algorithms from the API"
 )

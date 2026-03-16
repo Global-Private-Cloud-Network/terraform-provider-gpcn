@@ -16,55 +16,27 @@ import (
 
 // Test helpers
 
-func newSSHKeyResponse(id, name, privateKey string) *readSSHKeyResponse {
+func newSSHKeyResponse(id, name string) *readSSHKeyResponse {
 	resp := &readSSHKeyResponse{}
 	resp.Data.ID = id
 	resp.Data.Name = name
 	resp.Data.CreatedAt = time.Now().Format(time.RFC3339)
 	resp.Data.UpdatedAt = time.Now().Format(time.RFC3339)
-	resp.Data.Algorithm = "ed25519"
-	resp.Data.PrivateKey = privateKey
 	return resp
-}
-
-func newAlgorithmsResponse(codes []string) algorithmsResponse {
-	entries := make([]algorithmEntry, len(codes))
-	for i, code := range codes {
-		entries[i] = algorithmEntry{Code: code}
-	}
-	return algorithmsResponse{Data: entries}
-}
-
-func createGenerateModel(name, algorithm, passphrase string) ResourceModel {
-	model := ResourceModel{
-		Name:      types.StringValue(name),
-		PublicKey: types.StringNull(),
-		Algorithm: types.StringValue(algorithm),
-	}
-	if passphrase != "" {
-		model.Passphrase = types.StringValue(passphrase)
-	} else {
-		model.Passphrase = types.StringNull()
-	}
-	model.PrivateKey = types.StringNull()
-	return model
 }
 
 func createUploadModel(name, publicKey string) ResourceModel {
 	return ResourceModel{
-		Name:       types.StringValue(name),
-		PublicKey:  types.StringValue(publicKey),
-		Algorithm:  types.StringNull(),
-		Passphrase: types.StringNull(),
-		PrivateKey: types.StringNull(),
+		Name:      types.StringValue(name),
+		PublicKey: types.StringValue(publicKey),
 	}
 }
 
 // Tests for MapSSHKeyResponseToModel
 
 func TestMapSSHKeyResponseToModelSetsBasicFields(t *testing.T) {
-	response := newSSHKeyResponse("key-123", "test-key", "private-key-data")
-	model := createGenerateModel("test-key", "ed25519", "")
+	response := newSSHKeyResponse("key-123", "test-key")
+	model := createUploadModel("test-key", "ssh-ed25519 AAAA...")
 
 	result := MapSSHKeyResponseToModel(response, model)
 
@@ -82,35 +54,11 @@ func TestMapSSHKeyResponseToModelSetsBasicFields(t *testing.T) {
 	}
 }
 
-func TestMapSSHKeyResponseToModelSetsPrivateKeyWhenPresent(t *testing.T) {
-	response := newSSHKeyResponse("key-123", "test-key", "-----BEGIN OPENSSH PRIVATE KEY-----")
-	model := createGenerateModel("test-key", "ed25519", "")
-
-	result := MapSSHKeyResponseToModel(response, model)
-
-	if result.PrivateKey.ValueString() != "-----BEGIN OPENSSH PRIVATE KEY-----" {
-		t.Errorf("Expected PrivateKey to be set, got '%s'", result.PrivateKey.ValueString())
-	}
-}
-
-func TestMapSSHKeyResponseToModelPreservesPrivateKeyWhenNotInResponse(t *testing.T) {
-	// Response without private key (as returned on subsequent GETs)
-	response := newSSHKeyResponse("key-123", "test-key", "")
-	model := createGenerateModel("test-key", "ed25519", "")
-	model.PrivateKey = types.StringValue("existing-private-key")
-
-	result := MapSSHKeyResponseToModel(response, model)
-
-	if result.PrivateKey.ValueString() != "existing-private-key" {
-		t.Errorf("Expected PrivateKey to be preserved, got '%s'", result.PrivateKey.ValueString())
-	}
-}
-
 func TestMapSSHKeyResponseToModelInvalidTimestamp(t *testing.T) {
-	response := newSSHKeyResponse("key-123", "test-key", "")
+	response := newSSHKeyResponse("key-123", "test-key")
 	response.Data.CreatedAt = "not-a-timestamp"
 	response.Data.UpdatedAt = "also-not-a-timestamp"
-	model := createGenerateModel("test-key", "ed25519", "")
+	model := createUploadModel("test-key", "ssh-ed25519 AAAA...")
 
 	result := MapSSHKeyResponseToModel(response, model)
 
@@ -122,146 +70,7 @@ func TestMapSSHKeyResponseToModelInvalidTimestamp(t *testing.T) {
 	}
 }
 
-// Tests for CheckAlgorithms
-
-func TestCheckAlgorithmsMockHTTPSupported(t *testing.T) {
-	var algorithmsCalled bool
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/ssh-keys/algorithms") {
-				algorithmsCalled = true
-				testutil.WriteJSONResponse(w, newAlgorithmsResponse(SupportedAlgorithms))
-			} else {
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-	defer server.Close()
-
-	err := CheckAlgorithms(gpcnClient, context.Background(), "ed25519")
-	if err != nil {
-		t.Fatalf("CheckAlgorithms failed unexpectedly: %v", err)
-	}
-	if !algorithmsCalled {
-		t.Error("Expected algorithms endpoint to be called")
-	}
-}
-
-func TestCheckAlgorithmsMockHTTPUnsupported(t *testing.T) {
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/ssh-keys/algorithms") {
-				testutil.WriteJSONResponse(w, newAlgorithmsResponse([]string{"ed25519", "rsa-2048"}))
-			} else {
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-	defer server.Close()
-
-	err := CheckAlgorithms(gpcnClient, context.Background(), "rsa-4096")
-	if err == nil {
-		t.Fatal("Expected error for unsupported algorithm, got nil")
-	}
-	if !strings.Contains(err.Error(), "rsa-4096") {
-		t.Errorf("Expected error to mention 'rsa-4096', got '%s'", err.Error())
-	}
-}
-
-func TestCheckAlgorithmsMockHTTPEmptyResponse(t *testing.T) {
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/ssh-keys/algorithms") {
-				testutil.WriteJSONResponse(w, newAlgorithmsResponse([]string{}))
-			} else {
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-	defer server.Close()
-
-	err := CheckAlgorithms(gpcnClient, context.Background(), "ed25519")
-	if err == nil {
-		t.Fatal("Expected error for empty algorithms response, got nil")
-	}
-	if !strings.Contains(err.Error(), ErrDetailMalformedAlgorithmsResponse) {
-		t.Errorf("Expected error '%s', got '%s'", ErrDetailMalformedAlgorithmsResponse, err.Error())
-	}
-}
-
 // Tests for CreateSSHKey
-
-func TestCreateSSHKeyMockHTTPGenerateMode(t *testing.T) {
-	const (
-		keyID   = "key-456"
-		keyName = "test-key"
-		privKey = "-----BEGIN OPENSSH PRIVATE KEY-----"
-	)
-
-	var createCalled, getKeyCalled bool
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/ssh-keys/"):
-				createCalled = true
-				body, _ := io.ReadAll(r.Body)
-				var req map[string]any
-				_ = json.Unmarshal(body, &req)
-				if req["type"] != "generate" {
-					t.Errorf("Expected type 'generate', got '%v'", req["type"])
-				}
-				if req["algorithm"] != "ed25519" {
-					t.Errorf("Expected algorithm 'ed25519', got '%v'", req["algorithm"])
-				}
-				if req["name"] != keyName {
-					t.Errorf("Expected name '%s', got '%v'", keyName, req["name"])
-				}
-				testutil.WriteJSONResponse(w, createSSHKeyResponse{
-					Data: struct {
-						ID         string `json:"id"`
-						PrivateKey string `json:"privateKey"`
-					}{ID: keyID, PrivateKey: privKey},
-				})
-
-			case r.Method == "GET" && strings.Contains(r.URL.Path, "/ssh-keys/"+keyID):
-				getKeyCalled = true
-				testutil.WriteJSONResponse(w, newSSHKeyResponse(keyID, keyName, ""))
-
-			default:
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-	defer server.Close()
-
-	model := createGenerateModel(keyName, "ed25519", "")
-	response, err := CreateSSHKey(gpcnClient, context.Background(), model)
-	if err != nil {
-		t.Fatalf("CreateSSHKey failed: %v", err)
-	}
-	if response == nil {
-		t.Fatal("Expected response, got nil")
-		return
-	}
-	if response.Data.ID != keyID {
-		t.Errorf("Expected key ID '%s', got '%s'", keyID, response.Data.ID)
-	}
-	if response.Data.PrivateKey != privKey {
-		t.Errorf("Expected PrivateKey '%s', got '%s'", privKey, response.Data.PrivateKey)
-	}
-	if !createCalled {
-		t.Error("Expected create endpoint to be called")
-	}
-	if !getKeyCalled {
-		t.Error("Expected GET key endpoint to be called")
-	}
-}
 
 func TestCreateSSHKeyMockHTTPUploadMode(t *testing.T) {
 	const (
@@ -278,25 +87,23 @@ func TestCreateSSHKeyMockHTTPUploadMode(t *testing.T) {
 			switch {
 			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/ssh-keys/"):
 				createCalled = true
-				req := testutil.ReadRequestBody(r)
+				body, _ := io.ReadAll(r.Body)
+				var req map[string]any
+				_ = json.Unmarshal(body, &req)
 				if req["type"] != "upload" {
 					t.Errorf("Expected type 'upload', got '%v'", req["type"])
 				}
 				if req["publicKey"] != pubKey {
 					t.Errorf("Expected publicKey '%s', got '%v'", pubKey, req["publicKey"])
 				}
-				if _, hasAlgorithm := req["algorithm"]; hasAlgorithm {
-					t.Error("Expected algorithm to not be set in upload mode")
-				}
 				testutil.WriteJSONResponse(w, createSSHKeyResponse{
 					Data: struct {
-						ID         string `json:"id"`
-						PrivateKey string `json:"privateKey"`
+						ID string `json:"id"`
 					}{ID: keyID},
 				})
 
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/ssh-keys/"+keyID):
-				testutil.WriteJSONResponse(w, newSSHKeyResponse(keyID, keyName, ""))
+				testutil.WriteJSONResponse(w, newSSHKeyResponse(keyID, keyName))
 
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
@@ -308,7 +115,7 @@ func TestCreateSSHKeyMockHTTPUploadMode(t *testing.T) {
 	model := createUploadModel(keyName, pubKey)
 	response, err := CreateSSHKey(gpcnClient, context.Background(), model)
 	if err != nil {
-		t.Fatalf("CreateSSHKey (upload mode) failed: %v", err)
+		t.Fatalf("CreateSSHKey failed: %v", err)
 	}
 	if response == nil {
 		t.Fatal("Expected response, got nil")
@@ -331,7 +138,7 @@ func TestGetSSHKeyMockHTTP(t *testing.T) {
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/ssh-keys/"+keyID) {
-				testutil.WriteJSONResponse(w, newSSHKeyResponse(keyID, "test-key", ""))
+				testutil.WriteJSONResponse(w, newSSHKeyResponse(keyID, "test-key"))
 			} else {
 				testutil.LogUnexpectedRequest(t, w, r)
 			}
@@ -416,53 +223,5 @@ func TestDeleteSSHKeyMockHTTP(t *testing.T) {
 	}
 	if !deleteCalled {
 		t.Error("Expected delete endpoint to be called")
-	}
-}
-
-// Tests for CreateSSHKey with passphrase
-
-func TestCreateSSHKeyMockHTTPGenerateModeWithPassphrase(t *testing.T) {
-	const (
-		keyID      = "key-passcode-456"
-		keyName    = "secure-key"
-		passphrase = "my-secret"
-	)
-
-	var createCalled bool
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/ssh-keys/"):
-				createCalled = true
-				req := testutil.ReadRequestBody(r)
-				if req["passphrase"] != passphrase {
-					t.Errorf("Expected passphrase '%s', got '%v'", passphrase, req["passphrase"])
-				}
-				testutil.WriteJSONResponse(w, createSSHKeyResponse{
-					Data: struct {
-						ID         string `json:"id"`
-						PrivateKey string `json:"privateKey"`
-					}{ID: keyID, PrivateKey: "private-key"},
-				})
-
-			case r.Method == "GET" && strings.Contains(r.URL.Path, "/ssh-keys/"+keyID):
-				testutil.WriteJSONResponse(w, newSSHKeyResponse(keyID, keyName, ""))
-
-			default:
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-	defer server.Close()
-
-	model := createGenerateModel(keyName, "rsa-4096", passphrase)
-	_, err := CreateSSHKey(gpcnClient, context.Background(), model)
-	if err != nil {
-		t.Fatalf("CreateSSHKey with passphrase failed: %v", err)
-	}
-	if !createCalled {
-		t.Error("Expected create endpoint to be called")
 	}
 }

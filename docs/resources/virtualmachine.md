@@ -39,10 +39,11 @@ data "gpcn_datacenters" "central_us" {
   name         = "Chicago"
 }
 
-# Generate mode: platform generates an ed25519 key pair
-resource "gpcn_ssh_key" "generated" {
-  name      = "terraform-demo-key-generated"
-  algorithm = "ed25519"
+# Provide an existing public key
+resource "gpcn_ssh_key" "uploaded" {
+  name = "terraform-demo-key-uploaded"
+  # Not a real secret
+  public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
 }
 
 # Create a standard network for the VM
@@ -104,7 +105,7 @@ resource "gpcn_virtualmachine" "example" {
 
   # Authentication (Username and exactly one of ssh_key_id or password must be specified)
   auth = {
-    ssh_key_id = gpcn_ssh_key.generated.id
+    ssh_key_id = gpcn_ssh_key.uploaded.id
     username   = "almalinux"
   }
 
