@@ -164,11 +164,6 @@ func TestGPUResourceAuthReplacement(t *testing.T) {
 				name         = "Kansas"
 			}
 
-			resource "gpcn_ssh_key" "key1" {
-				name       = "%s"
-				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl key1"
-			}
-
 			resource "gpcn_ssh_key" "key2" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl key2"
@@ -184,7 +179,7 @@ func TestGPUResourceAuthReplacement(t *testing.T) {
 					ssh_key_id = gpcn_ssh_key.key2.id
 				}
 			}
-			`, key1Name, key2Name, gpuName),
+			`, key2Name, gpuName),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnGPUTest, plancheck.ResourceActionReplace),

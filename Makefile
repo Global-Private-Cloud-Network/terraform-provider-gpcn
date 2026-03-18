@@ -27,9 +27,12 @@ coverage:
 	@echo "Coverage report generated: coverage.html"
 
 testacc:
+	TF_ACC=1 TF_LOG=$(LOGLEVEL) go test -v -timeout 120m -parallel=1 ./...
+
+testaccparallel:
 	TF_ACC=1 TF_LOG=$(LOGLEVEL) go test -v -timeout 120m -parallel=4 ./...
 
 testaccnamed:
-	TF_ACC=1 TF_LOG=$(LOGLEVEL) go test -run=$(TEST) -v -timeout 120m -parallel=4 ./...
+	TF_ACC=1 TF_LOG=$(LOGLEVEL) go test -run=$(TEST) -v -timeout 120m -parallel=1 ./...
 
 .PHONY: fmt lint test testacc build install generate coverage

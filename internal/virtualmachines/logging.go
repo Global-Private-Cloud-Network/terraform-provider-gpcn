@@ -55,7 +55,6 @@ const (
 	// StartVirtualMachine messages
 	LogStartingStartVMWithID       = "Starting StartVirtualMachine for Virtual Machine ID %s"
 	LogSuccessfullyStartedVMWithID = "Successfully started Virtual Machine with ID %s"
-	LogStartingIteration           = "Starting iteration %d to attempt to start virtual machine"
 
 	// StopVirtualMachine messages
 	LogStartingStopVMWithID        = "Starting StopVirtualMachine for Virtual Machine ID %s"

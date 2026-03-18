@@ -19,7 +19,6 @@ type ResourceModel struct {
 	ID               types.String `tfsdk:"id"`
 	Name             types.String `tfsdk:"name"`
 	DatacenterId     types.String `tfsdk:"datacenter_id"`
-	WaitForStartup   types.Bool   `tfsdk:"wait_for_startup"`
 	Size             types.Object `tfsdk:"size"`
 	Image            types.String `tfsdk:"image"`
 	CreatedTime      types.String `tfsdk:"created_time"`
@@ -141,11 +140,6 @@ func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient
 	var networkDiags diag.Diagnostics
 	model, networkDiags = setNetworkModelValuesNotPresent(ctx, gpcnClient, response.Data.ID, model)
 	allDiags.Append(networkDiags...)
-
-	if model.WaitForStartup.IsNull() {
-		// Set WaitForStartup to the default value
-		model.WaitForStartup = types.BoolValue(true)
-	}
 
 	// Populate auth from response. On import, auth is null and must be constructed from the response.
 	var authDiags diag.Diagnostics

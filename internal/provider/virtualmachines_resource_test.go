@@ -75,7 +75,6 @@ func TestVirtualMachinesResource(t *testing.T) {
 				}
 				image = "Alma Linux 8.x"
 
-				wait_for_startup = false
 				allocate_public_ip = false
 				network_ids = [
 					gpcn_network.vm_network.id,
@@ -121,7 +120,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 				ResourceName:            gpcnVirtualMachineTest,
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"wait_for_startup", "volume_ids"},
+				ImportStateVerifyIgnore: []string{"volume_ids"},
 			},
 			// Update and Read testing
 			{
@@ -155,7 +154,6 @@ func TestVirtualMachinesResource(t *testing.T) {
 					tier     = "g-micro-1"
 				}
 				image = "Alma Linux 8.x"
-				wait_for_startup = false
 				allocate_public_ip = false
 				network_ids = [
 					gpcn_network.vm_network.id
@@ -213,7 +211,6 @@ func TestVirtualMachinesResource(t *testing.T) {
 					tier     = "g-micro-1"
 				}
 				image = "Alma Linux 9.x"
-				wait_for_startup = false
 				allocate_public_ip = false
 				network_ids = [
 					gpcn_network.vm_network.id
@@ -286,7 +283,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			  }
 			  image = "Alma Linux 8.x"
 
-			  wait_for_startup = false
+	
 			  allocate_public_ip = false
 			  network_ids = [
 			    gpcn_network.vm_network.id
@@ -339,7 +336,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			  }
 			  image = "Alma Linux 8.x"
 
-			  wait_for_startup = false
+	
 			  allocate_public_ip = true
 			  network_ids = [
 			    gpcn_network.vm_network.id
@@ -395,7 +392,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			  }
 			  image = "Alma Linux 8.x"
 
-			  wait_for_startup = false
+	
 			  allocate_public_ip = false
 			  network_ids = [
 			    gpcn_network.vm_network.id
@@ -464,7 +461,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 			  }
 			  image = "Alma Linux 8.x"
 
-			  wait_for_startup = false
+	
 			  allocate_public_ip = false
 			  network_ids = [
 			    gpcn_network.vm_network.id
@@ -518,7 +515,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 			  }
 			  image = "Alma Linux 8.x"
 
-			  wait_for_startup = false
+	
 			  allocate_public_ip = false
 			  network_ids = [
 			    gpcn_network.vm_network.id
@@ -603,7 +600,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			  }
 			  image = "Alma Linux 8.x"
 
-			  wait_for_startup = false
+	
 			  allocate_public_ip = false
 			  network_ids = [
 			    gpcn_network.vm_network.id
@@ -671,7 +668,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			  }
 			  image = "Alma Linux 8.x"
 
-			  wait_for_startup = false
+	
 			  allocate_public_ip = false
 			  network_ids = [
 			    gpcn_network.vm_network.id
@@ -744,7 +741,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			  }
 			  image = "Alma Linux 8.x"
 
-			  wait_for_startup = false
+	
 			  allocate_public_ip = false
 			  network_ids = [
 			    gpcn_network.vm_network.id
@@ -818,7 +815,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			  }
 			  image = "Alma Linux 8.x"
 
-			  wait_for_startup = false
+	
 			  allocate_public_ip = false
 			  network_ids = [
 			    gpcn_network.vm_network.id
@@ -891,7 +888,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 				}
 				image = "Alma Linux 8.x"
 
-				wait_for_startup   = false
+	
 				allocate_public_ip = false
 				network_ids = [
 					gpcn_network.vm_network.id
@@ -942,7 +939,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 				}
 				image = "Alma Linux 8.x"
 
-				wait_for_startup   = false
+	
 				allocate_public_ip = false
 				network_ids = [
 					gpcn_network.vm_network.id
@@ -992,7 +989,7 @@ func TestVirtualMachinesInvalidSizes(t *testing.T) {
 				  }
 				  image = "Alma Linux 8.x"
 
-				  wait_for_startup = false
+		
 				  allocate_public_ip = false
 				  auth = {
 				    ssh_key_id = "ssh-key-123"
@@ -1022,7 +1019,7 @@ func TestVirtualMachinesInvalidSizes(t *testing.T) {
 				  }
 				  image = "Alma Linux 8.x"
 
-				  wait_for_startup = false
+		
 				  allocate_public_ip = false
 				  auth = {
 				    ssh_key_id = "ssh-key-123"
@@ -1049,7 +1046,6 @@ func TestVirtualMachinesInvalidAuth(t *testing.T) {
 		    tier     = "g-micro-1"
 		  }
 		  image            = "Alma Linux 8.x"
-		  wait_for_startup   = false
 		  allocate_public_ip = false
 		  auth = {
 		    username = "testuser"

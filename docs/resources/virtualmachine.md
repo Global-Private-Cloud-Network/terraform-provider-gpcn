@@ -94,8 +94,6 @@ resource "gpcn_virtualmachine" "example" {
   }
   image = "Alma Linux 8.x"
 
-  wait_for_startup = false
-
   # Networking
   allocate_public_ip = false
   network_ids = [
@@ -132,7 +130,6 @@ resource "gpcn_virtualmachine" "example" {
 
 - `network_ids` (List of String) List of network IDs to attach to the virtual machine. Maximum of 5 networks allowed
 - `volume_ids` (List of String) List of volume IDs to attach to the virtual machine. Maximum of 5 volumes allowed. A volume can only be attached to a single virtual machine, so this parameter will not work as expected when using Terraform's count meta-attribute
-- `wait_for_startup` (Boolean) Determines if Terraform should wait for the virtual machine to start running before exiting. This will add a few minutes to virtual machine creation. Defaults to true
 
 ### Read-Only
 

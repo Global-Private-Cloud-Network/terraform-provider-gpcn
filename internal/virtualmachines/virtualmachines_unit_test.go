@@ -41,7 +41,6 @@ func createTestVMModel(name, image string, allocatePublicIP bool) ResourceModel 
 		Image:            types.StringValue(image),
 		Size:             sizeObj,
 		AllocatePublicIp: types.BoolValue(allocatePublicIP),
-		WaitForStartup:   types.BoolValue(false),
 		NetworkIds:       types.ListNull(types.StringType),
 		VolumeIds:        types.ListNull(types.StringType),
 		Auth:             authObj,

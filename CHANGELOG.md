@@ -5,6 +5,7 @@ BREAKING CHANGES:
 - **Network `dns_servers`**: The `dns_servers` attribute on `gpcn_network` is now a list of strings instead of a comma-delimited string. Existing configurations must be updated (e.g., `dns_servers = "8.8.8.8,1.1.1.1"` → `dns_servers = ["8.8.8.8", "1.1.1.1"]`)
 - **Virtual Machine `auth` block**: The `auth` block is now mandatory on `gpcn_virtualmachine`. The previous `display_secrets`/`secrets` logic has been removed; credentials are now user-provided via the `auth` block
 - **GPU `auth` block**: `gpcn_gpu` now requires an `auth` block containing an `ssh_key_id` to associate an SSH key with GPU instances
+- **Virtual machine `wait_for_startup`**: As the API has evolved, this has become less necessary and is now the default behavior
 
 FEATURES:
 
@@ -12,8 +13,7 @@ FEATURES:
 
 ENHANCEMENTS:
 
-- Acceptance tests now run in parallel for faster CI feedback
-- Removed unhelpful warning logged when a VM fails to start after creation
+- Acceptance tests can now run in parallel for faster CI feedback
 
 BUG FIXES:
 

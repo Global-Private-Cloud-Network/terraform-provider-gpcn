@@ -24,7 +24,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
@@ -82,15 +81,6 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 					// Changing the datacenter_id requires us to destroy and create a new VM
 					stringplanmodifier.RequiresReplace(),
 				},
-			},
-			"wait_for_startup": schema.BoolAttribute{
-				Description: "Determines if Terraform should wait for the virtual machine to start running before exiting. This will add a few minutes to virtual machine creation. Defaults to true",
-				Optional:    true,
-				Computed:    true,
-				PlanModifiers: []planmodifier.Bool{
-					boolplanmodifier.UseStateForUnknown(),
-				},
-				Default: booldefault.StaticBool(true),
 			},
 			"size": schema.SingleNestedAttribute{
 				Description: "Hardware size configuration defining the compute resources (CPU, memory, disk) for the virtual machine. Specified using a category and tier pairing. Downsizing requires replacing the virtual machine. Note that not all sizes are available for every datacenter",
@@ -329,13 +319,6 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 		}
 	}
 
-	// Once finished, start the virtual machine. It may already be started, in which case this will be a quick call
-	err = virtualmachines.StartVirtualMachine(r.client, ctx, plan.ID.ValueString(), plan.WaitForStartup.ValueBool())
-	if err != nil {
-		tflog.Debug(ctx, fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStartingVM, plan.ID.ValueString()), err).Error())
-	}
-	tflog.Debug(ctx, virtualmachines.LogSuccessfullyCreatedVMMayNotBeRunning)
-
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -494,7 +477,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 
 	// Once finished, conditionally start the virtual machine again
 	if needStopVM {
-		err = virtualmachines.StartVirtualMachine(r.client, ctx, state.ID.ValueString(), plan.WaitForStartup.ValueBool())
+		err = virtualmachines.StartVirtualMachine(r.client, ctx, state.ID.ValueString())
 		if err != nil {
 			tflog.Debug(ctx, fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStartingVM, state.ID.ValueString()), err).Error())
 		}

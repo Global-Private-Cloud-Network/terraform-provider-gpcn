@@ -80,8 +80,6 @@ resource "gpcn_virtualmachine" "example" {
   }
   image = "Alma Linux 8.x"
 
-  wait_for_startup = false
-
   # Networking
   allocate_public_ip = false
   network_ids = [
