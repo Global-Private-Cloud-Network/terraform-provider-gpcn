@@ -263,25 +263,25 @@ func TestGPUResourceInvalidSeries(t *testing.T) {
 		{
 			name:        "invalid_series_code",
 			seriesField: `series_code = "invalid_series_code"`,
-			gpuCount: "1", imageName: "ubuntu-22.04",
+			gpuCount:    "1", imageName: "ubuntu-22.04",
 			wantErr: "Attribute series_code value must be one of",
 		},
 		{
 			name:        "invalid_series_name",
 			seriesField: `series_name = "Invalid GPU Series"`,
-			gpuCount: "1", imageName: "ubuntu-22.04",
+			gpuCount:    "1", imageName: "ubuntu-22.04",
 			wantErr: "Attribute series_name value must be one of",
 		},
 		{
 			name:        "both_code_and_name",
 			seriesField: `series_name = "RTX A6000 Series"` + "\n" + `		  series_code = "rtx_a6000_series"`,
-			gpuCount: "1", imageName: "ubuntu-22.04",
+			gpuCount:    "1", imageName: "ubuntu-22.04",
 			wantErr: "2 attributes specified",
 		},
 		{
 			name:        "neither_code_nor_name",
 			seriesField: "",
-			gpuCount: "1", imageName: "ubuntu-22.04",
+			gpuCount:    "1", imageName: "ubuntu-22.04",
 			wantErr: "No attribute specified when one",
 		},
 	}

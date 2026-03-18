@@ -12,8 +12,8 @@ func TestPasswordValidator(t *testing.T) {
 	t.Parallel()
 	v := PasswordValidator{}
 	tests := []struct {
-		name     string
-		input    string
+		name        string
+		input       string
 		wantSummary string
 	}{
 		{name: "too_short", input: "Short1!", wantSummary: "Invalid password length"},
