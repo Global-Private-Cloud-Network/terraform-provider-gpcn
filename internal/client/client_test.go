@@ -87,7 +87,10 @@ func TestDoWithRetryNoRetryOn400(t *testing.T) {
 		t.Fatalf("failed to create request: %v", err)
 	}
 
-	_, err = gpcnClient.DoWithRetry(req)
+	resp, err := gpcnClient.DoWithRetry(req)
+	if resp != nil {
+		resp.Body.Close()
+	}
 	if err == nil {
 		t.Fatal("expected error for 400 response, got nil")
 	}
