@@ -9,7 +9,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.4.2"
+      version = "~>0.5.0"
     }
   }
 }
@@ -41,7 +41,7 @@ resource "gpcn_network" "example_standard" {
   dhcp_end_address   = "10.0.0.254"
 
   # DNS servers
-  dns_servers = "8.8.8.8"
+  dns_servers = ["8.8.8.8"]
 }
 
 output "gpcn_network_example_standard" {

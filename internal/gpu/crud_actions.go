@@ -10,6 +10,7 @@ import (
 
 	"terraform-provider-gpcn/internal/client"
 
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
@@ -37,11 +38,20 @@ type readGPUResponse struct {
 			CountryAbbr string `json:"countryAbbr"`
 			Country     string `json:"country"`
 		} `json:"datacenter"`
+		SshKeyId string `json:"sshKeyId"`
+		Image    string `json:"image"`
 	} `json:"data"`
 }
 
 func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId string, plan ResourceModel) (*readGPUResponse, error) {
 	tflog.Info(ctx, LogStartingCreateGPU)
+
+	// Extract auth configuration
+	var auth ResourceModelAuth
+	authDiags := plan.Auth.As(ctx, &auth, basetypes.ObjectAsOptions{})
+	if authDiags.HasError() {
+		return nil, fmt.Errorf("failed to read auth configuration")
+	}
 
 	// Create a new request from the model
 	createGPURequestBody := map[string]any{
@@ -50,6 +60,7 @@ func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId stri
 		"gpuCount":     plan.GPUCount.ValueInt64(),
 		"name":         plan.Name.ValueString(),
 		"imageName":    plan.ImageName.ValueString(),
+		"sshKeyId":     auth.SshKeyId.ValueString(),
 	}
 
 	jsonCreateGPURequestBody, err := json.Marshal(createGPURequestBody)

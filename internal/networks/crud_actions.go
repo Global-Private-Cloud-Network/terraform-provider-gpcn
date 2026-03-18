@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"terraform-provider-gpcn/internal/client"
@@ -44,6 +45,20 @@ type readNetworkResponse struct {
 	} `json:"data"`
 }
 
+// dnsServersToString joins the dns_servers list into the comma-separated string the API expects.
+func dnsServersToString(dnsServers types.List) string {
+	if dnsServers.IsNull() || dnsServers.IsUnknown() {
+		return ""
+	}
+	parts := make([]string, len(dnsServers.Elements()))
+	for i, el := range dnsServers.Elements() {
+		if sv, ok := el.(types.String); ok {
+			parts[i] = sv.ValueString()
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
 func CreateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*readNetworkResponse, error) {
 	tflog.Info(ctx, LogStartingCreateNetwork)
 	isStandardNetwork := model.NetworkType == types.StringValue("standard")
@@ -63,7 +78,7 @@ func CreateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, model Res
 		"dhcpStartAddress":       model.DHCPStartAddress.ValueString(),
 		"dhcpEndAddress":         model.DHCPEndAddress.ValueString(),
 		"dhcpServerEnabled":      isStandardNetwork,
-		"dnsServers":             model.DNSServers.ValueString(),
+		"dnsServers":             dnsServersToString(model.DNSServers),
 		"name":                   model.Name.ValueString(),
 		"networkType":            model.NetworkType.ValueString(),
 		"serveDNSServersEnabled": isStandardNetwork,
@@ -178,7 +193,7 @@ func UpdateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkId
 		"dhcpStartAddress":       model.DHCPStartAddress.ValueString(),
 		"dhcpEndAddress":         model.DHCPEndAddress.ValueString(),
 		"dhcpServerEnabled":      isStandardNetwork,
-		"dnsServers":             model.DNSServers.ValueString(),
+		"dnsServers":             dnsServersToString(model.DNSServers),
 		"name":                   model.Name.ValueString(),
 		"serveDNSServersEnabled": isStandardNetwork,
 	}

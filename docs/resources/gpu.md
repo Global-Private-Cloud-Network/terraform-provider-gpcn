@@ -23,7 +23,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.4.2"
+      version = "~>0.5.0"
     }
   }
 }
@@ -39,6 +39,13 @@ data "gpcn_datacenters" "central_us" {
   name         = "Kansas"
 }
 
+# Provide an existing public key
+resource "gpcn_ssh_key" "uploaded" {
+  name = "terraform-demo-key-uploaded"
+  # Not a real secret
+  public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
+}
+
 resource "gpcn_gpu" "example" {
   name          = "terraform-demo-gpu"
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
@@ -52,6 +59,11 @@ resource "gpcn_gpu" "example" {
 
   # Must be one of "ubuntu-22.04" or "ubuntu-24.04"
   image_name = "ubuntu-22.04"
+
+  # Authentication
+  auth = {
+    ssh_key_id = gpcn_ssh_key.uploaded.id
+  }
 }
 ```
 
@@ -60,6 +72,7 @@ resource "gpcn_gpu" "example" {
 
 ### Required
 
+- `auth` (Attributes) Authentication configuration for the GPU. Changing this block requires replacing the GPU (see [below for nested schema](#nestedatt--auth))
 - `datacenter_id` (String) Unique identifier of the datacenter where the GPU will be created. Changing this value requires replacing the GPU
 - `gpu_count` (Number) The number of GPUs tied to the Virtual Machine. Must be 1, 2, or 4
 - `image_name` (String) The operating system image to use for the GPU. Must be one of: "ubuntu-22.04" or "ubuntu-24.04"
@@ -76,6 +89,13 @@ resource "gpcn_gpu" "example" {
 - `id` (String) Unique identifier for the GPU in UUID format
 - `last_updated` (String) Timestamp when the GPU was last updated in ISO-8601 format
 - `location` (Map of String) Location details including datacenter, region, and country information
+
+<a id="nestedatt--auth"></a>
+### Nested Schema for `auth`
+
+Required:
+
+- `ssh_key_id` (String) ID of the SSH key to use for authentication
 
 ## Import
 
