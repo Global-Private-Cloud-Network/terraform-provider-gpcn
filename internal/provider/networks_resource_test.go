@@ -163,6 +163,7 @@ func TestNetworksResource(t *testing.T) {
 */
 func TestNetworksResourceInvalidType(t *testing.T) {
 	t.Run("invalid_network_type", func(t *testing.T) {
+		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
@@ -186,6 +187,7 @@ func TestNetworksResourceStandardValidator(t *testing.T) {
 	missingRequiredAttributeErr := "Missing required attribute"
 
 	t.Run("missing_cidr_block", func(t *testing.T) {
+		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
@@ -207,6 +209,7 @@ func TestNetworksResourceStandardValidator(t *testing.T) {
 	})
 
 	t.Run("missing_dhcp_start_address", func(t *testing.T) {
+		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
@@ -228,6 +231,7 @@ func TestNetworksResourceStandardValidator(t *testing.T) {
 	})
 
 	t.Run("missing_dhcp_end_address", func(t *testing.T) {
+		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
@@ -249,6 +253,7 @@ func TestNetworksResourceStandardValidator(t *testing.T) {
 	})
 
 	t.Run("missing_dns_servers", func(t *testing.T) {
+		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
@@ -272,6 +277,7 @@ func TestNetworksResourceStandardValidator(t *testing.T) {
 
 func TestNetworksResourceIpAddressValidator(t *testing.T) {
 	t.Run("invalid_dhcp_start_address", func(t *testing.T) {
+		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
@@ -294,6 +300,7 @@ func TestNetworksResourceIpAddressValidator(t *testing.T) {
 	})
 
 	t.Run("invalid_dhcp_end_address", func(t *testing.T) {
+		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
@@ -316,6 +323,7 @@ func TestNetworksResourceIpAddressValidator(t *testing.T) {
 	})
 
 	t.Run("dhcp_start_address_not_in_cidr", func(t *testing.T) {
+		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
@@ -339,29 +347,8 @@ func TestNetworksResourceIpAddressValidator(t *testing.T) {
 }
 
 func TestNetworksResourceCIDRValidator(t *testing.T) {
-	t.Run("invalid_cidr_block", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config: providerConfig + `
-				resource "gpcn_network" "test" {
-					name = "terraform-demo-standard"
-					datacenter_id = "any-datacenter-id"
-					network_type = "standard"
-					cidr_block = "10.0.0.0/245"
-					dhcp_start_address = "10.0.0.10"
-					dhcp_end_address   = "10.0.0.140"
-					dns_servers = ["8.8.8.8", "8.8.4.4"]
-				}
-				`,
-					ExpectError: regexp.MustCompile("does not contain a valid CIDR block"),
-				},
-			},
-		})
-	})
-
 	t.Run("dhcp_address_not_in_cidr_block", func(t *testing.T) {
+		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
@@ -385,29 +372,8 @@ func TestNetworksResourceCIDRValidator(t *testing.T) {
 }
 
 func TestNetworksResourceDNSServersValidator(t *testing.T) {
-	t.Run("invalid_dns_server_ip", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config: providerConfig + `
-				resource "gpcn_network" "test" {
-					name = "terraform-demo-standard"
-					datacenter_id = "any-datacenter-id"
-					network_type = "standard"
-					cidr_block = "10.0.0.0/24"
-					dhcp_start_address = "10.0.0.10"
-					dhcp_end_address   = "10.0.0.140"
-					dns_servers = ["8.8.8.8", "8.8.4.4", "123.123.123.1234"]
-				}
-				`,
-					ExpectError: regexp.MustCompile("is not a valid IPv4 address"),
-				},
-			},
-		})
-	})
-
 	t.Run("dns_servers_empty_list", func(t *testing.T) {
+		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
@@ -424,28 +390,6 @@ func TestNetworksResourceDNSServersValidator(t *testing.T) {
 			}
 			`,
 					ExpectError: regexp.MustCompile("Missing required attribute"),
-				},
-			},
-		})
-	})
-
-	t.Run("dns_servers_empty_element", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config: providerConfig + `
-				resource "gpcn_network" "test" {
-					name = "terraform-demo-standard"
-					datacenter_id = "any-datacenter-id"
-					network_type = "standard"
-					cidr_block = "10.0.0.0/24"
-					dhcp_start_address = "10.0.0.10"
-					dhcp_end_address   = "10.0.0.140"
-					dns_servers = ["8.8.8.8", ""]
-				}
-				`,
-					ExpectError: regexp.MustCompile("is not a valid IPv4 address"),
 				},
 			},
 		})

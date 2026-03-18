@@ -238,100 +238,71 @@ func TestGPUResourceNoAvailability(t *testing.T) {
 *
 */
 func TestGPUResourceInvalidSeries(t *testing.T) {
-	t.Run("invalid_series_code", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config: providerConfig + `
-				resource "gpcn_gpu" "test" {
-					name          = "terraform-gpu-bad-code"
-					datacenter_id = "any-datacenter-id"
-					series_code   = "invalid_series_code"
-					gpu_count     = 1
-					image_name    = "ubuntu-22.04"
-					auth = {
-						ssh_key_id = "any-ssh-key-id"
-					}
-				}
-				`,
-					ExpectError: regexp.MustCompile("Attribute series_code value must be one of"),
-				},
-			},
-		})
-	})
+	gpuConfigWithSeries := func(seriesField, gpuCount, imageName string) string {
+		return providerConfig + fmt.Sprintf(`
+		resource "gpcn_gpu" "test" {
+		  name          = "terraform-gpu-series-test"
+		  datacenter_id = "any-datacenter-id"
+		  %s
+		  gpu_count  = %s
+		  image_name = %q
+		  auth = {
+		    ssh_key_id = "any-ssh-key-id"
+		  }
+		}
+		`, seriesField, gpuCount, imageName)
+	}
 
-	t.Run("invalid_series_name", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config: providerConfig + `
-				resource "gpcn_gpu" "test" {
-					name          = "terraform-gpu-bad-series"
-					datacenter_id = "any-datacenter-id"
-					series_name   = "Invalid GPU Series"
-					gpu_count     = 1
-					image_name    = "ubuntu-22.04"
-					auth = {
-						ssh_key_id = "any-ssh-key-id"
-					}
-				}
-				`,
-					ExpectError: regexp.MustCompile("Attribute series_name value must be one of"),
+	tests := []struct {
+		name        string
+		seriesField string
+		gpuCount    string
+		imageName   string
+		wantErr     string
+	}{
+		{
+			name:        "invalid_series_code",
+			seriesField: `series_code = "invalid_series_code"`,
+			gpuCount: "1", imageName: "ubuntu-22.04",
+			wantErr: "Attribute series_code value must be one of",
+		},
+		{
+			name:        "invalid_series_name",
+			seriesField: `series_name = "Invalid GPU Series"`,
+			gpuCount: "1", imageName: "ubuntu-22.04",
+			wantErr: "Attribute series_name value must be one of",
+		},
+		{
+			name:        "both_code_and_name",
+			seriesField: `series_name = "RTX A6000 Series"` + "\n" + `		  series_code = "rtx_a6000_series"`,
+			gpuCount: "1", imageName: "ubuntu-22.04",
+			wantErr: "2 attributes specified",
+		},
+		{
+			name:        "neither_code_nor_name",
+			seriesField: "",
+			gpuCount: "1", imageName: "ubuntu-22.04",
+			wantErr: "No attribute specified when one",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config:      gpuConfigWithSeries(tc.seriesField, tc.gpuCount, tc.imageName),
+						ExpectError: regexp.MustCompile(tc.wantErr),
+					},
 				},
-			},
+			})
 		})
-	})
-
-	t.Run("both_code_and_name", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config: providerConfig + `
-				resource "gpcn_gpu" "test" {
-					name          = "terraform-gpu-both-series"
-					datacenter_id = "any-datacenter-id"
-					series_name   = "RTX A6000 Series"
-					series_code   = "rtx_a6000_series"
-					gpu_count     = 1
-					image_name    = "ubuntu-22.04"
-					auth = {
-						ssh_key_id = "any-ssh-key-id"
-					}
-				}
-				`,
-					ExpectError: regexp.MustCompile("2 attributes specified"),
-				},
-			},
-		})
-	})
-
-	t.Run("neither_code_nor_name", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config: providerConfig + `
-				resource "gpcn_gpu" "test" {
-					name          = "terraform-gpu-no-series"
-					datacenter_id = "any-datacenter-id"
-					gpu_count     = 1
-					image_name    = "ubuntu-22.04"
-					auth = {
-						ssh_key_id = "any-ssh-key-id"
-					}
-				}
-				`,
-					ExpectError: regexp.MustCompile("No attribute specified when one"),
-				},
-			},
-		})
-	})
+	}
 }
 
 func TestGPUResourceInvalidImageName(t *testing.T) {
+	t.Parallel()
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
@@ -356,6 +327,7 @@ func TestGPUResourceInvalidImageName(t *testing.T) {
 
 func TestGPUResourceInvalidGPUCount(t *testing.T) {
 	t.Run("gpu_count_zero", func(t *testing.T) {
+		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 			Steps: []resource.TestStep{
@@ -380,6 +352,7 @@ func TestGPUResourceInvalidGPUCount(t *testing.T) {
 }
 
 func TestGPUResourceMissingAuth(t *testing.T) {
+	t.Parallel()
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{

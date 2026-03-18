@@ -973,65 +973,48 @@ func TestVirtualMachinesAuth(t *testing.T) {
 *
 */
 func TestVirtualMachinesInvalidSizes(t *testing.T) {
-	t.Run("invalid_category", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config: providerConfig + `
-				resource "gpcn_virtualmachine" "test" {
-				  name          = "terraform-volume-test-vm"
-				  datacenter_id = "any-datacenter-id"
+	vmConfigWithSize := func(category, tier string) string {
+		return providerConfig + fmt.Sprintf(`
+		resource "gpcn_virtualmachine" "test" {
+		  name          = "terraform-volume-test-vm"
+		  datacenter_id = "any-datacenter-id"
+		  size = {
+		    category = %q
+		    tier     = %q
+		  }
+		  image              = "Alma Linux 8.x"
+		  allocate_public_ip = false
+		  auth = {
+		    ssh_key_id = "ssh-key-123"
+		    username   = "testuser"
+		  }
+		}
+		`, category, tier)
+	}
 
-				  size = {
-				    category = "bad-category"
-				    tier     = "g-micro-1"
-				  }
-				  image = "Alma Linux 8.x"
-
-		
-				  allocate_public_ip = false
-				  auth = {
-				    ssh_key_id = "ssh-key-123"
-				    username    = "testuser"
-				  }
-				}
-				`,
-					ExpectError: regexp.MustCompile("Attribute size.category value must be one of"),
+	tests := []struct {
+		name     string
+		category string
+		tier     string
+		wantErr  string
+	}{
+		{name: "invalid_category", category: "bad-category", tier: "g-micro-1", wantErr: "Attribute size.category value must be one of"},
+		{name: "invalid_tier", category: "general", tier: "bad-tier", wantErr: "Attribute size.tier value must be one of"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config:      vmConfigWithSize(tc.category, tc.tier),
+						ExpectError: regexp.MustCompile(tc.wantErr),
+					},
 				},
-			},
+			})
 		})
-	})
-
-	t.Run("invalid_tier", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config: providerConfig + `
-				resource "gpcn_virtualmachine" "test" {
-				  name          = "terraform-volume-test-vm"
-				  datacenter_id = "any-datacenter-id"
-
-				  size = {
-				    category = "general"
-				    tier     = "bad-tier"
-				  }
-				  image = "Alma Linux 8.x"
-
-		
-				  allocate_public_ip = false
-				  auth = {
-				    ssh_key_id = "ssh-key-123"
-				    username    = "testuser"
-				  }
-				}
-				`,
-					ExpectError: regexp.MustCompile("Attribute size.tier value must be one of"),
-				},
-			},
-		})
-	})
+	}
 }
 
 func TestVirtualMachinesInvalidAuth(t *testing.T) {
@@ -1055,149 +1038,52 @@ func TestVirtualMachinesInvalidAuth(t *testing.T) {
 		`
 	}
 
-	t.Run("ssh_key_id_and_password_conflict", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config:      vmConfigWithAuth(`ssh_key_id = "ssh-key-123"` + "\n" + `password = "Test1Password!"`),
-					ExpectError: regexp.MustCompile("cannot be specified when"),
+	// Password validation is tested directly in internal/virtualmachines/validators_test.go.
+	// The cases below test schema-level constraints (framework validators) that require
+	// a full provider roundtrip to exercise.
+	tests := []struct {
+		name      string
+		authBlock string
+		wantErr   string
+	}{
+		{
+			name:      "ssh_key_id_and_password_conflict",
+			authBlock: `ssh_key_id = "ssh-key-123"` + "\n" + `password = "Test1Password!"`,
+			wantErr:   "cannot be specified when",
+		},
+		{
+			name:      "username_too_short",
+			authBlock: `ssh_key_id = "ssh-key-123"` + "\n" + `username = "ab"`,
+			wantErr:   "string length must be between",
+		},
+		{
+			name:      "username_too_long",
+			authBlock: `ssh_key_id = "ssh-key-123"` + "\n" + `username = "averylongusernamethatexceedslimit"`,
+			wantErr:   "string length must be between",
+		},
+		{
+			name:      "username_starts_with_digit",
+			authBlock: `ssh_key_id = "ssh-key-123"` + "\n" + `username = "1testuser"`,
+			wantErr:   "Username must start with a letter or underscore",
+		},
+		{
+			name:      "username_invalid_chars", // spaces are not allowed
+			authBlock: `ssh_key_id = "ssh-key-123"` + "\n" + `username = "test user"`,
+			wantErr:   "Username must start with a letter or underscore",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config:      vmConfigWithAuth(tc.authBlock),
+						ExpectError: regexp.MustCompile(tc.wantErr),
+					},
 				},
-			},
+			})
 		})
-	})
-
-	t.Run("password_too_short", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config:      vmConfigWithAuth(`password = "Short1!"`),
-					ExpectError: regexp.MustCompile("Invalid password length"),
-				},
-			},
-		})
-	})
-
-	t.Run("password_too_long", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config:      vmConfigWithAuth(`password = "GigaLongPassword123!ExtraChars"`),
-					ExpectError: regexp.MustCompile("Invalid password length"),
-				},
-			},
-		})
-	})
-
-	t.Run("password_missing_uppercase", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config:      vmConfigWithAuth(`password = "test1password!"`),
-					ExpectError: regexp.MustCompile("Password missing uppercase letter"),
-				},
-			},
-		})
-	})
-
-	t.Run("password_missing_lowercase", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config:      vmConfigWithAuth(`password = "TEST1PASSWORD!"`),
-					ExpectError: regexp.MustCompile("Password missing lowercase letter"),
-				},
-			},
-		})
-	})
-
-	t.Run("password_missing_digit", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config:      vmConfigWithAuth(`password = "TestPassword!!"`),
-					ExpectError: regexp.MustCompile("Password missing digit"),
-				},
-			},
-		})
-	})
-
-	t.Run("password_missing_symbol", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config:      vmConfigWithAuth(`password = "Test1Password1"`),
-					ExpectError: regexp.MustCompile("Password missing symbol"),
-				},
-			},
-		})
-	})
-
-	t.Run("password_invalid_chars", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					// $ is not in the allowed set: ! @ # % - _ .
-					Config:      vmConfigWithAuth(`password = "Test1Pass$word"`),
-					ExpectError: regexp.MustCompile("Invalid password characters"),
-				},
-			},
-		})
-	})
-
-	t.Run("username_too_short", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config:      vmConfigWithAuth(`ssh_key_id = "ssh-key-123"` + "\n" + `username = "ab"`),
-					ExpectError: regexp.MustCompile("string length must be between"),
-				},
-			},
-		})
-	})
-
-	t.Run("username_too_long", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config:      vmConfigWithAuth(`ssh_key_id = "ssh-key-123"` + "\n" + `username = "averylongusernamethatexceedslimit"`),
-					ExpectError: regexp.MustCompile("string length must be between"),
-				},
-			},
-		})
-	})
-
-	t.Run("username_starts_with_digit", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					Config:      vmConfigWithAuth(`ssh_key_id = "ssh-key-123"` + "\n" + `username = "1testuser"`),
-					ExpectError: regexp.MustCompile("Username must start with a letter or underscore"),
-				},
-			},
-		})
-	})
-
-	t.Run("username_invalid_chars", func(t *testing.T) {
-		resource.UnitTest(t, resource.TestCase{
-			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-			Steps: []resource.TestStep{
-				{
-					// spaces are not allowed
-					Config:      vmConfigWithAuth(`ssh_key_id = "ssh-key-123"` + "\n" + `username = "test user"`),
-					ExpectError: regexp.MustCompile("Username must start with a letter or underscore"),
-				},
-			},
-		})
-	})
+	}
 }
