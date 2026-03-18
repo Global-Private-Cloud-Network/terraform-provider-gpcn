@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net"
-	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
@@ -49,7 +48,7 @@ func (v StandardNetworkValidator) ValidateString(ctx context.Context, request va
 			fmt.Sprintf(ErrDetailAttrRequiredForStandard, "dhcp_end_address"),
 		)
 	}
-	if config.NetworkType.ValueString() == "standard" && config.DNSServers.IsNull() {
+	if config.NetworkType.ValueString() == "standard" && (config.DNSServers.IsNull() || len(config.DNSServers.Elements()) == 0) {
 		response.Diagnostics.AddError(
 			ErrSummaryMissingRequiredAttr,
 			fmt.Sprintf(ErrDetailAttrRequiredForStandard, "dns_servers"),
@@ -171,78 +170,34 @@ func (v CIDRValidator) ValidateString(ctx context.Context, request validator.Str
 	}
 }
 
-// DNSServersValidator validates that a comma-delimited string contains valid IPv4 addresses.
-//
-// Error handling pattern:
-// - Returns early on delimiter format errors (can't reliably parse with wrong delimiter)
-// - Accumulates IP validation errors to show all invalid addresses at once
-type DNSServersValidator struct{}
+// DNSServerIPValidator validates that a single string value is a valid IPv4 address.
+// Used with listvalidator.ValueStringsAre to validate each element of the dns_servers list.
+type DNSServerIPValidator struct{}
 
-func (v DNSServersValidator) Description(ctx context.Context) string {
-	return "Parses a comma-delimited string and verifies each IP address is a valid one"
+func (v DNSServerIPValidator) Description(ctx context.Context) string {
+	return "Ensures the value is a valid IPv4 address"
 }
-func (v DNSServersValidator) MarkdownDescription(ctx context.Context) string {
-	return "Parses a comma-delimited string and verifies each IP address is a valid one"
+func (v DNSServerIPValidator) MarkdownDescription(ctx context.Context) string {
+	return "Ensures the value is a valid IPv4 address"
 }
-func (v DNSServersValidator) ValidateString(ctx context.Context, request validator.StringRequest, response *validator.StringResponse) {
-	// Access the full configuration to check other attributes
-	var config ResourceModel
-	diags := request.Config.Get(ctx, &config)
-	response.Diagnostics.Append(diags...)
-	if response.Diagnostics.HasError() {
+func (v DNSServerIPValidator) ValidateString(ctx context.Context, request validator.StringRequest, response *validator.StringResponse) {
+	if request.ConfigValue.IsNull() || request.ConfigValue.IsUnknown() {
 		return
 	}
 
-	// Check for optional case
-	if request.ConfigValue.ValueString() == "" {
+	addr := request.ConfigValue.ValueString()
+	parsedIPAddress := net.ParseIP(addr)
+	if parsedIPAddress == nil {
+		response.Diagnostics.AddError(
+			ErrSummaryInvalidAttr,
+			fmt.Sprintf(ErrDetailNotValidIPv4WithValue, request.Path.Expression().String(), addr),
+		)
 		return
 	}
-
-	value := request.ConfigValue.ValueString()
-
-	// Validate delimiter format first - if invalid, we can't reliably parse individual IPs
-	if strings.Contains(value, ",") {
-		hasValidDelimiter := strings.Contains(value, ", ")
-		hasSpaceBeforeComma := strings.Contains(value, " ,")
-
-		if !hasValidDelimiter {
-			response.Diagnostics.AddError(
-				ErrSummaryInvalidAttr,
-				fmt.Sprintf(ErrDetailDNSInvalidDelimiter, request.Path.Expression().String()),
-			)
-			// Return early - can't reliably parse IPs with invalid delimiter
-			return
-		}
-
-		if hasSpaceBeforeComma {
-			response.Diagnostics.AddError(
-				ErrSummaryInvalidAttr,
-				fmt.Sprintf(ErrDetailDNSSpaceBeforeComma, request.Path.Expression().String()),
-			)
-			// Return early - can't reliably parse IPs with invalid delimiter
-			return
-		}
-	}
-
-	// Validate each IP address - accumulate all errors to show user all invalid IPs at once
-	ipAddresses := strings.SplitSeq(value, ", ")
-	for address := range ipAddresses {
-		addr := strings.TrimSpace(address)
-		parsedIPAddress := net.ParseIP(addr)
-		if parsedIPAddress == nil {
-			response.Diagnostics.AddError(
-				ErrSummaryInvalidAttr,
-				fmt.Sprintf(ErrDetailNotValidIPv4WithValue, request.Path.Expression().String(), addr),
-			)
-			continue
-		}
-		parsedIPAddressv4 := parsedIPAddress.To4()
-		if parsedIPAddressv4 == nil {
-			response.Diagnostics.AddError(
-				ErrSummaryInvalidAttr,
-				fmt.Sprintf(ErrDetailNotValidIPv4WithValue, request.Path.Expression().String(), addr),
-			)
-			continue
-		}
+	if parsedIPAddress.To4() == nil {
+		response.Diagnostics.AddError(
+			ErrSummaryInvalidAttr,
+			fmt.Sprintf(ErrDetailNotValidIPv4WithValue, request.Path.Expression().String(), addr),
+		)
 	}
 }

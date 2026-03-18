@@ -12,13 +12,13 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 type ResourceModel struct {
 	ID               types.String `tfsdk:"id"`
 	Name             types.String `tfsdk:"name"`
 	DatacenterId     types.String `tfsdk:"datacenter_id"`
-	WaitForStartup   types.Bool   `tfsdk:"wait_for_startup"`
 	Size             types.Object `tfsdk:"size"`
 	Image            types.String `tfsdk:"image"`
 	CreatedTime      types.String `tfsdk:"created_time"`
@@ -27,11 +27,24 @@ type ResourceModel struct {
 	Configuration    types.Map    `tfsdk:"configuration"`
 	AllocatePublicIp types.Bool   `tfsdk:"allocate_public_ip"`
 	PublicIp         types.String `tfsdk:"public_ip"`
-	DisplaySecrets   types.Bool   `tfsdk:"display_secrets"`
-	Secrets          types.Map    `tfsdk:"secrets"`
 	NetworkIds       types.List   `tfsdk:"network_ids"`
 	VolumeIds        types.List   `tfsdk:"volume_ids"`
 	NetworkHotplug   types.Bool   `tfsdk:"network_hotplug"`
+	Auth             types.Object `tfsdk:"auth"`
+}
+
+type ResourceModelAuth struct {
+	SshKeyId types.String `tfsdk:"ssh_key_id"`
+	Username types.String `tfsdk:"username"`
+	Password types.String `tfsdk:"password"`
+}
+
+func (o ResourceModelAuth) AttrTypes() map[string]attr.Type {
+	return map[string]attr.Type{
+		"ssh_key_id": types.StringType,
+		"username":   types.StringType,
+		"password":   types.StringType,
+	}
 }
 
 type ResourceModelSize struct {
@@ -96,10 +109,6 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 	model, diags = setModelValuesNotPresent(ctx, gpcnClient, response, model)
 	allDiags.Append(diags...)
 
-	// If user requested secret values, fetch them now if needed
-	model, diags = setSecretValues(ctx, gpcnClient, response, model)
-	allDiags.Append(diags...)
-
 	return model, allDiags
 }
 
@@ -132,12 +141,42 @@ func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient
 	model, networkDiags = setNetworkModelValuesNotPresent(ctx, gpcnClient, response.Data.ID, model)
 	allDiags.Append(networkDiags...)
 
-	if model.WaitForStartup.IsNull() {
-		// Set WaitForStartup to the default value
-		model.WaitForStartup = types.BoolValue(true)
-	}
+	// Populate auth from response. On import, auth is null and must be constructed from the response.
+	var authDiags diag.Diagnostics
+	model.Auth, authDiags = populateAuth(ctx, model.Auth, response)
+	allDiags.Append(authDiags...)
 
 	return model, allDiags
+}
+
+// populateAuth fills auth fields from the API response. On import, current is null and the struct
+// is built from scratch. Otherwise, any null fields are filled in with values from the response.
+func populateAuth(ctx context.Context, current types.Object, response *ReadVirtualMachinesResponse) (types.Object, diag.Diagnostics) {
+	if current.IsUnknown() {
+		return current, nil
+	}
+
+	var auth ResourceModelAuth
+	if current.IsNull() {
+		auth = ResourceModelAuth{
+			Username: types.StringValue(response.Data.Username),
+			SshKeyId: types.StringNull(),
+			Password: types.StringNull(),
+		}
+	} else {
+		if diags := current.As(ctx, &auth, basetypes.ObjectAsOptions{}); diags.HasError() {
+			return current, diags
+		}
+		if auth.Username.IsNull() && response.Data.Username != "" {
+			auth.Username = types.StringValue(response.Data.Username)
+		}
+	}
+
+	if auth.SshKeyId.IsNull() && response.Data.SshKeyId != "" {
+		auth.SshKeyId = types.StringValue(response.Data.SshKeyId)
+	}
+
+	return types.ObjectValueFrom(ctx, auth.AttrTypes(), auth)
 }
 
 func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient, virtualMachineID string, model ResourceModel) (ResourceModel, diag.Diagnostics) {
@@ -181,61 +220,6 @@ func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.Gpc
 		// Set AllocatePublicIp if it's currently null
 		if model.AllocatePublicIp.IsNull() {
 			model.AllocatePublicIp = types.BoolValue(hasPublicIp)
-		}
-	}
-	return model, allDiags
-}
-
-func setSecretValues(ctx context.Context, gpcnClient *client.GpcnClient, response *ReadVirtualMachinesResponse, model ResourceModel) (ResourceModel, diag.Diagnostics) {
-	var allDiags diag.Diagnostics
-
-	// Construct the base object
-	var secretsDiags diag.Diagnostics
-	model.Secrets, secretsDiags = types.MapValueFrom(ctx, types.StringType, map[string]string{
-		"username": "",
-		"password": "",
-		"ssh_key":  "",
-	})
-	if secretsDiags.HasError() {
-		allDiags.Append(secretsDiags...)
-		model.Secrets = types.MapNull(types.StringType)
-	}
-
-	if model.DisplaySecrets.ValueBool() {
-		virtualMachineID := response.Data.ID
-		sshKeyResponse, err := GetSSHKey(gpcnClient, ctx, virtualMachineID)
-		if err != nil {
-			allDiags.AddWarning(
-				"Unable to fetch SSH key",
-				fmt.Sprintf("Failed to fetch SSH key for VM %s: %s", virtualMachineID, err.Error()),
-			)
-		}
-		sshPasswordResponse, err := GetPassword(gpcnClient, ctx, virtualMachineID)
-		if err != nil {
-			allDiags.AddWarning(
-				"Unable to fetch password",
-				fmt.Sprintf("Failed to fetch password for VM %s: %s", virtualMachineID, err.Error()),
-			)
-		}
-
-		// Construct the secrets object with whatever values we were able to retrieve
-		sshKey := ""
-		password := ""
-		if sshKeyResponse != nil {
-			sshKey = sshKeyResponse.Data.PrivateKey
-		}
-		if sshPasswordResponse != nil {
-			password = sshPasswordResponse.Data.SSHPassword
-		}
-
-		model.Secrets, secretsDiags = types.MapValueFrom(ctx, types.StringType, map[string]string{
-			"username": response.Data.Username,
-			"password": password,
-			"ssh_key":  sshKey,
-		})
-		if secretsDiags.HasError() {
-			allDiags.Append(secretsDiags...)
-			model.Secrets = types.MapNull(types.StringType)
 		}
 	}
 	return model, allDiags

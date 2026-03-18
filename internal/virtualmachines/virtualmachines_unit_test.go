@@ -12,8 +12,8 @@ import (
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
 
-	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 const (
@@ -28,15 +28,22 @@ func createTestVMModel(name, image string, allocatePublicIP bool) ResourceModel 
 	}
 	sizeObj, _ := types.ObjectValueFrom(context.Background(), size.AttrTypes(), size)
 
+	auth := ResourceModelAuth{
+		SshKeyId: types.StringValue("ssh-key-123"),
+		Username: types.StringNull(),
+		Password: types.StringNull(),
+	}
+	authObj, _ := types.ObjectValueFrom(context.Background(), auth.AttrTypes(), auth)
+
 	return ResourceModel{
 		Name:             types.StringValue(name),
 		DatacenterId:     types.StringValue(testDatacenterID),
 		Image:            types.StringValue(image),
 		Size:             sizeObj,
 		AllocatePublicIp: types.BoolValue(allocatePublicIP),
-		WaitForStartup:   types.BoolValue(false),
 		NetworkIds:       types.ListNull(types.StringType),
 		VolumeIds:        types.ListNull(types.StringType),
+		Auth:             authObj,
 	}
 }
 
@@ -354,173 +361,6 @@ func TestValidatePublicIpValueMockHTTP(t *testing.T) {
 	}
 }
 
-func TestGetSSHKeyMockHTTP(t *testing.T) {
-	const (
-		vmID       = "vm-ssh-123"
-		privateKey = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQ...\n-----END RSA PRIVATE KEY-----"
-	)
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID+"/ssh-key") {
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"message": "SSH key retrieved",
-					"data":    map[string]string{"privateKey": privateKey},
-				})
-			} else {
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-	defer server.Close()
-
-	response, err := GetSSHKey(gpcnClient, context.Background(), vmID)
-	if err != nil {
-		t.Fatalf("GetSSHKey failed: %v", err)
-	}
-	if response == nil {
-		t.Fatal("Expected response, got nil")
-		return
-	}
-	if response.Data.PrivateKey != privateKey {
-		t.Errorf("Expected private key '%s', got '%s'", privateKey, response.Data.PrivateKey)
-	}
-}
-
-func TestGetPasswordMockHTTP(t *testing.T) {
-	const (
-		vmID     = "vm-pwd-123"
-		password = "SecureP@ssw0rd123!"
-	)
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID+"/password") {
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"message": "Password retrieved",
-					"data":    map[string]string{"sshPassword": password},
-				})
-			} else {
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-	defer server.Close()
-
-	response, err := GetPassword(gpcnClient, context.Background(), vmID)
-	if err != nil {
-		t.Fatalf("GetPassword failed: %v", err)
-	}
-	if response == nil {
-		t.Fatal("Expected response, got nil")
-		return
-	}
-	if response.Data.SSHPassword != password {
-		t.Errorf("Expected password '%s', got '%s'", password, response.Data.SSHPassword)
-	}
-}
-
-func TestSetSecretValuesDisplaySecretsTrue(t *testing.T) {
-	const (
-		vmID       = "vm-secrets-123"
-		username   = "admin"
-		password   = "SecureP@ssw0rd123!"
-		privateKey = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQ...\n-----END RSA PRIVATE KEY-----"
-	)
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.Method == "GET" && strings.Contains(r.URL.Path, "/ssh-key"):
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true, "message": "SSH key retrieved",
-					"data": map[string]string{"privateKey": privateKey},
-				})
-			case r.Method == "GET" && strings.Contains(r.URL.Path, "/password"):
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true, "message": "Password retrieved",
-					"data": map[string]string{"sshPassword": password},
-				})
-			default:
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-	defer server.Close()
-
-	response := newVMResponse(vmID, "test-vm")
-	response.Data.Username = username
-
-	model := createTestVMModel("test-vm", testVMImage, false)
-	model.DisplaySecrets = types.BoolValue(true)
-
-	result, _ := setSecretValues(context.Background(), gpcnClient, response, model)
-
-	if result.Secrets.IsNull() || result.Secrets.IsUnknown() {
-		t.Fatal("Expected secrets to be set")
-	}
-
-	secretsMap := result.Secrets.Elements()
-	assertSecretValue(t, secretsMap, "username", username)
-	assertSecretValue(t, secretsMap, "password", password)
-	assertSecretValue(t, secretsMap, "ssh_key", privateKey)
-}
-
-func TestSetSecretValuesDisplaySecretsFalse(t *testing.T) {
-	const vmID = "vm-secrets-456"
-	sshKeyCalled, passwordCalled := false, false
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			if strings.Contains(r.URL.Path, "/ssh-key") {
-				sshKeyCalled = true
-			} else if strings.Contains(r.URL.Path, "/password") {
-				passwordCalled = true
-			}
-			w.WriteHeader(http.StatusNotFound)
-		},
-	})
-	defer server.Close()
-
-	response := newVMResponse(vmID, "test-vm")
-	model := createTestVMModel("test-vm", testVMImage, false)
-	model.DisplaySecrets = types.BoolValue(false)
-
-	result, _ := setSecretValues(context.Background(), gpcnClient, response, model)
-
-	if sshKeyCalled {
-		t.Error("SSH key endpoint should not be called when display_secrets is false")
-	}
-	if passwordCalled {
-		t.Error("Password endpoint should not be called when display_secrets is false")
-	}
-	if result.Secrets.IsNull() || result.Secrets.IsUnknown() {
-		t.Fatal("Expected secrets to be set (even if empty)")
-	}
-
-	secretsMap := result.Secrets.Elements()
-	assertSecretValue(t, secretsMap, "username", "")
-	assertSecretValue(t, secretsMap, "password", "")
-	assertSecretValue(t, secretsMap, "ssh_key", "")
-}
-
-func assertSecretValue(t *testing.T, secretsMap map[string]attr.Value, key, expected string) {
-	t.Helper()
-	val, ok := secretsMap[key]
-	if !ok {
-		t.Fatalf("Expected %s in secrets map", key)
-	}
-	if val.(types.String).ValueString() != expected {
-		t.Errorf("Expected %s '%s', got '%s'", key, expected, val.(types.String).ValueString())
-	}
-}
-
 func TestSetNetworkModelValuesNotPresentWithPublicIP(t *testing.T) {
 	const (
 		vmID      = "vm-network-123"
@@ -615,20 +455,17 @@ func TestSetNetworkModelValuesNotPresentWithoutPublicIP(t *testing.T) {
 	}
 }
 
-func TestMapVirtualMachineResponseToModelWithSecrets(t *testing.T) {
+func TestMapVirtualMachineResponseToModelUpdatesAuthUsername(t *testing.T) {
 	const (
-		vmID       = "vm-full-mapping-123"
-		username   = "admin"
-		password   = "TestPassword123!"
-		privateKey = "-----BEGIN RSA PRIVATE KEY-----\ntest-key\n-----END RSA PRIVATE KEY-----"
-		publicIP   = "198.51.100.50"
+		vmID     = "vm-full-mapping-123"
+		username = "admin"
+		publicIP = "198.51.100.50"
 	)
 
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces"):
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces") {
 				testutil.WriteJSONResponse(w, map[string]any{
 					"success": true, "message": "Network interfaces retrieved",
 					"data": []map[string]any{{
@@ -638,17 +475,7 @@ func TestMapVirtualMachineResponseToModelWithSecrets(t *testing.T) {
 						"cidrBlock": "10.0.0.0/24", "gatewayIp": "10.0.0.1", "networkType": "standard",
 					}},
 				})
-			case r.Method == "GET" && strings.Contains(r.URL.Path, "/ssh-key"):
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true, "message": "SSH key retrieved",
-					"data": map[string]string{"privateKey": privateKey},
-				})
-			case r.Method == "GET" && strings.Contains(r.URL.Path, "/password"):
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true, "message": "Password retrieved",
-					"data": map[string]string{"sshPassword": password},
-				})
-			default:
+			} else {
 				testutil.LogUnexpectedRequest(t, w, r)
 			}
 		},
@@ -659,7 +486,6 @@ func TestMapVirtualMachineResponseToModelWithSecrets(t *testing.T) {
 	response.Data.Username = username
 
 	model := createTestVMModel("test-vm-full", testVMImage, true)
-	model.DisplaySecrets = types.BoolValue(true)
 
 	result, diags := MapVirtualMachineResponseToModel(context.Background(), gpcnClient, response, model)
 	if diags.HasError() {
@@ -672,12 +498,62 @@ func TestMapVirtualMachineResponseToModelWithSecrets(t *testing.T) {
 	if result.PublicIp.ValueString() != publicIP {
 		t.Errorf("Expected public IP '%s', got '%s'", publicIP, result.PublicIp.ValueString())
 	}
-	if result.Secrets.IsNull() || result.Secrets.IsUnknown() {
-		t.Fatal("Expected secrets to be set")
+
+	var auth ResourceModelAuth
+	authDiags := result.Auth.As(context.Background(), &auth, basetypes.ObjectAsOptions{})
+	if authDiags.HasError() {
+		t.Fatalf("Failed to extract auth: %v", authDiags)
+	}
+	if auth.Username.ValueString() != username {
+		t.Errorf("Expected auth.username '%s', got '%s'", username, auth.Username.ValueString())
+	}
+}
+
+func TestSetModelValuesNotPresentPopulatesAuthOnImport(t *testing.T) {
+	const (
+		vmID     = "vm-import-456"
+		username = "importuser"
+		sshKeyID = "ssh-key-abc"
+	)
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces") {
+				testutil.WriteJSONResponse(w, emptyNetworkInterfacesResponse())
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	response := newVMResponse(vmID, "import-vm")
+	response.Data.Username = username
+	response.Data.SshKeyId = sshKeyID
+
+	// Simulate an import: Auth is null
+	model := createTestVMModel("import-vm", testVMImage, false)
+	model.Auth = types.ObjectNull(ResourceModelAuth{}.AttrTypes())
+
+	result, diags := MapVirtualMachineResponseToModel(context.Background(), gpcnClient, response, model)
+	if diags.HasError() {
+		t.Fatalf("Unexpected error: %v", diags)
 	}
 
-	secretsMap := result.Secrets.Elements()
-	assertSecretValue(t, secretsMap, "username", username)
-	assertSecretValue(t, secretsMap, "password", password)
-	assertSecretValue(t, secretsMap, "ssh_key", privateKey)
+	if result.Auth.IsNull() {
+		t.Fatal("Expected auth to be populated on import, got null")
+	}
+
+	var auth ResourceModelAuth
+	authDiags := result.Auth.As(context.Background(), &auth, basetypes.ObjectAsOptions{})
+	if authDiags.HasError() {
+		t.Fatalf("Failed to extract auth: %v", authDiags)
+	}
+	if auth.Username.ValueString() != username {
+		t.Errorf("Expected auth.username '%s', got '%s'", username, auth.Username.ValueString())
+	}
+	if auth.SshKeyId.ValueString() != sshKeyID {
+		t.Errorf("Expected auth.ssh_key_id '%s', got '%s'", sshKeyID, auth.SshKeyId.ValueString())
+	}
 }

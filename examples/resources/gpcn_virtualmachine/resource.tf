@@ -9,7 +9,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.4.2"
+      version = "~>0.5.0"
     }
   }
 }
@@ -23,6 +23,13 @@ data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "Central"
   name         = "Chicago"
+}
+
+# Provide an existing public key
+resource "gpcn_ssh_key" "uploaded" {
+  name = "terraform-demo-key-uploaded"
+  # Not a real secret
+  public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
 }
 
 # Create a standard network for the VM
@@ -41,7 +48,7 @@ resource "gpcn_network" "vm_network" {
   dhcp_end_address   = "10.0.0.254"
 
   # DNS servers
-  dns_servers = "8.8.8.8, 8.8.4.4"
+  dns_servers = ["8.8.8.8", "8.8.4.4"]
 }
 
 # Create a custom network for additional connectivity
@@ -73,8 +80,6 @@ resource "gpcn_virtualmachine" "example" {
   }
   image = "Alma Linux 8.x"
 
-  wait_for_startup = false
-
   # Networking
   allocate_public_ip = false
   network_ids = [
@@ -82,8 +87,11 @@ resource "gpcn_virtualmachine" "example" {
     gpcn_network.vm_network_custom.id
   ]
 
-  # Secrets
-  display_secrets = false
+  # Authentication (Username and exactly one of ssh_key_id or password must be specified)
+  auth = {
+    ssh_key_id = gpcn_ssh_key.uploaded.id
+    username   = "almalinux"
+  }
 
   # Storage
   volume_ids = [

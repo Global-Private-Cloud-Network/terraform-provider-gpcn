@@ -29,7 +29,6 @@ const (
 	WarnSummaryAttachingVolumeFailed          = "Attaching volume failed"
 	WarnSummaryRemovingNetworkInterfaceFailed = "Removing network interface failed"
 	WarnSummaryRemovingVolumeFailed           = "Removing volume failed"
-	WarnSummaryUnableToStartVM                = "Unable to start GPCN Virtual Machine"
 )
 
 // Error detail message templates

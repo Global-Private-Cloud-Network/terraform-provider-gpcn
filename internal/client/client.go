@@ -135,6 +135,18 @@ func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 		// Clone the request for retry (body needs special handling)
 		reqClone := req.Clone(req.Context())
 
+		// req.Clone() shallow-copies Body, so after the first attempt reads it the
+		// reader is exhausted. Reset it on retries using GetBody, which is set
+		// automatically by http.NewRequestWithContext for bytes.Buffer, bytes.Reader,
+		// and strings.Reader bodies.
+		if req.GetBody != nil {
+			body, err := req.GetBody()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get request body for retry attempt %d: %w", attempt, err)
+			}
+			reqClone.Body = body
+		}
+
 		//nolint:gosec // G704: URL is constructed from validated config, not user input
 		resp, err := c.httpClient.Do(reqClone)
 
@@ -166,8 +178,7 @@ func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 
 // isHTTPError checks if the error is an HTTPError and assigns it to target
 func isHTTPError(err error, target **HTTPError) bool {
-	var httpErr *HTTPError
-	if errors.As(err, &httpErr) {
+	if httpErr, ok := errors.AsType[*HTTPError](err); ok {
 		*target = httpErr
 		return true
 	}

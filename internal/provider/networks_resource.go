@@ -7,10 +7,12 @@ import (
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/networks"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
@@ -138,16 +140,16 @@ func (r *networksResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					mapplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"dns_servers": schema.StringAttribute{
-				Description: "Comma-separated list of DNS server IPv4 addresses. Only applicable for standard networks",
+			"dns_servers": schema.ListAttribute{
+				Description: "List of DNS server IPv4 addresses. Only applicable for standard networks",
 				Optional:    true,
 				Computed:    true,
-				Validators: []validator.String{
-					networks.StandardNetworkValidator{},
-					networks.DNSServersValidator{},
+				ElementType: types.StringType,
+				Validators: []validator.List{
+					listvalidator.ValueStringsAre(networks.DNSServerIPValidator{}),
 				},
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
+				PlanModifiers: []planmodifier.List{
+					listplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"dhcp_start_address": schema.StringAttribute{

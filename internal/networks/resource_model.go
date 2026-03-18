@@ -2,8 +2,10 @@ package networks
 
 import (
 	"context"
+	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
@@ -21,9 +23,26 @@ type ResourceModel struct {
 	NetworkType      types.String `tfsdk:"network_type"`
 	DatacenterId     types.String `tfsdk:"datacenter_id"`
 	Location         types.Map    `tfsdk:"location"`
-	DNSServers       types.String `tfsdk:"dns_servers"`
+	DNSServers       types.List   `tfsdk:"dns_servers"`
 	DHCPStartAddress types.String `tfsdk:"dhcp_start_address"`
 	DHCPEndAddress   types.String `tfsdk:"dhcp_end_address"`
+}
+
+// parseDNSServers converts the API's comma-separated DNS servers string into a types.List.
+func parseDNSServers(raw string) types.List {
+	if raw == "" {
+		return types.ListValueMust(types.StringType, []attr.Value{})
+	}
+	parts := strings.Split(raw, ", ")
+	elements := make([]attr.Value, len(parts))
+	for i, p := range parts {
+		elements[i] = types.StringValue(strings.TrimSpace(p))
+	}
+	list, diags := types.ListValue(types.StringType, elements)
+	if diags.HasError() {
+		return types.ListNull(types.StringType)
+	}
+	return list
 }
 
 // getDHCPAddresses safely extracts DHCP start and end addresses from allocation pools.
@@ -43,7 +62,7 @@ func MapNetworkResponseToModel(ctx context.Context, response *readNetworkRespons
 	model.CIDRBlock = types.StringValue(response.Data.CIDRBlock)
 	model.Gateway = types.StringValue(response.Data.Gateway)
 	model.ConnectedVMs = types.StringValue(response.Data.ConnectedVMs)
-	model.DNSServers = types.StringValue(response.Data.DNSServers)
+	model.DNSServers = parseDNSServers(response.Data.DNSServers)
 
 	// Construct time entries
 	createdTime, err := time.Parse(time.RFC3339, response.Data.CreatedAt)

@@ -9,6 +9,7 @@ import (
 
 	"terraform-provider-gpcn/internal/testutil"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -37,9 +38,14 @@ func createTestResourceModel(networkType, cidr, dhcpStart, dhcpEnd, dnsServers s
 		model.DHCPEndAddress = types.StringNull()
 	}
 	if dnsServers != "" {
-		model.DNSServers = types.StringValue(dnsServers)
+		parts := strings.Split(dnsServers, ", ")
+		elements := make([]attr.Value, len(parts))
+		for i, p := range parts {
+			elements[i] = types.StringValue(p)
+		}
+		model.DNSServers = types.ListValueMust(types.StringType, elements)
 	} else {
-		model.DNSServers = types.StringNull()
+		model.DNSServers = types.ListNull(types.StringType)
 	}
 	return model
 }
@@ -94,8 +100,8 @@ func TestMapNetworkResponseToModelUnit(t *testing.T) {
 	if result.ConnectedVMs.ValueString() != "2" {
 		t.Errorf("Expected connected VMs '2', got '%s'", result.ConnectedVMs.ValueString())
 	}
-	if result.DNSServers.ValueString() != "8.8.8.8, 8.8.4.4" {
-		t.Errorf("Expected DNS servers '8.8.8.8, 8.8.4.4', got '%s'", result.DNSServers.ValueString())
+	if result.DNSServers.IsNull() || len(result.DNSServers.Elements()) != 2 {
+		t.Errorf("Expected 2 DNS server elements, got %d", len(result.DNSServers.Elements()))
 	}
 	if result.DHCPStartAddress.ValueString() != "10.0.0.10" {
 		t.Errorf("Expected DHCP start '10.0.0.10', got '%s'", result.DHCPStartAddress.ValueString())

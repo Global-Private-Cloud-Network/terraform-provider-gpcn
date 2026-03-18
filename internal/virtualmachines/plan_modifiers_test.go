@@ -17,46 +17,31 @@ const (
 	testIPPreserve = "203.0.113.50"
 )
 
-var (
-	testPlanModifierSchema = schema.Schema{
-		Attributes: map[string]schema.Attribute{
-			"allocate_public_ip": schema.BoolAttribute{Required: true},
-			"public_ip":          schema.StringAttribute{Computed: true},
-			"display_secrets":    schema.BoolAttribute{Optional: true, Computed: true},
-			"secrets":            schema.MapAttribute{Computed: true, ElementType: types.StringType},
-		},
-	}
+var testPlanModifierSchema = schema.Schema{
+	Attributes: map[string]schema.Attribute{
+		"allocate_public_ip": schema.BoolAttribute{Required: true},
+		"public_ip":          schema.StringAttribute{Computed: true},
+	},
+}
 
-	emptySecrets = map[string]string{"username": "", "password": "", "ssh_key": ""}
-)
-
-func createRawValue(allocatePublicIp bool, publicIp string, displaySecrets bool, secrets map[string]string) tftypes.Value {
-	secretsMap := make(map[string]tftypes.Value, len(secrets))
-	for k, v := range secrets {
-		secretsMap[k] = tftypes.NewValue(tftypes.String, v)
-	}
-
+func createRawValue(allocatePublicIp bool, publicIp string) tftypes.Value {
 	return tftypes.NewValue(tftypes.Object{
 		AttributeTypes: map[string]tftypes.Type{
 			"allocate_public_ip": tftypes.Bool,
 			"public_ip":          tftypes.String,
-			"display_secrets":    tftypes.Bool,
-			"secrets":            tftypes.Map{ElementType: tftypes.String},
 		},
 	}, map[string]tftypes.Value{
 		"allocate_public_ip": tftypes.NewValue(tftypes.Bool, allocatePublicIp),
 		"public_ip":          tftypes.NewValue(tftypes.String, publicIp),
-		"display_secrets":    tftypes.NewValue(tftypes.Bool, displaySecrets),
-		"secrets":            tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, secretsMap),
 	})
 }
 
-func createTestState(allocatePublicIp bool, publicIp string, displaySecrets bool, secrets map[string]string) tfsdk.State {
-	return tfsdk.State{Raw: createRawValue(allocatePublicIp, publicIp, displaySecrets, secrets), Schema: testPlanModifierSchema}
+func createTestState(allocatePublicIp bool, publicIp string) tfsdk.State {
+	return tfsdk.State{Raw: createRawValue(allocatePublicIp, publicIp), Schema: testPlanModifierSchema}
 }
 
-func createTestPlan(allocatePublicIp bool, publicIp string, displaySecrets bool, secrets map[string]string) tfsdk.Plan {
-	return tfsdk.Plan{Raw: createRawValue(allocatePublicIp, publicIp, displaySecrets, secrets), Schema: testPlanModifierSchema}
+func createTestPlan(allocatePublicIp bool, publicIp string) tfsdk.Plan {
+	return tfsdk.Plan{Raw: createRawValue(allocatePublicIp, publicIp), Schema: testPlanModifierSchema}
 }
 
 type publicIPTestCase struct {
@@ -79,8 +64,8 @@ func (tc publicIPTestCase) run(t *testing.T) {
 	}
 
 	if !tc.stateValue.IsNull() {
-		req.State = createTestState(tc.stateAllocate, tc.stateIP, false, emptySecrets)
-		req.Plan = createTestPlan(tc.planAllocate, tc.stateIP, false, emptySecrets)
+		req.State = createTestState(tc.stateAllocate, tc.stateIP)
+		req.Plan = createTestPlan(tc.planAllocate, tc.stateIP)
 	}
 
 	resp := &planmodifier.StringResponse{PlanValue: tc.planValue}
@@ -127,109 +112,6 @@ func TestPublicIpPlanModifier(t *testing.T) {
 			planAllocate:  true,
 			stateIP:       testIPPreserve,
 			expectedValue: testIPPreserve,
-		},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, tc.run)
-	}
-}
-
-type secretsTestCase struct {
-	name                string
-	stateValue          types.Map
-	planValue           types.Map
-	stateDisplaySecrets bool
-	planDisplaySecrets  bool
-	stateSecrets        map[string]string
-	expectUnknown       bool
-	expectPreserved     bool
-}
-
-func (tc secretsTestCase) run(t *testing.T) {
-	t.Helper()
-	req := planmodifier.MapRequest{
-		StateValue: tc.stateValue,
-		PlanValue:  tc.planValue,
-		Path:       path.Root("secrets"),
-	}
-
-	if !tc.stateValue.IsNull() {
-		req.State = createTestState(false, "", tc.stateDisplaySecrets, tc.stateSecrets)
-		req.Plan = createTestPlan(false, "", tc.planDisplaySecrets, tc.stateSecrets)
-	}
-
-	resp := &planmodifier.MapResponse{PlanValue: tc.planValue}
-	SecretsPlanModifier{}.PlanModifyMap(context.Background(), req, resp)
-
-	switch {
-	case tc.expectUnknown:
-		if !resp.PlanValue.IsUnknown() {
-			t.Errorf("expected unknown, got %v", resp.PlanValue)
-		}
-	case tc.expectPreserved:
-		assertSecretsPreserved(t, resp.PlanValue, tc.stateSecrets)
-	}
-}
-
-func assertSecretsPreserved(t *testing.T, actual types.Map, expected map[string]string) {
-	t.Helper()
-	if actual.IsUnknown() || actual.IsNull() {
-		t.Error("expected secrets to be preserved")
-		return
-	}
-	elements := actual.Elements()
-	for key, expectedVal := range expected {
-		if elem, ok := elements[key]; !ok {
-			t.Errorf("missing key %q", key)
-		} else if elem.(types.String).ValueString() != expectedVal {
-			t.Errorf("key %q: expected %q, got %q", key, expectedVal, elem.(types.String).ValueString())
-		}
-	}
-}
-
-func TestSecretsPlanModifier(t *testing.T) {
-	populatedSecrets := map[string]string{
-		"username": "admin",
-		"password": "secret123",
-		"ssh_key":  "ssh-rsa AAAA...",
-	}
-	populatedSecretsMap, _ := types.MapValueFrom(context.Background(), types.StringType, populatedSecrets)
-	emptySecretsMap, _ := types.MapValueFrom(context.Background(), types.StringType, emptySecrets)
-
-	tests := []secretsTestCase{
-		{
-			name:          "on create leaves unknown",
-			stateValue:    types.MapNull(types.StringType),
-			planValue:     types.MapUnknown(types.StringType),
-			expectUnknown: true,
-		},
-		{
-			name:                "display_secrets changes false to true",
-			stateValue:          emptySecretsMap,
-			planValue:           emptySecretsMap,
-			stateDisplaySecrets: false,
-			planDisplaySecrets:  true,
-			stateSecrets:        emptySecrets,
-			expectUnknown:       true,
-		},
-		{
-			name:                "display_secrets changes true to false",
-			stateValue:          populatedSecretsMap,
-			planValue:           populatedSecretsMap,
-			stateDisplaySecrets: true,
-			planDisplaySecrets:  false,
-			stateSecrets:        populatedSecrets,
-			expectUnknown:       true,
-		},
-		{
-			name:                "display_secrets unchanged preserves value",
-			stateValue:          populatedSecretsMap,
-			planValue:           types.MapUnknown(types.StringType),
-			stateDisplaySecrets: true,
-			planDisplaySecrets:  true,
-			stateSecrets:        populatedSecrets,
-			expectPreserved:     true,
 		},
 	}
 
