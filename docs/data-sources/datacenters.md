@@ -85,7 +85,7 @@ output "west_us_datacenter_count" {
 Read-Only:
 
 - `country_abbreviation` (String) Two-letter country code abbreviation (e.g., 'US').
-- `country_id` (Number) Numeric identifier of the country where the datacenter is located.
+- `country_id` (String) Unique identifier of the country where the datacenter is located.
 - `country_name` (String) Name of the country where the datacenter is located.
 - `id` (String) Unique identifier of the datacenter.
 - `name` (String) Name of the datacenter.
