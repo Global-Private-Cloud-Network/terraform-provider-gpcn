@@ -42,7 +42,7 @@ type datacenterResponse struct {
 		Name                string `json:"name"`
 		RegionID            int64  `json:"regionId"`
 		RegionName          string `json:"regionName"`
-		CountryID           int64  `json:"countryId"`
+		CountryID           string `json:"countryId"`
 		CountryName         string `json:"countryName"`
 		CountryAbbreviation string `json:"countryAbbreviation"`
 	} `json:"data"`
@@ -52,7 +52,7 @@ type datacenterDataResponseTF struct {
 	Name                types.String `tfsdk:"name"`
 	RegionID            types.Int64  `tfsdk:"region_id"`
 	RegionName          types.String `tfsdk:"region_name"`
-	CountryID           types.Int64  `tfsdk:"country_id"`
+	CountryID           types.String `tfsdk:"country_id"`
 	CountryName         types.String `tfsdk:"country_name"`
 	CountryAbbreviation types.String `tfsdk:"country_abbreviation"`
 }
@@ -84,7 +84,7 @@ func (o datacenterDataResponseTF) AttrTypes() map[string]attr.Type {
 		"name":                 types.StringType,
 		"region_id":            types.Int64Type,
 		"region_name":          types.StringType,
-		"country_id":           types.Int64Type,
+		"country_id":           types.StringType,
 		"country_name":         types.StringType,
 		"country_abbreviation": types.StringType,
 	}
@@ -131,9 +131,9 @@ func (d *datacenterDataSource) Schema(_ context.Context, _ datasource.SchemaRequ
 							Computed:    true,
 							Description: "Name of the region where the datacenter is located.",
 						},
-						"country_id": schema.Int64Attribute{
+						"country_id": schema.StringAttribute{
 							Computed:    true,
-							Description: "Numeric identifier of the country where the datacenter is located.",
+							Description: "Unique identifier of the country where the datacenter is located.",
 						},
 						"country_name": schema.StringAttribute{
 							Computed:    true,
@@ -246,7 +246,7 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 			Name:                types.StringValue(datacenter.Name),
 			RegionID:            types.Int64Value(datacenter.RegionID),
 			RegionName:          types.StringValue(datacenter.RegionName),
-			CountryID:           types.Int64Value(datacenter.CountryID),
+			CountryID:           types.StringValue(datacenter.CountryID),
 			CountryName:         types.StringValue(datacenter.CountryName),
 			CountryAbbreviation: types.StringValue(datacenter.CountryAbbreviation),
 		})
