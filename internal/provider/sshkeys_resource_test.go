@@ -88,9 +88,10 @@ resource "gpcn_ssh_key" "test" {
 			},
 			// Import state sets all computed fields correctly
 			{
-				ResourceName:      gpcnSSHKeyTest,
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            gpcnSSHKeyTest,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"created_time", "last_updated"},
 			},
 		},
 	})

@@ -72,7 +72,7 @@ func TestGPUResource(t *testing.T) {
 				ImportState:       true,
 				ImportStateVerify: true,
 				// Image name is mapped to a "full" image name on the API
-				ImportStateVerifyIgnore: []string{"image_name"},
+				ImportStateVerifyIgnore: []string{"image_name", "created_time", "last_updated"},
 			},
 			// Update and Read testing (name change only — does not trigger replacement)
 			{

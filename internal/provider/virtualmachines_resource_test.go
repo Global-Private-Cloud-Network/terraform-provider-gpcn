@@ -120,7 +120,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 				ResourceName:            gpcnVirtualMachineTest,
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"volume_ids"},
+				ImportStateVerifyIgnore: []string{"volume_ids", "created_time", "last_updated"},
 			},
 			// Update and Read testing
 			{

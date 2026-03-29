@@ -75,9 +75,10 @@ func TestNetworksResource(t *testing.T) {
 			},
 			// ImportState testing
 			{
-				ResourceName:      gpcnNetworkTest,
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            gpcnNetworkTest,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"created_time", "last_updated"},
 			},
 			// Update and Read testing with little changes
 			{

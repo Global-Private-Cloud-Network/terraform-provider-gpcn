@@ -7,10 +7,12 @@ Terraform provider for GPCN (cloud infrastructure platform) built with Terraform
 ## Environment Setup
 
 Required environment variables:
+
 - `GPCN_API_KEY`: API key for authentication
 - `GPCN_HOST`: Base URL for the GPCN API
 
 Local development:
+
 1. `go mod tidy && go install .`
 2. Create `~/.terraformrc` with dev overrides pointing to your local GOBIN
 3. Provider address: `gpcn.com/dev/gpcn`
@@ -35,6 +37,7 @@ make testacc LOGLEVEL=debug  # Control log level
 ### Resource Package Pattern
 
 Each resource follows this structure in `internal/{resource}/`:
+
 - `resource_model.go`: Terraform state model structs
 - `crud_actions.go`: HTTP request/response logic and API calls
 - `plan_modifiers.go`: Custom plan modifiers (optional)
@@ -80,6 +83,7 @@ Generated via `make generate` using terraform-plugin-docs. Examples in `examples
 ### Linting
 
 The project uses golangci-lint (`.golangci.yml`). Key enabled linters:
+
 - `gosec`: Security scanner - use `//nolint:gosec` with explanation for false positives
 - `bodyclose`: Ensures HTTP response bodies are closed
 - `contextcheck`: Validates context usage
@@ -124,3 +128,7 @@ To prepare a new release:
 3. Run `make` to regenerate documentation (this copies examples into `docs/`)
 4. Commit all changes
 5. Create and push the version tag: `git tag vX.Y.Z && git push origin vX.Y.Z`
+
+## MCP Servers
+
+Always use Context7 when I need library/API documentation, code generation, setup or configuration steps without me having to explicitly ask.

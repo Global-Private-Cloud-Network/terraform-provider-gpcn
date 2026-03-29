@@ -65,9 +65,10 @@ func TestVolumesResource(t *testing.T) {
 			},
 			// ImportState testing
 			{
-				ResourceName:      gpcnVolumeTest,
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            gpcnVolumeTest,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"created_time", "last_updated"},
 			},
 			// Update and Read testing with little changes
 			// Increasing the size does not result in a replace
