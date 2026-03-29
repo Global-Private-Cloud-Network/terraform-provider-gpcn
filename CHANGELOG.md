@@ -1,3 +1,13 @@
+## 0.5.1 (March 29, 2026)
+
+BUG FIXES:
+
+- **Datacenter `country_id`**: Fixed `country_id` field in the `gpcn_datacenters` data source to match updated API response format
+
+ENHANCEMENTS:
+
+- Upgraded Terraform plugin dependencies: terraform-plugin-framework 1.19.0, terraform-plugin-go 0.31.0, terraform-plugin-testing 1.15.0
+
 ## 0.5.0 (March 18, 2026)
 
 BREAKING CHANGES:
