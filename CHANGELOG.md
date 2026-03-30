@@ -1,3 +1,9 @@
+## 0.5.2 (March 30, 2026)
+
+FEATURES:
+
+- **Resource Group Resource**: New `gpcn_resource_group` resource for creating and managing resource groups. Virtual machines can now be attached to a resource group via the `resource_group_id` attribute on `gpcn_virtualmachine`.
+
 ## 0.5.1 (March 29, 2026)
 
 BUG FIXES:

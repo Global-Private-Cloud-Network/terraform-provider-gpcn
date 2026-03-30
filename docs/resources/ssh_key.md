@@ -19,7 +19,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.5.1"
+      version = "~>0.5.2"
     }
   }
 }
