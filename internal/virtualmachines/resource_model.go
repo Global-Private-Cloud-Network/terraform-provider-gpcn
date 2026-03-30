@@ -31,6 +31,7 @@ type ResourceModel struct {
 	VolumeIds        types.List   `tfsdk:"volume_ids"`
 	NetworkHotplug   types.Bool   `tfsdk:"network_hotplug"`
 	Auth             types.Object `tfsdk:"auth"`
+	ResourceGroupId  types.String `tfsdk:"resource_group_id"`
 }
 
 type ResourceModelAuth struct {
@@ -66,6 +67,12 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 
 	model.ID = types.StringValue(response.Data.ID)
 	model.NetworkHotplug = types.BoolValue(response.Data.NetworkHotplug == 1)
+
+	if response.Data.ResourceGroupId != "" {
+		model.ResourceGroupId = types.StringValue(response.Data.ResourceGroupId)
+	} else {
+		model.ResourceGroupId = types.StringNull()
+	}
 
 	// Construct time entries
 	createdTime, err := time.Parse(time.RFC3339, response.Data.CreatedAt)

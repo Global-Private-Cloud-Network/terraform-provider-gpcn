@@ -59,7 +59,6 @@ Resource schema definitions live in `internal/provider/{resource}_resource.go`.
 
 - Size uses `category` (`general`, `memory`) + `tier` (e.g., `g-small-1`)
 - Tier upgrades within the same category don't require replacement; downgrades or category changes do
-- `display_secrets` attribute controls whether `secrets` map (username, password, ssh_key) is populated
 - `allocate_public_ip` controls whether `public_ip` is populated
 
 ### GPU Specifics

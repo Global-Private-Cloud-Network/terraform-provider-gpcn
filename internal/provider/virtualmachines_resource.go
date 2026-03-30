@@ -183,6 +183,10 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 					boolplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"resource_group_id": schema.StringAttribute{
+				Description: "Optional ID of the resource group to assign this virtual machine to",
+				Optional:    true,
+			},
 			"auth": schema.SingleNestedAttribute{
 				Description: "Authentication configuration for the virtual machine. Either ssh_key_id or password must be specified. Changing any value in this block requires replacing the virtual machine",
 				Required:    true,
@@ -446,7 +450,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	}
 
 	// Update name if changed
-	nameDiags := virtualmachines.UpdateNameIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+	nameDiags := virtualmachines.UpdateChangeableAttributesIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
 	resp.Diagnostics.Append(nameDiags...)
 	if resp.Diagnostics.HasError() {
 		return

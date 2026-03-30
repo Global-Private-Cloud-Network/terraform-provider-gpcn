@@ -9,7 +9,7 @@ const (
 	ErrSummaryUnableToCreateVM                    = "Unable to create GPCN Virtual Machine"
 	ErrSummaryRetrievingVMInfoFailed              = "Retrieving information about the Virtual Machine failed"
 	ErrSummaryErrorUpdatingVMSize                 = "Error updating Virtual Machine size"
-	ErrSummaryErrorUpdatingVMName                 = "Error updating Virtual Machine name"
+	ErrSummaryErrorUpdatingVMAttributes           = "Error updating Virtual Machine attributes"
 	ErrSummaryErrorRetrievingNetworkIfaces        = "Error retrieving network interfaces"
 	ErrSummaryErrorUpdatingNetworkInterfaces      = "Error updating network interfaces"
 	ErrSummaryErrorUpdatingVolumes                = "Error updating volumes"

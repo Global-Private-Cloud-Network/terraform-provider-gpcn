@@ -46,6 +46,11 @@ resource "gpcn_ssh_key" "uploaded" {
   public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
 }
 
+# Create a resource group
+resource "gpcn_resource_group" "group_example" {
+  name = "terraform-demo-group"
+}
+
 # Create a standard network for the VM
 resource "gpcn_network" "vm_network" {
   name          = "vm-network-standard"
@@ -101,6 +106,9 @@ resource "gpcn_virtualmachine" "example" {
     gpcn_network.vm_network_custom.id
   ]
 
+  # Resource Group
+  resource_group_id = gpcn_resource_group.group_example.id
+
   # Authentication (Username and exactly one of ssh_key_id or password must be specified)
   auth = {
     ssh_key_id = gpcn_ssh_key.uploaded.id
@@ -129,6 +137,7 @@ resource "gpcn_virtualmachine" "example" {
 ### Optional
 
 - `network_ids` (List of String) List of network IDs to attach to the virtual machine. Maximum of 5 networks allowed
+- `resource_group_id` (String) Optional ID of the resource group to assign this virtual machine to
 - `volume_ids` (List of String) List of volume IDs to attach to the virtual machine. Maximum of 5 volumes allowed. A volume can only be attached to a single virtual machine, so this parameter will not work as expected when using Terraform's count meta-attribute
 
 ### Read-Only

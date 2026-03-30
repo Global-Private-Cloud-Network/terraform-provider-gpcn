@@ -67,7 +67,7 @@ const (
 	LogSuccessfullyFinishedReadGPCNVirtualMachine   = "Successfully finished Read GPCN Virtual Machine"
 	LogStartingUpdateGPCNVirtualMachine             = "Starting Update GPCN Virtual Machine"
 	LogPerformingVirtualMachineResize               = "Performing Virtual Machine resize"
-	LogNameChangedUpdatingVirtualMachine            = "Name has changed, updating Virtual Machine"
+	LogAttributesChangedUpdatingVirtualMachine      = "Attributes have changed, updating Virtual Machine"
 	LogAllVMUpdateOpsCompleteRetrievingLatestInfo   = "All Virtual Machine update operations are completed, performing GET calls to retrieve latest info"
 	LogRetrievedLatestVMInfoMappingToModel          = "Retrieved latest Virtual Machine info, now mapping to model"
 	LogSuccessfullyFinishedUpdateGPCNVirtualMachine = "Successfully finished Update GPCN Virtual Machine"

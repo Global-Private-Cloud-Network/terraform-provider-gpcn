@@ -32,6 +32,11 @@ resource "gpcn_ssh_key" "uploaded" {
   public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
 }
 
+# Create a resource group
+resource "gpcn_resource_group" "group_example" {
+  name = "terraform-demo-group"
+}
+
 # Create a standard network for the VM
 resource "gpcn_network" "vm_network" {
   name          = "vm-network-standard"
@@ -86,6 +91,9 @@ resource "gpcn_virtualmachine" "example" {
     gpcn_network.vm_network.id,
     gpcn_network.vm_network_custom.id
   ]
+
+  # Resource Group
+  resource_group_id = gpcn_resource_group.group_example.id
 
   # Authentication (Username and exactly one of ssh_key_id or password must be specified)
   auth = {
