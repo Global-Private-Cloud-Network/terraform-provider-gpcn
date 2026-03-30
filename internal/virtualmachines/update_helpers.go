@@ -145,20 +145,37 @@ func UpdateSizeIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmI
 	return diags
 }
 
-// UpdateNameIfChanged handles VM name updates during VM update.
+// UpdateChangeableAttributesIfChanged handles VM name and resource group updates during VM update.
 // Returns diagnostics if any errors occurred.
-func UpdateNameIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, state, plan ResourceModel) diag.Diagnostics {
+func UpdateChangeableAttributesIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, state, plan ResourceModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	if plan.Name == state.Name {
+	if plan.Name == state.Name && plan.ResourceGroupId == state.ResourceGroupId {
 		return diags
 	}
 
-	tflog.Info(ctx, LogNameChangedUpdatingVirtualMachine)
-	err := UpdateVirtualMachine(gpcnClient, ctx, vmID, plan.Name.ValueString())
+	body := map[string]any{}
+
+	// Check for Name change
+	if plan.Name != state.Name {
+		body["name"] = plan.Name.ValueString()
+	}
+
+	// Check for ResourceGroupId change
+	if plan.ResourceGroupId != state.ResourceGroupId {
+		if plan.ResourceGroupId.IsNull() {
+			// Explicitly set to nil to force a disconnect of the resource group from the VM
+			body["resourceGroupId"] = nil
+		} else {
+			body["resourceGroupId"] = plan.ResourceGroupId.ValueString()
+		}
+	}
+
+	tflog.Info(ctx, LogAttributesChangedUpdatingVirtualMachine)
+	err := UpdateVirtualMachine(gpcnClient, ctx, vmID, body)
 	if err != nil {
 		diags.AddError(
-			ErrSummaryErrorUpdatingVMName,
+			ErrSummaryErrorUpdatingVMAttributes,
 			err.Error(),
 		)
 		return diags

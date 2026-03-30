@@ -19,7 +19,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.5.1"
+      version = "~>0.5.2"
     }
   }
 }
@@ -49,3 +49,13 @@ resource "gpcn_ssh_key" "uploaded" {
 - `created_time` (String) Timestamp when the SSH key was created in ISO-8601 format
 - `id` (String) Unique identifier for the SSH key in UUID format
 - `last_updated` (String) Timestamp when the SSH key was last updated in ISO-8601 format
+
+## Import
+
+Import is supported using the following syntax:
+
+The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
+
+```shell
+terraform import gpcn_ssh_key.uploaded "8974f992-b7e1-415e-9dba-7a3a5f664c4a"
+```

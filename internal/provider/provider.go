@@ -220,10 +220,11 @@ func (p *gpcnProvider) DataSources(_ context.Context) []func() datasource.DataSo
 // Resources defines the resources implemented in the provider.
 func (p *gpcnProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
-		NewNetworksResource,
-		NewVolumesResource,
-		NewVirtualMachinesResource,
 		NewGPUResource,
+		NewNetworksResource,
+		NewResourceGroupResource,
 		NewSSHKeyResource,
+		NewVirtualMachinesResource,
+		NewVolumesResource,
 	}
 }

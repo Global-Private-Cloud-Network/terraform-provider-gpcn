@@ -257,7 +257,7 @@ func TestUpdateVirtualMachineMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	if err := UpdateVirtualMachine(gpcnClient, context.Background(), vmID, newName); err != nil {
+	if err := UpdateVirtualMachine(gpcnClient, context.Background(), vmID, map[string]any{"name": newName}); err != nil {
 		t.Fatalf("UpdateVirtualMachine failed: %v", err)
 	}
 

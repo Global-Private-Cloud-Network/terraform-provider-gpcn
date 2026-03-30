@@ -37,6 +37,10 @@ func TestVirtualMachinesResource(t *testing.T) {
 				name = "Chicago"
 			}
 
+			resource "gpcn_resource_group" "vm_group" {
+				name = "terraform-demo-group"
+			}
+
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -81,6 +85,8 @@ func TestVirtualMachinesResource(t *testing.T) {
 					gpcn_network.vm_network_custom.id
 				]
 
+				resource_group_id = gpcn_resource_group.vm_group.id
+
 				volume_ids = [
 					gpcn_volume.vm_storage.id
 				]
@@ -93,7 +99,9 @@ func TestVirtualMachinesResource(t *testing.T) {
 			`, sshKeyName, networkStdName, networkCustName, volumeName, vmName),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						// Expect initial create action
+						// Expect initial create actions
+						plancheck.ExpectResourceAction("gpcn_resource_group.vm_group", plancheck.ResourceActionCreate),
+						plancheck.ExpectResourceAction("gpcn_ssh_key.vm_uploaded_key", plancheck.ResourceActionCreate),
 						plancheck.ExpectResourceAction("gpcn_volume.vm_storage", plancheck.ResourceActionCreate),
 						plancheck.ExpectResourceAction("gpcn_network.vm_network", plancheck.ResourceActionCreate),
 						plancheck.ExpectResourceAction("gpcn_network.vm_network_custom", plancheck.ResourceActionCreate),
@@ -170,6 +178,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("gpcn_resource_group.vm_group", plancheck.ResourceActionDestroy),
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
 					},
 				},
@@ -177,6 +186,9 @@ func TestVirtualMachinesResource(t *testing.T) {
 					// Verify network and volumes have been removed
 					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("volume_ids"), knownvalue.ListSizeExact(0)),
 					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("network_ids"), knownvalue.ListSizeExact(1)),
+
+					// Verify resource group has been removed
+					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("resource_group_id"), knownvalue.Null()),
 				},
 			},
 			// Changing image forces a replace

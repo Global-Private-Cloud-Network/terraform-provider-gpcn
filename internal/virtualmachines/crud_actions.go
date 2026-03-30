@@ -33,18 +33,19 @@ type ReadVirtualMachinesResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Data    struct {
-		Status         string                `json:"status"`
-		ID             string                `json:"id"`
-		Name           string                `json:"name"`
-		CreatedAt      string                `json:"createdAt"`
-		UpdatedAt      string                `json:"updatedAt"`
-		Configuration  ConfigurationResponse `json:"configuration"`
-		Image          string                `json:"image"`
-		Username       string                `json:"username"`
-		SshKeyId       string                `json:"sshKeyId"`
-		SshKeyName     string                `json:"sshKeyName"`
-		NetworkHotplug int                   `json:"networkHotplug"`
-		Datacenter     struct {
+		Status          string                `json:"status"`
+		ID              string                `json:"id"`
+		Name            string                `json:"name"`
+		CreatedAt       string                `json:"createdAt"`
+		UpdatedAt       string                `json:"updatedAt"`
+		Configuration   ConfigurationResponse `json:"configuration"`
+		Image           string                `json:"image"`
+		Username        string                `json:"username"`
+		SshKeyId        string                `json:"sshKeyId"`
+		SshKeyName      string                `json:"sshKeyName"`
+		NetworkHotplug  int                   `json:"networkHotplug"`
+		ResourceGroupId string                `json:"resourceGroupId"`
+		Datacenter      struct {
 			ID          string `json:"id"`
 			Name        string `json:"name"`
 			Region      string `json:"region"`
@@ -98,6 +99,11 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 	} else {
 		createVMRequestBody["username"] = auth.Username.ValueString()
 		createVMRequestBody["password"] = auth.Password.ValueString()
+	}
+
+	// If resourceGroupId is set, add it to the create request
+	if !model.ResourceGroupId.IsNull() {
+		createVMRequestBody["resourceGroupId"] = model.ResourceGroupId.ValueString()
 	}
 
 	// If networkIds is populated, add it to the create request
@@ -212,14 +218,10 @@ func GetVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, virtu
 }
 
 // Updates a Virtual Machine by its ID
-func UpdateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId, name string) error {
+func UpdateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string, body map[string]any) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateVMWithID, virtualMachineId))
-	// Create a new request from the plan
-	updateVMRequestBody := map[string]any{
-		"name": name,
-	}
 
-	jsonUpdateVMRequestBody, err := json.Marshal(updateVMRequestBody)
+	jsonUpdateVMRequestBody, err := json.Marshal(body)
 	if err != nil {
 		return err
 	}
