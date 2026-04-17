@@ -77,6 +77,107 @@ func emptyNetworkInterfacesResponse() map[string]any {
 	return map[string]any{"success": true, "message": "Network interfaces retrieved", "data": []any{}}
 }
 
+func nestedImagesResponse() map[string]any {
+	return map[string]any{
+		"success": true,
+		"message": "Virtual machine images retrieved successfully",
+		"data": []any{
+			map[string]any{
+				"id":        1,
+				"name":      "Linux",
+				"sortOrder": 1,
+				"images": []any{
+					map[string]any{
+						"id":   "eb7da49d-cc71-480a-968d-fbf2841bedf7",
+						"name": testVMImage,
+					},
+					map[string]any{
+						"id":   "aa1b2c3d-0000-0000-0000-000000000001",
+						"name": "Ubuntu 24.04",
+					},
+				},
+			},
+			map[string]any{
+				"id":        2,
+				"name":      "Windows",
+				"sortOrder": 2,
+				"images": []any{
+					map[string]any{
+						"id":   "bb2c3d4e-0000-0000-0000-000000000002",
+						"name": "Windows Server 2022",
+					},
+				},
+			},
+		},
+	}
+}
+
+func TestGetVirtualMachineImageIdMockHTTP(t *testing.T) {
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machine-images") {
+				testutil.WriteJSONResponse(w, nestedImagesResponse())
+			}
+		},
+	})
+	defer server.Close()
+
+	id, images, err := GetVirtualMachineImageId(gpcnClient, context.Background(), testDatacenterID, testVMImage)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if id != "eb7da49d-cc71-480a-968d-fbf2841bedf7" {
+		t.Errorf("Expected image ID 'eb7da49d-cc71-480a-968d-fbf2841bedf7', got '%s'", id)
+	}
+	if len(images) != 3 {
+		t.Errorf("Expected 3 flattened images, got %d", len(images))
+	}
+}
+
+func TestGetVirtualMachineImageIdCaseInsensitiveMockHTTP(t *testing.T) {
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machine-images") {
+				testutil.WriteJSONResponse(w, nestedImagesResponse())
+			}
+		},
+	})
+	defer server.Close()
+
+	id, _, err := GetVirtualMachineImageId(gpcnClient, context.Background(), testDatacenterID, strings.ToUpper(testVMImage))
+	if err != nil {
+		t.Fatalf("Expected case-insensitive match, got error: %v", err)
+	}
+	if id != "eb7da49d-cc71-480a-968d-fbf2841bedf7" {
+		t.Errorf("Expected image ID 'eb7da49d-cc71-480a-968d-fbf2841bedf7', got '%s'", id)
+	}
+}
+
+func TestGetVirtualMachineImageIdNotFoundMockHTTP(t *testing.T) {
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machine-images") {
+				testutil.WriteJSONResponse(w, nestedImagesResponse())
+			}
+		},
+	})
+	defer server.Close()
+
+	_, _, err := GetVirtualMachineImageId(gpcnClient, context.Background(), testDatacenterID, "NonExistentOS 99.x")
+	if err == nil {
+		t.Fatal("Expected error for unknown image name, got nil")
+	}
+	if !strings.Contains(err.Error(), "NonExistentOS 99.x") {
+		t.Errorf("Expected error to mention the requested image name, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), testVMImage) {
+		t.Errorf("Expected error to list available images, got: %v", err)
+	}
+}
+
 func TestMapVirtualMachineResponseToModelUnit(t *testing.T) {
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
@@ -117,7 +218,7 @@ func TestCreateVirtualMachineMockHTTP(t *testing.T) {
 	const (
 		jobID   = "job-123"
 		vmID    = "vm-456"
-		imageID = int64(10)
+		imageID = "550e8400-e29b-41d4-a716-446655440000"
 		sizeID  = int64(1)
 	)
 
@@ -136,8 +237,8 @@ func TestCreateVirtualMachineMockHTTP(t *testing.T) {
 				if req["name"] != "test-vm" {
 					t.Errorf("Expected name 'test-vm', got '%v'", req["name"])
 				}
-				if int64(req["imageId"].(float64)) != imageID {
-					t.Errorf("Expected imageId %d, got '%v'", imageID, req["imageId"])
+				if req["imageId"].(string) != imageID {
+					t.Errorf("Expected imageId %s, got '%v'", imageID, req["imageId"])
 				}
 
 				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{

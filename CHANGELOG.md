@@ -1,3 +1,9 @@
+## 0.5.3 (April 16, 2026)
+
+BUG FIXES:
+
+- **Virtual Machine images**: Updated image lookup to handle the new nested category structure returned by the API. Image IDs are now strings (UUIDs) instead of integers, matching the current API format.
+
 ## 0.5.2 (March 30, 2026)
 
 FEATURES:

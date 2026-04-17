@@ -18,76 +18,83 @@ import (
 )
 
 type virtualMachineImagesResponse struct {
-	Success bool                               `json:"success"`
-	Message string                             `json:"message"`
-	Data    []virtualMachineImagesDataResponse `json:"data"`
+	Success bool                                       `json:"success"`
+	Message string                                     `json:"message"`
+	Data    []virtualMachineImagesCategoryDataResponse `json:"data"`
+}
+type virtualMachineImagesCategoryDataResponse struct {
+	ID        int64                              `json:"id"`
+	Name      string                             `json:"name"`
+	SortOrder int                                `json:"sortOrder"`
+	Images    []virtualMachineImagesDataResponse `json:"images"`
 }
 type virtualMachineImagesDataResponse struct {
-	ID   int64  `json:"id"`
+	ID   string `json:"id"`
 	Name string `json:"name"`
 }
 type VirtualMachineImagesDataResponseTF struct {
-	ID   types.Int64  `tfsdk:"id"`
+	ID   types.String `tfsdk:"id"`
 	Name types.String `tfsdk:"name"`
 }
 
 func (o VirtualMachineImagesDataResponseTF) AttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
-		"id":   types.Int64Type,
+		"id":   types.StringType,
 		"name": types.StringType,
 	}
 }
 
 // Get virtual machine image ID for a given datacenterId and virtual machine image name
-func GetVirtualMachineImageId(gpcnClient *client.GpcnClient, ctx context.Context, datacenterId, virtualMachineImageName string) (int64, []VirtualMachineImagesDataResponseTF, error) {
+func GetVirtualMachineImageId(gpcnClient *client.GpcnClient, ctx context.Context, datacenterId, virtualMachineImageName string) (string, []VirtualMachineImagesDataResponseTF, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVMImageIDWithName, virtualMachineImageName))
 	request, err := http.NewRequestWithContext(ctx, "GET", DATA_CENTERS_BASE_URL_V1+datacenterId+"/virtual-machine-images", nil)
 
 	var images []VirtualMachineImagesDataResponseTF
 	if err != nil {
-		return -1, images, err
+		return "", images, err
 	}
 
 	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
-		return -1, images, err
+		return "", images, err
 	}
 	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return -1, images, err
+		return "", images, err
 	}
 
 	var imagesResp virtualMachineImagesResponse
 	err = json.Unmarshal(body, &imagesResp)
 
 	if err != nil {
-		return -1, images, err
+		return "", images, err
 	}
 
-	// Verify the image name specified is available
-	imageIdx := slices.IndexFunc(imagesResp.Data, func(virtualMachineImage virtualMachineImagesDataResponse) bool {
-		return strings.EqualFold(virtualMachineImage.Name, virtualMachineImageName)
-	})
+	// Flatten all images across categories for name lookup
+	var allImages []virtualMachineImagesDataResponse
+	for _, category := range imagesResp.Data {
+		allImages = append(allImages, category.Images...)
+	}
 
 	var names []string
-	for _, image := range imagesResp.Data {
-		// Used for actual data
+	for _, image := range allImages {
 		images = append(images, VirtualMachineImagesDataResponseTF{
-			ID:   types.Int64Value(image.ID),
+			ID:   types.StringValue(image.ID),
 			Name: types.StringValue(image.Name),
 		})
-		// Used for helpful error function if needed
 		names = append(names, image.Name)
 	}
 
-	imageNamesFormatted := strings.Join(names, ", ")
+	imageIdx := slices.IndexFunc(allImages, func(image virtualMachineImagesDataResponse) bool {
+		return strings.EqualFold(image.Name, virtualMachineImageName)
+	})
 
 	if imageIdx < 0 {
-		return -1, images, errors.New("the image '" + virtualMachineImageName + "' is not available for this datacenter. Valid images are: " + imageNamesFormatted)
+		return "", images, errors.New("the image '" + virtualMachineImageName + "' is not available for this datacenter. Valid images are: " + strings.Join(names, ", "))
 	}
 
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyRetrievedVMImageIDWithName, virtualMachineImageName))
-	return imagesResp.Data[imageIdx].ID, images, nil
+	return allImages[imageIdx].ID, images, nil
 }

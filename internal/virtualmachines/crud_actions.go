@@ -55,7 +55,7 @@ type ReadVirtualMachinesResponse struct {
 	} `json:"data"`
 }
 
-func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, imageId, sizeId int64, model ResourceModel) (*ReadVirtualMachinesResponse, error) {
+func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, imageId string, sizeId int64, model ResourceModel) (*ReadVirtualMachinesResponse, error) {
 	tflog.Info(ctx, LogStartingCreateVirtualMachine)
 
 	// Allocate public Ip cannot be true if we are attaching a network of type custom
