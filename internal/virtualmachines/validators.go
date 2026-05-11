@@ -101,6 +101,35 @@ func (v PasswordValidator) ValidateString(_ context.Context, req validator.Strin
 	}
 }
 
+// ImageNameValidator warns (not errors) when image_name is not in ValidImageNames.
+// This allows custom or future images while surfacing a hint about known-good values.
+type ImageNameValidator struct{}
+
+var _ validator.String = ImageNameValidator{}
+
+func (v ImageNameValidator) Description(_ context.Context) string {
+	return fmt.Sprintf("Image name should be one of the supported images: %s. Since upstream images may change before this provider is updated, and not every image is available for every datacenter, entering an invalid image is non-blocking, but it may not be available.", strings.Join(ValidImageNames, ", "))
+}
+
+func (v ImageNameValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (v ImageNameValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+	val := req.ConfigValue.ValueString()
+	if slices.Contains(ValidImageNames, val) {
+		return
+	}
+	resp.Diagnostics.AddAttributeWarning(
+		req.Path,
+		"Unrecognized image name",
+		fmt.Sprintf("%q is not a known supported image. There is no guarantee that the image specified is available in GPCN. Known images: %s", val, strings.Join(ValidImageNames, ", ")),
+	)
+}
+
 // Determines if the new networks to be added will cause the network interfaces size to exceed its cap
 func ValidateNetworkInterfacesDoesNotExceedCap(oldNetworksList, newNetworksList []string, networkInterfaces []networks.ReadVirtualMachineNetworkDataResponseTF) error {
 	// Get newly added values

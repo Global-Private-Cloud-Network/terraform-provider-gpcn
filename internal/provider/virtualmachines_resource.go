@@ -109,7 +109,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				Description: "Operating system image to use for the virtual machine. Must be one of the supported image names. Changing this value requires replacing the virtual machine. Note that not all images are available for every datacenter",
 				Required:    true,
 				Validators: []validator.String{
-					stringvalidator.OneOf(virtualmachines.ValidImageNames...),
+					virtualmachines.ImageNameValidator{},
 				},
 				PlanModifiers: []planmodifier.String{
 					// Changing the image requires us to destroy and create a new VM
