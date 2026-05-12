@@ -1,3 +1,18 @@
+## 0.5.4 (May 12, 2026)
+
+ENHANCEMENTS:
+
+- **GPU**: Updated GPU structure and inventory to match API changes; GPU availability now determined via `availableSkus` using `skuId`
+- **Volumes**: Updated volume size selection to use `skuId`-based API model
+- **Virtual Machines**: Updated VM size selection to use `skuId`-based API model
+- **Virtual Machine images**: Image validation now emits a warning instead of an error when an unrecognized image is specified, preventing provider breakage when new images are added before the provider is updated
+- Upgraded Go dependencies
+
+BREAKING CHANGES:
+
+- **Virtual Machines**: Updating a virtual machine's size is no longer done in-place and requires a destroy and re-create. This will be reverted when the GPCN API SKU updates have been finalized
+- **GPU**: Updated valid GPU series name and codes list
+
 ## 0.5.3 (April 16, 2026)
 
 BUG FIXES:
