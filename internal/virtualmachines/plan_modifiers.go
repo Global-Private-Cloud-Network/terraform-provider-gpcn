@@ -114,10 +114,10 @@ func (m SizePlanModifier) PlanModifyObject(ctx context.Context, req planmodifier
 	stateIdx := -1
 	planIdx := -1
 	for i, tier := range tierList {
-		if tier == stateSize.Tier.ValueString() {
+		if tier == stateSize.Name.ValueString() {
 			stateIdx = i
 		}
-		if tier == planSize.Tier.ValueString() {
+		if tier == planSize.Name.ValueString() {
 			planIdx = i
 		}
 	}

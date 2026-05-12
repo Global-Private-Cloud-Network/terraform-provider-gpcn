@@ -18,11 +18,11 @@ type readVolumesResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Data    struct {
-		ID           string `json:"id"`
-		Name         string `json:"name"`
-		SizeGb       int64  `json:"sizeGb"`
-		VolumeSizeId int64  `json:"volumeSizeId"`
-		VolumeType   struct {
+		ID         string `json:"id"`
+		Name       string `json:"name"`
+		SizeGb     int64  `json:"sizeGb"`
+		SkuId      string `json:"skuId"`
+		VolumeType struct {
 			ID          int64  `json:"id"`
 			Name        string `json:"name"`
 			Description string `json:"description"`
@@ -43,24 +43,18 @@ type readVolumesResponse struct {
 
 func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*readVolumesResponse, error) {
 	tflog.Info(ctx, LogStartingCreateVolume)
-	// Find volumeTypeId based on volumeType. This will always be populated because of Schema validation
-	volumeTypeId := volumeTypeMapping[model.VolumeType.ValueString()]
+	componentCode := volumeTypeMapping[model.VolumeType.ValueString()]
 
-	tflog.Info(ctx, LogLookingUpVolumeSizeID)
-	// Find volumeSizeId and do validation that sizeGb is valid
-	volumeSizeId, err := GetVolumeSizeId(gpcnClient, ctx, model.DatacenterId.ValueString(), volumeTypeId, model.SizeGb.ValueInt64())
-
+	tflog.Info(ctx, LogLookingUpVolumeSkuId)
+	skuId, err := GetVolumeSkuId(gpcnClient, ctx, model.DatacenterId.ValueString(), componentCode, model.SizeGb.ValueInt64())
 	if err != nil {
 		return nil, err
 	}
 
-	// Create a new request from the model
 	createVolumeRequestBody := map[string]any{
 		"datacenterId": model.DatacenterId.ValueString(),
 		"name":         model.Name.ValueString(),
-		"volumeSizeId": volumeSizeId,
-		"volumeTypeId": volumeTypeId,
-		"sizeGb":       model.SizeGb.ValueInt64(),
+		"skuId":        skuId,
 	}
 
 	jsonCreateVolumeRequestBody, err := json.Marshal(createVolumeRequestBody)
@@ -149,19 +143,16 @@ func GetVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId stri
 
 func UpdateVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId string, model ResourceModel) (*readVolumesResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateVolumeWithID, volumeId))
-	// Find volumeTypeId based on volumeType. This will always be populated because of Schema validation
-	volumeTypeId := volumeTypeMapping[model.VolumeType.ValueString()]
+	componentCode := volumeTypeMapping[model.VolumeType.ValueString()]
 
-	tflog.Info(ctx, LogValidatingVolumeSizeForUpdate)
-	// Do validation that sizeGb is valid
-	_, err := GetVolumeSizeId(gpcnClient, ctx, model.DatacenterId.ValueString(), volumeTypeId, model.SizeGb.ValueInt64())
+	tflog.Info(ctx, LogValidatingVolumeSkuIdForUpdate)
 
+	// Verify that the new volume size exists in the datacenter
+	_, err := GetVolumeSkuId(gpcnClient, ctx, model.DatacenterId.ValueString(), componentCode, model.SizeGb.ValueInt64())
 	if err != nil {
 		return nil, err
 	}
 
-	// Create a new request from the plan
-	// Validation was already done so we know the new sizeGb is larger than the previous state so this should be a valid request
 	updateVolumeRequestBody := map[string]any{
 		"newSizeGb": model.SizeGb.ValueInt64(),
 	}

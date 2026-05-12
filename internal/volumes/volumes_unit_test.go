@@ -26,7 +26,7 @@ func createTestVolumeModel(name, volumeType string, sizeGb int64) ResourceModel 
 	}
 }
 
-func newVolumeResponse(id, name string, sizeGb, volumeSizeID int64) *readVolumesResponse {
+func newVolumeResponse(id, name string, sizeGb int64, skuId string) *readVolumesResponse {
 	resp := &readVolumesResponse{Success: true, Message: "Volume retrieved"}
 	resp.Data.ID = id
 	resp.Data.Name = name
@@ -34,7 +34,7 @@ func newVolumeResponse(id, name string, sizeGb, volumeSizeID int64) *readVolumes
 	resp.Data.VolumeType.ID = 1
 	resp.Data.VolumeType.Name = "SSD"
 	resp.Data.VolumeType.Description = "Solid State Drive"
-	resp.Data.VolumeSizeId = volumeSizeID
+	resp.Data.SkuId = skuId
 	resp.Data.Datacenter.ID = testDatacenterID
 	resp.Data.Datacenter.Name = "US-East-1"
 	resp.Data.Datacenter.Region = "East"
@@ -53,9 +53,7 @@ func newVolumeSizesResponse(datacenterID string, sizes []volumeSizesDataVolumeTy
 		Data: volumeSizesDataResponse{
 			DatacenterId: datacenterID,
 			VolumeTypes: []volumeSizesDataVolumeTypesResponse{{
-				ID:             1,
-				Name:           "SSD",
-				Description:    "Solid State Drive",
+				ComponentCode:  "vol-add-ssd",
 				AvailableSizes: sizes,
 			}},
 		},
@@ -63,7 +61,7 @@ func newVolumeSizesResponse(datacenterID string, sizes []volumeSizesDataVolumeTy
 }
 
 func TestMapVolumeResponseToModelUnit(t *testing.T) {
-	response := newVolumeResponse("volume-123", "test-volume", 256, 10)
+	response := newVolumeResponse("volume-123", "test-volume", 256, "sku-uuid-10")
 	model := createTestVolumeModel("test-volume", "SSD", 256)
 
 	result := MapVolumeResponseToModel(context.Background(), response, model)
@@ -87,9 +85,9 @@ func TestMapVolumeResponseToModelUnit(t *testing.T) {
 
 func TestCreateVolumeMockHTTP(t *testing.T) {
 	const (
-		jobID        = "job-123"
-		volumeID     = "volume-456"
-		volumeSizeID = int64(10)
+		jobID    = "job-123"
+		volumeID = "volume-456"
+		skuId    = "sku-uuid-10"
 	)
 
 	var volumeSizesCalled, createCalled, jobStatusCalled, getCalled bool
@@ -101,8 +99,8 @@ func TestCreateVolumeMockHTTP(t *testing.T) {
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/data-centers/") && strings.HasSuffix(r.URL.Path, "/volume-sizes"):
 				volumeSizesCalled = true
 				testutil.WriteJSONResponse(w, newVolumeSizesResponse(testDatacenterID, []volumeSizesDataVolumeTypesAvailableSizesResponse{
-					{ID: volumeSizeID, SizeGb: 256},
-					{ID: 11, SizeGb: 512},
+					{SkuId: skuId, SizeGb: 256},
+					{SkuId: "sku-uuid-11", SizeGb: 512},
 				}))
 
 			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/volumes/"):
@@ -114,8 +112,17 @@ func TestCreateVolumeMockHTTP(t *testing.T) {
 				if req["name"] != "test-volume" {
 					t.Errorf("Expected name 'test-volume', got '%v'", req["name"])
 				}
-				if int64(req["sizeGb"].(float64)) != 256 {
-					t.Errorf("Expected sizeGb 256, got '%v'", req["sizeGb"])
+				if req["skuId"] != skuId {
+					t.Errorf("Expected skuId '%s', got '%v'", skuId, req["skuId"])
+				}
+				if _, hasSizeGb := req["sizeGb"]; hasSizeGb {
+					t.Error("Request body should not contain sizeGb")
+				}
+				if _, hasVolumeTypeId := req["volumeTypeId"]; hasVolumeTypeId {
+					t.Error("Request body should not contain volumeTypeId")
+				}
+				if _, hasVolumeSizeId := req["volumeSizeId"]; hasVolumeSizeId {
+					t.Error("Request body should not contain volumeSizeId")
 				}
 
 				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
@@ -130,7 +137,7 @@ func TestCreateVolumeMockHTTP(t *testing.T) {
 
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID):
 				getCalled = true
-				testutil.WriteJSONResponse(w, newVolumeResponse(volumeID, "test-volume", 256, volumeSizeID))
+				testutil.WriteJSONResponse(w, newVolumeResponse(volumeID, "test-volume", 256, skuId))
 
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
@@ -171,7 +178,7 @@ func TestGetVolumeMockHTTP(t *testing.T) {
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID) {
-				testutil.WriteJSONResponse(w, newVolumeResponse(volumeID, "test-volume", 256, 10))
+				testutil.WriteJSONResponse(w, newVolumeResponse(volumeID, "test-volume", 256, "sku-uuid-10"))
 			} else {
 				testutil.LogUnexpectedRequest(t, w, r)
 			}
@@ -194,9 +201,9 @@ func TestGetVolumeMockHTTP(t *testing.T) {
 
 func TestUpdateVolumeMockHTTP(t *testing.T) {
 	const (
-		volumeID     = "volume-update-123"
-		newSizeGb    = int64(512)
-		volumeSizeID = int64(11)
+		volumeID  = "volume-update-123"
+		newSizeGb = int64(512)
+		skuId     = "sku-uuid-11"
 	)
 
 	var volumeSizesCalled, updateCalled, jobStatusCalled, getCalled bool
@@ -208,8 +215,8 @@ func TestUpdateVolumeMockHTTP(t *testing.T) {
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/data-centers/") && strings.HasSuffix(r.URL.Path, "/volume-sizes"):
 				volumeSizesCalled = true
 				testutil.WriteJSONResponse(w, newVolumeSizesResponse(testDatacenterID, []volumeSizesDataVolumeTypesAvailableSizesResponse{
-					{ID: 10, SizeGb: 256},
-					{ID: volumeSizeID, SizeGb: newSizeGb},
+					{SkuId: "sku-uuid-10", SizeGb: 256},
+					{SkuId: skuId, SizeGb: newSizeGb},
 				}))
 
 			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+volumeID+"/resize"):
@@ -217,8 +224,11 @@ func TestUpdateVolumeMockHTTP(t *testing.T) {
 				body, _ := io.ReadAll(r.Body)
 				var req map[string]any
 				_ = json.Unmarshal(body, &req)
-				if int64(req["newSizeGb"].(float64)) != newSizeGb {
-					t.Errorf("Expected newSizeGb %d, got '%v'", newSizeGb, req["newSizeGb"])
+				if req["newSizeGb"] != float64(newSizeGb) {
+					t.Errorf("Expected newSizeGb '%d', got '%v'", newSizeGb, req["newSizeGb"])
+				}
+				if _, hasSkuId := req["skuId"]; hasSkuId {
+					t.Error("Request body should not contain skuId")
 				}
 				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
 					Success: true,
@@ -232,7 +242,7 @@ func TestUpdateVolumeMockHTTP(t *testing.T) {
 
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID):
 				getCalled = true
-				resp := newVolumeResponse(volumeID, "test-volume", newSizeGb, volumeSizeID)
+				resp := newVolumeResponse(volumeID, "test-volume", newSizeGb, skuId)
 				resp.Data.CreatedAt = time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
 				testutil.WriteJSONResponse(w, resp)
 
@@ -271,11 +281,11 @@ func TestUpdateVolumeMockHTTP(t *testing.T) {
 	}
 }
 
-func TestGetVolumeSizeIdMockHTTP(t *testing.T) {
+func TestGetVolumeSkuIdMockHTTP(t *testing.T) {
 	const (
-		volumeTypeID         = int64(1)
-		sizeGb               = int64(256)
-		expectedVolumeSizeID = int64(10)
+		componentCode = "vol-add-ssd"
+		sizeGb        = int64(256)
+		expectedSkuId = "sku-uuid-10"
 	)
 
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
@@ -283,9 +293,9 @@ func TestGetVolumeSizeIdMockHTTP(t *testing.T) {
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/data-centers/") && strings.HasSuffix(r.URL.Path, "/volume-sizes") {
 				testutil.WriteJSONResponse(w, newVolumeSizesResponse(testDatacenterID, []volumeSizesDataVolumeTypesAvailableSizesResponse{
-					{ID: expectedVolumeSizeID, SizeGb: sizeGb},
-					{ID: 11, SizeGb: 512},
-					{ID: 12, SizeGb: 1024},
+					{SkuId: expectedSkuId, SizeGb: sizeGb},
+					{SkuId: "sku-uuid-11", SizeGb: 512},
+					{SkuId: "sku-uuid-12", SizeGb: 1024},
 				}))
 			} else {
 				testutil.LogUnexpectedRequest(t, w, r)
@@ -294,18 +304,18 @@ func TestGetVolumeSizeIdMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	volumeSizeID, err := GetVolumeSizeId(gpcnClient, context.Background(), testDatacenterID, volumeTypeID, sizeGb)
+	skuId, err := GetVolumeSkuId(gpcnClient, context.Background(), testDatacenterID, componentCode, sizeGb)
 	if err != nil {
-		t.Fatalf("GetVolumeSizeId failed: %v", err)
+		t.Fatalf("GetVolumeSkuId failed: %v", err)
 	}
-	if volumeSizeID != expectedVolumeSizeID {
-		t.Errorf("Expected volume size ID %d, got %d", expectedVolumeSizeID, volumeSizeID)
+	if skuId != expectedSkuId {
+		t.Errorf("Expected SKU ID '%s', got '%s'", expectedSkuId, skuId)
 	}
 }
 
-func TestGetVolumeSizeIdInvalidSizeMockHTTP(t *testing.T) {
+func TestGetVolumeSkuIdInvalidSizeMockHTTP(t *testing.T) {
 	const (
-		volumeTypeID  = int64(1)
+		componentCode = "vol-add-ssd"
 		invalidSizeGb = int64(555)
 	)
 
@@ -314,9 +324,9 @@ func TestGetVolumeSizeIdInvalidSizeMockHTTP(t *testing.T) {
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/data-centers/") && strings.HasSuffix(r.URL.Path, "/volume-sizes") {
 				testutil.WriteJSONResponse(w, newVolumeSizesResponse(testDatacenterID, []volumeSizesDataVolumeTypesAvailableSizesResponse{
-					{ID: 10, SizeGb: 256},
-					{ID: 11, SizeGb: 512},
-					{ID: 12, SizeGb: 1024},
+					{SkuId: "sku-uuid-10", SizeGb: 256},
+					{SkuId: "sku-uuid-11", SizeGb: 512},
+					{SkuId: "sku-uuid-12", SizeGb: 1024},
 				}))
 			} else {
 				testutil.LogUnexpectedRequest(t, w, r)
@@ -325,7 +335,7 @@ func TestGetVolumeSizeIdInvalidSizeMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	_, err := GetVolumeSizeId(gpcnClient, context.Background(), testDatacenterID, volumeTypeID, invalidSizeGb)
+	_, err := GetVolumeSkuId(gpcnClient, context.Background(), testDatacenterID, componentCode, invalidSizeGb)
 	if err == nil {
 		t.Fatal("Expected error for invalid size, got nil")
 	}

@@ -8,8 +8,20 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
+func TestImageNameValidator_unknown_image_warns(t *testing.T) {
+	v := ImageNameValidator{}
+	var resp validator.StringResponse
+	v.ValidateString(context.Background(), validator.StringRequest{
+		ConfigValue: types.StringValue("Unsupported Image"),
+	}, &resp)
+
+	warnings := resp.Diagnostics.Warnings()
+	if warnings[0].Summary() != "Unrecognized image name" {
+		t.Errorf("unexpected warning summary: %q", warnings[0].Summary())
+	}
+}
+
 func TestPasswordValidator(t *testing.T) {
-	t.Parallel()
 	v := PasswordValidator{}
 	tests := []struct {
 		name        string

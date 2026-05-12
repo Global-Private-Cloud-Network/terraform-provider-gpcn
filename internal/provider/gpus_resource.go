@@ -209,7 +209,7 @@ func (r *gpuResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 
 	// Extract the series ID from the inventory response
-	seriesId := inventory.Data[0].ID
+	seriesId := inventory.Data.Series[0].ID
 
 	getGPUResponse, err := gpu.CreateGPU(r.client, ctx, seriesId, plan)
 	if err != nil {

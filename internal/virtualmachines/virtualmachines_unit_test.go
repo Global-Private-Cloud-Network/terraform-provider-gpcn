@@ -24,7 +24,7 @@ const (
 func createTestVMModel(name, image string, allocatePublicIP bool) ResourceModel {
 	size := ResourceModelSize{
 		Category: types.StringValue("general"),
-		Tier:     types.StringValue("g-micro-1"),
+		Name:     types.StringValue("G-Micro-1"),
 	}
 	sizeObj, _ := types.ObjectValueFrom(context.Background(), size.AttrTypes(), size)
 
@@ -57,8 +57,10 @@ func newVMResponse(id, name string) *ReadVirtualMachinesResponse {
 	resp.Data.Configuration = ConfigurationResponse{
 		ID:           1,
 		Name:         "General - Micro - 1",
-		Code:         "g-micro-1",
+		Code:         "G-Micro-1",
 		CategoryCode: "general",
+		SkuId:        "sku-uuid-test",
+		SkuCode:      "general-G-Micro-1",
 		CPU:          1,
 		RAM:          2,
 		Disk:         20,
@@ -219,7 +221,7 @@ func TestCreateVirtualMachineMockHTTP(t *testing.T) {
 		jobID   = "job-123"
 		vmID    = "vm-456"
 		imageID = "550e8400-e29b-41d4-a716-446655440000"
-		sizeID  = int64(1)
+		sizeID  = "sku-abc-123"
 	)
 
 	var createCalled, jobStatusCalled, vmStatusCalled bool

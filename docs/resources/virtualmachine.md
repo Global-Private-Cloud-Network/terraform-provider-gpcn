@@ -23,7 +23,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.5.2"
+      version = "~>0.5.4"
     }
   }
 }
@@ -95,7 +95,7 @@ resource "gpcn_virtualmachine" "example" {
   # Compute configuration
   size = {
     category = "general"
-    tier     = "g-micro-1"
+    name     = "G-Micro-1"
   }
   image = "Alma Linux 8.x"
 
@@ -169,7 +169,7 @@ Optional:
 Required:
 
 - `category` (String) Short code representing the category. Must be one of: 'general' or 'memory'
-- `tier` (String) Human-readable name of the size configuration. Must be one of: 'g-micro-1', 'g-small-1', 'g-medium-1', 'g-large-1', 'g-xl-1', 'm-micro-1', 'm-small-1', 'm-medium-1', 'm-large-1', 'm-xl-1'
+- `name` (String) Human-readable name of the size configuration. Must be one of: 'G-Micro-1', 'G-Small-1', 'G-Medium-1', 'G-Large-1', 'G-Extra Large-1', 'M-Micro-1', 'M-Small-1', 'M-Medium-1', 'M-Large-1', 'M-Extra Large-1'
 
 ## Import
 

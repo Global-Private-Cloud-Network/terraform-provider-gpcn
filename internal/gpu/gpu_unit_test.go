@@ -64,91 +64,184 @@ func newGPUResponse(id, name string) *readGPUResponse {
 }
 
 func newInventoryResponse(seriesID, seriesCode, datacenterID string, gpuCount, availableCount int64) inventoryResp {
-	// Create a slice of empty structs with length equal to availableCount
-	availableSkus := make([]struct{}, availableCount)
+	availableSkus := make([]struct {
+		SkuCode     string `json:"skuCode"`
+		Description string `json:"description"`
+		Specs       struct {
+			GPUDescription string `json:"gpuDescription"`
+			VCPU           int64  `json:"vcpu"`
+			Memory         int64  `json:"memoryGiB"`
+			Storage        int64  `json:"storageGB"`
+		} `json:"specs"`
+	}, availableCount)
 
-	return inventoryResp{
-		Data: []struct {
-			ID           string `json:"id"`
-			Name         string `json:"name"`
-			Code         string `json:"code"`
-			Description  string `json:"description"`
-			Availability []struct {
-				DatacenterId   string `json:"datacenterId"`
-				DatacenterName string `json:"datacenterName"`
-				DatacenterCode string `json:"datacenterCode"`
-				GPUCounts      []struct {
-					Count         int64      `json:"count"`
-					AvailableSkus []struct{} `json:"availableSkus"`
-					Specs         struct {
+	series := struct {
+		ID           string `json:"id"`
+		Name         string `json:"name"`
+		Code         string `json:"code"`
+		Availability []struct {
+			DatacenterId   string `json:"datacenterId"`
+			DatacenterName string `json:"datacenterName"`
+			DatacenterCode string `json:"datacenterCode"`
+			GPUCounts      []struct {
+				Count         int64 `json:"count"`
+				AvailableSkus []struct {
+					SkuCode     string `json:"skuCode"`
+					Description string `json:"description"`
+					Specs       struct {
 						GPUDescription string `json:"gpuDescription"`
 						VCPU           int64  `json:"vcpu"`
 						Memory         int64  `json:"memoryGiB"`
 						Storage        int64  `json:"storageGB"`
 					} `json:"specs"`
-				} `json:"gpuCounts"`
-			} `json:"availability"`
+				} `json:"availableSkus"`
+				Specs struct {
+					GPUDescription string `json:"gpuDescription"`
+					VCPU           int64  `json:"vcpu"`
+					Memory         int64  `json:"memoryGiB"`
+					Storage        int64  `json:"storageGB"`
+				} `json:"specs"`
+			} `json:"gpuCounts"`
+		} `json:"availability"`
+	}{
+		ID:   seriesID,
+		Name: "NVIDIA H100 Series",
+		Code: seriesCode,
+		Availability: []struct {
+			DatacenterId   string `json:"datacenterId"`
+			DatacenterName string `json:"datacenterName"`
+			DatacenterCode string `json:"datacenterCode"`
+			GPUCounts      []struct {
+				Count         int64 `json:"count"`
+				AvailableSkus []struct {
+					SkuCode     string `json:"skuCode"`
+					Description string `json:"description"`
+					Specs       struct {
+						GPUDescription string `json:"gpuDescription"`
+						VCPU           int64  `json:"vcpu"`
+						Memory         int64  `json:"memoryGiB"`
+						Storage        int64  `json:"storageGB"`
+					} `json:"specs"`
+				} `json:"availableSkus"`
+				Specs struct {
+					GPUDescription string `json:"gpuDescription"`
+					VCPU           int64  `json:"vcpu"`
+					Memory         int64  `json:"memoryGiB"`
+					Storage        int64  `json:"storageGB"`
+				} `json:"specs"`
+			} `json:"gpuCounts"`
 		}{
 			{
-				ID:          seriesID,
-				Name:        "H100 Series",
-				Code:        seriesCode,
-				Description: "NVIDIA H100 GPU Series",
-				Availability: []struct {
-					DatacenterId   string `json:"datacenterId"`
-					DatacenterName string `json:"datacenterName"`
-					DatacenterCode string `json:"datacenterCode"`
-					GPUCounts      []struct {
-						Count         int64      `json:"count"`
-						AvailableSkus []struct{} `json:"availableSkus"`
-						Specs         struct {
+				DatacenterId:   datacenterID,
+				DatacenterName: "US-East-1",
+				DatacenterCode: "us-east-1",
+				GPUCounts: []struct {
+					Count         int64 `json:"count"`
+					AvailableSkus []struct {
+						SkuCode     string `json:"skuCode"`
+						Description string `json:"description"`
+						Specs       struct {
 							GPUDescription string `json:"gpuDescription"`
 							VCPU           int64  `json:"vcpu"`
 							Memory         int64  `json:"memoryGiB"`
 							Storage        int64  `json:"storageGB"`
 						} `json:"specs"`
-					} `json:"gpuCounts"`
+					} `json:"availableSkus"`
+					Specs struct {
+						GPUDescription string `json:"gpuDescription"`
+						VCPU           int64  `json:"vcpu"`
+						Memory         int64  `json:"memoryGiB"`
+						Storage        int64  `json:"storageGB"`
+					} `json:"specs"`
 				}{
 					{
-						DatacenterId:   datacenterID,
-						DatacenterName: "US-East-1",
-						DatacenterCode: "us-east-1",
-						GPUCounts: []struct {
-							Count         int64      `json:"count"`
-							AvailableSkus []struct{} `json:"availableSkus"`
-							Specs         struct {
-								GPUDescription string `json:"gpuDescription"`
-								VCPU           int64  `json:"vcpu"`
-								Memory         int64  `json:"memoryGiB"`
-								Storage        int64  `json:"storageGB"`
-							} `json:"specs"`
+						Count:         gpuCount,
+						AvailableSkus: availableSkus,
+						Specs: struct {
+							GPUDescription string `json:"gpuDescription"`
+							VCPU           int64  `json:"vcpu"`
+							Memory         int64  `json:"memoryGiB"`
+							Storage        int64  `json:"storageGB"`
 						}{
-							{
-								Count:         gpuCount,
-								AvailableSkus: availableSkus,
-								Specs: struct {
-									GPUDescription string `json:"gpuDescription"`
-									VCPU           int64  `json:"vcpu"`
-									Memory         int64  `json:"memoryGiB"`
-									Storage        int64  `json:"storageGB"`
-								}{
-									GPUDescription: "NVIDIA H100 80GB",
-									VCPU:           32,
-									Memory:         256,
-									Storage:        1000,
-								},
-							},
+							GPUDescription: "NVIDIA H100 80GB",
+							VCPU:           32,
+							Memory:         256,
+							Storage:        1000,
 						},
 					},
 				},
 			},
 		},
 	}
+
+	return inventoryResp{
+		Data: struct {
+			Series []struct {
+				ID           string `json:"id"`
+				Name         string `json:"name"`
+				Code         string `json:"code"`
+				Availability []struct {
+					DatacenterId   string `json:"datacenterId"`
+					DatacenterName string `json:"datacenterName"`
+					DatacenterCode string `json:"datacenterCode"`
+					GPUCounts      []struct {
+						Count         int64 `json:"count"`
+						AvailableSkus []struct {
+							SkuCode     string `json:"skuCode"`
+							Description string `json:"description"`
+							Specs       struct {
+								GPUDescription string `json:"gpuDescription"`
+								VCPU           int64  `json:"vcpu"`
+								Memory         int64  `json:"memoryGiB"`
+								Storage        int64  `json:"storageGB"`
+							} `json:"specs"`
+						} `json:"availableSkus"`
+						Specs struct {
+							GPUDescription string `json:"gpuDescription"`
+							VCPU           int64  `json:"vcpu"`
+							Memory         int64  `json:"memoryGiB"`
+							Storage        int64  `json:"storageGB"`
+						} `json:"specs"`
+					} `json:"gpuCounts"`
+				} `json:"availability"`
+			} `json:"series"`
+		}{
+			Series: []struct {
+				ID           string `json:"id"`
+				Name         string `json:"name"`
+				Code         string `json:"code"`
+				Availability []struct {
+					DatacenterId   string `json:"datacenterId"`
+					DatacenterName string `json:"datacenterName"`
+					DatacenterCode string `json:"datacenterCode"`
+					GPUCounts      []struct {
+						Count         int64 `json:"count"`
+						AvailableSkus []struct {
+							SkuCode     string `json:"skuCode"`
+							Description string `json:"description"`
+							Specs       struct {
+								GPUDescription string `json:"gpuDescription"`
+								VCPU           int64  `json:"vcpu"`
+								Memory         int64  `json:"memoryGiB"`
+								Storage        int64  `json:"storageGB"`
+							} `json:"specs"`
+						} `json:"availableSkus"`
+						Specs struct {
+							GPUDescription string `json:"gpuDescription"`
+							VCPU           int64  `json:"vcpu"`
+							Memory         int64  `json:"memoryGiB"`
+							Storage        int64  `json:"storageGB"`
+						} `json:"specs"`
+					} `json:"gpuCounts"`
+				} `json:"availability"`
+			}{series},
+		},
+	}
 }
 
 func TestMapGPUResponseToModelUnit(t *testing.T) {
 	response := newGPUResponse("gpu-123", "test-gpu")
-	model := createTestGPUModel("test-gpu", "H100 Series", "h100_series", testImageName, 2)
+	model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100_series", testImageName, 2)
 
 	result := MapGPUResponseToModel(context.Background(), response, model)
 
@@ -183,7 +276,7 @@ func TestMapGPUResponseToModelUnit(t *testing.T) {
 
 func TestCheckInventoryMockHTTP(t *testing.T) {
 	const (
-		seriesCode = "h100_series"
+		seriesCode = "nvidia-h100_series"
 		gpuCount   = int64(2)
 	)
 
@@ -225,20 +318,20 @@ func TestCheckInventoryMockHTTP(t *testing.T) {
 	if !inventoryCalled {
 		t.Error("Expected inventory endpoint to be called")
 	}
-	if len(response.Data) == 0 {
-		t.Fatal("Expected inventory data, got empty array")
+	if len(response.Data.Series) == 0 {
+		t.Fatal("Expected inventory data, got empty series")
 	}
-	if response.Data[0].ID != "series-123" {
-		t.Errorf("Expected series ID 'series-123', got '%s'", response.Data[0].ID)
+	if response.Data.Series[0].ID != "series-123" {
+		t.Errorf("Expected series ID 'series-123', got '%s'", response.Data.Series[0].ID)
 	}
-	if len(response.Data[0].Availability[0].GPUCounts[0].AvailableSkus) != 5 {
-		t.Errorf("Expected 5 available SKUs, got %d", len(response.Data[0].Availability[0].GPUCounts[0].AvailableSkus))
+	if len(response.Data.Series[0].Availability[0].GPUCounts[0].AvailableSkus) != 5 {
+		t.Errorf("Expected 5 available SKUs, got %d", len(response.Data.Series[0].Availability[0].GPUCounts[0].AvailableSkus))
 	}
 }
 
 func TestCheckInventoryNoAvailabilityMockHTTP(t *testing.T) {
 	const (
-		seriesCode = "h100_series"
+		seriesCode = "nvidia-h100_series"
 		gpuCount   = int64(2)
 	)
 
@@ -324,7 +417,7 @@ func TestCreateGPUMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	model := createTestGPUModel("test-gpu", "H100 Series", "h100_series", testImageName, 2)
+	model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100_series", testImageName, 2)
 
 	response, err := CreateGPU(gpcnClient, context.Background(), seriesID, model)
 	if err != nil {

@@ -9,7 +9,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.5.2"
+      version = "~>0.5.4"
     }
   }
 }
@@ -81,7 +81,7 @@ resource "gpcn_virtualmachine" "example" {
   # Compute configuration
   size = {
     category = "general"
-    tier     = "g-micro-1"
+    name     = "G-Micro-1"
   }
   image = "Alma Linux 8.x"
 

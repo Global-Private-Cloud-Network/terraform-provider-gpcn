@@ -50,13 +50,13 @@ func (o ResourceModelAuth) AttrTypes() map[string]attr.Type {
 
 type ResourceModelSize struct {
 	Category types.String `tfsdk:"category"`
-	Tier     types.String `tfsdk:"tier"`
+	Name     types.String `tfsdk:"name"`
 }
 
 func (o ResourceModelSize) AttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
 		"category": types.StringType,
-		"tier":     types.StringType,
+		"name":     types.StringType,
 	}
 }
 
@@ -106,6 +106,8 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 		"cpu":          strconv.FormatInt(response.Data.Configuration.CPU, 10) + " cores",
 		"ram":          strconv.FormatInt(response.Data.Configuration.RAM, 10) + " GB",
 		"base_storage": strconv.FormatInt(response.Data.Configuration.Disk, 10) + " GB",
+		"sku_id":       response.Data.Configuration.SkuId,
+		"sku_code":     response.Data.Configuration.SkuCode,
 	})
 	if diags.HasError() {
 		allDiags.Append(diags...)
@@ -136,7 +138,7 @@ func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient
 		var sizeDiags diag.Diagnostics
 		model.Size, sizeDiags = types.ObjectValueFrom(ctx, size.AttrTypes(), ResourceModelSize{
 			Category: types.StringValue(response.Data.Configuration.CategoryCode),
-			Tier:     types.StringValue(response.Data.Configuration.Code),
+			Name:     types.StringValue(response.Data.Configuration.Name),
 		})
 		if sizeDiags.HasError() {
 			allDiags.Append(sizeDiags...)

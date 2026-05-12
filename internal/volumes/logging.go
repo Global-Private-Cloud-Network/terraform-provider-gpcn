@@ -4,7 +4,7 @@ package volumes
 const (
 	// CreateVolume messages
 	LogStartingCreateVolume              = "Starting CreateVolume"
-	LogLookingUpVolumeSizeID             = "Looking up volume size ID for validation"
+	LogLookingUpVolumeSkuId              = "Looking up volume SKU ID for validation"
 	LogConstructedCreateVolumeRequest    = "Constructed Create GPCN Volume request successfully"
 	LogIssuedCreateVolumeJob             = "Successfully issued to job to create GPCN Volume. Beginning long-polling to check the status"
 	LogLongPollingCompletedCreateVolume  = "Long polling completed for Create GPCN Volume - proceeding to GetVolume"
@@ -20,7 +20,7 @@ const (
 
 	// UpdateVolume messages
 	LogStartingUpdateVolumeWithID        = "Starting UpdateVolume for volume ID %s"
-	LogValidatingVolumeSizeForUpdate     = "Validating volume size for update"
+	LogValidatingVolumeSkuIdForUpdate    = "Validating volume SKU ID for update"
 	LogConstructedUpdateVolumeRequest    = "Constructed Update GPCN Volume request successfully"
 	LogIssuedUpdateVolumeJob             = "Successfully issued to job to update GPCN Volume. Beginning long-polling to check the status"
 	LogLongPollingCompletedUpdateVolume  = "Long polling completed for Update GPCN Volume - proceeding to GetVolume"
@@ -32,11 +32,11 @@ const (
 	LogIssuedDeleteVolumeJob                   = "Successfully issued job to delete GPCN Volume. Beginning long-polling to check the status"
 	LogSuccessfullyCompletedDeleteVolumeWithID = "Successfully completed DeleteVolume for volume ID %s"
 
-	// GetVolumeSizeId messages
-	LogStartingGetVolumeSizeIDWithParams           = "Starting GetVolumeSizeId for volume type ID %s and size: %s"
-	LogValidatingVolumeTypeAvailable               = "Validating volume type is available"
-	LogValidatingVolumeSizeAvailable               = "Validating volume size is available"
-	LogSuccessfullyRetrievedVolumeSizeIDWithParams = "Successfully retrieved volume size ID for volume type ID %s and size: %s"
+	// GetVolumeSkuId messages
+	LogStartingGetVolumeSkuIdWithParams           = "Starting GetVolumeSkuId for component code %s and size: %s"
+	LogValidatingVolumeTypeAvailable              = "Validating volume type is available"
+	LogValidatingVolumeSizeAvailable              = "Validating volume size is available"
+	LogSuccessfullyRetrievedVolumeSkuIdWithParams = "Successfully retrieved volume SKU ID for component code %s and size: %s"
 
 	// Resource-level CRUD operation messages
 	LogStartingCreateGPCNVolume             = "Starting Create GPCN Volume"
