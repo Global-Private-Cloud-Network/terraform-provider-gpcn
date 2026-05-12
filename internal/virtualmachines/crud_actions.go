@@ -24,6 +24,8 @@ type ConfigurationResponse struct {
 	Name         string `json:"name"`
 	Code         string `json:"code"`
 	CategoryCode string `json:"categoryCode"`
+	SkuId        string `json:"skuId"`
+	SkuCode      string `json:"skuCode"`
 	CPU          int64  `json:"cpu"`
 	RAM          int64  `json:"ram"`
 	Disk         int64  `json:"disk"`
@@ -55,7 +57,7 @@ type ReadVirtualMachinesResponse struct {
 	} `json:"data"`
 }
 
-func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, imageId string, sizeId int64, model ResourceModel) (*ReadVirtualMachinesResponse, error) {
+func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, imageId string, skuId string, model ResourceModel) (*ReadVirtualMachinesResponse, error) {
 	tflog.Info(ctx, LogStartingCreateVirtualMachine)
 
 	// Allocate public Ip cannot be true if we are attaching a network of type custom
@@ -84,7 +86,7 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 	createVMRequestBody := map[string]any{
 		"allocatePublicIp":  model.AllocatePublicIp.ValueBool(),
 		"authMethod":        authMethod,
-		"configurationId":   sizeId,
+		"skuId":             skuId,
 		"datacenterId":      model.DatacenterId.ValueString(),
 		"imageId":           imageId,
 		"name":              model.Name.ValueString(),

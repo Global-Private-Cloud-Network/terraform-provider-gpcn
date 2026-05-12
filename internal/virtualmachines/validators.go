@@ -19,31 +19,31 @@ import (
 )
 
 // Validates that the planned virtual machine size is larger than the current. Returns the new sizeId if so
-func ValidatePlanSizeLargerThanStateSize(gpcnClient *client.GpcnClient, ctx context.Context, state, plan ResourceModel) (int64, error) {
+func ValidatePlanSizeLargerThanStateSize(gpcnClient *client.GpcnClient, ctx context.Context, state, plan ResourceModel) (string, error) {
 	tflog.Info(ctx, LogSizeChangedVerifyingLarger)
 	var planSize ResourceModelSize
 	plan.Size.As(ctx, &planSize, basetypes.ObjectAsOptions{})
 	var stateSize ResourceModelSize
 	state.Size.As(ctx, &stateSize, basetypes.ObjectAsOptions{})
 	// This had preliminary validation, but verify it's up-to-date
-	_, sizes, err := GetVirtualMachineSizeConfigurationId(gpcnClient, ctx, plan.DatacenterId.ValueString(), planSize.Tier.ValueString())
+	_, sizes, err := GetVirtualMachineSizeSkuId(gpcnClient, ctx, plan.DatacenterId.ValueString(), planSize.Name.ValueString())
 	if err != nil {
-		return -1, err
+		return "", err
 	}
 
 	// Verify the new size is larger than the old
 	stateSizeIdx := slices.IndexFunc(sizes, func(virtualMachineSize VirtualMachineConfigurationsTF) bool {
-		return strings.EqualFold(virtualMachineSize.Code.ValueString(), stateSize.Tier.ValueString())
+		return strings.EqualFold(virtualMachineSize.Name.ValueString(), stateSize.Name.ValueString())
 	})
 	planSizeIdx := slices.IndexFunc(sizes, func(virtualMachineSize VirtualMachineConfigurationsTF) bool {
-		return strings.EqualFold(virtualMachineSize.Code.ValueString(), planSize.Tier.ValueString())
+		return strings.EqualFold(virtualMachineSize.Name.ValueString(), planSize.Name.ValueString())
 	})
 
 	if sizes[stateSizeIdx].CPUCores.ValueInt64() > sizes[planSizeIdx].CPUCores.ValueInt64() {
-		return -1, errors.New("the target virtual machine size is smaller than the old size. This shouldn't happen, since the validation should check for a smaller size (and force a replace), but in case it does, make sure the target size is LARGER than the current")
+		return "", errors.New("the target virtual machine size is smaller than the old size. This shouldn't happen, since the validation should check for a smaller size (and force a replace), but in case it does, make sure the target size is LARGER than the current")
 	}
 
-	return sizes[planSizeIdx].ID.ValueInt64(), nil
+	return sizes[planSizeIdx].SkuId.ValueString(), nil
 }
 
 func ValidateAllNetworksAreNotRemoved(oldNetworksList, newNetworksList types.List) error {

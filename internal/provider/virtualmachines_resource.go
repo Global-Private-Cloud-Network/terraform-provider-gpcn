@@ -93,8 +93,8 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 							stringvalidator.OneOf(virtualmachines.AllCategoryStrings()...),
 						},
 					},
-					"tier": schema.StringAttribute{
-						Description: "Human-readable name of the size configuration. Must be one of: 'g-micro-1', 'g-small-1', 'g-medium-1', 'g-large-1', 'g-xl-1', 'm-micro-1', 'm-small-1', 'm-medium-1', 'm-large-1', 'm-xl-1'",
+					"name": schema.StringAttribute{
+						Description: "Human-readable name of the size configuration. Must be one of: 'G-micro-1', 'G-small-1', 'G-medium-1', 'G-large-1', 'G-xl-1', 'M-micro-1', 'M-small-1', 'M-medium-1', 'M-large-1', 'M-xl-1'",
 						Required:    true,
 						Validators: []validator.String{
 							stringvalidator.OneOf(virtualmachines.AllTiers...),
@@ -102,7 +102,9 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 					},
 				},
 				PlanModifiers: []planmodifier.Object{
-					virtualmachines.SizePlanModifier{},
+					objectplanmodifier.RequiresReplace(),
+					// Temporarily commenting out ability to upgrade virtual machine sizes until API is updated
+					// virtualmachines.SizePlanModifier{},
 				},
 			},
 			"image": schema.StringAttribute{
@@ -286,16 +288,16 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 	// Verify the size selected is still available
 	var size virtualmachines.ResourceModelSize
 	plan.Size.As(ctx, &size, basetypes.ObjectAsOptions{})
-	sizeId, _, err := virtualmachines.GetVirtualMachineSizeConfigurationId(r.client, ctx, plan.DatacenterId.ValueString(), size.Tier.ValueString())
+	skuId, _, err := virtualmachines.GetVirtualMachineSizeSkuId(r.client, ctx, plan.DatacenterId.ValueString(), size.Name.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryErrorVerifyingSize,
-			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailSizeVerificationFailed, size.Category.ValueString(), size.Tier.ValueString(), plan.DatacenterId.ValueString()), err).Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailSizeVerificationFailed, size.Category.ValueString(), size.Name.ValueString(), plan.DatacenterId.ValueString()), err).Error(),
 		)
 		return
 	}
 
-	getVirtualMachineResponse, err := virtualmachines.CreateVirtualMachine(r.client, ctx, imageId, sizeId, plan)
+	getVirtualMachineResponse, err := virtualmachines.CreateVirtualMachine(r.client, ctx, imageId, skuId, plan)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToCreateVM,

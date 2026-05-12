@@ -128,7 +128,7 @@ var (
 				Required: true,
 				Attributes: map[string]schema.Attribute{
 					"category": schema.StringAttribute{Required: true},
-					"tier":     schema.StringAttribute{Required: true},
+					"name":     schema.StringAttribute{Required: true},
 				},
 			},
 			"configuration": schema.MapAttribute{Computed: true, ElementType: types.StringType},
@@ -136,7 +136,7 @@ var (
 	}
 
 	testConfiguration = map[string]string{
-		"name":         "g-small-1",
+		"name":         "G-small-1",
 		"cpu":          "2 cores",
 		"ram":          "4 GB",
 		"base_storage": "50 GB",
@@ -154,7 +154,7 @@ func createConfigRawValue(category, tier string, configuration map[string]string
 			"size": tftypes.Object{
 				AttributeTypes: map[string]tftypes.Type{
 					"category": tftypes.String,
-					"tier":     tftypes.String,
+					"name":     tftypes.String,
 				},
 			},
 			"configuration": tftypes.Map{ElementType: tftypes.String},
@@ -163,11 +163,11 @@ func createConfigRawValue(category, tier string, configuration map[string]string
 		"size": tftypes.NewValue(tftypes.Object{
 			AttributeTypes: map[string]tftypes.Type{
 				"category": tftypes.String,
-				"tier":     tftypes.String,
+				"name":     tftypes.String,
 			},
 		}, map[string]tftypes.Value{
 			"category": tftypes.NewValue(tftypes.String, category),
-			"tier":     tftypes.NewValue(tftypes.String, tier),
+			"name":     tftypes.NewValue(tftypes.String, tier),
 		}),
 		"configuration": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, configMap),
 	})
@@ -251,9 +251,9 @@ func TestConfigurationPlanModifier(t *testing.T) {
 			stateValue:    configMap,
 			planValue:     configMap,
 			stateCategory: "general",
-			stateTier:     "g-small-1",
+			stateTier:     "G-small-1",
 			planCategory:  "general",
-			planTier:      "g-medium-1",
+			planTier:      "G-medium-1",
 			stateConfig:   testConfiguration,
 			expectUnknown: true,
 		},
@@ -262,9 +262,9 @@ func TestConfigurationPlanModifier(t *testing.T) {
 			stateValue:    configMap,
 			planValue:     configMap,
 			stateCategory: "general",
-			stateTier:     "g-small-1",
+			stateTier:     "G-small-1",
 			planCategory:  "memory",
-			planTier:      "m-small-1",
+			planTier:      "M-small-1",
 			stateConfig:   testConfiguration,
 			expectUnknown: true,
 		},
@@ -273,9 +273,9 @@ func TestConfigurationPlanModifier(t *testing.T) {
 			stateValue:      configMap,
 			planValue:       types.MapUnknown(types.StringType),
 			stateCategory:   "general",
-			stateTier:       "g-small-1",
+			stateTier:       "G-small-1",
 			planCategory:    "general",
-			planTier:        "g-small-1",
+			planTier:        "G-small-1",
 			stateConfig:     testConfiguration,
 			expectPreserved: true,
 		},

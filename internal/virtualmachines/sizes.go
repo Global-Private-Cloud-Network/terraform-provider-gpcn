@@ -23,42 +23,25 @@ type sizesResponse struct {
 	Data    struct {
 		DatacenterId string `json:"datacenterId"`
 		Categories   []struct {
-			ID    int64  `json:"id"`
-			Name  string `json:"name"`
 			Code  string `json:"code"`
-			Tiers []struct {
-				ID             int64  `json:"id"`
-				Name           string `json:"name"`
-				Code           string `json:"code"`
-				Configurations []struct {
-					ConfigurationID int64 `json:"configurationId"`
-					CPU             struct {
-						ID          int64  `json:"id"`
-						Cores       int64  `json:"cores"`
-						DisplayName string `json:"displayName"`
-					} `json:"cpu"`
-					Memory struct {
-						ID          int64  `json:"id"`
-						SizeGb      int64  `json:"sizeGb"`
-						DisplayName string `json:"displayName"`
-					} `json:"memory"`
-					Disk struct {
-						ID          int64  `json:"id"`
-						SizeGb      int64  `json:"sizeGb"`
-						DisplayName string `json:"displayName"`
-					} `json:"disk"`
-				} `json:"configurations"`
-			} `json:"tiers"`
+			Name  string `json:"name"`
+			Sizes []struct {
+				SkuId   string `json:"skuId"`
+				Name    string `json:"name"`
+				SkuCode string `json:"skuCode"`
+				CPU     int64  `json:"cpu"`
+				Memory  int64  `json:"ram"`
+				Disk    int64  `json:"disk"`
+			} `json:"sizes"`
 		} `json:"categories"`
 	} `json:"data"`
 }
 
 type VirtualMachineConfigurationsTF struct {
-	ID           types.Int64  `tfsdk:"id"`
+	SkuId        types.String `tfsdk:"skuId"`
+	SkuCode      types.String `tfsdk:"skuCode"`
 	Category     types.String `tfsdk:"category"`
-	CategoryCode types.String `tfsdk:"category_code"`
 	Name         types.String `tfsdk:"name"`
-	Code         types.String `tfsdk:"code"`
 	CPUCores     types.Int64  `tfsdk:"cpu"`
 	MemorySizeGB types.Int64  `tfsdk:"memory"`
 	DiskSizeGB   types.Int64  `tfsdk:"disk"`
@@ -66,84 +49,80 @@ type VirtualMachineConfigurationsTF struct {
 
 func (o VirtualMachineConfigurationsTF) AttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
-		"id":            types.Int64Type,
-		"category":      types.StringType,
-		"category_code": types.StringType,
-		"name":          types.StringType,
-		"code":          types.StringType,
-		"cpu":           types.Int64Type,
-		"memory":        types.Int64Type,
-		"disk":          types.Int64Type,
+		"skuId":    types.StringType,
+		"skuCode":  types.StringType,
+		"category": types.StringType,
+		"name":     types.StringType,
+		"cpu":      types.Int64Type,
+		"memory":   types.Int64Type,
+		"disk":     types.Int64Type,
 	}
 }
 
-// Get virtual machine size Id for a given datacenterId
-func GetVirtualMachineSizeConfigurationId(gpcnClient *client.GpcnClient, ctx context.Context, datacenterId, virtualMachineSizeTierCode string) (int64, []VirtualMachineConfigurationsTF, error) {
-	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVMSizeIDWithName, virtualMachineSizeTierCode))
+// Get virtual machine SKU ID for a given datacenterId
+func GetVirtualMachineSizeSkuId(gpcnClient *client.GpcnClient, ctx context.Context, datacenterId, virtualMachineSizeName string) (string, []VirtualMachineConfigurationsTF, error) {
+	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVMSizeIDWithName, virtualMachineSizeName))
 	request, err := http.NewRequestWithContext(ctx, "GET", DATA_CENTERS_BASE_URL_V1+datacenterId+"/virtual-machine-sizes", nil)
 	var sizes []VirtualMachineConfigurationsTF
 	if err != nil {
-		return -1, sizes, err
+		return "", sizes, err
 	}
 
 	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
-		return -1, sizes, err
+		return "", sizes, err
 	}
 	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return -1, sizes, err
+		return "", sizes, err
 	}
 
 	var sizesResp sizesResponse
 	err = json.Unmarshal(body, &sizesResp)
 
 	if err != nil {
-		return -1, sizes, err
+		return "", sizes, err
 	}
 
 	// Collect all names for error handling later
 	var names []string
 	for _, category := range sizesResp.Data.Categories {
-		for _, tier := range category.Tiers {
-			for _, configuration := range tier.Configurations {
-				sizes = append(sizes, VirtualMachineConfigurationsTF{
-					ID:           types.Int64Value(configuration.ConfigurationID),
-					Category:     types.StringValue(category.Name),
-					CategoryCode: types.StringValue(category.Code),
-					Name:         types.StringValue(tier.Name),
-					Code:         types.StringValue(tier.Code),
-					CPUCores:     types.Int64Value(configuration.CPU.Cores),
-					MemorySizeGB: types.Int64Value(configuration.Memory.SizeGb),
-					DiskSizeGB:   types.Int64Value(configuration.Disk.SizeGb),
-				})
-				names = append(names, category.Code+" - "+tier.Code)
-			}
+		for _, size := range category.Sizes {
+			sizes = append(sizes, VirtualMachineConfigurationsTF{
+				Category:     types.StringValue(category.Name),
+				SkuId:        types.StringValue(size.SkuId),
+				SkuCode:      types.StringValue(size.SkuCode),
+				Name:         types.StringValue(size.Name),
+				CPUCores:     types.Int64Value(size.CPU),
+				MemorySizeGB: types.Int64Value(size.Memory),
+				DiskSizeGB:   types.Int64Value(size.Disk),
+			})
+			names = append(names, category.Name+" - "+size.Name)
 		}
 	}
 	sizesFormatted := strings.Join(names, ", ")
 
 	// Verify the size specified is available
-	tierIdx := slices.IndexFunc(sizes, func(size VirtualMachineConfigurationsTF) bool {
-		return strings.EqualFold(size.Code.ValueString(), virtualMachineSizeTierCode)
+	sizeIdx := slices.IndexFunc(sizes, func(size VirtualMachineConfigurationsTF) bool {
+		return strings.EqualFold(size.Name.ValueString(), virtualMachineSizeName)
 	})
 
-	if tierIdx < 0 {
-		return -1, sizes, fmt.Errorf(ErrDetailSizeNotAvailableForDatacenterNoCategory, virtualMachineSizeTierCode, sizesFormatted)
+	if sizeIdx < 0 {
+		return "", sizes, fmt.Errorf(ErrDetailSizeNotAvailableForDatacenterNoCategory, virtualMachineSizeName, sizesFormatted)
 	}
 
-	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyRetrievedVMSizeIDWithName, virtualMachineSizeTierCode))
-	return sizes[tierIdx].ID.ValueInt64(), sizes, nil
+	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyRetrievedVMSizeIDWithName, virtualMachineSizeName))
+	return sizes[sizeIdx].SkuId.ValueString(), sizes, nil
 }
 
 // Helper function to update a VM by ID
-func UpdateVirtualMachineSize(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string, sizeId int64) error {
+func UpdateVirtualMachineSize(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string, skuId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateVMSizeWithID, virtualMachineId))
 	// Create a new request from the plan
 	updateVMRequestBody := map[string]any{
-		"configurationId": sizeId,
+		"skuId": skuId,
 	}
 
 	jsonUpdateVMRequestBody, err := json.Marshal(updateVMRequestBody)

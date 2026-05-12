@@ -81,7 +81,7 @@ resource "gpcn_virtualmachine" "example" {
   # Compute configuration
   size = {
     category = "general"
-    tier     = "g-micro-1"
+    name     = "G-micro-1"
   }
   image = "Alma Linux 8.x"
 

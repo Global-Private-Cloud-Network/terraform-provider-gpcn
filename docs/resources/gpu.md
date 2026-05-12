@@ -51,8 +51,8 @@ resource "gpcn_gpu" "example" {
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
   # Only one can be specified but one must be
-  series_name = "RTX A6000 Series"
-  # series_code = "rtx_a6000_series"
+  series_name = "NVIDIA RTX A6000 Series"
+  # series_code = "nvidia-rtx_a6000-series"
 
   # Can only be one of 1,2, or 4
   gpu_count = 1

@@ -16,26 +16,36 @@ import (
 )
 
 type inventoryResp struct {
-	Data []struct {
-		ID           string `json:"id"`
-		Name         string `json:"name"`
-		Code         string `json:"code"`
-		Description  string `json:"description"`
-		Availability []struct {
-			DatacenterId   string `json:"datacenterId"`
-			DatacenterName string `json:"datacenterName"`
-			DatacenterCode string `json:"datacenterCode"`
-			GPUCounts      []struct {
-				Count         int64      `json:"count"`
-				AvailableSkus []struct{} `json:"availableSkus"`
-				Specs         struct {
-					GPUDescription string `json:"gpuDescription"`
-					VCPU           int64  `json:"vcpu"`
-					Memory         int64  `json:"memoryGiB"`
-					Storage        int64  `json:"storageGB"`
-				} `json:"specs"`
-			} `json:"gpuCounts"`
-		} `json:"availability"`
+	Data struct {
+		Series []struct {
+			ID           string `json:"id"`
+			Name         string `json:"name"`
+			Code         string `json:"code"`
+			Availability []struct {
+				DatacenterId   string `json:"datacenterId"`
+				DatacenterName string `json:"datacenterName"`
+				DatacenterCode string `json:"datacenterCode"`
+				GPUCounts      []struct {
+					Count         int64 `json:"count"`
+					AvailableSkus []struct {
+						SkuCode     string `json:"skuCode"`
+						Description string `json:"description"`
+						Specs       struct {
+							GPUDescription string `json:"gpuDescription"`
+							VCPU           int64  `json:"vcpu"`
+							Memory         int64  `json:"memoryGiB"`
+							Storage        int64  `json:"storageGB"`
+						} `json:"specs"`
+					} `json:"availableSkus"`
+					Specs struct {
+						GPUDescription string `json:"gpuDescription"`
+						VCPU           int64  `json:"vcpu"`
+						Memory         int64  `json:"memoryGiB"`
+						Storage        int64  `json:"storageGB"`
+					} `json:"specs"`
+				} `json:"gpuCounts"`
+			} `json:"availability"`
+		} `json:"series"`
 	} `json:"data"`
 }
 
@@ -93,18 +103,18 @@ func CheckInventory(gpcnClient *client.GpcnClient, ctx context.Context, model Re
 	tflog.Info(ctx, LogValidatingInventoryResponseStructure)
 
 	// Validate response structure
-	if len(invResp.Data) == 0 {
+	if len(invResp.Data.Series) == 0 {
 		return nil, errors.New(ErrDetailMalformedResponseMissingData)
 	}
-	if len(invResp.Data[0].Availability) == 0 {
+	if len(invResp.Data.Series[0].Availability) == 0 {
 		return nil, fmt.Errorf(ErrDetailNoInventoryAvailable, seriesCode, datacenterId, gpuCount)
 	}
-	if len(invResp.Data[0].Availability[0].GPUCounts) == 0 {
+	if len(invResp.Data.Series[0].Availability[0].GPUCounts) == 0 {
 		return nil, fmt.Errorf(ErrDetailNoInventoryAvailable, seriesCode, datacenterId, gpuCount)
 	}
 
 	// Check if inventory is available
-	if len(invResp.Data[0].Availability[0].GPUCounts[0].AvailableSkus) <= 0 {
+	if len(invResp.Data.Series[0].Availability[0].GPUCounts[0].AvailableSkus) <= 0 {
 		return nil, fmt.Errorf(ErrDetailNoInventoryAvailable, seriesCode, datacenterId, gpuCount)
 	}
 

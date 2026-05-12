@@ -39,7 +39,7 @@ func TestGPUResource(t *testing.T) {
 			resource "gpcn_gpu" "test" {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				series_name   = "RTX A6000 Series"
+				series_name   = "NVIDIA RTX A6000 Series"
 				gpu_count     = 1
 				image_name    = "ubuntu-22.04"
 				auth = {
@@ -56,12 +56,12 @@ func TestGPUResource(t *testing.T) {
 					resource.TestCheckResourceAttrSet(gpcnGPUTest, "id"),
 					resource.TestCheckResourceAttrSet(gpcnGPUTest, "created_time"),
 					resource.TestCheckResourceAttrSet(gpcnGPUTest, "last_updated"),
-					resource.TestCheckResourceAttr(gpcnGPUTest, "series_code", "rtx_a6000_series"),
+					resource.TestCheckResourceAttr(gpcnGPUTest, "series_code", "nvidia-rtx_a6000-series"),
 					resource.TestCheckResourceAttrSet(gpcnGPUTest, "location.datacenter"),
 					resource.TestCheckResourceAttrSet(gpcnGPUTest, "location.region"),
 					resource.TestCheckResourceAttrSet(gpcnGPUTest, "location.country"),
 					resource.TestCheckResourceAttr(gpcnGPUTest, "name", gpuName),
-					resource.TestCheckResourceAttr(gpcnGPUTest, "series_name", "RTX A6000 Series"),
+					resource.TestCheckResourceAttr(gpcnGPUTest, "series_name", "NVIDIA RTX A6000 Series"),
 					resource.TestCheckResourceAttr(gpcnGPUTest, "gpu_count", "1"),
 					resource.TestCheckResourceAttrSet(gpcnGPUTest, "auth.ssh_key_id"),
 				),
@@ -91,7 +91,7 @@ func TestGPUResource(t *testing.T) {
 			resource "gpcn_gpu" "test" {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				series_name   = "RTX A6000 Series"
+				series_name   = "NVIDIA RTX A6000 Series"
 				gpu_count     = 1
 				image_name    = "ubuntu-22.04"
 				auth = {
@@ -138,7 +138,7 @@ func TestGPUResourceAuthReplacement(t *testing.T) {
 			resource "gpcn_gpu" "test" {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				series_name   = "RTX A6000 Series"
+				series_name   = "NVIDIA RTX A6000 Series"
 				gpu_count     = 1
 				image_name    = "ubuntu-22.04"
 				auth = {
@@ -172,7 +172,7 @@ func TestGPUResourceAuthReplacement(t *testing.T) {
 			resource "gpcn_gpu" "test" {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				series_name   = "RTX A6000 Series"
+				series_name   = "NVIDIA RTX A6000 Series"
 				gpu_count     = 1
 				image_name    = "ubuntu-22.04"
 				auth = {
@@ -218,7 +218,7 @@ func TestGPUResourceNoAvailability(t *testing.T) {
 			resource "gpcn_gpu" "test" {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				series_code   = "a100_series"
+				series_code   = "nvidia-a100_series"
 				gpu_count     = 4
 				image_name    = "ubuntu-22.04"
 				auth = {
@@ -274,7 +274,7 @@ func TestGPUResourceInvalidSeries(t *testing.T) {
 		},
 		{
 			name:        "both_code_and_name",
-			seriesField: `series_name = "RTX A6000 Series"` + "\n" + `		  series_code = "rtx_a6000_series"`,
+			seriesField: `series_name = "NVIDIA RTX A6000 Series"` + "\n" + `		  series_code = "nvidia-rtx_a6000-series"`,
 			gpuCount:    "1", imageName: "ubuntu-22.04",
 			wantErr: "2 attributes specified",
 		},
@@ -311,7 +311,7 @@ func TestGPUResourceInvalidImageName(t *testing.T) {
 			resource "gpcn_gpu" "test" {
 				name          = "terraform-gpu-invalid-image"
 				datacenter_id = "any-datacenter-id"
-				series_name   = "RTX A6000 Series"
+				series_name   = "NVIDIA RTX A6000 Series"
 				gpu_count     = 1
 				image_name    = "Invalid Image Name"
 				auth = {
@@ -336,7 +336,7 @@ func TestGPUResourceInvalidGPUCount(t *testing.T) {
 				resource "gpcn_gpu" "test" {
 					name          = "terraform-gpu-invalid-count"
 					datacenter_id = "any-datacenter-id"
-					series_name   = "RTX A6000 Series"
+					series_name   = "NVIDIA RTX A6000 Series"
 					gpu_count     = 0
 					image_name    = "ubuntu-22.04"
 					auth = {
@@ -361,7 +361,7 @@ func TestGPUResourceMissingAuth(t *testing.T) {
 			resource "gpcn_gpu" "test" {
 				name          = "terraform-gpu-missing-auth"
 				datacenter_id = "any-datacenter-id"
-				series_name   = "RTX A6000 Series"
+				series_name   = "NVIDIA RTX A6000 Series"
 				gpu_count     = 1
 				image_name    = "ubuntu-22.04"
 			}

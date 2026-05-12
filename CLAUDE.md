@@ -57,7 +57,7 @@ Resource schema definitions live in `internal/provider/{resource}_resource.go`.
 
 ### Virtual Machine Specifics
 
-- Size uses `category` (`general`, `memory`) + `tier` (e.g., `g-small-1`)
+- Size uses `category` (`general`, `memory`) + `tier` (e.g., `G-small-1`)
 - Tier upgrades within the same category don't require replacement; downgrades or category changes do
 - `allocate_public_ip` controls whether `public_ip` is populated
 

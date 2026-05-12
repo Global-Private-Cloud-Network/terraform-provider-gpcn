@@ -95,7 +95,7 @@ resource "gpcn_virtualmachine" "example" {
   # Compute configuration
   size = {
     category = "general"
-    tier     = "g-micro-1"
+    name     = "G-micro-1"
   }
   image = "Alma Linux 8.x"
 
@@ -169,7 +169,7 @@ Optional:
 Required:
 
 - `category` (String) Short code representing the category. Must be one of: 'general' or 'memory'
-- `tier` (String) Human-readable name of the size configuration. Must be one of: 'g-micro-1', 'g-small-1', 'g-medium-1', 'g-large-1', 'g-xl-1', 'm-micro-1', 'm-small-1', 'm-medium-1', 'm-large-1', 'm-xl-1'
+- `name` (String) Human-readable name of the size configuration. Must be one of: 'G-micro-1', 'G-small-1', 'G-medium-1', 'G-large-1', 'G-xl-1', 'M-micro-1', 'M-small-1', 'M-medium-1', 'M-large-1', 'M-xl-1'
 
 ## Import
 

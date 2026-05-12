@@ -59,22 +59,22 @@ func AllCategoryStrings() []string {
 // Tier represents a virtual machine size tier
 type Tier string
 
-// General purpose tiers (g- prefix) in ascending order by size
+// General purpose tiers (G- prefix) in ascending order by size
 const (
-	TierGeneralMicro  Tier = "g-micro-1"
-	TierGeneralSmall  Tier = "g-small-1"
-	TierGeneralMedium Tier = "g-medium-1"
-	TierGeneralLarge  Tier = "g-large-1"
-	TierGeneralXL     Tier = "g-xl-1"
+	TierGeneralMicro  Tier = "G-micro-1"
+	TierGeneralSmall  Tier = "G-small-1"
+	TierGeneralMedium Tier = "G-medium-1"
+	TierGeneralLarge  Tier = "G-large-1"
+	TierGeneralXL     Tier = "G-xl-1"
 )
 
-// Memory optimized tiers (m- prefix) in ascending order by size
+// Memory optimized tiers (M- prefix) in ascending order by size
 const (
-	TierMemoryMicro  Tier = "m-micro-1"
-	TierMemorySmall  Tier = "m-small-1"
-	TierMemoryMedium Tier = "m-medium-1"
-	TierMemoryLarge  Tier = "m-large-1"
-	TierMemoryXL     Tier = "m-xl-1"
+	TierMemoryMicro  Tier = "M-micro-1"
+	TierMemorySmall  Tier = "M-small-1"
+	TierMemoryMedium Tier = "M-medium-1"
+	TierMemoryLarge  Tier = "M-large-1"
+	TierMemoryXL     Tier = "M-xl-1"
 )
 
 // String returns the string representation of Tier
@@ -96,7 +96,7 @@ func (t Tier) Category() Category {
 
 // Virtual Machine size tiers in ascending order (smallest to largest)
 var (
-	// General purpose tiers (g- prefix) in ascending order by size
+	// General purpose tiers (G- prefix) in ascending order by size
 	GeneralTiers = []string{
 		string(TierGeneralMicro),
 		string(TierGeneralSmall),
@@ -105,7 +105,7 @@ var (
 		string(TierGeneralXL),
 	}
 
-	// Memory optimized tiers (m- prefix) in ascending order by size
+	// Memory optimized tiers (M- prefix) in ascending order by size
 	MemoryTiers = []string{
 		string(TierMemoryMicro),
 		string(TierMemorySmall),
