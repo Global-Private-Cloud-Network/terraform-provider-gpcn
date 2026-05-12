@@ -94,7 +94,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 						},
 					},
 					"name": schema.StringAttribute{
-						Description: "Human-readable name of the size configuration. Must be one of: 'G-micro-1', 'G-small-1', 'G-medium-1', 'G-large-1', 'G-xl-1', 'M-micro-1', 'M-small-1', 'M-medium-1', 'M-large-1', 'M-xl-1'",
+						Description: "Human-readable name of the size configuration. Must be one of: 'G-Micro-1', 'G-Small-1', 'G-Medium-1', 'G-Large-1', 'G-Extra Large-1', 'M-Micro-1', 'M-Small-1', 'M-Medium-1', 'M-Large-1', 'M-Extra Large-1'",
 						Required:    true,
 						Validators: []validator.String{
 							stringvalidator.OneOf(virtualmachines.AllTiers...),

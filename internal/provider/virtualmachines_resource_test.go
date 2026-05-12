@@ -75,7 +75,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 
 				size = {
 					category = "general"
-					name     = "G-micro-1"
+					name     = "G-Micro-1"
 				}
 				image = "Alma Linux 8.x"
 
@@ -159,7 +159,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 				size = {
 					category = "general"
-					name     = "G-micro-1"
+					name     = "G-Micro-1"
 				}
 				image = "Alma Linux 8.x"
 				allocate_public_ip = false
@@ -220,7 +220,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 				size = {
 					category = "general"
-					name     = "G-micro-1"
+					name     = "G-Micro-1"
 				}
 				image = "Alma Linux 9.x"
 				allocate_public_ip = false
@@ -291,7 +291,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 
 			  size = {
 			    category = "general"
-			    name     = "G-micro-1"
+			    name     = "G-Micro-1"
 			  }
 			  image = "Alma Linux 8.x"
 
@@ -344,7 +344,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 
 			  size = {
 			    category = "general"
-			    name     = "G-micro-1"
+			    name     = "G-Micro-1"
 			  }
 			  image = "Alma Linux 8.x"
 
@@ -400,7 +400,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 
 			  size = {
 			    category = "general"
-			    name     = "G-micro-1"
+			    name     = "G-Micro-1"
 			  }
 			  image = "Alma Linux 8.x"
 
@@ -440,7 +440,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Create VM with G-micro-1 size
+			// Create VM with G-Micro-1 size
 			{
 				Config: providerConfig + fmt.Sprintf(`
 			data "gpcn_datacenters" "central_us" {
@@ -470,7 +470,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 
 			  size = {
 			    category = "general"
-			    name     = "G-micro-1"
+			    name     = "G-Micro-1"
 			  }
 			  image = "Alma Linux 8.x"
 
@@ -491,10 +491,10 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 					},
 				},
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("size").AtMapKey("name"), knownvalue.StringExact("G-micro-1")),
+					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("size").AtMapKey("name"), knownvalue.StringExact("G-Micro-1")),
 				},
 			},
-			// Upgrade to G-small-1 size - should update in place
+			// Upgrade to G-Small-1 size - should update in place
 			{
 				Config: providerConfig + fmt.Sprintf(`
 			data "gpcn_datacenters" "central_us" {
@@ -524,7 +524,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 
 			  size = {
 			    category = "general"
-			    name     = "G-small-1"
+			    name     = "G-Small-1"
 			  }
 			  image = "Alma Linux 8.x"
 
@@ -546,7 +546,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 					},
 				},
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("size").AtMapKey("name"), knownvalue.StringExact("G-small-1")),
+					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("size").AtMapKey("name"), knownvalue.StringExact("G-Small-1")),
 				},
 			},
 		},
@@ -609,7 +609,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 
 			  size = {
 			    category = "general"
-			    name     = "G-micro-1"
+			    name     = "G-Micro-1"
 			  }
 			  image = "Alma Linux 8.x"
 
@@ -677,7 +677,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 
 			  size = {
 			    category = "general"
-			    name     = "G-micro-1"
+			    name     = "G-Micro-1"
 			  }
 			  image = "Alma Linux 8.x"
 
@@ -750,7 +750,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 
 			  size = {
 			    category = "general"
-			    name     = "G-micro-1"
+			    name     = "G-Micro-1"
 			  }
 			  image = "Alma Linux 8.x"
 
@@ -824,7 +824,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 
 			  size = {
 			    category = "general"
-			    name     = "G-micro-1"
+			    name     = "G-Micro-1"
 			  }
 			  image = "Alma Linux 8.x"
 
@@ -897,7 +897,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 
 				size = {
 					category = "general"
-					name     = "G-micro-1"
+					name     = "G-Micro-1"
 				}
 				image = "Alma Linux 8.x"
 
@@ -948,7 +948,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 
 				size = {
 					category = "general"
-					name     = "G-micro-1"
+					name     = "G-Micro-1"
 				}
 				image = "Alma Linux 8.x"
 
@@ -1011,7 +1011,7 @@ func TestVirtualMachinesInvalidSizes(t *testing.T) {
 		tier     string
 		wantErr  string
 	}{
-		{name: "invalid_category", category: "bad-category", tier: "G-micro-1", wantErr: "Attribute size.category value must be one of"},
+		{name: "invalid_category", category: "bad-category", tier: "G-Micro-1", wantErr: "Attribute size.category value must be one of"},
 		{name: "invalid_tier", category: "general", tier: "bad-tier", wantErr: "Attribute size.name value must be one of"},
 	}
 	for _, tc := range tests {
@@ -1039,7 +1039,7 @@ func TestVirtualMachinesInvalidAuth(t *testing.T) {
 		  datacenter_id = "any-datacenter-id"
 		  size = {
 		    category = "general"
-		    name     = "G-micro-1"
+		    name     = "G-Micro-1"
 		  }
 		  image            = "Alma Linux 8.x"
 		  allocate_public_ip = false

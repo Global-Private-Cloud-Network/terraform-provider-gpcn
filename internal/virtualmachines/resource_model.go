@@ -138,7 +138,7 @@ func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient
 		var sizeDiags diag.Diagnostics
 		model.Size, sizeDiags = types.ObjectValueFrom(ctx, size.AttrTypes(), ResourceModelSize{
 			Category: types.StringValue(response.Data.Configuration.CategoryCode),
-			Name:     types.StringValue(response.Data.Configuration.Code),
+			Name:     types.StringValue(response.Data.Configuration.Name),
 		})
 		if sizeDiags.HasError() {
 			allDiags.Append(sizeDiags...)

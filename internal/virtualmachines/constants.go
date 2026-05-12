@@ -61,20 +61,20 @@ type Tier string
 
 // General purpose tiers (G- prefix) in ascending order by size
 const (
-	TierGeneralMicro  Tier = "G-micro-1"
-	TierGeneralSmall  Tier = "G-small-1"
-	TierGeneralMedium Tier = "G-medium-1"
-	TierGeneralLarge  Tier = "G-large-1"
-	TierGeneralXL     Tier = "G-xl-1"
+	TierGeneralMicro  Tier = "G-Micro-1"
+	TierGeneralSmall  Tier = "G-Small-1"
+	TierGeneralMedium Tier = "G-Medium-1"
+	TierGeneralLarge  Tier = "G-Large-1"
+	TierGeneralXL     Tier = "G-Extra Large-1"
 )
 
 // Memory optimized tiers (M- prefix) in ascending order by size
 const (
-	TierMemoryMicro  Tier = "M-micro-1"
-	TierMemorySmall  Tier = "M-small-1"
-	TierMemoryMedium Tier = "M-medium-1"
-	TierMemoryLarge  Tier = "M-large-1"
-	TierMemoryXL     Tier = "M-xl-1"
+	TierMemoryMicro  Tier = "M-Micro-1"
+	TierMemorySmall  Tier = "M-Small-1"
+	TierMemoryMedium Tier = "M-Medium-1"
+	TierMemoryLarge  Tier = "M-Large-1"
+	TierMemoryXL     Tier = "M-Extra Large-1"
 )
 
 // String returns the string representation of Tier

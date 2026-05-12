@@ -24,7 +24,7 @@ const (
 func createTestVMModel(name, image string, allocatePublicIP bool) ResourceModel {
 	size := ResourceModelSize{
 		Category: types.StringValue("general"),
-		Name:     types.StringValue("G-micro-1"),
+		Name:     types.StringValue("G-Micro-1"),
 	}
 	sizeObj, _ := types.ObjectValueFrom(context.Background(), size.AttrTypes(), size)
 
@@ -57,10 +57,10 @@ func newVMResponse(id, name string) *ReadVirtualMachinesResponse {
 	resp.Data.Configuration = ConfigurationResponse{
 		ID:           1,
 		Name:         "General - Micro - 1",
-		Code:         "G-micro-1",
+		Code:         "G-Micro-1",
 		CategoryCode: "general",
 		SkuId:        "sku-uuid-test",
-		SkuCode:      "general-G-micro-1",
+		SkuCode:      "general-G-Micro-1",
 		CPU:          1,
 		RAM:          2,
 		Disk:         20,
