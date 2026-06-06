@@ -27,7 +27,7 @@ type Category string
 
 // Virtual Machine categories
 const (
-	CategoryGeneral Category = "general"
+	CategoryGeneral Category = "general-purpose"
 	CategoryMemory  Category = "memory"
 )
 
@@ -130,7 +130,7 @@ func TiersForCategory(category Category) []Tier {
 	}
 }
 
-// Valid virtual machine image names
+// Known valid virtual machine image names
 var ValidImageNames = []string{
 	"Acronis",
 	"Alma Linux 10.x",

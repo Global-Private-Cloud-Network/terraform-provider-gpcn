@@ -102,9 +102,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 					},
 				},
 				PlanModifiers: []planmodifier.Object{
-					objectplanmodifier.RequiresReplace(),
-					// Temporarily commenting out ability to upgrade virtual machine sizes until API is updated
-					// virtualmachines.SizePlanModifier{},
+					virtualmachines.SizePlanModifier{},
 				},
 			},
 			"image": schema.StringAttribute{

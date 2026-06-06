@@ -74,7 +74,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 				size = {
-					category = "general"
+					category = "general-purpose"
 					name     = "G-Micro-1"
 				}
 				image = "Alma Linux 8.x"
@@ -158,7 +158,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 				size = {
-					category = "general"
+					category = "general-purpose"
 					name     = "G-Micro-1"
 				}
 				image = "Alma Linux 8.x"
@@ -219,7 +219,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 				size = {
-					category = "general"
+					category = "general-purpose"
 					name     = "G-Micro-1"
 				}
 				image = "Alma Linux 9.x"
@@ -290,7 +290,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
-			    category = "general"
+			    category = "general-purpose"
 			    name     = "G-Micro-1"
 			  }
 			  image = "Alma Linux 8.x"
@@ -343,7 +343,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
-			    category = "general"
+			    category = "general-purpose"
 			    name     = "G-Micro-1"
 			  }
 			  image = "Alma Linux 8.x"
@@ -399,7 +399,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
-			    category = "general"
+			    category = "general-purpose"
 			    name     = "G-Micro-1"
 			  }
 			  image = "Alma Linux 8.x"
@@ -430,7 +430,6 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 }
 
 func TestVirtualMachinesSizeUpgrade(t *testing.T) {
-	t.Skip("Temporarily requiring replacement for all size upgrades while the GPCN API changes")
 	t.Parallel()
 	rName := acctest.RandString(8)
 	sshKeyName := fmt.Sprintf("vm-size-upgrade-key-%s", rName)
@@ -469,7 +468,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
-			    category = "general"
+			    category = "general-purpose"
 			    name     = "G-Micro-1"
 			  }
 			  image = "Alma Linux 8.x"
@@ -523,7 +522,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
-			    category = "general"
+			    category = "general-purpose"
 			    name     = "G-Small-1"
 			  }
 			  image = "Alma Linux 8.x"
@@ -608,7 +607,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
-			    category = "general"
+			    category = "general-purpose"
 			    name     = "G-Micro-1"
 			  }
 			  image = "Alma Linux 8.x"
@@ -676,7 +675,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
-			    category = "general"
+			    category = "general-purpose"
 			    name     = "G-Micro-1"
 			  }
 			  image = "Alma Linux 8.x"
@@ -749,7 +748,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
-			    category = "general"
+			    category = "general-purpose"
 			    name     = "G-Micro-1"
 			  }
 			  image = "Alma Linux 8.x"
@@ -823,7 +822,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 			  size = {
-			    category = "general"
+			    category = "general-purpose"
 			    name     = "G-Micro-1"
 			  }
 			  image = "Alma Linux 8.x"
@@ -896,7 +895,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 				size = {
-					category = "general"
+					category = "general-purpose"
 					name     = "G-Micro-1"
 				}
 				image = "Alma Linux 8.x"
@@ -947,7 +946,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
 				size = {
-					category = "general"
+					category = "general-purpose"
 					name     = "G-Micro-1"
 				}
 				image = "Alma Linux 8.x"
@@ -1038,7 +1037,7 @@ func TestVirtualMachinesInvalidAuth(t *testing.T) {
 		  name          = "terraform-auth-test-vm"
 		  datacenter_id = "any-datacenter-id"
 		  size = {
-		    category = "general"
+		    category = "general-purpose"
 		    name     = "G-Micro-1"
 		  }
 		  image            = "Alma Linux 8.x"
