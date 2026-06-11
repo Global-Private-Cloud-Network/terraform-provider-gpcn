@@ -28,7 +28,7 @@ func createTestVMModel(name, image string, allocatePublicIP bool) ResourceModel 
 	}
 	sizeObj, _ := types.ObjectValueFrom(context.Background(), size.AttrTypes(), size)
 
-	auth := ResourceModelAuth{
+	auth := ResourceModelInitialAuth{
 		SshKeyId: types.StringValue("ssh-key-123"),
 		Username: types.StringNull(),
 		Password: types.StringNull(),
@@ -43,7 +43,7 @@ func createTestVMModel(name, image string, allocatePublicIP bool) ResourceModel 
 		AllocatePublicIp: types.BoolValue(allocatePublicIP),
 		NetworkIds:       types.ListNull(types.StringType),
 		VolumeIds:        types.ListNull(types.StringType),
-		Auth:             authObj,
+		InitialAuth:      authObj,
 	}
 }
 
@@ -602,8 +602,8 @@ func TestMapVirtualMachineResponseToModelUpdatesAuthUsername(t *testing.T) {
 		t.Errorf("Expected public IP '%s', got '%s'", publicIP, result.PublicIp.ValueString())
 	}
 
-	var auth ResourceModelAuth
-	authDiags := result.Auth.As(context.Background(), &auth, basetypes.ObjectAsOptions{})
+	var auth ResourceModelInitialAuth
+	authDiags := result.InitialAuth.As(context.Background(), &auth, basetypes.ObjectAsOptions{})
 	if authDiags.HasError() {
 		t.Fatalf("Failed to extract auth: %v", authDiags)
 	}
@@ -637,19 +637,19 @@ func TestSetModelValuesNotPresentPopulatesAuthOnImport(t *testing.T) {
 
 	// Simulate an import: Auth is null
 	model := createTestVMModel("import-vm", testVMImage, false)
-	model.Auth = types.ObjectNull(ResourceModelAuth{}.AttrTypes())
+	model.InitialAuth = types.ObjectNull(ResourceModelInitialAuth{}.AttrTypes())
 
 	result, diags := MapVirtualMachineResponseToModel(context.Background(), gpcnClient, response, model)
 	if diags.HasError() {
 		t.Fatalf("Unexpected error: %v", diags)
 	}
 
-	if result.Auth.IsNull() {
+	if result.InitialAuth.IsNull() {
 		t.Fatal("Expected auth to be populated on import, got null")
 	}
 
-	var auth ResourceModelAuth
-	authDiags := result.Auth.As(context.Background(), &auth, basetypes.ObjectAsOptions{})
+	var auth ResourceModelInitialAuth
+	authDiags := result.InitialAuth.As(context.Background(), &auth, basetypes.ObjectAsOptions{})
 	if authDiags.HasError() {
 		t.Fatalf("Failed to extract auth: %v", authDiags)
 	}

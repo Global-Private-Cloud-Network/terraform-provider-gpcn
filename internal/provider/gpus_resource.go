@@ -14,8 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -121,12 +120,9 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					stringvalidator.OneOf(gpu.GPUImageNames...),
 				},
 			},
-			"auth": schema.SingleNestedAttribute{
-				Description: "Authentication configuration for the GPU. Changing this block requires replacing the GPU",
+			"initial_auth": schema.SingleNestedAttribute{
+				Description: "Initial authentication configuration for the GPU. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine",
 				Required:    true,
-				PlanModifiers: []planmodifier.Object{
-					objectplanmodifier.RequiresReplace(),
-				},
 				Attributes: map[string]schema.Attribute{
 					"ssh_key_id": schema.StringAttribute{
 						Description: "ID of the SSH key to use for authentication",

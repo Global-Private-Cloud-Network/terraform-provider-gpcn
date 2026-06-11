@@ -46,8 +46,8 @@ resource "gpcn_gpu" "example" {
   # Must be one of "ubuntu-22.04" or "ubuntu-24.04"
   image_name = "ubuntu-22.04"
 
-  # Authentication
-  auth = {
+  # Initial authentication (applied at creation time only; changes update state without affecting the machine)
+  initial_auth = {
     ssh_key_id = gpcn_ssh_key.uploaded.id
   }
 }

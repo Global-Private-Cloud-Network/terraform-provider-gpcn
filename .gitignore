@@ -48,6 +48,7 @@ Thumbs.db
 **/.terraform/**
 **/.terraform.lock.hcl
 terraform-provider-gpcn
+.terraform.tfstate.lock.info
 
 # Environment variables
 .env

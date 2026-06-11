@@ -38,9 +38,9 @@ func createTestGPUModel(name, seriesName, seriesCode, imageName string, gpuCount
 	} else {
 		model.SeriesCode = types.StringNull()
 	}
-	auth := ResourceModelAuth{SshKeyId: types.StringValue(testSSHKeyID)}
+	auth := ResourceModelInitialAuth{SshKeyId: types.StringValue(testSSHKeyID)}
 	var diags diag.Diagnostics
-	model.Auth, diags = types.ObjectValueFrom(context.Background(), auth.AttrTypes(), auth)
+	model.InitialAuth, diags = types.ObjectValueFrom(context.Background(), auth.AttrTypes(), auth)
 	if diags.HasError() {
 		panic("failed to create auth object in test helper")
 	}

@@ -27,7 +27,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -187,12 +186,9 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				Description: "Optional ID of the resource group to assign this virtual machine to",
 				Optional:    true,
 			},
-			"auth": schema.SingleNestedAttribute{
-				Description: "Authentication configuration for the virtual machine. Either ssh_key_id or password must be specified. Changing any value in this block requires replacing the virtual machine",
+			"initial_auth": schema.SingleNestedAttribute{
+				Description: "Initial authentication configuration for the virtual machine. Either ssh_key_id or password must be specified. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine",
 				Required:    true,
-				PlanModifiers: []planmodifier.Object{
-					objectplanmodifier.RequiresReplace(),
-				},
 				Attributes: map[string]schema.Attribute{
 					"ssh_key_id": schema.StringAttribute{
 						Description: "ID of the SSH key to use for authentication. Cannot be set together with password",

@@ -17,17 +17,17 @@ type ResourceModel struct {
 	SeriesCode   types.String `tfsdk:"series_code"`
 	GPUCount     types.Int64  `tfsdk:"gpu_count"`
 	ImageName    types.String `tfsdk:"image_name"`
-	Auth         types.Object `tfsdk:"auth"`
+	InitialAuth  types.Object `tfsdk:"initial_auth"`
 	CreatedTime  types.String `tfsdk:"created_time"`
 	LastUpdated  types.String `tfsdk:"last_updated"`
 	Location     types.Map    `tfsdk:"location"`
 }
 
-type ResourceModelAuth struct {
+type ResourceModelInitialAuth struct {
 	SshKeyId types.String `tfsdk:"ssh_key_id"`
 }
 
-func (o ResourceModelAuth) AttrTypes() map[string]attr.Type {
+func (o ResourceModelInitialAuth) AttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
 		"ssh_key_id": types.StringType,
 	}
@@ -87,12 +87,12 @@ func setModelValuesNotPresent(ctx context.Context, response *readGPUResponse, mo
 	if model.ImageName.IsNull() || model.ImageName.ValueString() == "" {
 		model.ImageName = types.StringValue(response.Data.Image)
 	}
-	if model.Auth.IsNull() && response.Data.SshKeyId != "" {
-		authObj, diags := types.ObjectValueFrom(ctx, ResourceModelAuth{}.AttrTypes(), ResourceModelAuth{
+	if model.InitialAuth.IsNull() && response.Data.SshKeyId != "" {
+		authObj, diags := types.ObjectValueFrom(ctx, ResourceModelInitialAuth{}.AttrTypes(), ResourceModelInitialAuth{
 			SshKeyId: types.StringValue(response.Data.SshKeyId),
 		})
 		if !diags.HasError() {
-			model.Auth = authObj
+			model.InitialAuth = authObj
 		}
 	}
 	return model

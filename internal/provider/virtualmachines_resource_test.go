@@ -91,7 +91,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 					gpcn_volume.vm_storage.id
 				]
 
-				auth = {
+				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
 					username   = "testuser"
 				}
@@ -166,7 +166,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 				network_ids = [
 					gpcn_network.vm_network.id
 				]
-				auth = {
+				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
 					username   = "testuser"
 				}
@@ -227,7 +227,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 				network_ids = [
 					gpcn_network.vm_network.id
 				]
-				auth = {
+				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
 					username   = "testuser"
 				}
@@ -300,7 +300,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			  network_ids = [
 			    gpcn_network.vm_network.id
 			  ]
-			  auth = {
+			  initial_auth = {
 				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
     			username   = "testuser"
 			  }
@@ -353,7 +353,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			  network_ids = [
 			    gpcn_network.vm_network.id
 			  ]
-			  auth = {
+			  initial_auth = {
 				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
     			username   = "testuser"
 			  }
@@ -409,7 +409,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			  network_ids = [
 			    gpcn_network.vm_network.id
 			  ]
-			  auth = {
+			  initial_auth = {
 				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
     			username   = "testuser"
 			  }
@@ -478,7 +478,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 			  network_ids = [
 			    gpcn_network.vm_network.id
 			  ]
-			  auth = {
+			  initial_auth = {
 				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
     			username   = "testuser"
 			  }
@@ -532,7 +532,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 			  network_ids = [
 			    gpcn_network.vm_network.id
 			  ]
-			  auth = {
+			  initial_auth = {
 				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
     			username   = "testuser"
 			  }
@@ -617,7 +617,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			  network_ids = [
 			    gpcn_network.vm_network.id
 			  ]
-			  auth = {
+			  initial_auth = {
 				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
     			username   = "testuser"
 			  }
@@ -690,7 +690,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			    gpcn_volume.vm_vol1.id
 			  ]
 
-			  auth = {
+			  initial_auth = {
 				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
     			username   = "testuser"
 			  }
@@ -764,7 +764,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			    gpcn_volume.vm_vol2.id
 			  ]
 
-			  auth = {
+			  initial_auth = {
 				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
     			username   = "testuser"
 			  }
@@ -837,7 +837,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			    gpcn_volume.vm_vol2.id
 			  ]
 
-			  auth = {
+			  initial_auth = {
 				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
     			username   = "testuser"
 			  }
@@ -906,7 +906,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 					gpcn_network.vm_network.id
 				]
 
-				auth = {
+				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
 					username   = "testuser"
 				}
@@ -918,11 +918,11 @@ func TestVirtualMachinesAuth(t *testing.T) {
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "auth.ssh_key_id"),
-					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "auth.username", "testuser"),
+					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "initial_auth.ssh_key_id"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "initial_auth.username", "testuser"),
 				),
 			},
-			// Switch to password + username - should force replace
+			// Changing initial_auth is a no-op - state is updated with new config values but no API calls are made
 			{
 				Config: providerConfig + fmt.Sprintf(`
 			data "gpcn_datacenters" "central_us" {
@@ -951,13 +951,13 @@ func TestVirtualMachinesAuth(t *testing.T) {
 				}
 				image = "Alma Linux 8.x"
 
-	
+
 				allocate_public_ip = false
 				network_ids = [
 					gpcn_network.vm_network.id
 				]
 
-				auth = {
+				initial_auth = {
 					password = "Test1Password!"
 					username = "newuser"
 				}
@@ -965,14 +965,11 @@ func TestVirtualMachinesAuth(t *testing.T) {
 			`, networkName, vmName),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionReplace),
+						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
 					},
 				},
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "auth.username", "newuser"),
-				),
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("auth").AtMapKey("username"), knownvalue.StringExact("newuser")),
+					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("initial_auth").AtMapKey("username"), knownvalue.StringExact("newuser")),
 				},
 			},
 		},
@@ -996,7 +993,7 @@ func TestVirtualMachinesInvalidSizes(t *testing.T) {
 		  }
 		  image              = "Alma Linux 8.x"
 		  allocate_public_ip = false
-		  auth = {
+		  initial_auth = {
 		    ssh_key_id = "ssh-key-123"
 		    username   = "testuser"
 		  }
@@ -1042,7 +1039,7 @@ func TestVirtualMachinesInvalidAuth(t *testing.T) {
 		  }
 		  image            = "Alma Linux 8.x"
 		  allocate_public_ip = false
-		  auth = {
+		  initial_auth = {
 		    username = "testuser"
 		    ` + authBlock + `
 		  }
@@ -1076,12 +1073,12 @@ func TestVirtualMachinesInvalidAuth(t *testing.T) {
 		{
 			name:      "username_starts_with_digit",
 			authBlock: `ssh_key_id = "ssh-key-123"` + "\n" + `username = "1testuser"`,
-			wantErr:   "Username must start with a letter or underscore",
+			wantErr:   "Username must start with a letter",
 		},
 		{
 			name:      "username_invalid_chars", // spaces are not allowed
 			authBlock: `ssh_key_id = "ssh-key-123"` + "\n" + `username = "test user"`,
-			wantErr:   "Username must start with a letter or underscore",
+			wantErr:   "Username must start with a letter",
 		},
 	}
 	for _, tc := range tests {

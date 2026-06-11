@@ -95,8 +95,8 @@ resource "gpcn_virtualmachine" "example" {
   # Resource Group
   resource_group_id = gpcn_resource_group.group_example.id
 
-  # Authentication (Username and exactly one of ssh_key_id or password must be specified)
-  auth = {
+  # Initial authentication (applied at creation time only; changes update state without affecting the machine)
+  initial_auth = {
     ssh_key_id = gpcn_ssh_key.uploaded.id
     username   = "almalinux"
   }

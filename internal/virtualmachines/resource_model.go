@@ -30,17 +30,17 @@ type ResourceModel struct {
 	NetworkIds       types.List   `tfsdk:"network_ids"`
 	VolumeIds        types.List   `tfsdk:"volume_ids"`
 	NetworkHotplug   types.Bool   `tfsdk:"network_hotplug"`
-	Auth             types.Object `tfsdk:"auth"`
+	InitialAuth      types.Object `tfsdk:"initial_auth"`
 	ResourceGroupId  types.String `tfsdk:"resource_group_id"`
 }
 
-type ResourceModelAuth struct {
+type ResourceModelInitialAuth struct {
 	SshKeyId types.String `tfsdk:"ssh_key_id"`
 	Username types.String `tfsdk:"username"`
 	Password types.String `tfsdk:"password"`
 }
 
-func (o ResourceModelAuth) AttrTypes() map[string]attr.Type {
+func (o ResourceModelInitialAuth) AttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
 		"ssh_key_id": types.StringType,
 		"username":   types.StringType,
@@ -152,7 +152,7 @@ func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient
 
 	// Populate auth from response. On import, auth is null and must be constructed from the response.
 	var authDiags diag.Diagnostics
-	model.Auth, authDiags = populateAuth(ctx, model.Auth, response)
+	model.InitialAuth, authDiags = populateAuth(ctx, model.InitialAuth, response)
 	allDiags.Append(authDiags...)
 
 	return model, allDiags
@@ -165,12 +165,15 @@ func populateAuth(ctx context.Context, current types.Object, response *ReadVirtu
 		return current, nil
 	}
 
-	var auth ResourceModelAuth
+	var auth ResourceModelInitialAuth
 	if current.IsNull() {
-		auth = ResourceModelAuth{
+		auth = ResourceModelInitialAuth{
 			Username: types.StringValue(response.Data.Username),
 			SshKeyId: types.StringNull(),
 			Password: types.StringNull(),
+		}
+		if response.Data.SshKeyId != "" {
+			auth.SshKeyId = types.StringValue(response.Data.SshKeyId)
 		}
 	} else {
 		if diags := current.As(ctx, &auth, basetypes.ObjectAsOptions{}); diags.HasError() {
@@ -179,10 +182,6 @@ func populateAuth(ctx context.Context, current types.Object, response *ReadVirtu
 		if auth.Username.IsNull() && response.Data.Username != "" {
 			auth.Username = types.StringValue(response.Data.Username)
 		}
-	}
-
-	if auth.SshKeyId.IsNull() && response.Data.SshKeyId != "" {
-		auth.SshKeyId = types.StringValue(response.Data.SshKeyId)
 	}
 
 	return types.ObjectValueFrom(ctx, auth.AttrTypes(), auth)
