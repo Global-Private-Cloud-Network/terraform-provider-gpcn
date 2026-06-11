@@ -109,8 +109,8 @@ resource "gpcn_virtualmachine" "example" {
   # Resource Group
   resource_group_id = gpcn_resource_group.group_example.id
 
-  # Authentication (Username and exactly one of ssh_key_id or password must be specified)
-  auth = {
+  # Initial authentication (applied at creation time only; changes update state without affecting the machine)
+  initial_auth = {
     ssh_key_id = gpcn_ssh_key.uploaded.id
     username   = "almalinux"
   }
@@ -128,9 +128,9 @@ resource "gpcn_virtualmachine" "example" {
 ### Required
 
 - `allocate_public_ip` (Boolean) Whether to allocate a public IP address for the virtual machine
-- `auth` (Attributes) Authentication configuration for the virtual machine. Either ssh_key_id or password must be specified. Changing any value in this block requires replacing the virtual machine (see [below for nested schema](#nestedatt--auth))
 - `datacenter_id` (String) Unique identifier of the datacenter where the virtual machine will be created. Changing this value requires replacing the virtual machine
 - `image` (String) Operating system image to use for the virtual machine. Must be one of the supported image names. Changing this value requires replacing the virtual machine. Note that not all images are available for every datacenter
+- `initial_auth` (Attributes) Initial authentication configuration for the virtual machine. Either ssh_key_id or password must be specified. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine (see [below for nested schema](#nestedatt--initial_auth))
 - `name` (String) Human-readable name for the virtual machine
 - `size` (Attributes) Hardware size configuration defining the compute resources (CPU, memory, disk) for the virtual machine. Specified using a category and tier pairing. Downsizing requires replacing the virtual machine. Note that not all sizes are available for every datacenter (see [below for nested schema](#nestedatt--size))
 
@@ -150,8 +150,8 @@ resource "gpcn_virtualmachine" "example" {
 - `network_hotplug` (Boolean) Whether the virtual machine supports hot modifications without the virtual machine being in Shutoff status
 - `public_ip` (String) The public IP address, if allocate_public_ip is True
 
-<a id="nestedatt--auth"></a>
-### Nested Schema for `auth`
+<a id="nestedatt--initial_auth"></a>
+### Nested Schema for `initial_auth`
 
 Required:
 
