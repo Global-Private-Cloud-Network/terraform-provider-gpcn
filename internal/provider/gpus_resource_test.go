@@ -29,6 +29,7 @@ func TestGPUResource(t *testing.T) {
 				country_name = "United States"
 				region_name  = "central"
 				name         = "Kansas"
+				gpu_enabled  = true
 			}
 
 			resource "gpcn_ssh_key" "test" {
@@ -81,6 +82,7 @@ func TestGPUResource(t *testing.T) {
 				country_name = "United States"
 				region_name  = "central"
 				name         = "Kansas"
+				gpu_enabled  = true
 			}
 
 			resource "gpcn_ssh_key" "test" {
@@ -128,6 +130,7 @@ func TestGPUResourceInitialAuthNoOp(t *testing.T) {
 				country_name = "United States"
 				region_name  = "central"
 				name         = "Kansas"
+				gpu_enabled  = true
 			}
 
 			resource "gpcn_ssh_key" "key1" {
@@ -162,6 +165,7 @@ func TestGPUResourceInitialAuthNoOp(t *testing.T) {
 				country_name = "United States"
 				region_name  = "central"
 				name         = "Kansas"
+				gpu_enabled  = true
 			}
 
 			resource "gpcn_ssh_key" "key2" {
