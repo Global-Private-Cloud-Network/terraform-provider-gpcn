@@ -214,6 +214,7 @@ func (p *gpcnProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 func (p *gpcnProvider) DataSources(_ context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 		NewDatacenterDataSource,
+		NewVirtualMachineImagesDataSource,
 	}
 }
 

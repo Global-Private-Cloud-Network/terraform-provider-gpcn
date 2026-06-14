@@ -37,10 +37,6 @@ const (
 	LogValidatingPublicIPSettingByNetworkType = "Validating public IP setting by checking primary network type"
 	LogPublicIPValidationPassed               = "Public IP validation passed"
 
-	// GetVirtualMachineImageId messages
-	LogStartingGetVMImageIDWithName           = "Starting GetVirtualMachineImageId for image name: %s"
-	LogSuccessfullyRetrievedVMImageIDWithName = "Successfully retrieved virtual machine image ID for image name: %s"
-
 	// GetVirtualMachineSizeSkuId messages
 	LogStartingGetVMSizeIDWithName           = "Starting GetVirtualMachineSizeSkuId for size name: %s"
 	LogSuccessfullyRetrievedVMSizeIDWithName = "Successfully retrieved virtual machine SKU ID for size name: %s"

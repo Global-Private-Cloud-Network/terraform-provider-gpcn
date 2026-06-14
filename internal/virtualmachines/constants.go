@@ -129,28 +129,3 @@ func TiersForCategory(category Category) []Tier {
 		return nil
 	}
 }
-
-// Known valid virtual machine image names
-var ValidImageNames = []string{
-	"Acronis",
-	"Alma Linux 10.x",
-	"Alma Linux 8.x",
-	"Alma Linux 9.x",
-	"Alpine 3.x",
-	"Debian 11.x",
-	"Debian 12.x",
-	"Fedora 43",
-	"OPNSense 26.x",
-	"PFSense CE 2.7.2",
-	"Rescuezilla 2.6.1",
-	"Rocky 10.x",
-	"Rocky 8.x",
-	"Rocky 9.x",
-	"Ubuntu 22.04 LTS",
-	"Ubuntu 24.04 LTS",
-	"Ubuntu 26.04 LTS",
-	"Veeam Recovery",
-	"Windows 2019 Standard",
-	"Windows 2022 Standard",
-	"Windows 2025 Standard",
-}

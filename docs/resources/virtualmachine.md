@@ -39,6 +39,12 @@ data "gpcn_datacenters" "central_us" {
   name         = "Chicago"
 }
 
+# Look up the image ID for Alma Linux 8
+data "gpcn_virtualmachine_images" "alma_8" {
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+  image_name    = "Alma Linux 8"
+}
+
 # Provide an existing public key
 resource "gpcn_ssh_key" "uploaded" {
   name = "terraform-demo-key-uploaded"
@@ -97,7 +103,7 @@ resource "gpcn_virtualmachine" "example" {
     category = "general-purpose"
     name     = "G-Micro-1"
   }
-  image = "Alma Linux 8.x"
+  image_id = data.gpcn_virtualmachine_images.alma_8.images[0].id
 
   # Networking
   allocate_public_ip = false
@@ -129,7 +135,7 @@ resource "gpcn_virtualmachine" "example" {
 
 - `allocate_public_ip` (Boolean) Whether to allocate a public IP address for the virtual machine
 - `datacenter_id` (String) Unique identifier of the datacenter where the virtual machine will be created. Changing this value requires replacing the virtual machine
-- `image` (String) Operating system image to use for the virtual machine. Must be one of the supported image names. Changing this value requires replacing the virtual machine. Note that not all images are available for every datacenter
+- `image_id` (String) Unique identifier of the operating system image to use for the virtual machine. Use the gpcn_virtualmachine_images data source to look up the image ID. Changing this value requires replacing the virtual machine
 - `initial_auth` (Attributes) Initial authentication configuration for the virtual machine. Either ssh_key_id or password must be specified. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine (see [below for nested schema](#nestedatt--initial_auth))
 - `name` (String) Human-readable name for the virtual machine
 - `size` (Attributes) Hardware size configuration defining the compute resources (CPU, memory, disk) for the virtual machine. Specified using a category and tier pairing. Downsizing requires replacing the virtual machine. Note that not all sizes are available for every datacenter (see [below for nested schema](#nestedatt--size))

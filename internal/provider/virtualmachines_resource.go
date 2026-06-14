@@ -104,14 +104,10 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 					virtualmachines.SizePlanModifier{},
 				},
 			},
-			"image": schema.StringAttribute{
-				Description: "Operating system image to use for the virtual machine. Must be one of the supported image names. Changing this value requires replacing the virtual machine. Note that not all images are available for every datacenter",
+			"image_id": schema.StringAttribute{
+				Description: "Unique identifier of the operating system image to use for the virtual machine. Use the gpcn_virtualmachine_images data source to look up the image ID. Changing this value requires replacing the virtual machine",
 				Required:    true,
-				Validators: []validator.String{
-					virtualmachines.ImageNameValidator{},
-				},
 				PlanModifiers: []planmodifier.String{
-					// Changing the image requires us to destroy and create a new VM
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
@@ -268,17 +264,6 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
-	// Verify the image selected is still available
-	imageId, _, err := virtualmachines.GetVirtualMachineImageId(r.client, ctx, plan.DatacenterId.ValueString(), plan.Image.ValueString())
-
-	if err != nil {
-		resp.Diagnostics.AddError(
-			virtualmachines.ErrSummaryErrorVerifyingImage,
-			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailImageVerificationFailed, plan.Image.ValueString(), plan.DatacenterId.ValueString()), err).Error(),
-		)
-		return
-	}
-
 	// Verify the size selected is still available
 	var size virtualmachines.ResourceModelSize
 	plan.Size.As(ctx, &size, basetypes.ObjectAsOptions{})
@@ -291,7 +276,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
-	getVirtualMachineResponse, err := virtualmachines.CreateVirtualMachine(r.client, ctx, imageId, skuId, plan)
+	getVirtualMachineResponse, err := virtualmachines.CreateVirtualMachine(r.client, ctx, plan.ImageId.ValueString(), skuId, plan)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToCreateVM,

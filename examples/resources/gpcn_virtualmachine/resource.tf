@@ -25,6 +25,12 @@ data "gpcn_datacenters" "central_us" {
   name         = "Chicago"
 }
 
+# Look up the image ID for Alma Linux 8
+data "gpcn_virtualmachine_images" "alma_8" {
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+  image_name    = "Alma Linux 8"
+}
+
 # Provide an existing public key
 resource "gpcn_ssh_key" "uploaded" {
   name = "terraform-demo-key-uploaded"
@@ -83,7 +89,7 @@ resource "gpcn_virtualmachine" "example" {
     category = "general-purpose"
     name     = "G-Micro-1"
   }
-  image = "Alma Linux 8.x"
+  image_id = data.gpcn_virtualmachine_images.alma_8.images[0].id
 
   # Networking
   allocate_public_ip = false

@@ -4,7 +4,6 @@ package virtualmachines
 const (
 	ErrSummaryUnexpectedConfigureType             = "Unexpected Data Source Configure Type"
 	ErrSummaryUnableToCompletePlan                = "Unable to complete plan"
-	ErrSummaryErrorVerifyingImage                 = "Error verifying the virtual image"
 	ErrSummaryErrorVerifyingSize                  = "Error verifying the size"
 	ErrSummaryUnableToCreateVM                    = "Unable to create GPCN Virtual Machine"
 	ErrSummaryRetrievingVMInfoFailed              = "Retrieving information about the Virtual Machine failed"
@@ -37,7 +36,6 @@ const (
 	ErrDetailSizeNoLongerAvailable                   = "The size in the state is no longer available for this datacenter. This will require a re-create with a new value"
 	ErrDetailSizeNotAvailableForDatacenter           = "the category '%s' and size '%s' is not available for this datacenter. The available values are: %s"
 	ErrDetailSizeNotAvailableForDatacenterNoCategory = "the size '%s' is not available for this datacenter. The available values are: %s"
-	ErrDetailImageVerificationFailed                 = "Error verifying the virtual image: %s for datacenter with ID %s"
 	ErrDetailSizeVerificationFailed                  = "Error verifying the category '%s' and size '%s' for datacenter with ID %s"
 	ErrDetailNetworkInterfacesForNewVM               = "Error retrieving network interfaces for newly created virtual machine with ID %s"
 	ErrDetailNetworkInterfacesForVM                  = "Error retrieving network interfaces for virtual machine with ID %s"
