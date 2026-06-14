@@ -5,14 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"maps"
 	"net/http"
 	"slices"
 
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/networks"
-
 	"terraform-provider-gpcn/internal/virtualmachines"
+	"terraform-provider-gpcn/internal/virtualmachinesizes"
 
 	"regexp"
 
@@ -30,7 +29,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
@@ -39,6 +37,7 @@ var (
 	_ resource.Resource                = &virtualMachinesResource{}
 	_ resource.ResourceWithConfigure   = &virtualMachinesResource{}
 	_ resource.ResourceWithImportState = &virtualMachinesResource{}
+	_ resource.ResourceWithModifyPlan  = &virtualMachinesResource{}
 )
 
 // NewVirtualMachinesResource is a helper function to simplify the provider implementation.
@@ -80,28 +79,9 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"size": schema.SingleNestedAttribute{
-				Description: "Hardware size configuration defining the compute resources (CPU, memory, disk) for the virtual machine. Specified using a category and tier pairing. Downsizing requires replacing the virtual machine. Note that not all sizes are available for every datacenter",
+			"size_id": schema.StringAttribute{
+				Description: "Unique identifier (SKU ID) of the size to use for the virtual machine. Use the gpcn_virtualmachine_sizes data source to look up the size ID. Changing to a non-upgradeable size requires replacing the virtual machine",
 				Required:    true,
-				Attributes: map[string]schema.Attribute{
-					"category": schema.StringAttribute{
-						Description: "Short code representing the category. Must be one of: 'general' or 'memory'",
-						Required:    true,
-						Validators: []validator.String{
-							stringvalidator.OneOf(virtualmachines.AllCategoryStrings()...),
-						},
-					},
-					"name": schema.StringAttribute{
-						Description: "Human-readable name of the size configuration. Must be one of: 'G-Micro-1', 'G-Small-1', 'G-Medium-1', 'G-Large-1', 'G-Extra Large-1', 'M-Micro-1', 'M-Small-1', 'M-Medium-1', 'M-Large-1', 'M-Extra Large-1'",
-						Required:    true,
-						Validators: []validator.String{
-							stringvalidator.OneOf(virtualmachines.AllTiers...),
-						},
-					},
-				},
-				PlanModifiers: []planmodifier.Object{
-					virtualmachines.SizePlanModifier{},
-				},
 			},
 			"image_id": schema.StringAttribute{
 				Description: "Unique identifier of the operating system image to use for the virtual machine. Use the gpcn_virtualmachine_images data source to look up the image ID. Changing this value requires replacing the virtual machine",
@@ -252,19 +232,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
-	// Verify the size selected is still available
-	var size virtualmachines.ResourceModelSize
-	plan.Size.As(ctx, &size, basetypes.ObjectAsOptions{})
-	skuId, _, err := virtualmachines.GetVirtualMachineSizeSkuId(r.client, ctx, plan.DatacenterId.ValueString(), size.Name.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError(
-			virtualmachines.ErrSummaryErrorVerifyingSize,
-			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailSizeVerificationFailed, size.Category.ValueString(), size.Name.ValueString(), plan.DatacenterId.ValueString()), err).Error(),
-		)
-		return
-	}
-
-	getVirtualMachineResponse, err := virtualmachines.CreateVirtualMachine(r.client, ctx, plan.ImageId.ValueString(), skuId, plan)
+	getVirtualMachineResponse, err := virtualmachines.CreateVirtualMachine(r.client, ctx, plan.ImageId.ValueString(), plan.SizeId.ValueString(), plan)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToCreateVM,
@@ -552,12 +520,54 @@ func (r *virtualMachinesResource) ImportState(ctx context.Context, req resource.
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
+// ModifyPlan determines whether a size_id change is a valid in-place upgrade or requires replacement.
+// It calls the API with vmId to get only sizes that are valid upgrade targets for the current VM.
+// If the planned size_id is not among them, the resource must be replaced.
+func (r *virtualMachinesResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if r.client == nil {
+		return
+	}
+
+	// Only relevant on update (state and plan both non-null)
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var state, plan virtualmachines.ResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	// Skip if size_id is unchanged or unknown
+	if state.SizeId.Equal(plan.SizeId) || plan.SizeId.IsUnknown() {
+		return
+	}
+
+	// Fetch only the sizes that are valid in-place upgrade targets for this VM
+	upgradeable, err := virtualmachinesizes.FetchSizes(r.client, ctx, state.DatacenterId.ValueString(), state.ID.ValueString())
+	if err != nil {
+		// If the call fails, default to requiring replacement rather than allowing an unknown operation
+		resp.RequiresReplace.Append(path.Root("size_id"))
+		return
+	}
+
+	for _, s := range upgradeable {
+		if s.ID == plan.SizeId.ValueString() {
+			return
+		}
+	}
+
+	resp.RequiresReplace.Append(path.Root("size_id"))
+}
+
 /*
 Some actions can be done without stopping the VM. Since it's a heavy time investment to start and stop, determine that and use it for the rest of the update logic.
 Cases where VM needs to be stopped:
   - NetworkHotplug is disabled AND one of the below
   - NetworkIds change
-  - Size changes
+  - size_id changes
 */
 func determineIfVMNeedsStopped(state, plan virtualmachines.ResourceModel) bool {
 	// If network hotplug is enabled, the VM does not need to be stopped
@@ -567,5 +577,5 @@ func determineIfVMNeedsStopped(state, plan virtualmachines.ResourceModel) bool {
 
 	// If network hotplug is disabled, the VM needs to be stopped for a few scenarios
 	return (!slices.Equal(plan.NetworkIds.Elements(), state.NetworkIds.Elements())) ||
-		!maps.Equal(state.Size.Attributes(), plan.Size.Attributes())
+		!state.SizeId.Equal(plan.SizeId)
 }

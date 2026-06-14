@@ -31,6 +31,13 @@ data "gpcn_virtualmachine_images" "alma_8" {
   image_name    = "Alma Linux 8"
 }
 
+# Look up a general-purpose size with at least 2 CPU cores
+data "gpcn_virtualmachine_sizes" "micro" {
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+  category      = "general-purpose"
+  min_cpu       = 2
+}
+
 # Provide an existing public key
 resource "gpcn_ssh_key" "uploaded" {
   name = "terraform-demo-key-uploaded"
@@ -85,10 +92,7 @@ resource "gpcn_virtualmachine" "example" {
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
   # Compute configuration
-  size = {
-    category = "general-purpose"
-    name     = "G-Micro-1"
-  }
+  size_id  = data.gpcn_virtualmachine_sizes.micro.sizes[0].id
   image_id = data.gpcn_virtualmachine_images.alma_8.images[0].id
 
   # Networking

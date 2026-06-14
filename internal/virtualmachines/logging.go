@@ -37,16 +37,9 @@ const (
 	LogValidatingPublicIPSettingByNetworkType = "Validating public IP setting by checking primary network type"
 	LogPublicIPValidationPassed               = "Public IP validation passed"
 
-	// GetVirtualMachineSizeSkuId messages
-	LogStartingGetVMSizeIDWithName           = "Starting GetVirtualMachineSizeSkuId for size name: %s"
-	LogSuccessfullyRetrievedVMSizeIDWithName = "Successfully retrieved virtual machine SKU ID for size name: %s"
-
 	// UpdateVirtualMachineSize messages
 	LogStartingUpdateVMSizeWithID = "Starting UpdateVirtualMachineSize for Virtual Machine ID %s"
 	LogSuccessfullyUpdatedVMSize  = "Successfully updated Virtual Machine size"
-
-	// ValidatePlanSizeLargerThanStateSize messages
-	LogSizeChangedVerifyingLarger = "Size has changed, verifying the new size is larger than the old"
 
 	// StartVirtualMachine messages
 	LogStartingStartVMWithID       = "Starting StartVirtualMachine for Virtual Machine ID %s"

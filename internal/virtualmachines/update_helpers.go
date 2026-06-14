@@ -119,21 +119,12 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 func UpdateSizeIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, state, plan ResourceModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	if plan.Size.Equal(state.Size) {
-		return diags
-	}
-
-	newSizeId, err := ValidatePlanSizeLargerThanStateSize(gpcnClient, ctx, state, plan)
-	if err != nil {
-		diags.AddError(
-			ErrSummaryErrorUpdatingVMSize,
-			err.Error(),
-		)
+	if plan.SizeId.Equal(state.SizeId) {
 		return diags
 	}
 
 	tflog.Info(ctx, LogPerformingVirtualMachineResize)
-	err = UpdateVirtualMachineSize(gpcnClient, ctx, vmID, newSizeId)
+	err := UpdateVirtualMachineSize(gpcnClient, ctx, vmID, plan.SizeId.ValueString())
 	if err != nil {
 		diags.AddError(
 			ErrSummaryErrorUpdatingVMSize,

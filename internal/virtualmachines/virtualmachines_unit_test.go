@@ -22,12 +22,6 @@ const (
 )
 
 func createTestVMModel(name, image string, allocatePublicIP bool) ResourceModel {
-	size := ResourceModelSize{
-		Category: types.StringValue("general"),
-		Name:     types.StringValue("G-Micro-1"),
-	}
-	sizeObj, _ := types.ObjectValueFrom(context.Background(), size.AttrTypes(), size)
-
 	auth := ResourceModelInitialAuth{
 		SshKeyId: types.StringValue("ssh-key-123"),
 		Username: types.StringNull(),
@@ -39,7 +33,7 @@ func createTestVMModel(name, image string, allocatePublicIP bool) ResourceModel 
 		Name:             types.StringValue(name),
 		DatacenterId:     types.StringValue(testDatacenterID),
 		ImageId:          types.StringValue(image),
-		Size:             sizeObj,
+		SizeId:           types.StringValue("sku-uuid-test"),
 		AllocatePublicIp: types.BoolValue(allocatePublicIP),
 		NetworkIds:       types.ListNull(types.StringType),
 		InitialAuth:      authObj,

@@ -124,13 +124,7 @@ func TestPublicIpPlanModifier(t *testing.T) {
 var (
 	testConfigurationPlanModifierSchema = schema.Schema{
 		Attributes: map[string]schema.Attribute{
-			"size": schema.SingleNestedAttribute{
-				Required: true,
-				Attributes: map[string]schema.Attribute{
-					"category": schema.StringAttribute{Required: true},
-					"name":     schema.StringAttribute{Required: true},
-				},
-			},
+			"size_id":       schema.StringAttribute{Required: true},
 			"configuration": schema.MapAttribute{Computed: true, ElementType: types.StringType},
 		},
 	}
@@ -143,7 +137,7 @@ var (
 	}
 )
 
-func createConfigRawValue(category, tier string, configuration map[string]string) tftypes.Value {
+func createConfigRawValue(sizeId string, configuration map[string]string) tftypes.Value {
 	configMap := make(map[string]tftypes.Value, len(configuration))
 	for k, v := range configuration {
 		configMap[k] = tftypes.NewValue(tftypes.String, v)
@@ -151,44 +145,29 @@ func createConfigRawValue(category, tier string, configuration map[string]string
 
 	return tftypes.NewValue(tftypes.Object{
 		AttributeTypes: map[string]tftypes.Type{
-			"size": tftypes.Object{
-				AttributeTypes: map[string]tftypes.Type{
-					"category": tftypes.String,
-					"name":     tftypes.String,
-				},
-			},
+			"size_id":       tftypes.String,
 			"configuration": tftypes.Map{ElementType: tftypes.String},
 		},
 	}, map[string]tftypes.Value{
-		"size": tftypes.NewValue(tftypes.Object{
-			AttributeTypes: map[string]tftypes.Type{
-				"category": tftypes.String,
-				"name":     tftypes.String,
-			},
-		}, map[string]tftypes.Value{
-			"category": tftypes.NewValue(tftypes.String, category),
-			"name":     tftypes.NewValue(tftypes.String, tier),
-		}),
+		"size_id":       tftypes.NewValue(tftypes.String, sizeId),
 		"configuration": tftypes.NewValue(tftypes.Map{ElementType: tftypes.String}, configMap),
 	})
 }
 
-func createConfigTestState(category, tier string, configuration map[string]string) tfsdk.State {
-	return tfsdk.State{Raw: createConfigRawValue(category, tier, configuration), Schema: testConfigurationPlanModifierSchema}
+func createConfigTestState(sizeId string, configuration map[string]string) tfsdk.State {
+	return tfsdk.State{Raw: createConfigRawValue(sizeId, configuration), Schema: testConfigurationPlanModifierSchema}
 }
 
-func createConfigTestPlan(category, tier string, configuration map[string]string) tfsdk.Plan {
-	return tfsdk.Plan{Raw: createConfigRawValue(category, tier, configuration), Schema: testConfigurationPlanModifierSchema}
+func createConfigTestPlan(sizeId string, configuration map[string]string) tfsdk.Plan {
+	return tfsdk.Plan{Raw: createConfigRawValue(sizeId, configuration), Schema: testConfigurationPlanModifierSchema}
 }
 
 type configurationTestCase struct {
 	name            string
 	stateValue      types.Map
 	planValue       types.Map
-	stateCategory   string
-	stateTier       string
-	planCategory    string
-	planTier        string
+	stateSizeId     string
+	planSizeId      string
 	stateConfig     map[string]string
 	expectUnknown   bool
 	expectPreserved bool
@@ -203,8 +182,8 @@ func (tc configurationTestCase) run(t *testing.T) {
 	}
 
 	if !tc.stateValue.IsNull() {
-		req.State = createConfigTestState(tc.stateCategory, tc.stateTier, tc.stateConfig)
-		req.Plan = createConfigTestPlan(tc.planCategory, tc.planTier, tc.stateConfig)
+		req.State = createConfigTestState(tc.stateSizeId, tc.stateConfig)
+		req.Plan = createConfigTestPlan(tc.planSizeId, tc.stateConfig)
 	}
 
 	resp := &planmodifier.MapResponse{PlanValue: tc.planValue}
@@ -247,35 +226,20 @@ func TestConfigurationPlanModifier(t *testing.T) {
 			expectUnknown: true,
 		},
 		{
-			name:          "tier changes marks unknown",
+			name:          "size_id changes marks unknown",
 			stateValue:    configMap,
 			planValue:     configMap,
-			stateCategory: "general",
-			stateTier:     "G-Small-1",
-			planCategory:  "general",
-			planTier:      "G-Medium-1",
+			stateSizeId:   "sku-abc-111",
+			planSizeId:    "sku-abc-222",
 			stateConfig:   testConfiguration,
 			expectUnknown: true,
 		},
 		{
-			name:          "category changes marks unknown",
-			stateValue:    configMap,
-			planValue:     configMap,
-			stateCategory: "general",
-			stateTier:     "G-Small-1",
-			planCategory:  "memory",
-			planTier:      "M-Small-1",
-			stateConfig:   testConfiguration,
-			expectUnknown: true,
-		},
-		{
-			name:            "size unchanged preserves value",
+			name:            "size_id unchanged preserves value",
 			stateValue:      configMap,
 			planValue:       types.MapUnknown(types.StringType),
-			stateCategory:   "general",
-			stateTier:       "G-Small-1",
-			planCategory:    "general",
-			planTier:        "G-Small-1",
+			stateSizeId:     "sku-abc-111",
+			planSizeId:      "sku-abc-111",
 			stateConfig:     testConfiguration,
 			expectPreserved: true,
 		},

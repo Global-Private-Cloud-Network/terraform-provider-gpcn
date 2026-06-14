@@ -45,6 +45,13 @@ data "gpcn_virtualmachine_images" "alma_8" {
   image_name    = "Alma Linux 8"
 }
 
+# Look up a general-purpose size with at least 2 CPU cores
+data "gpcn_virtualmachine_sizes" "micro" {
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+  category      = "general-purpose"
+  min_cpu       = 2
+}
+
 # Provide an existing public key
 resource "gpcn_ssh_key" "uploaded" {
   name = "terraform-demo-key-uploaded"
@@ -99,10 +106,7 @@ resource "gpcn_virtualmachine" "example" {
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
   # Compute configuration
-  size = {
-    category = "general-purpose"
-    name     = "G-Micro-1"
-  }
+  size_id  = data.gpcn_virtualmachine_sizes.micro.sizes[0].id
   image_id = data.gpcn_virtualmachine_images.alma_8.images[0].id
 
   # Networking
@@ -138,7 +142,7 @@ resource "gpcn_virtualmachine" "example" {
 - `image_id` (String) Unique identifier of the operating system image to use for the virtual machine. Use the gpcn_virtualmachine_images data source to look up the image ID. Changing this value requires replacing the virtual machine
 - `initial_auth` (Attributes) Initial authentication configuration for the virtual machine. Either ssh_key_id or password must be specified. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine (see [below for nested schema](#nestedatt--initial_auth))
 - `name` (String) Human-readable name for the virtual machine
-- `size` (Attributes) Hardware size configuration defining the compute resources (CPU, memory, disk) for the virtual machine. Specified using a category and tier pairing. Downsizing requires replacing the virtual machine. Note that not all sizes are available for every datacenter (see [below for nested schema](#nestedatt--size))
+- `size_id` (String) Unique identifier (SKU ID) of the size to use for the virtual machine. Use the gpcn_virtualmachine_sizes data source to look up the size ID. Changing to a non-upgradeable size requires replacing the virtual machine
 
 ### Optional
 
@@ -166,15 +170,6 @@ Optional:
 
 - `password` (String, Sensitive) Password for authentication. Must be 12-20 characters, contain only letters, digits, and ! @ # % - _ ., and include at least one uppercase letter, one lowercase letter, one digit, and one symbol. Cannot be set when ssh_key_id is set. username defaults to the image default if not specified
 - `ssh_key_id` (String) ID of the SSH key to use for authentication. Cannot be set together with password
-
-
-<a id="nestedatt--size"></a>
-### Nested Schema for `size`
-
-Required:
-
-- `category` (String) Short code representing the category. Must be one of: 'general' or 'memory'
-- `name` (String) Human-readable name of the size configuration. Must be one of: 'G-Micro-1', 'G-Small-1', 'G-Medium-1', 'G-Large-1', 'G-Extra Large-1', 'M-Micro-1', 'M-Small-1', 'M-Medium-1', 'M-Large-1', 'M-Extra Large-1'
 
 ## Import
 

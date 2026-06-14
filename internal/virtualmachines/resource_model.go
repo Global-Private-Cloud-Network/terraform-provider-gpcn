@@ -20,7 +20,7 @@ type ResourceModel struct {
 	ID               types.String `tfsdk:"id"`
 	Name             types.String `tfsdk:"name"`
 	DatacenterId     types.String `tfsdk:"datacenter_id"`
-	Size             types.Object `tfsdk:"size"`
+	SizeId           types.String `tfsdk:"size_id"`
 	ImageId          types.String `tfsdk:"image_id"`
 	CreatedTime      types.String `tfsdk:"created_time"`
 	LastUpdated      types.String `tfsdk:"last_updated"`
@@ -45,18 +45,6 @@ func (o ResourceModelInitialAuth) AttrTypes() map[string]attr.Type {
 		"ssh_key_id": types.StringType,
 		"username":   types.StringType,
 		"password":   types.StringType,
-	}
-}
-
-type ResourceModelSize struct {
-	Category types.String `tfsdk:"category"`
-	Name     types.String `tfsdk:"name"`
-}
-
-func (o ResourceModelSize) AttrTypes() map[string]attr.Type {
-	return map[string]attr.Type{
-		"category": types.StringType,
-		"name":     types.StringType,
 	}
 }
 
@@ -133,17 +121,8 @@ func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient
 	if model.Name.IsNull() {
 		model.Name = types.StringValue(response.Data.Name)
 	}
-	if model.Size.IsNull() {
-		size := ResourceModelSize{}
-		var sizeDiags diag.Diagnostics
-		model.Size, sizeDiags = types.ObjectValueFrom(ctx, size.AttrTypes(), ResourceModelSize{
-			Category: types.StringValue(response.Data.Configuration.CategoryCode),
-			Name:     types.StringValue(response.Data.Configuration.Name),
-		})
-		if sizeDiags.HasError() {
-			allDiags.Append(sizeDiags...)
-			model.Size = types.ObjectNull(size.AttrTypes())
-		}
+	if model.SizeId.IsNull() {
+		model.SizeId = types.StringValue(response.Data.Configuration.SkuId)
 	}
 
 	var networkDiags diag.Diagnostics
