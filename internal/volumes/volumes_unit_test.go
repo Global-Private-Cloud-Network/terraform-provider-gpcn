@@ -34,7 +34,7 @@ func newVolumeResponse(id, name string, sizeGb int64, skuId string) *readVolumes
 	resp.Data.VolumeType.ID = 1
 	resp.Data.VolumeType.Name = "SSD"
 	resp.Data.VolumeType.Description = "Solid State Drive"
-	resp.Data.SkuId = skuId
+	resp.Data.Configuration.SkuId = skuId
 	resp.Data.Datacenter.ID = testDatacenterID
 	resp.Data.Datacenter.Name = "US-East-1"
 	resp.Data.Datacenter.Region = "East"

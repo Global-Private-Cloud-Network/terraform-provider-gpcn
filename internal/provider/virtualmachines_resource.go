@@ -11,7 +11,6 @@ import (
 
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/networks"
-	"terraform-provider-gpcn/internal/volumes"
 
 	"terraform-provider-gpcn/internal/virtualmachines"
 
@@ -160,17 +159,6 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				},
 				Default: listdefault.StaticValue(types.ListValueMust(types.StringType, []attr.Value{})),
 			},
-			"volume_ids": schema.ListAttribute{
-				Description: "List of volume IDs to attach to the virtual machine. Maximum of 5 volumes allowed. A volume can only be attached to a single virtual machine, so this parameter will not work as expected when using Terraform's count meta-attribute",
-				ElementType: types.StringType,
-				Optional:    true,
-				Computed:    true,
-				Validators: []validator.List{
-					listvalidator.SizeAtMost(virtualmachines.MAX_VOLUMES_ATTACHED_ALLOWED),
-					listvalidator.UniqueValues(),
-				},
-				Default: listdefault.StaticValue(types.ListValueMust(types.StringType, []attr.Value{})),
-			},
 			"network_hotplug": schema.BoolAttribute{
 				Description: "Whether the virtual machine supports hot modifications without the virtual machine being in Shutoff status",
 				Computed:    true,
@@ -288,21 +276,6 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 	var mapDiags diag.Diagnostics
 	plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
 	resp.Diagnostics.Append(mapDiags...)
-
-	// Attach each volume
-	if !plan.VolumeIds.IsNull() {
-		var volumeIds []string
-		plan.VolumeIds.ElementsAs(ctx, &volumeIds, true)
-		for _, volumeId := range volumeIds {
-			err = volumes.AddVolumeToVirtualMachine(r.client, ctx, plan.ID.ValueString(), volumeId)
-			if err != nil {
-				resp.Diagnostics.AddWarning(
-					virtualmachines.WarnSummaryAttachingVolumeFailed,
-					fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.WarnDetailAttachingVolumeWithIDFailed, volumeId), err).Error(),
-				)
-			}
-		}
-	}
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
@@ -437,13 +410,6 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		return
 	}
 
-	// Update volumes if changed
-	volumeDiags := virtualmachines.UpdateVolumesIfChanged(r.client, ctx, plan.ID.ValueString(), state, plan)
-	resp.Diagnostics.Append(volumeDiags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
 	// Perform a GET call to retrieve actual information about the Virtual Machine
 	tflog.Info(ctx, virtualmachines.LogAllVMUpdateOpsCompleteRetrievingLatestInfo)
 	getVirtualMachineResponse, err := virtualmachines.GetVirtualMachine(r.client, ctx, plan.ID.ValueString())
@@ -527,21 +493,6 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 		}
 	}
 
-	// Detach volumes too
-	if !state.VolumeIds.IsNull() {
-		var volumeIds []string
-		state.VolumeIds.ElementsAs(ctx, &volumeIds, true)
-		for _, volumeId := range volumeIds {
-			err := volumes.RemoveVolumeFromVirtualMachine(r.client, ctx, volumeId)
-			if err != nil {
-				resp.Diagnostics.AddWarning(
-					virtualmachines.WarnSummaryRemovingVolumeFailed,
-					fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.WarnDetailRemovingVolumeWithIDFailed, volumeId), err).Error()+". This warning should only be treated as an error if you are not trying to delete the virtual machine and volume in quick succession.",
-				)
-			}
-		}
-	}
-
 	request, err := http.NewRequestWithContext(ctx, "DELETE", virtualmachines.BASE_URL_V1+state.ID.ValueString(), nil)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -606,7 +557,6 @@ Some actions can be done without stopping the VM. Since it's a heavy time invest
 Cases where VM needs to be stopped:
   - NetworkHotplug is disabled AND one of the below
   - NetworkIds change
-  - VolumeIds change
   - Size changes
 */
 func determineIfVMNeedsStopped(state, plan virtualmachines.ResourceModel) bool {
@@ -617,6 +567,5 @@ func determineIfVMNeedsStopped(state, plan virtualmachines.ResourceModel) bool {
 
 	// If network hotplug is disabled, the VM needs to be stopped for a few scenarios
 	return (!slices.Equal(plan.NetworkIds.Elements(), state.NetworkIds.Elements())) ||
-		(!slices.Equal(plan.VolumeIds.Elements(), state.VolumeIds.Elements())) ||
 		!maps.Equal(state.Size.Attributes(), plan.Size.Attributes())
 }

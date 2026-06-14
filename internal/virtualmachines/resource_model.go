@@ -29,7 +29,6 @@ type ResourceModel struct {
 	AllocatePublicIp types.Bool   `tfsdk:"allocate_public_ip"`
 	PublicIp         types.String `tfsdk:"public_ip"`
 	NetworkIds       types.List   `tfsdk:"network_ids"`
-	VolumeIds        types.List   `tfsdk:"volume_ids"`
 	NetworkHotplug   types.Bool   `tfsdk:"network_hotplug"`
 	InitialAuth      types.Object `tfsdk:"initial_auth"`
 	ResourceGroupId  types.String `tfsdk:"resource_group_id"`

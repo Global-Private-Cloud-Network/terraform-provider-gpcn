@@ -144,7 +144,6 @@ resource "gpcn_virtualmachine" "example" {
 
 - `network_ids` (List of String) List of network IDs to attach to the virtual machine. Maximum of 5 networks allowed
 - `resource_group_id` (String) Optional ID of the resource group to assign this virtual machine to
-- `volume_ids` (List of String) List of volume IDs to attach to the virtual machine. Maximum of 5 volumes allowed. A volume can only be attached to a single virtual machine, so this parameter will not work as expected when using Terraform's count meta-attribute
 
 ### Read-Only
 

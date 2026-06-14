@@ -183,28 +183,3 @@ func UpdateChangeableAttributesIfChanged(gpcnClient *client.GpcnClient, ctx cont
 
 	return diags
 }
-
-// UpdateVolumesIfChanged handles volume attachment/detachment during VM update.
-// Returns diagnostics if any errors occurred.
-func UpdateVolumesIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, state, plan ResourceModel) diag.Diagnostics {
-	var diags diag.Diagnostics
-
-	if slices.Equal(plan.VolumeIds.Elements(), state.VolumeIds.Elements()) {
-		return diags
-	}
-
-	var oldVolumesList, newVolumesList []string
-	state.VolumeIds.ElementsAs(ctx, &oldVolumesList, true)
-	plan.VolumeIds.ElementsAs(ctx, &newVolumesList, true)
-
-	err := UpdateVolumes(gpcnClient, ctx, vmID, oldVolumesList, newVolumesList)
-	if err != nil {
-		diags.AddError(
-			ErrSummaryErrorUpdatingVolumes,
-			err.Error(),
-		)
-		return diags
-	}
-
-	return diags
-}

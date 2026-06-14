@@ -11,7 +11,6 @@ const (
 	ErrSummaryErrorUpdatingVMAttributes           = "Error updating Virtual Machine attributes"
 	ErrSummaryErrorRetrievingNetworkIfaces        = "Error retrieving network interfaces"
 	ErrSummaryErrorUpdatingNetworkInterfaces      = "Error updating network interfaces"
-	ErrSummaryErrorUpdatingVolumes                = "Error updating volumes"
 	ErrSummaryUnableToCreateDeleteRequest         = "Unable to create a request for deleting a new GPCN Virtual Machine"
 	ErrSummaryUnableToDeleteVM                    = "Unable to delete GPCN Virtual Machine"
 	ErrSummaryUnableToUpdateVM                    = "Unable to update GPCN Virtual Machine"
@@ -25,9 +24,7 @@ const (
 
 // Warning summary constants
 const (
-	WarnSummaryAttachingVolumeFailed          = "Attaching volume failed"
 	WarnSummaryRemovingNetworkInterfaceFailed = "Removing network interface failed"
-	WarnSummaryRemovingVolumeFailed           = "Removing volume failed"
 )
 
 // Error detail message templates
@@ -52,9 +49,7 @@ const (
 
 // Warning detail message templates
 const (
-	WarnDetailAttachingVolumeWithIDFailed          = "Attaching volume with ID '%s' failed"
 	WarnDetailRemovingNetworkInterfaceWithIDFailed = "Removing the network interface with ID '%s' failed"
-	WarnDetailRemovingVolumeWithIDFailed           = "Removing the volume with ID '%s' failed"
 )
 
 // Polling constants
