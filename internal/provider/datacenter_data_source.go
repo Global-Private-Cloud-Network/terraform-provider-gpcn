@@ -28,10 +28,12 @@ type datacenterDataSource struct {
 }
 
 type datacenterDataSourceModel struct {
-	Name        types.String `tfsdk:"name"`
-	CountryName types.String `tfsdk:"country_name"`
-	RegionName  types.String `tfsdk:"region_name"`
-	DataCenters types.List   `tfsdk:"datacenters"`
+	Name         types.String `tfsdk:"name"`
+	CountryName  types.String `tfsdk:"country_name"`
+	RegionName   types.String `tfsdk:"region_name"`
+	GPUEnabled   types.Bool   `tfsdk:"gpu_enabled"`
+	CustomImages types.Bool   `tfsdk:"custom_images"`
+	DataCenters  types.List   `tfsdk:"datacenters"`
 }
 
 type datacenterResponse struct {
@@ -45,6 +47,8 @@ type datacenterResponse struct {
 		CountryID           string `json:"countryId"`
 		CountryName         string `json:"countryName"`
 		CountryAbbreviation string `json:"countryAbbreviation"`
+		GPUEnabled          bool   `json:"gpuEnabled"`
+		CustomImages        bool   `json:"customImages"`
 	} `json:"data"`
 }
 type datacenterDataResponseTF struct {
@@ -55,6 +59,8 @@ type datacenterDataResponseTF struct {
 	CountryID           types.String `tfsdk:"country_id"`
 	CountryName         types.String `tfsdk:"country_name"`
 	CountryAbbreviation types.String `tfsdk:"country_abbreviation"`
+	GPUEnabled          types.Bool   `tfsdk:"gpu_enabled"`
+	CustomImages        types.Bool   `tfsdk:"custom_images"`
 }
 
 type datacenterRegionResponse struct {
@@ -87,6 +93,8 @@ func (o datacenterDataResponseTF) AttrTypes() map[string]attr.Type {
 		"country_id":           types.StringType,
 		"country_name":         types.StringType,
 		"country_abbreviation": types.StringType,
+		"gpu_enabled":          types.BoolType,
+		"custom_images":        types.BoolType,
 	}
 }
 
@@ -109,6 +117,14 @@ func (d *datacenterDataSource) Schema(_ context.Context, _ datasource.SchemaRequ
 			"region_name": schema.StringAttribute{
 				Optional:    true,
 				Description: "Filter datacenters by region name within a country. (e.g., 'East', 'West', 'Central')",
+			},
+			"gpu_enabled": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Filter datacenters to only those with GPU support enabled.",
+			},
+			"custom_images": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Filter datacenters to only those that support custom images.",
 			},
 			"datacenters": schema.ListNestedAttribute{
 				Computed:    true,
@@ -142,6 +158,14 @@ func (d *datacenterDataSource) Schema(_ context.Context, _ datasource.SchemaRequ
 						"country_abbreviation": schema.StringAttribute{
 							Computed:    true,
 							Description: "Two-letter country code abbreviation (e.g., 'US').",
+						},
+						"gpu_enabled": schema.BoolAttribute{
+							Computed:    true,
+							Description: "Whether GPU resources are available in this datacenter.",
+						},
+						"custom_images": schema.BoolAttribute{
+							Computed:    true,
+							Description: "Whether custom images are supported in this datacenter.",
 						}},
 				},
 			},
@@ -200,6 +224,44 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		return
 	}
 
+	if !state.GPUEnabled.IsNull() && state.GPUEnabled.ValueBool() {
+		unfiltered := datacenterResponse.Data
+		filtered := unfiltered[:0]
+		for _, dc := range unfiltered {
+			if dc.GPUEnabled {
+				filtered = append(filtered, dc)
+			}
+		}
+		datacenterResponse.Data = filtered
+		// If filtering removed all results, give a specific error rather than falling
+		// through to the region/country suggestion logic which would be misleading.
+		if len(unfiltered) > 0 && len(filtered) == 0 {
+			resp.Diagnostics.AddError(
+				datacenters.ErrSummaryUnableGetDatacenters,
+				datacenters.ErrDetailDatacenterNoGPUEnabled,
+			)
+			return
+		}
+	}
+
+	if !state.CustomImages.IsNull() && state.CustomImages.ValueBool() {
+		unfiltered := datacenterResponse.Data
+		filtered := unfiltered[:0]
+		for _, dc := range unfiltered {
+			if dc.CustomImages {
+				filtered = append(filtered, dc)
+			}
+		}
+		datacenterResponse.Data = filtered
+		if len(unfiltered) > 0 && len(filtered) == 0 {
+			resp.Diagnostics.AddError(
+				datacenters.ErrSummaryUnableGetDatacenters,
+				datacenters.ErrDetailDatacenterNoCustomImages,
+			)
+			return
+		}
+	}
+
 	// If no data centers found, search with just country name to make a friendly error message
 	if len(datacenterResponse.Data) < 1 {
 		datacenterRegionResponse, err := d.getCountriesAndRegions(ctx, state.CountryName.ValueString())
@@ -249,6 +311,8 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 			CountryID:           types.StringValue(datacenter.CountryID),
 			CountryName:         types.StringValue(datacenter.CountryName),
 			CountryAbbreviation: types.StringValue(datacenter.CountryAbbreviation),
+			GPUEnabled:          types.BoolValue(datacenter.GPUEnabled),
+			CustomImages:        types.BoolValue(datacenter.CustomImages),
 		})
 	}
 
