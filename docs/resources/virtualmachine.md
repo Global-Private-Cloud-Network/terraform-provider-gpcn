@@ -23,7 +23,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.5.4"
+      version = "~>1.0.0"
     }
   }
 }
@@ -124,11 +124,12 @@ resource "gpcn_virtualmachine" "example" {
     ssh_key_id = gpcn_ssh_key.uploaded.id
     username   = "almalinux"
   }
+}
 
-  # Storage
-  volume_ids = [
-    gpcn_volume.vm_storage.id
-  ]
+# Attach the storage volume to the virtual machine
+resource "gpcn_volume_attachment" "vm_storage_attachment" {
+  virtual_machine_id = gpcn_virtualmachine.example.id
+  volume_id          = gpcn_volume.vm_storage.id
 }
 ```
 

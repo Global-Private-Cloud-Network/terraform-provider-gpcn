@@ -1,3 +1,25 @@
+## 1.0.0 (June 15, 2026)
+
+BREAKING CHANGES:
+
+- **Virtual Machines**: The `auth` block has been renamed to `initial_auth`. Existing configurations must be updated.
+- **GPU**: The `auth` block has been renamed to `initial_auth`. Existing configurations must be updated.
+- **Virtual Machines**: The `image` attribute has been renamed to `image_id`. Use the new `gpcn_virtualmachine_images` data source to look up image IDs.
+- **Virtual Machines**: The `volume_ids` attribute has been removed. Volumes must now be attached using the new `gpcn_volume_attachment` resource.
+- **Virtual Machines**: The `size` block has been replaced by a `size_id` string attribute. Use the new `gpcn_virtualmachine_sizes` data source to look up size IDs.
+- **Virtual Machines**: The VM size category value `"general"` has been renamed to `"general-purpose"` and `"memory"` has been renamed to `"memory-optimized"`.
+
+FEATURES:
+
+- **Data Source: `gpcn_virtualmachine_images`**: New data source to list available OS images for a given datacenter, with optional filtering by image type or name substring.
+- **Data Source: `gpcn_virtualmachine_sizes`**: New data source to list available VM sizes for a given datacenter, with optional filtering by category, minimum CPU, minimum memory, and minimum base storage size.
+- **Resource: `gpcn_volume_attachment`**: New resource for attaching a volume to a virtual machine. Replaces the `volume_ids` attribute on `gpcn_virtualmachine`.
+- **Datacenters**: `gpcn_datacenters` data source now exposes `gpu_enabled` and `custom_images` boolean attributes for filtering datacenters by capability.
+
+ENHANCEMENTS:
+
+- **Virtual Machines**: Size upgrades within the same category are again performed in-place without requiring resource replacement.
+
 ## 0.5.4 (May 12, 2026)
 
 ENHANCEMENTS:

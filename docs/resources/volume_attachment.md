@@ -17,7 +17,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.5.4"
+      version = "~>1.0.0"
     }
   }
 }
@@ -38,6 +38,13 @@ data "gpcn_virtualmachine_images" "alma_8" {
   image_name    = "Alma Linux 8"
 }
 
+# Look up a general-purpose size with at least 2 CPU cores
+data "gpcn_virtualmachine_sizes" "micro" {
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+  category      = "general-purpose"
+  min_cpu       = 2
+}
+
 resource "gpcn_volume" "vm_storage_primary" {
   name          = "vm-storage-primary"
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
@@ -56,10 +63,7 @@ resource "gpcn_virtualmachine" "example" {
   name          = "terraform-demo-vm"
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
-  size = {
-    category = "general-purpose"
-    name     = "G-Micro-1"
-  }
+  size_id  = data.gpcn_virtualmachine_sizes.micro.sizes[0].id
   image_id = data.gpcn_virtualmachine_images.alma_8.images[0].id
 
   allocate_public_ip = false
