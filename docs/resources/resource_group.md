@@ -39,7 +39,7 @@ resource "gpcn_resource_group" "example" {
 
 ### Required
 
-- `name` (String) Human-readable name for the resource group. Maximum 64 characters
+- `name` (String) Human-readable name for the resource group. Must be 1-64 characters
 
 ### Optional
 

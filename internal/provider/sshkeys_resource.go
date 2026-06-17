@@ -52,10 +52,10 @@ func (r *sshKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"name": schema.StringAttribute{
-				Description: "Human-readable name for the SSH key. Maximum 255 characters",
+				Description: "Human-readable name for the SSH key. Must be 1-255 characters",
 				Required:    true,
 				Validators: []validator.String{
-					stringvalidator.LengthAtMost(255),
+					stringvalidator.LengthBetween(1, 255),
 				},
 			},
 			"public_key": schema.StringAttribute{
@@ -63,6 +63,9 @@ func (r *sshKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
+				},
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
 				},
 			},
 			"created_time": schema.StringAttribute{

@@ -52,10 +52,10 @@ func (r *resourceGroupResource) Schema(_ context.Context, _ resource.SchemaReque
 				},
 			},
 			"name": schema.StringAttribute{
-				Description: "Human-readable name for the resource group. Maximum 64 characters",
+				Description: "Human-readable name for the resource group. Must be 1-64 characters",
 				Required:    true,
 				Validators: []validator.String{
-					stringvalidator.LengthAtMost(64),
+					stringvalidator.LengthBetween(1, 64),
 				},
 			},
 			"description": schema.StringAttribute{
