@@ -136,7 +136,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				},
 			},
 			"network_ids": schema.ListAttribute{
-				Description: "List of network IDs to attach to the virtual machine. Maximum of 5 networks allowed",
+				Description: "List of network IDs to attach to the virtual machine. Maximum of 5 networks allowed. The first in the list is considered the 'primary' and if removed, the next will take its place",
 				ElementType: types.StringType,
 				Optional:    true,
 				Computed:    true,

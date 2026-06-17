@@ -529,7 +529,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			// Detach first volume attachment by removing its attachment resource
 			{
 				Config: vmBase(sshKeyName, vol1Name, vol2Name, vmName) + `
-			resource "gpcn_volume_attachment" "vol2" {
+			resource "gpcn_volume_attachment" "vol2_attach" {
 			  virtual_machine_id = gpcn_virtualmachine.test.id
 			  volume_id          = gpcn_volume.vm_vol2.id
 			}`,

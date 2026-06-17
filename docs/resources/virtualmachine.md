@@ -147,7 +147,7 @@ resource "gpcn_volume_attachment" "vm_storage_attachment" {
 
 ### Optional
 
-- `network_ids` (List of String) List of network IDs to attach to the virtual machine. Maximum of 5 networks allowed
+- `network_ids` (List of String) List of network IDs to attach to the virtual machine. Maximum of 5 networks allowed. The first in the list is considered the 'primary' and if removed, the next will take its place
 - `resource_group_id` (String) Optional ID of the resource group to assign this virtual machine to
 
 ### Read-Only
