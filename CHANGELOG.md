@@ -15,6 +15,7 @@ FEATURES:
 - **Data Source: `gpcn_virtualmachine_sizes`**: New data source to list available VM sizes for a given datacenter, with optional filtering by category, minimum CPU, minimum memory, and minimum base storage size.
 - **Resource: `gpcn_volume_attachment`**: New resource for attaching a volume to a virtual machine. Replaces the `volume_ids` attribute on `gpcn_virtualmachine`.
 - **Datacenters**: `gpcn_datacenters` data source now exposes `gpu_enabled` and `custom_images` boolean attributes for filtering datacenters by capability.
+- GPU name, virtualmachine name, network name, and volume name now have appropriate length and special character validators
 
 ENHANCEMENTS:
 

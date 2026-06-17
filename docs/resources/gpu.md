@@ -85,7 +85,7 @@ resource "gpcn_gpu" "example" {
 - `gpu_count` (Number) The number of GPUs tied to the Virtual Machine. Must be 1, 2, or 4
 - `image_name` (String) The operating system image to use for the GPU. Must be one of: "ubuntu-22.04" or "ubuntu-24.04"
 - `initial_auth` (Attributes) Initial authentication configuration for the GPU. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine (see [below for nested schema](#nestedatt--initial_auth))
-- `name` (String) Human-readable name for the GPU
+- `name` (String) Human-readable name for the GPU. Must be 1-60 characters, starting and ending with an alphanumeric character, containing only letters, digits, spaces, periods, and hyphens
 
 ### Optional
 

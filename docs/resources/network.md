@@ -82,7 +82,7 @@ output "gpcn_network_example_custom" {
 ### Required
 
 - `datacenter_id` (String) Unique identifier of the datacenter where the network will be created. Changing this value requires replacing the network
-- `name` (String) Human-readable name for the network
+- `name` (String) Human-readable name for the network. Must be 1-255 characters
 - `network_type` (String) Type of network: either 'standard' or 'custom'. Changing this value requires replacing the network
 
 ### Optional

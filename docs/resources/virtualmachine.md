@@ -142,7 +142,7 @@ resource "gpcn_volume_attachment" "vm_storage_attachment" {
 - `datacenter_id` (String) Unique identifier of the datacenter where the virtual machine will be created. Changing this value requires replacing the virtual machine
 - `image_id` (String) Unique identifier of the operating system image to use for the virtual machine. Use the gpcn_virtualmachine_images data source to look up the image ID. Changing this value requires replacing the virtual machine
 - `initial_auth` (Attributes) Initial authentication configuration for the virtual machine. Either ssh_key_id or password must be specified. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine (see [below for nested schema](#nestedatt--initial_auth))
-- `name` (String) Human-readable name for the virtual machine
+- `name` (String) Human-readable name for the virtual machine. Must be 1-60 characters, starting and ending with an alphanumeric character, containing only letters, digits, spaces, periods, and hyphens
 - `size_id` (String) Unique identifier (SKU ID) of the size to use for the virtual machine. Use the gpcn_virtualmachine_sizes data source to look up the size ID. Changing to a non-upgradeable size requires replacing the virtual machine
 
 ### Optional

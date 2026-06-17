@@ -68,8 +68,15 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				},
 			},
 			"name": schema.StringAttribute{
-				Description: "Human-readable name for the virtual machine",
+				Description: "Human-readable name for the virtual machine. Must be 1-60 characters, starting and ending with an alphanumeric character, containing only letters, digits, spaces, periods, and hyphens",
 				Required:    true,
+				Validators: []validator.String{
+					stringvalidator.LengthBetween(1, 60),
+					stringvalidator.RegexMatches(
+						regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9 .\-]*[a-zA-Z0-9])?$`),
+						"Name must start and end with an alphanumeric character and contain only letters, digits, spaces, periods, and hyphens",
+					),
+				},
 			},
 			"datacenter_id": schema.StringAttribute{
 				Description: "Unique identifier of the datacenter where the virtual machine will be created. Changing this value requires replacing the virtual machine",

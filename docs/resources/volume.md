@@ -57,7 +57,7 @@ output "example_gpcn_volume_ssd" {
 ### Required
 
 - `datacenter_id` (String) Unique identifier of the datacenter where the volume will be created. Changing this value requires replacing the volume
-- `name` (String) Human-readable name for the volume. Changing this value requires replacing the volume
+- `name` (String) Human-readable name for the volume. Must be 1-255 characters. Changing this value requires replacing the volume
 - `size_gb` (Number) Size of the volume in GB. Can be increased without replacement, but shrinking requires replacing the volume
 - `volume_type` (String) Type of storage: either 'SSD' or 'NVMe'. Changing this value requires replacing the volume. Note that not all volume types are available for every datacenter
 

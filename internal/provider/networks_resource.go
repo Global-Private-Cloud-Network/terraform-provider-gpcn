@@ -57,8 +57,11 @@ func (r *networksResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				},
 			},
 			"name": schema.StringAttribute{
-				Description: "Human-readable name for the network",
+				Description: "Human-readable name for the network. Must be 1-255 characters",
 				Required:    true,
+				Validators: []validator.String{
+					stringvalidator.LengthBetween(1, 255),
+				},
 			},
 			"description": schema.StringAttribute{
 				Description: "Additional information about the network to provide context for its purpose",
