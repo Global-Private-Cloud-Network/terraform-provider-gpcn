@@ -1,4 +1,4 @@
-## 1.0.0 (June 15, 2026)
+## 1.0.0 (June 18, 2026)
 
 BREAKING CHANGES:
 
