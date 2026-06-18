@@ -69,8 +69,8 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 	tflog.Info(ctx, LogValidatedPublicIPConfigurationSuccessfully)
 
 	// Extract auth configuration and set authMethod fields
-	var auth ResourceModelAuth
-	authDiags := model.Auth.As(ctx, &auth, basetypes.ObjectAsOptions{})
+	var auth ResourceModelInitialAuth
+	authDiags := model.InitialAuth.As(ctx, &auth, basetypes.ObjectAsOptions{})
 	if authDiags.HasError() {
 		return nil, fmt.Errorf("failed to read auth configuration")
 	}

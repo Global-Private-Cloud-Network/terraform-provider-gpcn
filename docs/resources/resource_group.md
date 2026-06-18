@@ -19,7 +19,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.5.4"
+      version = "~>1.0.0"
     }
   }
 }
@@ -39,7 +39,7 @@ resource "gpcn_resource_group" "example" {
 
 ### Required
 
-- `name` (String) Human-readable name for the resource group. Maximum 64 characters
+- `name` (String) Human-readable name for the resource group. Must be 1-64 characters
 
 ### Optional
 

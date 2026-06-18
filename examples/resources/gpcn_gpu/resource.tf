@@ -9,7 +9,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.5.4"
+      version = "~>1.0.0"
     }
   }
 }
@@ -18,11 +18,12 @@ provider "gpcn" {
   host = "https://api.gpcn.com"
 }
 
-# Lookup datacenter in Central US region
+# Lookup GPU-enabled datacenters in Central US region
 data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "central"
   name         = "Kansas"
+  gpu_enabled  = true
 }
 
 # Provide an existing public key
@@ -33,7 +34,8 @@ resource "gpcn_ssh_key" "uploaded" {
 }
 
 resource "gpcn_gpu" "example" {
-  name          = "terraform-demo-gpu"
+  name = "terraform-demo-gpu"
+
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
   # Only one can be specified but one must be
@@ -46,8 +48,15 @@ resource "gpcn_gpu" "example" {
   # Must be one of "ubuntu-22.04" or "ubuntu-24.04"
   image_name = "ubuntu-22.04"
 
-  # Authentication
-  auth = {
+  # Initial authentication (applied at creation time only; changes update state without affecting the machine)
+  initial_auth = {
     ssh_key_id = gpcn_ssh_key.uploaded.id
+  }
+
+  lifecycle {
+    precondition {
+      condition     = length(data.gpcn_datacenters.central_us.datacenters) > 0
+      error_message = "No GPU-enabled datacenters found matching the specified filters."
+    }
   }
 }

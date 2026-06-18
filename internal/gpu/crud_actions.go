@@ -47,8 +47,8 @@ func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId stri
 	tflog.Info(ctx, LogStartingCreateGPU)
 
 	// Extract auth configuration
-	var auth ResourceModelAuth
-	authDiags := plan.Auth.As(ctx, &auth, basetypes.ObjectAsOptions{})
+	var auth ResourceModelInitialAuth
+	authDiags := plan.InitialAuth.As(ctx, &auth, basetypes.ObjectAsOptions{})
 	if authDiags.HasError() {
 		return nil, fmt.Errorf("failed to read auth configuration")
 	}

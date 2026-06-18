@@ -18,10 +18,12 @@ type readVolumesResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Data    struct {
-		ID         string `json:"id"`
-		Name       string `json:"name"`
-		SizeGb     int64  `json:"sizeGb"`
-		SkuId      string `json:"skuId"`
+		ID            string `json:"id"`
+		Name          string `json:"name"`
+		SizeGb        int64  `json:"sizeGb"`
+		Configuration struct {
+			SkuId string `json:"skuId"`
+		} `json:"configuration"`
 		VolumeType struct {
 			ID          int64  `json:"id"`
 			Name        string `json:"name"`

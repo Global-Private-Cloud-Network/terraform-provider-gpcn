@@ -29,6 +29,7 @@ func TestGPUResource(t *testing.T) {
 				country_name = "United States"
 				region_name  = "central"
 				name         = "Kansas"
+				gpu_enabled  = true
 			}
 
 			resource "gpcn_ssh_key" "test" {
@@ -42,7 +43,7 @@ func TestGPUResource(t *testing.T) {
 				series_name   = "NVIDIA RTX A6000 Series"
 				gpu_count     = 1
 				image_name    = "ubuntu-22.04"
-				auth = {
+				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.test.id
 				}
 			}
@@ -63,7 +64,7 @@ func TestGPUResource(t *testing.T) {
 					resource.TestCheckResourceAttr(gpcnGPUTest, "name", gpuName),
 					resource.TestCheckResourceAttr(gpcnGPUTest, "series_name", "NVIDIA RTX A6000 Series"),
 					resource.TestCheckResourceAttr(gpcnGPUTest, "gpu_count", "1"),
-					resource.TestCheckResourceAttrSet(gpcnGPUTest, "auth.ssh_key_id"),
+					resource.TestCheckResourceAttrSet(gpcnGPUTest, "initial_auth.ssh_key_id"),
 				),
 			},
 			// ImportState testing
@@ -81,6 +82,7 @@ func TestGPUResource(t *testing.T) {
 				country_name = "United States"
 				region_name  = "central"
 				name         = "Kansas"
+				gpu_enabled  = true
 			}
 
 			resource "gpcn_ssh_key" "test" {
@@ -94,7 +96,7 @@ func TestGPUResource(t *testing.T) {
 				series_name   = "NVIDIA RTX A6000 Series"
 				gpu_count     = 1
 				image_name    = "ubuntu-22.04"
-				auth = {
+				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.test.id
 				}
 			}
@@ -112,7 +114,7 @@ func TestGPUResource(t *testing.T) {
 	})
 }
 
-func TestGPUResourceAuthReplacement(t *testing.T) {
+func TestGPUResourceInitialAuthNoOp(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
 	gpuName := fmt.Sprintf("gpu-auth-replace-%s", rName)
@@ -128,6 +130,7 @@ func TestGPUResourceAuthReplacement(t *testing.T) {
 				country_name = "United States"
 				region_name  = "central"
 				name         = "Kansas"
+				gpu_enabled  = true
 			}
 
 			resource "gpcn_ssh_key" "key1" {
@@ -141,7 +144,7 @@ func TestGPUResourceAuthReplacement(t *testing.T) {
 				series_name   = "NVIDIA RTX A6000 Series"
 				gpu_count     = 1
 				image_name    = "ubuntu-22.04"
-				auth = {
+				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.key1.id
 				}
 			}
@@ -155,13 +158,14 @@ func TestGPUResourceAuthReplacement(t *testing.T) {
 					resource.TestCheckResourceAttrSet(gpcnGPUTest, "id"),
 				),
 			},
-			// Changing ssh_key_id triggers replacement
+			// Changing initial_auth is a no-op - state is updated with new config values but no API calls are made
 			{
 				Config: providerConfig + fmt.Sprintf(`
 			data "gpcn_datacenters" "central_us" {
 				country_name = "United States"
 				region_name  = "central"
 				name         = "Kansas"
+				gpu_enabled  = true
 			}
 
 			resource "gpcn_ssh_key" "key2" {
@@ -175,18 +179,18 @@ func TestGPUResourceAuthReplacement(t *testing.T) {
 				series_name   = "NVIDIA RTX A6000 Series"
 				gpu_count     = 1
 				image_name    = "ubuntu-22.04"
-				auth = {
+				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.key2.id
 				}
 			}
 			`, key2Name, gpuName),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(gpcnGPUTest, plancheck.ResourceActionReplace),
+						plancheck.ExpectResourceAction(gpcnGPUTest, plancheck.ResourceActionUpdate),
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet(gpcnGPUTest, "auth.ssh_key_id"),
+					resource.TestCheckResourceAttrSet(gpcnGPUTest, "initial_auth.ssh_key_id"),
 				),
 			},
 		},
@@ -221,7 +225,7 @@ func TestGPUResourceNoAvailability(t *testing.T) {
 				series_code   = "nvidia-a100_series"
 				gpu_count     = 4
 				image_name    = "ubuntu-22.04"
-				auth = {
+				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.test.id
 				}
 			}
@@ -246,7 +250,7 @@ func TestGPUResourceInvalidSeries(t *testing.T) {
 		  %s
 		  gpu_count  = %s
 		  image_name = %q
-		  auth = {
+		  initial_auth = {
 		    ssh_key_id = "any-ssh-key-id"
 		  }
 		}
@@ -314,7 +318,7 @@ func TestGPUResourceInvalidImageName(t *testing.T) {
 				series_name   = "NVIDIA RTX A6000 Series"
 				gpu_count     = 1
 				image_name    = "Invalid Image Name"
-				auth = {
+				initial_auth = {
 					ssh_key_id = "any-ssh-key-id"
 				}
 			}
@@ -339,7 +343,7 @@ func TestGPUResourceInvalidGPUCount(t *testing.T) {
 					series_name   = "NVIDIA RTX A6000 Series"
 					gpu_count     = 0
 					image_name    = "ubuntu-22.04"
-					auth = {
+					initial_auth = {
 						ssh_key_id = "any-ssh-key-id"
 					}
 				}
@@ -366,7 +370,7 @@ func TestGPUResourceMissingAuth(t *testing.T) {
 				image_name    = "ubuntu-22.04"
 			}
 			`,
-				ExpectError: regexp.MustCompile(`The argument "auth" is required`),
+				ExpectError: regexp.MustCompile(`The argument "initial_auth" is required`),
 			},
 		},
 	})

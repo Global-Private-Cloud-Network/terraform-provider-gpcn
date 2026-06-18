@@ -8,6 +8,7 @@ import (
 
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/networks"
+	"terraform-provider-gpcn/internal/virtualmachineimages"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -19,8 +20,8 @@ type ResourceModel struct {
 	ID               types.String `tfsdk:"id"`
 	Name             types.String `tfsdk:"name"`
 	DatacenterId     types.String `tfsdk:"datacenter_id"`
-	Size             types.Object `tfsdk:"size"`
-	Image            types.String `tfsdk:"image"`
+	SizeId           types.String `tfsdk:"size_id"`
+	ImageId          types.String `tfsdk:"image_id"`
 	CreatedTime      types.String `tfsdk:"created_time"`
 	LastUpdated      types.String `tfsdk:"last_updated"`
 	Location         types.Map    `tfsdk:"location"`
@@ -28,35 +29,22 @@ type ResourceModel struct {
 	AllocatePublicIp types.Bool   `tfsdk:"allocate_public_ip"`
 	PublicIp         types.String `tfsdk:"public_ip"`
 	NetworkIds       types.List   `tfsdk:"network_ids"`
-	VolumeIds        types.List   `tfsdk:"volume_ids"`
 	NetworkHotplug   types.Bool   `tfsdk:"network_hotplug"`
-	Auth             types.Object `tfsdk:"auth"`
+	InitialAuth      types.Object `tfsdk:"initial_auth"`
 	ResourceGroupId  types.String `tfsdk:"resource_group_id"`
 }
 
-type ResourceModelAuth struct {
+type ResourceModelInitialAuth struct {
 	SshKeyId types.String `tfsdk:"ssh_key_id"`
 	Username types.String `tfsdk:"username"`
 	Password types.String `tfsdk:"password"`
 }
 
-func (o ResourceModelAuth) AttrTypes() map[string]attr.Type {
+func (o ResourceModelInitialAuth) AttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
 		"ssh_key_id": types.StringType,
 		"username":   types.StringType,
 		"password":   types.StringType,
-	}
-}
-
-type ResourceModelSize struct {
-	Category types.String `tfsdk:"category"`
-	Name     types.String `tfsdk:"name"`
-}
-
-func (o ResourceModelSize) AttrTypes() map[string]attr.Type {
-	return map[string]attr.Type{
-		"category": types.StringType,
-		"name":     types.StringType,
 	}
 }
 
@@ -127,23 +115,14 @@ func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient
 	if model.DatacenterId.IsNull() {
 		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
 	}
-	if model.Image.IsNull() {
-		model.Image = types.StringValue(response.Data.Image)
-	}
+	var imageIdDiags diag.Diagnostics
+	model.ImageId, imageIdDiags = resolveImageId(gpcnClient, ctx, model.ImageId, model.DatacenterId.ValueString(), response)
+	allDiags.Append(imageIdDiags...)
 	if model.Name.IsNull() {
 		model.Name = types.StringValue(response.Data.Name)
 	}
-	if model.Size.IsNull() {
-		size := ResourceModelSize{}
-		var sizeDiags diag.Diagnostics
-		model.Size, sizeDiags = types.ObjectValueFrom(ctx, size.AttrTypes(), ResourceModelSize{
-			Category: types.StringValue(response.Data.Configuration.CategoryCode),
-			Name:     types.StringValue(response.Data.Configuration.Name),
-		})
-		if sizeDiags.HasError() {
-			allDiags.Append(sizeDiags...)
-			model.Size = types.ObjectNull(size.AttrTypes())
-		}
+	if model.SizeId.IsNull() {
+		model.SizeId = types.StringValue(response.Data.Configuration.SkuId)
 	}
 
 	var networkDiags diag.Diagnostics
@@ -152,25 +131,27 @@ func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient
 
 	// Populate auth from response. On import, auth is null and must be constructed from the response.
 	var authDiags diag.Diagnostics
-	model.Auth, authDiags = populateAuth(ctx, model.Auth, response)
+	model.InitialAuth, authDiags = populateAuth(ctx, model.InitialAuth, response)
 	allDiags.Append(authDiags...)
 
 	return model, allDiags
 }
 
-// populateAuth fills auth fields from the API response. On import, current is null and the struct
-// is built from scratch. Otherwise, any null fields are filled in with values from the response.
+// Fill auth fields from the API response. On import, current is null
 func populateAuth(ctx context.Context, current types.Object, response *ReadVirtualMachinesResponse) (types.Object, diag.Diagnostics) {
 	if current.IsUnknown() {
 		return current, nil
 	}
 
-	var auth ResourceModelAuth
+	var auth ResourceModelInitialAuth
 	if current.IsNull() {
-		auth = ResourceModelAuth{
+		auth = ResourceModelInitialAuth{
 			Username: types.StringValue(response.Data.Username),
 			SshKeyId: types.StringNull(),
 			Password: types.StringNull(),
+		}
+		if response.Data.SshKeyId != "" {
+			auth.SshKeyId = types.StringValue(response.Data.SshKeyId)
 		}
 	} else {
 		if diags := current.As(ctx, &auth, basetypes.ObjectAsOptions{}); diags.HasError() {
@@ -181,11 +162,41 @@ func populateAuth(ctx context.Context, current types.Object, response *ReadVirtu
 		}
 	}
 
-	if auth.SshKeyId.IsNull() && response.Data.SshKeyId != "" {
-		auth.SshKeyId = types.StringValue(response.Data.SshKeyId)
+	return types.ObjectValueFrom(ctx, auth.AttrTypes(), auth)
+}
+
+// Derive the image_id from the image name. On import, current is null
+func resolveImageId(gpcnClient *client.GpcnClient, ctx context.Context, current types.String, datacenterId string, response *ReadVirtualMachinesResponse) (types.String, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
+	if !current.IsNull() {
+		return current, diags
 	}
 
-	return types.ObjectValueFrom(ctx, auth.AttrTypes(), auth)
+	if datacenterId == "" {
+		datacenterId = response.Data.Datacenter.ID
+	}
+
+	images, err := virtualmachineimages.FetchImages(gpcnClient, ctx, datacenterId)
+	if err != nil {
+		diags.AddWarning(
+			"Unable to resolve image ID",
+			fmt.Sprintf("Failed to fetch images for datacenter %s to resolve image name %q: %s", datacenterId, response.Data.Image, err.Error()),
+		)
+		return types.StringNull(), diags
+	}
+
+	for _, img := range images {
+		if img.Name == response.Data.Image {
+			return types.StringValue(img.ID), diags
+		}
+	}
+
+	diags.AddWarning(
+		"Unable to resolve image ID",
+		fmt.Sprintf("Image %q was not found in the virtual machine images list for datacenter %s. The image_id field will remain empty.", response.Data.Image, datacenterId),
+	)
+	return types.StringNull(), diags
 }
 
 func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient, virtualMachineID string, model ResourceModel) (ResourceModel, diag.Diagnostics) {

@@ -19,7 +19,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.5.4"
+      version = "~>1.0.0"
     }
   }
 }
@@ -41,7 +41,7 @@ resource "gpcn_ssh_key" "uploaded" {
 
 ### Required
 
-- `name` (String) Human-readable name for the SSH key. Maximum 255 characters
+- `name` (String) Human-readable name for the SSH key. Must be 1-255 characters
 - `public_key` (String) The public SSH key to upload
 
 ### Read-Only

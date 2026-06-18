@@ -23,7 +23,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.5.4"
+      version = "~>1.0.0"
     }
   }
 }
@@ -32,11 +32,12 @@ provider "gpcn" {
   host = "https://api.gpcn.com"
 }
 
-# Lookup datacenter in Central US region
+# Lookup GPU-enabled datacenters in Central US region
 data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "central"
   name         = "Kansas"
+  gpu_enabled  = true
 }
 
 # Provide an existing public key
@@ -47,7 +48,8 @@ resource "gpcn_ssh_key" "uploaded" {
 }
 
 resource "gpcn_gpu" "example" {
-  name          = "terraform-demo-gpu"
+  name = "terraform-demo-gpu"
+
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
   # Only one can be specified but one must be
@@ -60,9 +62,16 @@ resource "gpcn_gpu" "example" {
   # Must be one of "ubuntu-22.04" or "ubuntu-24.04"
   image_name = "ubuntu-22.04"
 
-  # Authentication
-  auth = {
+  # Initial authentication (applied at creation time only; changes update state without affecting the machine)
+  initial_auth = {
     ssh_key_id = gpcn_ssh_key.uploaded.id
+  }
+
+  lifecycle {
+    precondition {
+      condition     = length(data.gpcn_datacenters.central_us.datacenters) > 0
+      error_message = "No GPU-enabled datacenters found matching the specified filters."
+    }
   }
 }
 ```
@@ -72,11 +81,11 @@ resource "gpcn_gpu" "example" {
 
 ### Required
 
-- `auth` (Attributes) Authentication configuration for the GPU. Changing this block requires replacing the GPU (see [below for nested schema](#nestedatt--auth))
 - `datacenter_id` (String) Unique identifier of the datacenter where the GPU will be created. Changing this value requires replacing the GPU
 - `gpu_count` (Number) The number of GPUs tied to the Virtual Machine. Must be 1, 2, or 4
 - `image_name` (String) The operating system image to use for the GPU. Must be one of: "ubuntu-22.04" or "ubuntu-24.04"
-- `name` (String) Human-readable name for the GPU
+- `initial_auth` (Attributes) Initial authentication configuration for the GPU. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine (see [below for nested schema](#nestedatt--initial_auth))
+- `name` (String) Human-readable name for the GPU. Must be 1-60 characters, starting and ending with an alphanumeric character, containing only letters, digits, spaces, periods, and hyphens
 
 ### Optional
 
@@ -90,8 +99,8 @@ resource "gpcn_gpu" "example" {
 - `last_updated` (String) Timestamp when the GPU was last updated in ISO-8601 format
 - `location` (Map of String) Location details including datacenter, region, and country information
 
-<a id="nestedatt--auth"></a>
-### Nested Schema for `auth`
+<a id="nestedatt--initial_auth"></a>
+### Nested Schema for `initial_auth`
 
 Required:
 

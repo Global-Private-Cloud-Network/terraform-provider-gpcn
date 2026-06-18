@@ -9,7 +9,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.5.4"
+      version = "~>1.0.0"
     }
   }
 }
@@ -23,6 +23,19 @@ data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "Central"
   name         = "Chicago"
+}
+
+# Look up the image ID for Alma Linux 8
+data "gpcn_virtualmachine_images" "alma_8" {
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+  image_name    = "Alma Linux 8"
+}
+
+# Look up a general-purpose size with at least 2 CPU cores
+data "gpcn_virtualmachine_sizes" "micro" {
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+  category      = "general-purpose"
+  min_cpu       = 2
 }
 
 # Provide an existing public key
@@ -79,11 +92,8 @@ resource "gpcn_virtualmachine" "example" {
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
   # Compute configuration
-  size = {
-    category = "general"
-    name     = "G-Micro-1"
-  }
-  image = "Alma Linux 8.x"
+  size_id  = data.gpcn_virtualmachine_sizes.micro.sizes[0].id
+  image_id = data.gpcn_virtualmachine_images.alma_8.images[0].id
 
   # Networking
   allocate_public_ip = false
@@ -95,14 +105,15 @@ resource "gpcn_virtualmachine" "example" {
   # Resource Group
   resource_group_id = gpcn_resource_group.group_example.id
 
-  # Authentication (Username and exactly one of ssh_key_id or password must be specified)
-  auth = {
+  # Initial authentication (applied at creation time only; changes update state without affecting the machine)
+  initial_auth = {
     ssh_key_id = gpcn_ssh_key.uploaded.id
     username   = "almalinux"
   }
+}
 
-  # Storage
-  volume_ids = [
-    gpcn_volume.vm_storage.id
-  ]
+# Attach the storage volume to the virtual machine
+resource "gpcn_volume_attachment" "vm_storage_attachment" {
+  virtual_machine_id = gpcn_virtualmachine.example.id
+  volume_id          = gpcn_volume.vm_storage.id
 }

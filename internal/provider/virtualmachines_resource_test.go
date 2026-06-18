@@ -15,6 +15,28 @@ import (
 
 var gpcnVirtualMachineTest = "gpcn_virtualmachine.test"
 
+// dataCenterImagesAndSize returns the common datacenter, image, and size datasource lookup blocks for Chicago.
+func dataCenterImagesAndSize() string {
+	return `
+data "gpcn_datacenters" "central_us" {
+	country_name = "United States"
+	region_name  = "Central"
+	name         = "Chicago"
+}
+
+data "gpcn_virtualmachine_images" "vm_image" {
+	datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+	image_name    = "Alma Linux 8"
+}
+
+data "gpcn_virtualmachine_sizes" "vm_size" {
+	datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+	category      = "general-purpose"
+	min_cpu       = 2
+}
+`
+}
+
 func TestVirtualMachinesResource(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
@@ -30,13 +52,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
-				Config: providerConfig + fmt.Sprintf(`
-			data "gpcn_datacenters" "central_us" {
-				country_name = "United States"
-				region_name  = "Central"
-				name = "Chicago"
-			}
-
+				Config: providerConfig + dataCenterImagesAndSize() + fmt.Sprintf(`
 			resource "gpcn_resource_group" "vm_group" {
 				name = "terraform-demo-group"
 			}
@@ -73,11 +89,8 @@ func TestVirtualMachinesResource(t *testing.T) {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
-				size = {
-					category = "general"
-					name     = "G-Micro-1"
-				}
-				image = "Alma Linux 8.x"
+				size_id  = data.gpcn_virtualmachine_sizes.vm_size.sizes[0].id
+				image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 
 				allocate_public_ip = false
 				network_ids = [
@@ -87,11 +100,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 
 				resource_group_id = gpcn_resource_group.vm_group.id
 
-				volume_ids = [
-					gpcn_volume.vm_storage.id
-				]
-
-				auth = {
+				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
 					username   = "testuser"
 				}
@@ -99,7 +108,6 @@ func TestVirtualMachinesResource(t *testing.T) {
 			`, sshKeyName, networkStdName, networkCustName, volumeName, vmName),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						// Expect initial create actions
 						plancheck.ExpectResourceAction("gpcn_resource_group.vm_group", plancheck.ResourceActionCreate),
 						plancheck.ExpectResourceAction("gpcn_ssh_key.vm_uploaded_key", plancheck.ResourceActionCreate),
 						plancheck.ExpectResourceAction("gpcn_volume.vm_storage", plancheck.ResourceActionCreate),
@@ -109,15 +117,12 @@ func TestVirtualMachinesResource(t *testing.T) {
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
-					// Verify computed attributes are set
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "id"),
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "created_time"),
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "last_updated"),
-					// Verify location map is populated
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "location.datacenter"),
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "location.region"),
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "location.country"),
-					// Verify configuration map is populated
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.cpu"),
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.ram"),
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.base_storage"),
@@ -128,17 +133,11 @@ func TestVirtualMachinesResource(t *testing.T) {
 				ResourceName:            gpcnVirtualMachineTest,
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"volume_ids", "created_time", "last_updated"},
+				ImportStateVerifyIgnore: []string{"created_time", "last_updated"},
 			},
 			// Update and Read testing
 			{
-				Config: providerConfig + fmt.Sprintf(`
-			data "gpcn_datacenters" "central_us" {
-				country_name = "United States"
-				region_name  = "Central"
-				name = "Chicago"
-			}
-
+				Config: providerConfig + dataCenterImagesAndSize() + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -157,23 +156,19 @@ func TestVirtualMachinesResource(t *testing.T) {
 			resource "gpcn_virtualmachine" "test" {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				size = {
-					category = "general"
-					name     = "G-Micro-1"
-				}
-				image = "Alma Linux 8.x"
+				size_id  = data.gpcn_virtualmachine_sizes.vm_size.sizes[0].id
+				image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 				allocate_public_ip = false
 				network_ids = [
 					gpcn_network.vm_network.id
 				]
-				auth = {
+				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
 					username   = "testuser"
 				}
 			}
 			`, sshKeyName, networkStdName, vmNameUpdated),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					// Verify name has been updated
 					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "name", vmNameUpdated),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
@@ -183,23 +178,28 @@ func TestVirtualMachinesResource(t *testing.T) {
 					},
 				},
 				ConfigStateChecks: []statecheck.StateCheck{
-					// Verify network and volumes have been removed
-					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("volume_ids"), knownvalue.ListSizeExact(0)),
 					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("network_ids"), knownvalue.ListSizeExact(1)),
-
-					// Verify resource group has been removed
 					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("resource_group_id"), knownvalue.Null()),
 				},
 			},
-			// Changing image forces a replace
+			// Changing image_id forces a replace
 			{
-				Config: providerConfig + fmt.Sprintf(`
+				Config: providerConfig + `
 			data "gpcn_datacenters" "central_us" {
 				country_name = "United States"
 				region_name  = "Central"
-				name = "Chicago"
+				name         = "Chicago"
 			}
-
+			data "gpcn_virtualmachine_images" "vm_image" {
+				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+				image_name    = "Alma Linux 9"
+			}
+			data "gpcn_virtualmachine_sizes" "vm_size" {
+				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+				category      = "general-purpose"
+				min_cpu       = 2
+			}
+			` + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -218,33 +218,25 @@ func TestVirtualMachinesResource(t *testing.T) {
 			resource "gpcn_virtualmachine" "test" {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				size = {
-					category = "general"
-					name     = "G-Micro-1"
-				}
-				image = "Alma Linux 9.x"
+				size_id  = data.gpcn_virtualmachine_sizes.vm_size.sizes[0].id
+				image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 				allocate_public_ip = false
 				network_ids = [
 					gpcn_network.vm_network.id
 				]
-				auth = {
+				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
 					username   = "testuser"
 				}
 			}
 			`, sshKeyName, networkStdName, vmNameUpdated),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					// Verify image name has been updated
-					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "image", "Alma Linux 9.x"),
+					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "image_id"),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						// Changing image forces a replace
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionReplace),
 					},
-				},
-				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("image"), knownvalue.StringExact("Alma Linux 9.x")),
 				},
 			},
 		},
@@ -258,18 +250,8 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 	networkName := fmt.Sprintf("vm-public-ip-net-%s", rName)
 	vmName := fmt.Sprintf("vm-public-ip-%s", rName)
 
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			// Set baseline
-			{
-				Config: providerConfig + fmt.Sprintf(`
-			data "gpcn_datacenters" "central_us" {
-				country_name = "United States"
-				region_name  = "Central"
-				name = "Chicago"
-			}
-
+	vmConfig := func(sshKey, network, vm string, allocatePublicIp bool) string {
+		return providerConfig + dataCenterImagesAndSize() + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -288,27 +270,28 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			resource "gpcn_virtualmachine" "test" {
 			  name          = "%s"
 			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-
-			  size = {
-			    category = "general"
-			    name     = "G-Micro-1"
-			  }
-			  image = "Alma Linux 8.x"
-
-	
-			  allocate_public_ip = false
+			  size_id  = data.gpcn_virtualmachine_sizes.vm_size.sizes[0].id
+			  image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
+			  allocate_public_ip = %t
 			  network_ids = [
 			    gpcn_network.vm_network.id
 			  ]
-			  auth = {
+			  initial_auth = {
 				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
     			username   = "testuser"
 			  }
 			}
-			`, sshKeyName, networkName, vmName),
+			`, sshKey, network, vm, allocatePublicIp)
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Set baseline
+			{
+				Config: vmConfig(sshKeyName, networkName, vmName, false),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						// Expect initial create action
 						plancheck.ExpectResourceAction("gpcn_network.vm_network", plancheck.ResourceActionCreate),
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionCreate),
 					},
@@ -316,53 +299,9 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			},
 			// Update allocate_public_ip to true
 			{
-				Config: providerConfig + fmt.Sprintf(`
-			data "gpcn_datacenters" "central_us" {
-				country_name = "United States"
-				region_name  = "Central"
-				name = "Chicago"
-			}
-
-			resource "gpcn_ssh_key" "vm_uploaded_key" {
-				name       = "%s"
-				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
-			}
-
-			resource "gpcn_network" "vm_network" {
-			  name          = "%s"
-			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			  cidr_block = "10.0.0.0/24"
-			  dhcp_start_address = "10.0.0.10"
-			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = ["8.8.8.8", "8.8.4.4"]
-			}
-
-			resource "gpcn_virtualmachine" "test" {
-			  name          = "%s"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-
-			  size = {
-			    category = "general"
-			    name     = "G-Micro-1"
-			  }
-			  image = "Alma Linux 8.x"
-
-	
-			  allocate_public_ip = true
-			  network_ids = [
-			    gpcn_network.vm_network.id
-			  ]
-			  auth = {
-				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
-    			username   = "testuser"
-			  }
-			}
-			`, sshKeyName, networkName, vmName),
-
+				Config: vmConfig(sshKeyName, networkName, vmName, true),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						// Expect update
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
 					},
 				},
@@ -372,52 +311,9 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			},
 			// Release the IP
 			{
-				Config: providerConfig + fmt.Sprintf(`
-			data "gpcn_datacenters" "central_us" {
-				country_name = "United States"
-				region_name  = "Central"
-				name = "Chicago"
-			}
-
-			resource "gpcn_ssh_key" "vm_uploaded_key" {
-				name       = "%s"
-				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
-			}
-
-			resource "gpcn_network" "vm_network" {
-			  name          = "%s"
-			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			  cidr_block = "10.0.0.0/24"
-			  dhcp_start_address = "10.0.0.10"
-			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = ["8.8.8.8", "8.8.4.4"]
-			}
-
-			resource "gpcn_virtualmachine" "test" {
-			  name          = "%s"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-
-			  size = {
-			    category = "general"
-			    name     = "G-Micro-1"
-			  }
-			  image = "Alma Linux 8.x"
-
-	
-			  allocate_public_ip = false
-			  network_ids = [
-			    gpcn_network.vm_network.id
-			  ]
-			  auth = {
-				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
-    			username   = "testuser"
-			  }
-			}
-			`, sshKeyName, networkName, vmName),
+				Config: vmConfig(sshKeyName, networkName, vmName, false),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						// Expect update
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
 					},
 				},
@@ -430,25 +326,25 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 }
 
 func TestVirtualMachinesSizeUpgrade(t *testing.T) {
-	t.Skip("Temporarily requiring replacement for all size upgrades while the GPCN API changes")
 	t.Parallel()
 	rName := acctest.RandString(8)
 	sshKeyName := fmt.Sprintf("vm-size-upgrade-key-%s", rName)
 	networkName := fmt.Sprintf("vm-size-upgrade-net-%s", rName)
 	vmName := fmt.Sprintf("vm-size-upgrade-%s", rName)
 
-	resource.Test(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			// Create VM with G-Micro-1 size
-			{
-				Config: providerConfig + fmt.Sprintf(`
+	vmConfig := func(sshKey, network, vm, sizeDataSource string) string {
+		return providerConfig + `
 			data "gpcn_datacenters" "central_us" {
 				country_name = "United States"
 				region_name  = "Central"
-				name = "Chicago"
+				name         = "Chicago"
 			}
 
+			data "gpcn_virtualmachine_images" "vm_image" {
+				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+				image_name    = "Alma Linux 8"
+			}
+		` + sizeDataSource + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -467,86 +363,70 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 			resource "gpcn_virtualmachine" "test" {
 			  name          = "%s"
 			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-
-			  size = {
-			    category = "general"
-			    name     = "G-Micro-1"
-			  }
-			  image = "Alma Linux 8.x"
-
-	
+			  size_id  = data.gpcn_virtualmachine_sizes.vm_size.sizes[0].id
+			  image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 			  allocate_public_ip = false
 			  network_ids = [
 			    gpcn_network.vm_network.id
 			  ]
-			  auth = {
+			  initial_auth = {
 				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
     			username   = "testuser"
 			  }
 			}
-			`, sshKeyName, networkName, vmName),
+			`, sshKey, network, vm)
+	}
+
+	microSize := `
+			data "gpcn_virtualmachine_sizes" "vm_size" {
+				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+				category      = "general-purpose"
+				min_cpu       = 2
+				min_memory_gb = 4
+			}
+	`
+	smallSize := `
+			data "gpcn_virtualmachine_sizes" "vm_size" {
+				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+				category      = "general-purpose"
+				min_cpu       = 4
+			}
+	`
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Create VM with micro size
+			{
+				Config: vmConfig(sshKeyName, networkName, vmName, microSize),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionCreate),
 					},
 				},
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("size").AtMapKey("name"), knownvalue.StringExact("G-Micro-1")),
+					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("size_id"), knownvalue.NotNull()),
 				},
 			},
-			// Upgrade to G-Small-1 size - should update in place
+			// Upgrade to a larger size - should update in place
 			{
-				Config: providerConfig + fmt.Sprintf(`
-			data "gpcn_datacenters" "central_us" {
-				country_name = "United States"
-				region_name  = "Central"
-				name = "Chicago"
-			}
-
-			resource "gpcn_ssh_key" "vm_uploaded_key" {
-				name       = "%s"
-				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
-			}
-
-			resource "gpcn_network" "vm_network" {
-			  name          = "%s"
-			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			  cidr_block = "10.0.0.0/24"
-			  dhcp_start_address = "10.0.0.10"
-			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = ["8.8.8.8", "8.8.4.4"]
-			}
-
-			resource "gpcn_virtualmachine" "test" {
-			  name          = "%s"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-
-			  size = {
-			    category = "general"
-			    name     = "G-Small-1"
-			  }
-			  image = "Alma Linux 8.x"
-
-	
-			  allocate_public_ip = false
-			  network_ids = [
-			    gpcn_network.vm_network.id
-			  ]
-			  auth = {
-				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
-    			username   = "testuser"
-			  }
-			}
-			`, sshKeyName, networkName, vmName),
+				Config: vmConfig(sshKeyName, networkName, vmName, smallSize),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						// Expect update, not replace, when upgrading size
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
 					},
 				},
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("size").AtMapKey("name"), knownvalue.StringExact("G-Small-1")),
+					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("size_id"), knownvalue.NotNull()),
+				},
+			},
+			// Downgrade back to micro - should require replacement
+			{
+				Config: vmConfig(sshKeyName, networkName, vmName, microSize),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionReplace),
+					},
 				},
 			},
 		},
@@ -557,300 +437,106 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
 	sshKeyName := fmt.Sprintf("vm-vol-attach-key-%s", rName)
-	networkName := fmt.Sprintf("vm-vol-attach-net-%s", rName)
 	vol1Name := fmt.Sprintf("vm-vol-attach-vol1-%s", rName)
 	vol2Name := fmt.Sprintf("vm-vol-attach-vol2-%s", rName)
 	vmName := fmt.Sprintf("vm-vol-attach-%s", rName)
+
+	vmBase := func(sshKey, vol1, vol2, vm string) string {
+		return providerConfig + dataCenterImagesAndSize() + fmt.Sprintf(`
+			resource "gpcn_ssh_key" "vm_uploaded_key" {
+				name       = "%s"
+				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
+			}
+
+			resource "gpcn_volume" "vm_vol1" {
+			  name          = "%s"
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+			  volume_type   = "SSD"
+			  size_gb       = 256
+			}
+
+			resource "gpcn_volume" "vm_vol2" {
+			  name          = "%s"
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+			  volume_type   = "SSD"
+			  size_gb       = 256
+			}
+
+			resource "gpcn_virtualmachine" "test" {
+			  name          = "%s"
+			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+			  size_id  = data.gpcn_virtualmachine_sizes.vm_size.sizes[0].id
+			  image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
+			  allocate_public_ip = false
+			  initial_auth = {
+			    ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
+			    username   = "testuser"
+			  }
+			}
+			`, sshKey, vol1, vol2, vm)
+	}
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create VM with no volumes
 			{
-				Config: providerConfig + fmt.Sprintf(`
-			data "gpcn_datacenters" "central_us" {
-				country_name = "United States"
-				region_name  = "Central"
-				name = "Chicago"
-			}
-
-			resource "gpcn_ssh_key" "vm_uploaded_key" {
-				name       = "%s"
-				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
-			}
-
-			resource "gpcn_network" "vm_network" {
-			  name          = "%s"
-			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			  cidr_block = "10.0.0.0/24"
-			  dhcp_start_address = "10.0.0.10"
-			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = ["8.8.8.8", "8.8.4.4"]
-			}
-
-			resource "gpcn_volume" "vm_vol1" {
-			  name          = "%s"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			  volume_type   = "SSD"
-			  size_gb       = 256
-			}
-
-			resource "gpcn_volume" "vm_vol2" {
-			  name          = "%s"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			  volume_type   = "SSD"
-			  size_gb       = 256
-			}
-
-			resource "gpcn_virtualmachine" "test" {
-			  name          = "%s"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-
-			  size = {
-			    category = "general"
-			    name     = "G-Micro-1"
-			  }
-			  image = "Alma Linux 8.x"
-
-	
-			  allocate_public_ip = false
-			  network_ids = [
-			    gpcn_network.vm_network.id
-			  ]
-			  auth = {
-				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
-    			username   = "testuser"
-			  }
-			}
-			`, sshKeyName, networkName, vol1Name, vol2Name, vmName),
+				Config: vmBase(sshKeyName, vol1Name, vol2Name, vmName),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction("gpcn_volume.vm_vol1", plancheck.ResourceActionCreate),
+						plancheck.ExpectResourceAction("gpcn_volume.vm_vol2", plancheck.ResourceActionCreate),
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionCreate),
 					},
 				},
-				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("volume_ids"), knownvalue.ListSizeExact(0)),
-				},
 			},
-			// Attach one volume
+			// Attach the first volume
 			{
-				Config: providerConfig + fmt.Sprintf(`
-			data "gpcn_datacenters" "central_us" {
-				country_name = "United States"
-				region_name  = "Central"
-				name = "Chicago"
-			}
-
-			resource "gpcn_ssh_key" "vm_uploaded_key" {
-				name       = "%s"
-				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
-			}
-
-			resource "gpcn_network" "vm_network" {
-			  name          = "%s"
-			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			  cidr_block = "10.0.0.0/24"
-			  dhcp_start_address = "10.0.0.10"
-			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = ["8.8.8.8", "8.8.4.4"]
-			}
-
-			resource "gpcn_volume" "vm_vol1" {
-			  name          = "%s"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			  volume_type   = "SSD"
-			  size_gb       = 256
-			}
-
-			resource "gpcn_volume" "vm_vol2" {
-			  name          = "%s"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			  volume_type   = "SSD"
-			  size_gb       = 256
-			}
-
-			resource "gpcn_virtualmachine" "test" {
-			  name          = "%s"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-
-			  size = {
-			    category = "general"
-			    name     = "G-Micro-1"
-			  }
-			  image = "Alma Linux 8.x"
-
-	
-			  allocate_public_ip = false
-			  network_ids = [
-			    gpcn_network.vm_network.id
-			  ]
-
-			  volume_ids = [
-			    gpcn_volume.vm_vol1.id
-			  ]
-
-			  auth = {
-				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
-    			username   = "testuser"
-			  }
-			}
-			`, sshKeyName, networkName, vol1Name, vol2Name, vmName),
+				Config: vmBase(sshKeyName, vol1Name, vol2Name, vmName) + `
+			resource "gpcn_volume_attachment" "vol1_attach" {
+			  virtual_machine_id = gpcn_virtualmachine.test.id
+			  volume_id          = gpcn_volume.vm_vol1.id
+			}`,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
+						plancheck.ExpectResourceAction("gpcn_volume_attachment.vol1_attach", plancheck.ResourceActionCreate),
 					},
 				},
-				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("volume_ids"), knownvalue.ListSizeExact(1)),
-				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("gpcn_volume_attachment.vol1_attach", "id"),
+					resource.TestCheckResourceAttrSet("gpcn_volume_attachment.vol1_attach", "virtual_machine_id"),
+					resource.TestCheckResourceAttrSet("gpcn_volume_attachment.vol1_attach", "volume_id"),
+				),
 			},
 			// Attach second volume
 			{
-				Config: providerConfig + fmt.Sprintf(`
-			data "gpcn_datacenters" "central_us" {
-				country_name = "United States"
-				region_name  = "Central"
-				name = "Chicago"
+				Config: vmBase(sshKeyName, vol1Name, vol2Name, vmName) + `
+			resource "gpcn_volume_attachment" "vol1_attach" {
+			  virtual_machine_id = gpcn_virtualmachine.test.id
+			  volume_id          = gpcn_volume.vm_vol1.id
 			}
-
-			resource "gpcn_ssh_key" "vm_uploaded_key" {
-				name       = "%s"
-				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
-			}
-
-			resource "gpcn_network" "vm_network" {
-			  name          = "%s"
-			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			  cidr_block = "10.0.0.0/24"
-			  dhcp_start_address = "10.0.0.10"
-			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = ["8.8.8.8", "8.8.4.4"]
-			}
-
-			resource "gpcn_volume" "vm_vol1" {
-			  name          = "%s"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			  volume_type   = "SSD"
-			  size_gb       = 256
-			}
-
-			resource "gpcn_volume" "vm_vol2" {
-			  name          = "%s"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			  volume_type   = "SSD"
-			  size_gb       = 256
-			}
-
-			resource "gpcn_virtualmachine" "test" {
-			  name          = "%s"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-
-			  size = {
-			    category = "general"
-			    name     = "G-Micro-1"
-			  }
-			  image = "Alma Linux 8.x"
-
-	
-			  allocate_public_ip = false
-			  network_ids = [
-			    gpcn_network.vm_network.id
-			  ]
-
-			  volume_ids = [
-			    gpcn_volume.vm_vol1.id,
-			    gpcn_volume.vm_vol2.id
-			  ]
-
-			  auth = {
-				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
-    			username   = "testuser"
-			  }
-			}
-			`, sshKeyName, networkName, vol1Name, vol2Name, vmName),
+			resource "gpcn_volume_attachment" "vol2_attach" {
+			  virtual_machine_id = gpcn_virtualmachine.test.id
+			  volume_id          = gpcn_volume.vm_vol2.id
+			  depends_on         = [gpcn_volume_attachment.vol1_attach]
+			}`,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
+						plancheck.ExpectResourceAction("gpcn_volume_attachment.vol2_attach", plancheck.ResourceActionCreate),
 					},
-				},
-				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("volume_ids"), knownvalue.ListSizeExact(2)),
 				},
 			},
-			// Remove first volume
+			// Detach first volume attachment by removing its attachment resource
 			{
-				Config: providerConfig + fmt.Sprintf(`
-			data "gpcn_datacenters" "central_us" {
-				country_name = "United States"
-				region_name  = "Central"
-				name = "Chicago"
-			}
-
-			resource "gpcn_ssh_key" "vm_uploaded_key" {
-				name       = "%s"
-				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
-			}
-
-			resource "gpcn_network" "vm_network" {
-			  name          = "%s"
-			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			  cidr_block = "10.0.0.0/24"
-			  dhcp_start_address = "10.0.0.10"
-			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = ["8.8.8.8", "8.8.4.4"]
-			}
-
-			resource "gpcn_volume" "vm_vol1" {
-			  name          = "%s"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			  volume_type   = "SSD"
-			  size_gb       = 256
-			}
-
-			resource "gpcn_volume" "vm_vol2" {
-			  name          = "%s"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			  volume_type   = "SSD"
-			  size_gb       = 256
-			}
-
-			resource "gpcn_virtualmachine" "test" {
-			  name          = "%s"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-
-			  size = {
-			    category = "general"
-			    name     = "G-Micro-1"
-			  }
-			  image = "Alma Linux 8.x"
-
-	
-			  allocate_public_ip = false
-			  network_ids = [
-			    gpcn_network.vm_network.id
-			  ]
-
-			  volume_ids = [
-			    gpcn_volume.vm_vol2.id
-			  ]
-
-			  auth = {
-				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
-    			username   = "testuser"
-			  }
-			}
-			`, sshKeyName, networkName, vol1Name, vol2Name, vmName),
+				Config: vmBase(sshKeyName, vol1Name, vol2Name, vmName) + `
+			resource "gpcn_volume_attachment" "vol2_attach" {
+			  virtual_machine_id = gpcn_virtualmachine.test.id
+			  volume_id          = gpcn_volume.vm_vol2.id
+			}`,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
+						plancheck.ExpectResourceAction("gpcn_volume_attachment.vol1_attach", plancheck.ResourceActionDestroy),
 					},
-				},
-				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("volume_ids"), knownvalue.ListSizeExact(1)),
 				},
 			},
 		},
@@ -869,13 +555,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create with ssh_key_id and username
 			{
-				Config: providerConfig + fmt.Sprintf(`
-			data "gpcn_datacenters" "central_us" {
-				country_name = "United States"
-				region_name  = "Central"
-				name = "Chicago"
-			}
-
+				Config: providerConfig + dataCenterImagesAndSize() + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -895,19 +575,15 @@ func TestVirtualMachinesAuth(t *testing.T) {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
-				size = {
-					category = "general"
-					name     = "G-Micro-1"
-				}
-				image = "Alma Linux 8.x"
+				size_id  = data.gpcn_virtualmachine_sizes.vm_size.sizes[0].id
+				image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 
-	
 				allocate_public_ip = false
 				network_ids = [
 					gpcn_network.vm_network.id
 				]
 
-				auth = {
+				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
 					username   = "testuser"
 				}
@@ -919,19 +595,13 @@ func TestVirtualMachinesAuth(t *testing.T) {
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "auth.ssh_key_id"),
-					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "auth.username", "testuser"),
+					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "initial_auth.ssh_key_id"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "initial_auth.username", "testuser"),
 				),
 			},
-			// Switch to password + username - should force replace
+			// Changing initial_auth is a no-op - state is updated with new config values but no API calls are made
 			{
-				Config: providerConfig + fmt.Sprintf(`
-			data "gpcn_datacenters" "central_us" {
-				country_name = "United States"
-				region_name  = "Central"
-				name = "Chicago"
-			}
-
+				Config: providerConfig + dataCenterImagesAndSize() + fmt.Sprintf(`
 			resource "gpcn_network" "vm_network" {
 				name          = "%s"
 				network_type  = "standard"
@@ -946,19 +616,15 @@ func TestVirtualMachinesAuth(t *testing.T) {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
-				size = {
-					category = "general"
-					name     = "G-Micro-1"
-				}
-				image = "Alma Linux 8.x"
+				size_id  = data.gpcn_virtualmachine_sizes.vm_size.sizes[0].id
+				image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 
-	
 				allocate_public_ip = false
 				network_ids = [
 					gpcn_network.vm_network.id
 				]
 
-				auth = {
+				initial_auth = {
 					password = "Test1Password!"
 					username = "newuser"
 				}
@@ -966,14 +632,11 @@ func TestVirtualMachinesAuth(t *testing.T) {
 			`, networkName, vmName),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionReplace),
+						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
 					},
 				},
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "auth.username", "newuser"),
-				),
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("auth").AtMapKey("username"), knownvalue.StringExact("newuser")),
+					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("initial_auth").AtMapKey("username"), knownvalue.StringExact("newuser")),
 				},
 			},
 		},
@@ -985,49 +648,28 @@ func TestVirtualMachinesAuth(t *testing.T) {
 ----- Unit tests -----
 *
 */
-func TestVirtualMachinesInvalidSizes(t *testing.T) {
-	vmConfigWithSize := func(category, tier string) string {
-		return providerConfig + fmt.Sprintf(`
+func TestVirtualMachinesMissingSizeId(t *testing.T) {
+	config := providerConfig + `
 		resource "gpcn_virtualmachine" "test" {
 		  name          = "terraform-volume-test-vm"
 		  datacenter_id = "any-datacenter-id"
-		  size = {
-		    category = %q
-		    name     =%q
-		  }
-		  image              = "Alma Linux 8.x"
+		  image_id           = "eb7da49d-cc71-480a-968d-fbf2841bedf7"
 		  allocate_public_ip = false
-		  auth = {
+		  initial_auth = {
 		    ssh_key_id = "ssh-key-123"
 		    username   = "testuser"
 		  }
 		}
-		`, category, tier)
-	}
-
-	tests := []struct {
-		name     string
-		category string
-		tier     string
-		wantErr  string
-	}{
-		{name: "invalid_category", category: "bad-category", tier: "G-Micro-1", wantErr: "Attribute size.category value must be one of"},
-		{name: "invalid_tier", category: "general", tier: "bad-tier", wantErr: "Attribute size.name value must be one of"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			resource.UnitTest(t, resource.TestCase{
-				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-				Steps: []resource.TestStep{
-					{
-						Config:      vmConfigWithSize(tc.category, tc.tier),
-						ExpectError: regexp.MustCompile(tc.wantErr),
-					},
-				},
-			})
-		})
-	}
+		`
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexp.MustCompile(`The argument "size_id" is required`),
+			},
+		},
+	})
 }
 
 func TestVirtualMachinesInvalidAuth(t *testing.T) {
@@ -1037,13 +679,10 @@ func TestVirtualMachinesInvalidAuth(t *testing.T) {
 		resource "gpcn_virtualmachine" "test" {
 		  name          = "terraform-auth-test-vm"
 		  datacenter_id = "any-datacenter-id"
-		  size = {
-		    category = "general"
-		    name     = "G-Micro-1"
-		  }
-		  image            = "Alma Linux 8.x"
+		  size_id            = "sku-abc-123"
+		  image_id         = "eb7da49d-cc71-480a-968d-fbf2841bedf7"
 		  allocate_public_ip = false
-		  auth = {
+		  initial_auth = {
 		    username = "testuser"
 		    ` + authBlock + `
 		  }
@@ -1077,12 +716,12 @@ func TestVirtualMachinesInvalidAuth(t *testing.T) {
 		{
 			name:      "username_starts_with_digit",
 			authBlock: `ssh_key_id = "ssh-key-123"` + "\n" + `username = "1testuser"`,
-			wantErr:   "Username must start with a letter or underscore",
+			wantErr:   "Username must start with a letter",
 		},
 		{
 			name:      "username_invalid_chars", // spaces are not allowed
 			authBlock: `ssh_key_id = "ssh-key-123"` + "\n" + `username = "test user"`,
-			wantErr:   "Username must start with a letter or underscore",
+			wantErr:   "Username must start with a letter",
 		},
 	}
 	for _, tc := range tests {

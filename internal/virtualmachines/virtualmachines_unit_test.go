@@ -22,13 +22,7 @@ const (
 )
 
 func createTestVMModel(name, image string, allocatePublicIP bool) ResourceModel {
-	size := ResourceModelSize{
-		Category: types.StringValue("general"),
-		Name:     types.StringValue("G-Micro-1"),
-	}
-	sizeObj, _ := types.ObjectValueFrom(context.Background(), size.AttrTypes(), size)
-
-	auth := ResourceModelAuth{
+	auth := ResourceModelInitialAuth{
 		SshKeyId: types.StringValue("ssh-key-123"),
 		Username: types.StringNull(),
 		Password: types.StringNull(),
@@ -38,12 +32,11 @@ func createTestVMModel(name, image string, allocatePublicIP bool) ResourceModel 
 	return ResourceModel{
 		Name:             types.StringValue(name),
 		DatacenterId:     types.StringValue(testDatacenterID),
-		Image:            types.StringValue(image),
-		Size:             sizeObj,
+		ImageId:          types.StringValue(image),
+		SizeId:           types.StringValue("sku-uuid-test"),
 		AllocatePublicIp: types.BoolValue(allocatePublicIP),
 		NetworkIds:       types.ListNull(types.StringType),
-		VolumeIds:        types.ListNull(types.StringType),
-		Auth:             authObj,
+		InitialAuth:      authObj,
 	}
 }
 
@@ -77,107 +70,6 @@ func newVMResponse(id, name string) *ReadVirtualMachinesResponse {
 
 func emptyNetworkInterfacesResponse() map[string]any {
 	return map[string]any{"success": true, "message": "Network interfaces retrieved", "data": []any{}}
-}
-
-func nestedImagesResponse() map[string]any {
-	return map[string]any{
-		"success": true,
-		"message": "Virtual machine images retrieved successfully",
-		"data": []any{
-			map[string]any{
-				"id":        1,
-				"name":      "Linux",
-				"sortOrder": 1,
-				"images": []any{
-					map[string]any{
-						"id":   "eb7da49d-cc71-480a-968d-fbf2841bedf7",
-						"name": testVMImage,
-					},
-					map[string]any{
-						"id":   "aa1b2c3d-0000-0000-0000-000000000001",
-						"name": "Ubuntu 24.04",
-					},
-				},
-			},
-			map[string]any{
-				"id":        2,
-				"name":      "Windows",
-				"sortOrder": 2,
-				"images": []any{
-					map[string]any{
-						"id":   "bb2c3d4e-0000-0000-0000-000000000002",
-						"name": "Windows Server 2022",
-					},
-				},
-			},
-		},
-	}
-}
-
-func TestGetVirtualMachineImageIdMockHTTP(t *testing.T) {
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machine-images") {
-				testutil.WriteJSONResponse(w, nestedImagesResponse())
-			}
-		},
-	})
-	defer server.Close()
-
-	id, images, err := GetVirtualMachineImageId(gpcnClient, context.Background(), testDatacenterID, testVMImage)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-	if id != "eb7da49d-cc71-480a-968d-fbf2841bedf7" {
-		t.Errorf("Expected image ID 'eb7da49d-cc71-480a-968d-fbf2841bedf7', got '%s'", id)
-	}
-	if len(images) != 3 {
-		t.Errorf("Expected 3 flattened images, got %d", len(images))
-	}
-}
-
-func TestGetVirtualMachineImageIdCaseInsensitiveMockHTTP(t *testing.T) {
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machine-images") {
-				testutil.WriteJSONResponse(w, nestedImagesResponse())
-			}
-		},
-	})
-	defer server.Close()
-
-	id, _, err := GetVirtualMachineImageId(gpcnClient, context.Background(), testDatacenterID, strings.ToUpper(testVMImage))
-	if err != nil {
-		t.Fatalf("Expected case-insensitive match, got error: %v", err)
-	}
-	if id != "eb7da49d-cc71-480a-968d-fbf2841bedf7" {
-		t.Errorf("Expected image ID 'eb7da49d-cc71-480a-968d-fbf2841bedf7', got '%s'", id)
-	}
-}
-
-func TestGetVirtualMachineImageIdNotFoundMockHTTP(t *testing.T) {
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machine-images") {
-				testutil.WriteJSONResponse(w, nestedImagesResponse())
-			}
-		},
-	})
-	defer server.Close()
-
-	_, _, err := GetVirtualMachineImageId(gpcnClient, context.Background(), testDatacenterID, "NonExistentOS 99.x")
-	if err == nil {
-		t.Fatal("Expected error for unknown image name, got nil")
-	}
-	if !strings.Contains(err.Error(), "NonExistentOS 99.x") {
-		t.Errorf("Expected error to mention the requested image name, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), testVMImage) {
-		t.Errorf("Expected error to list available images, got: %v", err)
-	}
 }
 
 func TestMapVirtualMachineResponseToModelUnit(t *testing.T) {
@@ -494,7 +386,7 @@ func TestSetNetworkModelValuesNotPresentWithPublicIP(t *testing.T) {
 	model := ResourceModel{
 		Name:             types.StringValue("test-vm"),
 		DatacenterId:     types.StringValue(testDatacenterID),
-		Image:            types.StringValue(testVMImage),
+		ImageId:          types.StringValue(testVMImage),
 		AllocatePublicIp: types.BoolNull(),
 		PublicIp:         types.StringNull(),
 		NetworkIds:       types.ListNull(types.StringType),
@@ -542,7 +434,7 @@ func TestSetNetworkModelValuesNotPresentWithoutPublicIP(t *testing.T) {
 	model := ResourceModel{
 		Name:             types.StringValue("test-vm"),
 		DatacenterId:     types.StringValue(testDatacenterID),
-		Image:            types.StringValue(testVMImage),
+		ImageId:          types.StringValue(testVMImage),
 		AllocatePublicIp: types.BoolNull(),
 		PublicIp:         types.StringNull(),
 		NetworkIds:       types.ListNull(types.StringType),
@@ -602,8 +494,8 @@ func TestMapVirtualMachineResponseToModelUpdatesAuthUsername(t *testing.T) {
 		t.Errorf("Expected public IP '%s', got '%s'", publicIP, result.PublicIp.ValueString())
 	}
 
-	var auth ResourceModelAuth
-	authDiags := result.Auth.As(context.Background(), &auth, basetypes.ObjectAsOptions{})
+	var auth ResourceModelInitialAuth
+	authDiags := result.InitialAuth.As(context.Background(), &auth, basetypes.ObjectAsOptions{})
 	if authDiags.HasError() {
 		t.Fatalf("Failed to extract auth: %v", authDiags)
 	}
@@ -637,19 +529,19 @@ func TestSetModelValuesNotPresentPopulatesAuthOnImport(t *testing.T) {
 
 	// Simulate an import: Auth is null
 	model := createTestVMModel("import-vm", testVMImage, false)
-	model.Auth = types.ObjectNull(ResourceModelAuth{}.AttrTypes())
+	model.InitialAuth = types.ObjectNull(ResourceModelInitialAuth{}.AttrTypes())
 
 	result, diags := MapVirtualMachineResponseToModel(context.Background(), gpcnClient, response, model)
 	if diags.HasError() {
 		t.Fatalf("Unexpected error: %v", diags)
 	}
 
-	if result.Auth.IsNull() {
+	if result.InitialAuth.IsNull() {
 		t.Fatal("Expected auth to be populated on import, got null")
 	}
 
-	var auth ResourceModelAuth
-	authDiags := result.Auth.As(context.Background(), &auth, basetypes.ObjectAsOptions{})
+	var auth ResourceModelInitialAuth
+	authDiags := result.InitialAuth.As(context.Background(), &auth, basetypes.ObjectAsOptions{})
 	if authDiags.HasError() {
 		t.Fatalf("Failed to extract auth: %v", authDiags)
 	}
@@ -658,5 +550,57 @@ func TestSetModelValuesNotPresentPopulatesAuthOnImport(t *testing.T) {
 	}
 	if auth.SshKeyId.ValueString() != sshKeyID {
 		t.Errorf("Expected auth.ssh_key_id '%s', got '%s'", sshKeyID, auth.SshKeyId.ValueString())
+	}
+}
+
+func TestSetModelValuesNotPresentResolvesImageIdOnImport(t *testing.T) {
+	const (
+		vmID    = "vm-image-import-789"
+		imageID = "eb7da49d-cc71-480a-968d-fbf2841bedf7"
+	)
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces"):
+				testutil.WriteJSONResponse(w, emptyNetworkInterfacesResponse())
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machine-images"):
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"message": "Virtual machine images retrieved successfully",
+					"data": []any{
+						map[string]any{
+							"id": 1, "name": "Linux", "sortOrder": 1,
+							"images": []any{
+								map[string]any{"id": imageID, "name": testVMImage},
+							},
+						},
+					},
+				})
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	response := newVMResponse(vmID, "import-image-vm")
+	// response.Data.Image is set to testVMImage by newVMResponse
+
+	// Simulate import: ImageId is null, must be resolved from the image name
+	model := createTestVMModel("import-image-vm", testVMImage, false)
+	model.ImageId = types.StringNull()
+
+	result, diags := MapVirtualMachineResponseToModel(context.Background(), gpcnClient, response, model)
+	if diags.HasError() {
+		t.Fatalf("Unexpected diagnostics: %v", diags)
+	}
+
+	if result.ImageId.IsNull() || result.ImageId.ValueString() == "" {
+		t.Fatal("Expected image_id to be resolved on import, got null/empty")
+	}
+	if result.ImageId.ValueString() != imageID {
+		t.Errorf("Expected image_id '%s', got '%s'", imageID, result.ImageId.ValueString())
 	}
 }

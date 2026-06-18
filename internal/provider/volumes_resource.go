@@ -55,8 +55,11 @@ func (r *volumesResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"name": schema.StringAttribute{
-				Description: "Human-readable name for the volume. Changing this value requires replacing the volume",
+				Description: "Human-readable name for the volume. Must be 1-255 characters. Changing this value requires replacing the volume",
 				Required:    true,
+				Validators: []validator.String{
+					stringvalidator.LengthBetween(1, 255),
+				},
 				PlanModifiers: []planmodifier.String{
 					// Changing the name requires us to destroy and create a new volume. There's no update call for volumes
 					stringplanmodifier.RequiresReplace(),

@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"regexp"
 
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/gpu"
@@ -14,7 +15,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/objectplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
@@ -57,8 +57,15 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"name": schema.StringAttribute{
-				Description: "Human-readable name for the GPU",
+				Description: "Human-readable name for the GPU. Must be 1-60 characters, starting and ending with an alphanumeric character, containing only letters, digits, spaces, periods, and hyphens",
 				Required:    true,
+				Validators: []validator.String{
+					stringvalidator.LengthBetween(1, 60),
+					stringvalidator.RegexMatches(
+						regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9 .\-]*[a-zA-Z0-9])?$`),
+						"Name must start and end with an alphanumeric character and contain only letters, digits, spaces, periods, and hyphens",
+					),
+				},
 			},
 			"datacenter_id": schema.StringAttribute{
 				Description: "Unique identifier of the datacenter where the GPU will be created. Changing this value requires replacing the GPU",
@@ -121,12 +128,9 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					stringvalidator.OneOf(gpu.GPUImageNames...),
 				},
 			},
-			"auth": schema.SingleNestedAttribute{
-				Description: "Authentication configuration for the GPU. Changing this block requires replacing the GPU",
+			"initial_auth": schema.SingleNestedAttribute{
+				Description: "Initial authentication configuration for the GPU. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine",
 				Required:    true,
-				PlanModifiers: []planmodifier.Object{
-					objectplanmodifier.RequiresReplace(),
-				},
 				Attributes: map[string]schema.Attribute{
 					"ssh_key_id": schema.StringAttribute{
 						Description: "ID of the SSH key to use for authentication",

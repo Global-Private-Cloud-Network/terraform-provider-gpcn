@@ -23,7 +23,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>0.5.4"
+      version = "~>1.0.0"
     }
   }
 }
@@ -37,6 +37,19 @@ data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "Central"
   name         = "Chicago"
+}
+
+# Look up the image ID for Alma Linux 8
+data "gpcn_virtualmachine_images" "alma_8" {
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+  image_name    = "Alma Linux 8"
+}
+
+# Look up a general-purpose size with at least 2 CPU cores
+data "gpcn_virtualmachine_sizes" "micro" {
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+  category      = "general-purpose"
+  min_cpu       = 2
 }
 
 # Provide an existing public key
@@ -93,11 +106,8 @@ resource "gpcn_virtualmachine" "example" {
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
   # Compute configuration
-  size = {
-    category = "general"
-    name     = "G-Micro-1"
-  }
-  image = "Alma Linux 8.x"
+  size_id  = data.gpcn_virtualmachine_sizes.micro.sizes[0].id
+  image_id = data.gpcn_virtualmachine_images.alma_8.images[0].id
 
   # Networking
   allocate_public_ip = false
@@ -109,16 +119,17 @@ resource "gpcn_virtualmachine" "example" {
   # Resource Group
   resource_group_id = gpcn_resource_group.group_example.id
 
-  # Authentication (Username and exactly one of ssh_key_id or password must be specified)
-  auth = {
+  # Initial authentication (applied at creation time only; changes update state without affecting the machine)
+  initial_auth = {
     ssh_key_id = gpcn_ssh_key.uploaded.id
     username   = "almalinux"
   }
+}
 
-  # Storage
-  volume_ids = [
-    gpcn_volume.vm_storage.id
-  ]
+# Attach the storage volume to the virtual machine
+resource "gpcn_volume_attachment" "vm_storage_attachment" {
+  virtual_machine_id = gpcn_virtualmachine.example.id
+  volume_id          = gpcn_volume.vm_storage.id
 }
 ```
 
@@ -128,17 +139,16 @@ resource "gpcn_virtualmachine" "example" {
 ### Required
 
 - `allocate_public_ip` (Boolean) Whether to allocate a public IP address for the virtual machine
-- `auth` (Attributes) Authentication configuration for the virtual machine. Either ssh_key_id or password must be specified. Changing any value in this block requires replacing the virtual machine (see [below for nested schema](#nestedatt--auth))
 - `datacenter_id` (String) Unique identifier of the datacenter where the virtual machine will be created. Changing this value requires replacing the virtual machine
-- `image` (String) Operating system image to use for the virtual machine. Must be one of the supported image names. Changing this value requires replacing the virtual machine. Note that not all images are available for every datacenter
-- `name` (String) Human-readable name for the virtual machine
-- `size` (Attributes) Hardware size configuration defining the compute resources (CPU, memory, disk) for the virtual machine. Specified using a category and tier pairing. Downsizing requires replacing the virtual machine. Note that not all sizes are available for every datacenter (see [below for nested schema](#nestedatt--size))
+- `image_id` (String) Unique identifier of the operating system image to use for the virtual machine. Use the gpcn_virtualmachine_images data source to look up the image ID. Changing this value requires replacing the virtual machine
+- `initial_auth` (Attributes) Initial authentication configuration for the virtual machine. Either ssh_key_id or password must be specified. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine (see [below for nested schema](#nestedatt--initial_auth))
+- `name` (String) Human-readable name for the virtual machine. Must be 1-60 characters, starting and ending with an alphanumeric character, containing only letters, digits, spaces, periods, and hyphens
+- `size_id` (String) Unique identifier (SKU ID) of the size to use for the virtual machine. Use the gpcn_virtualmachine_sizes data source to look up the size ID. Changing to a non-upgradeable size requires replacing the virtual machine
 
 ### Optional
 
-- `network_ids` (List of String) List of network IDs to attach to the virtual machine. Maximum of 5 networks allowed
+- `network_ids` (List of String) List of network IDs to attach to the virtual machine. Maximum of 5 networks allowed. The first in the list is considered the 'primary' and if removed, the next will take its place
 - `resource_group_id` (String) Optional ID of the resource group to assign this virtual machine to
-- `volume_ids` (List of String) List of volume IDs to attach to the virtual machine. Maximum of 5 volumes allowed. A volume can only be attached to a single virtual machine, so this parameter will not work as expected when using Terraform's count meta-attribute
 
 ### Read-Only
 
@@ -150,8 +160,8 @@ resource "gpcn_virtualmachine" "example" {
 - `network_hotplug` (Boolean) Whether the virtual machine supports hot modifications without the virtual machine being in Shutoff status
 - `public_ip` (String) The public IP address, if allocate_public_ip is True
 
-<a id="nestedatt--auth"></a>
-### Nested Schema for `auth`
+<a id="nestedatt--initial_auth"></a>
+### Nested Schema for `initial_auth`
 
 Required:
 
@@ -161,15 +171,6 @@ Optional:
 
 - `password` (String, Sensitive) Password for authentication. Must be 12-20 characters, contain only letters, digits, and ! @ # % - _ ., and include at least one uppercase letter, one lowercase letter, one digit, and one symbol. Cannot be set when ssh_key_id is set. username defaults to the image default if not specified
 - `ssh_key_id` (String) ID of the SSH key to use for authentication. Cannot be set together with password
-
-
-<a id="nestedatt--size"></a>
-### Nested Schema for `size`
-
-Required:
-
-- `category` (String) Short code representing the category. Must be one of: 'general' or 'memory'
-- `name` (String) Human-readable name of the size configuration. Must be one of: 'G-Micro-1', 'G-Small-1', 'G-Medium-1', 'G-Large-1', 'G-Extra Large-1', 'M-Micro-1', 'M-Small-1', 'M-Medium-1', 'M-Large-1', 'M-Extra Large-1'
 
 ## Import
 
