@@ -4,7 +4,7 @@ This repository contains a Terraform provider used to provision GPCN resources. 
 
 ## Environment Setup
 
-This provider is still in development, so you will need to configure your provider to build it locally.
+The below instructions are for installing the GPCN terraform provider locally for development purposes. If you are interested in using GPCN for resource management, refer to the [documentation](./docs/) to get started.
 
 Install [go](https://go.dev/) and [terraform](https://developer.hashicorp.com/terraform/install).
 
