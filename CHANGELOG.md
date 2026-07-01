@@ -1,3 +1,14 @@
+## 1.0.1 (July 1, 2026)
+
+BUG FIXES:
+
+- **SSH Key**: Corrected the `name` attribute length validator from 1-255 to the API-enforced maximum of 1-30 characters
+
+ENHANCEMENTS:
+
+- Upgraded Go dependencies (golang.org/x/crypto, golang.org/x/sync, golang.org/x/net, golang.org/x/sys, golang.org/x/text, google.golang.org/grpc)
+- Upgraded terraform-plugin-docs to v0.25.0
+
 ## 1.0.0 (June 18, 2026)
 
 BREAKING CHANGES:
