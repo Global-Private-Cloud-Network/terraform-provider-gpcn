@@ -18,7 +18,7 @@ func TestSSHKeyResourceUpload(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
 	nameInitial := fmt.Sprintf("ssh-key-upload-%s", rName)
-	nameRenamed := fmt.Sprintf("ssh-key-upload-renamed-%s", rName)
+	nameRenamed := fmt.Sprintf("ssh-key-renamed-%s", rName)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
