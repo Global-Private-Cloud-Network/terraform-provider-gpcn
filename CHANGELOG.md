@@ -1,3 +1,9 @@
+## 1.0.2 (July 12, 2026)
+
+ENHANCEMENTS:
+
+- Upgraded Go to 1.26.5 and bumped transitive dependencies to resolve security advisories
+
 ## 1.0.1 (July 1, 2026)
 
 BUG FIXES:
