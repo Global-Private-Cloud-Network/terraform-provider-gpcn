@@ -52,5 +52,5 @@ const (
 // Drift-detection messages for resources deleted outside of Terraform
 const (
 	LogVolumeNotFoundRemovingFromState = "GPCN Volume no longer exists (deleted outside of Terraform) - removing it from state"
-	LogVolumeAlreadyDeleted            = "GPCN Volume was already deleted - treating delete as successful"
+	LogVolumeAlreadyDeleted            = "GPCN Volume was already deleted"
 )

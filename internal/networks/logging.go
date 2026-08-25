@@ -72,5 +72,5 @@ const (
 // Drift-detection messages for resources deleted outside of Terraform
 const (
 	LogNetworkNotFoundRemovingFromState = "GPCN Network no longer exists (deleted outside of Terraform) - removing it from state"
-	LogNetworkAlreadyDeleted            = "GPCN Network was already deleted - treating delete as successful"
+	LogNetworkAlreadyDeleted            = "GPCN Network was already deleted"
 )
