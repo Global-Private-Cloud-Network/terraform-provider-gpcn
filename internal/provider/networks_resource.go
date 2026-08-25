@@ -246,6 +246,12 @@ func (r *networksResource) Read(ctx context.Context, req resource.ReadRequest, r
 
 	getNetworkResponse, err := networks.GetNetwork(r.client, ctx, state.ID.ValueString())
 	if err != nil {
+		// Resource was deleted outside of Terraform
+		if client.IsNotFound(err) {
+			tflog.Info(ctx, networks.LogNetworkNotFoundRemovingFromState)
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError(
 			networks.ErrSummaryUnableToGetNetwork,
 			fmt.Sprintf(networks.ErrDetailUnableToGetNetworkWithID, state.ID.ValueString())+": "+err.Error(),
@@ -312,7 +318,10 @@ func (r *networksResource) Delete(ctx context.Context, req resource.DeleteReques
 	}
 
 	err := networks.DeleteNetwork(r.client, ctx, state.ID.ValueString())
-	if err != nil {
+	if client.IsNotFound(err) {
+		// Already deleted outside of Terraform
+		tflog.Info(ctx, networks.LogNetworkAlreadyDeleted)
+	} else if err != nil {
 		resp.Diagnostics.AddError(
 			networks.ErrSummaryUnableToDeleteNetwork,
 			fmt.Sprintf(networks.ErrDetailUnableToDeleteNetworkWithID, state.ID.ValueString())+": "+err.Error(),

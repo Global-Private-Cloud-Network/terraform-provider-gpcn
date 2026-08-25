@@ -127,7 +127,12 @@ func (r *volumeAttachmentResource) Read(ctx context.Context, req resource.ReadRe
 	}
 
 	currentVMId, err := volumeattachments.GetAttachedVMId(r.client, ctx, state.VolumeId.ValueString())
-	if err != nil {
+	if client.IsNotFound(err) {
+		// The backing volume is gone, so the attachment should be too
+		tflog.Info(ctx, volumeattachments.LogVolumeAttachmentVolumeGone)
+		resp.State.RemoveResource(ctx)
+		return
+	} else if err != nil {
 		resp.Diagnostics.AddError(volumeattachments.ErrSummaryUnableToReadAttachment, err.Error())
 		return
 	}
@@ -165,7 +170,10 @@ func (r *volumeAttachmentResource) Delete(ctx context.Context, req resource.Dele
 		return
 	}
 
-	if err := volumeattachments.DetachVolume(r.client, ctx, state.VirtualMachineId.ValueString(), state.VolumeId.ValueString()); err != nil {
+	if err := volumeattachments.DetachVolume(r.client, ctx, state.VirtualMachineId.ValueString(), state.VolumeId.ValueString()); client.IsNotFound(err) {
+		// The VM or volume is already deleted
+		tflog.Info(ctx, volumeattachments.LogVolumeAttachmentAlreadyDetached)
+	} else if err != nil {
 		resp.Diagnostics.AddError(volumeattachments.ErrSummaryUnableToDetachVolume, err.Error())
 		return
 	}

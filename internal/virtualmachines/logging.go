@@ -65,3 +65,9 @@ const (
 	LogIssuedDeleteGPCNVirtualMachineJob            = "Successfully issued job to delete GPCN Virtual Machine. Beginning long-polling to check the status"
 	LogSuccessfullyFinishedDeleteGPCNVirtualMachine = "Successfully finished Delete GPCN Virtual Machine"
 )
+
+// Drift-detection messages for resources deleted outside of Terraform
+const (
+	LogVirtualMachineNotFoundRemovingFromState = "GPCN Virtual Machine no longer exists (deleted outside of Terraform) - removing it from state"
+	LogVirtualMachineAlreadyDeleted            = "GPCN Virtual Machine was already deleted - treating delete as successful"
+)

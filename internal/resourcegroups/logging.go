@@ -18,3 +18,9 @@ const (
 	LogStartingDeleteResourceGroup             = "Starting Delete GPCN Resource Group"
 	LogSuccessfullyFinishedDeleteResourceGroup = "Successfully finished Delete GPCN Resource Group"
 )
+
+// Drift-detection messages for resources deleted outside of Terraform
+const (
+	LogResourceGroupNotFoundRemovingFromState = "GPCN Resource Group no longer exists (deleted outside of Terraform) - removing it from state"
+	LogResourceGroupAlreadyDeleted            = "GPCN Resource Group was already deleted - treating delete as successful"
+)

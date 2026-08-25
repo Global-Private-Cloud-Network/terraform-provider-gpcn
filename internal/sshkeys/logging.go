@@ -18,3 +18,9 @@ const (
 	LogStartingDeleteSSHKey             = "Starting Delete GPCN SSH Key"
 	LogSuccessfullyFinishedDeleteSSHKey = "Successfully finished Delete GPCN SSH Key"
 )
+
+// Drift-detection messages for resources deleted outside of Terraform
+const (
+	LogSSHKeyNotFoundRemovingFromState = "GPCN SSH Key no longer exists (deleted outside of Terraform) - removing it from state"
+	LogSSHKeyAlreadyDeleted            = "GPCN SSH Key was already deleted - treating delete as successful"
+)
