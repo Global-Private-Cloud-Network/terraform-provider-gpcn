@@ -252,6 +252,12 @@ func (r *gpuResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 
 	getGPUResponse, err := gpu.GetGPU(r.client, ctx, state.ID.ValueString())
 	if err != nil {
+		// Resource was deleted outside of Terraform
+		if client.IsNotFound(err) {
+			tflog.Info(ctx, gpu.LogGPUNotFoundRemovingFromState)
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError(
 			gpu.ErrSummaryUnableToReadGPU,
 			fmt.Errorf("%s: %w", fmt.Sprintf(gpu.ErrDetailReadGPUFailed, state.ID.ValueString()), err).Error(),
@@ -337,7 +343,10 @@ func (r *gpuResource) Delete(ctx context.Context, req resource.DeleteRequest, re
 	}
 
 	err := gpu.DeleteGPU(r.client, ctx, state.ID.ValueString())
-	if err != nil {
+	if client.IsNotFound(err) {
+		// Already deleted outside of Terraform
+		tflog.Info(ctx, gpu.LogGPUAlreadyDeleted)
+	} else if err != nil {
 		resp.Diagnostics.AddError(
 			gpu.ErrSummaryUnableToDeleteGPU,
 			fmt.Errorf("%s: %w", fmt.Sprintf(gpu.ErrDetailDeleteGPUFailed, state.ID.ValueString()), err).Error(),

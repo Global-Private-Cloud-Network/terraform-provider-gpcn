@@ -2,6 +2,8 @@ package client_test
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -97,5 +99,78 @@ func TestDoWithRetryNoRetryOn400(t *testing.T) {
 
 	if int(attemptCount.Load()) != 1 {
 		t.Errorf("expected exactly 1 attempt for non-retryable 400, got %d", attemptCount.Load())
+	}
+}
+
+// TestIsNotFound verifies that only genuine HTTP 404 responses are reported as
+// "not found". Read implementations use this to remove a resource from state, and
+// Delete implementations to treat an already-deleted resource as success, so a
+// false positive here would silently discard a live resource from state.
+func TestIsNotFound(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil error", nil, false},
+		{"404", &client.HTTPError{StatusCode: 404, Body: "not found"}, true},
+		{"404 with empty body", &client.HTTPError{StatusCode: 404}, true},
+		{"400", &client.HTTPError{StatusCode: 400, Body: "bad request"}, false},
+		{"403", &client.HTTPError{StatusCode: 403}, false},
+		{"409", &client.HTTPError{StatusCode: 409}, false},
+		{"500", &client.HTTPError{StatusCode: 500}, false},
+		{"200", &client.HTTPError{StatusCode: 200}, false},
+		{"non-HTTP error", errors.New("connection refused"), false},
+		{"wrapped 404", fmt.Errorf("get network: %w", &client.HTTPError{StatusCode: 404}), true},
+		{"doubly wrapped 404", fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", &client.HTTPError{StatusCode: 404})), true},
+		{"wrapped 500", fmt.Errorf("get network: %w", &client.HTTPError{StatusCode: 500}), false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := client.IsNotFound(tt.err); got != tt.want {
+				t.Errorf("IsNotFound(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestIsNotFoundThroughRoundTrip verifies IsNotFound works on an error as it is
+// actually produced by the client stack, not just on a hand-constructed HTTPError.
+// http.Client wraps transport errors in *url.Error, so this covers that unwrap.
+func TestIsNotFoundThroughRoundTrip(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusInternalServerError} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"message":"nope"}`))
+			}))
+			defer server.Close()
+
+			cfg := client.DefaultConfig(server.URL, "test-key")
+			cfg.MaxRetries = 0
+			gpcnClient, err := client.NewGpcnClient(cfg)
+			if err != nil {
+				t.Fatalf("failed to create client: %v", err)
+			}
+
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/test", nil)
+			if err != nil {
+				t.Fatalf("failed to create request: %v", err)
+			}
+
+			resp, err := gpcnClient.DoWithRetry(req)
+			if resp != nil {
+				resp.Body.Close()
+			}
+			if err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+
+			want := status == http.StatusNotFound
+			if got := client.IsNotFound(err); got != want {
+				t.Errorf("IsNotFound(%v) = %v, want %v", err, got, want)
+			}
+		})
 	}
 }

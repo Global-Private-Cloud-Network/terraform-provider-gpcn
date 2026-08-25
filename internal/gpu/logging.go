@@ -28,3 +28,9 @@ const (
 	LogValidatingInventoryResponseStructure = "Validating inventory response structure"
 	LogInventoryAvailable                   = "GPU inventory available for series code %s in datacenter %s with GPU count %d"
 )
+
+// Drift-detection messages for resources deleted outside of Terraform
+const (
+	LogGPUNotFoundRemovingFromState = "GPCN GPU no longer exists (deleted outside of Terraform) - removing it from state"
+	LogGPUAlreadyDeleted            = "GPCN GPU was already deleted"
+)

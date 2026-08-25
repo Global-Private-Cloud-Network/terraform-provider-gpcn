@@ -278,6 +278,12 @@ func (r *virtualMachinesResource) Read(ctx context.Context, req resource.ReadReq
 	// Perform a GET call to retrieve actual information about the Virtual Machine
 	getVirtualMachineResponse, err := virtualmachines.GetVirtualMachine(r.client, ctx, state.ID.ValueString())
 	if err != nil {
+		// Resource was deleted outside of Terraform
+		if client.IsNotFound(err) {
+			tflog.Info(ctx, virtualmachines.LogVirtualMachineNotFoundRemovingFromState)
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryRetrievingVMInfoFailed,
 			fmt.Errorf("%s: %w", virtualmachines.ErrDetailVMInfoFailedCanImport, err).Error(),
@@ -434,7 +440,11 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 
 	// Before proceeding with delete, stop the virtual machine
 	err := virtualmachines.StopVirtualMachine(r.client, ctx, state.ID.ValueString())
-	if err != nil {
+	if client.IsNotFound(err) {
+		// Already deleted outside of Terraform
+		tflog.Info(ctx, virtualmachines.LogVirtualMachineAlreadyDeleted)
+		return
+	} else if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToDeleteVM,
 			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStoppingVM, state.ID.ValueString()), err).Error(),
@@ -446,7 +456,10 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	if !state.NetworkIds.IsNull() {
 		networkInterfaces, err := networks.GetNetworkInterfaces(r.client, ctx, state.ID.ValueString())
 
-		if err != nil {
+		if client.IsNotFound(err) {
+			tflog.Info(ctx, virtualmachines.LogVirtualMachineAlreadyDeleted)
+			return
+		} else if err != nil {
 			resp.Diagnostics.AddError(
 				virtualmachines.ErrSummaryErrorRetrievingNetworkIfaces,
 				fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailNetworkInterfacesForVM, state.ID.ValueString()), err).Error(),
@@ -479,7 +492,11 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	tflog.Info(ctx, virtualmachines.LogConstructedDeleteGPCNVirtualMachineRequest)
 
 	response, err := r.client.DoWithRetry(request)
-	if err != nil {
+	if client.IsNotFound(err) {
+		// Already deleted outside of Terraform
+		tflog.Info(ctx, virtualmachines.LogVirtualMachineAlreadyDeleted)
+		return
+	} else if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToDeleteVM,
 			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailUnableToDeleteVMWithID, state.ID.ValueString()), err).Error(),

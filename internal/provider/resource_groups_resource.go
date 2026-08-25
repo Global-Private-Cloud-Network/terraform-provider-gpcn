@@ -144,6 +144,12 @@ func (r *resourceGroupResource) Read(ctx context.Context, req resource.ReadReque
 
 	resourceGroupResponse, err := resourcegroups.GetResourceGroup(r.client, ctx, state.ID.ValueString())
 	if err != nil {
+		// Resource was deleted outside of Terraform
+		if client.IsNotFound(err) {
+			tflog.Info(ctx, resourcegroups.LogResourceGroupNotFoundRemovingFromState)
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError(
 			resourcegroups.ErrSummaryUnableToReadResourceGroup,
 			fmt.Errorf("%s: %w", fmt.Sprintf(resourcegroups.ErrDetailReadResourceGroupFailed, state.ID.ValueString()), err).Error(),
@@ -221,7 +227,10 @@ func (r *resourceGroupResource) Delete(ctx context.Context, req resource.DeleteR
 		return
 	}
 
-	if err := resourcegroups.DeleteResourceGroup(r.client, ctx, state.ID.ValueString()); err != nil {
+	if err := resourcegroups.DeleteResourceGroup(r.client, ctx, state.ID.ValueString()); client.IsNotFound(err) {
+		// Already deleted outside of Terraform
+		tflog.Info(ctx, resourcegroups.LogResourceGroupAlreadyDeleted)
+	} else if err != nil {
 		resp.Diagnostics.AddError(
 			resourcegroups.ErrSummaryUnableToDeleteResourceGroup,
 			fmt.Errorf("%s: %w", fmt.Sprintf(resourcegroups.ErrDetailDeleteResourceGroupFailed, state.ID.ValueString()), err).Error(),

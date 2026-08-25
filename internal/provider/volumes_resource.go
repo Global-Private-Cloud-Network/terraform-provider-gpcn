@@ -193,6 +193,12 @@ func (r *volumesResource) Read(ctx context.Context, req resource.ReadRequest, re
 
 	getVolumeResponse, err := volumes.GetVolume(r.client, ctx, state.ID.ValueString())
 	if err != nil {
+		// Resource was deleted outside of Terraform
+		if client.IsNotFound(err) {
+			tflog.Info(ctx, volumes.LogVolumeNotFoundRemovingFromState)
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError(
 			volumes.ErrSummaryUnableToGetVolume,
 			fmt.Sprintf(volumes.ErrDetailUnableToGetVolumeWithID, state.ID.ValueString())+": "+err.Error(),
@@ -258,7 +264,10 @@ func (r *volumesResource) Delete(ctx context.Context, req resource.DeleteRequest
 	}
 
 	err := volumes.DeleteVolume(r.client, ctx, state.ID.ValueString())
-	if err != nil {
+	if client.IsNotFound(err) {
+		// Already deleted outside of Terraform
+		tflog.Info(ctx, volumes.LogVolumeAlreadyDeleted)
+	} else if err != nil {
 		resp.Diagnostics.AddError(
 			volumes.ErrSummaryUnableToDeleteVolume,
 			fmt.Sprintf(volumes.ErrDetailUnableToDeleteVolumeWithID, state.ID.ValueString())+": "+err.Error(),

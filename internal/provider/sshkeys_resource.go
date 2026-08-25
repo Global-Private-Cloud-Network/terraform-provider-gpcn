@@ -147,6 +147,12 @@ func (r *sshKeyResource) Read(ctx context.Context, req resource.ReadRequest, res
 
 	sshKeyResponse, err := sshkeys.GetSSHKey(r.client, ctx, state.ID.ValueString())
 	if err != nil {
+		// Resource was deleted outside of Terraform
+		if client.IsNotFound(err) {
+			tflog.Info(ctx, sshkeys.LogSSHKeyNotFoundRemovingFromState)
+			resp.State.RemoveResource(ctx)
+			return
+		}
 		resp.Diagnostics.AddError(
 			sshkeys.ErrSummaryUnableToReadSSHKey,
 			fmt.Errorf("%s: %w", fmt.Sprintf(sshkeys.ErrDetailReadSSHKeyFailed, state.ID.ValueString()), err).Error(),
@@ -224,7 +230,9 @@ func (r *sshKeyResource) Delete(ctx context.Context, req resource.DeleteRequest,
 		return
 	}
 
-	if err := sshkeys.DeleteSSHKey(r.client, ctx, state.ID.ValueString()); err != nil {
+	if err := sshkeys.DeleteSSHKey(r.client, ctx, state.ID.ValueString()); client.IsNotFound(err) {
+		// Already deleted outside of Terraform
+	} else if err != nil {
 		resp.Diagnostics.AddError(
 			sshkeys.ErrSummaryUnableToDeleteSSHKey,
 			fmt.Errorf("%s: %w", fmt.Sprintf(sshkeys.ErrDetailDeleteSSHKeyFailed, state.ID.ValueString()), err).Error(),
