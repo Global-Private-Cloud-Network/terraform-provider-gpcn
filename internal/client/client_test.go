@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"terraform-provider-gpcn/internal/client"
 )
@@ -172,5 +174,148 @@ func TestIsNotFoundThroughRoundTrip(t *testing.T) {
 				t.Errorf("IsNotFound(%v) = %v, want %v", err, got, want)
 			}
 		})
+	}
+}
+
+// TestDoWithRetryStopsOnCancelledContext verifies that a canceled context ends
+// the retry loop immediately instead of being treated as a transient failure.
+// context.Canceled is not an *HTTPError, so without an explicit check it falls
+// through to the retryable branch and sleeps the full backoff schedule after the
+// user has already interrupted the run.
+func TestDoWithRetryStopsOnCancelledContext(t *testing.T) {
+	t.Parallel()
+
+	var attemptCount atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attemptCount.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.MaxRetries = 3
+	cfg.InitialRetryDelay = 500 * time.Millisecond // unfixed: 500ms + 1s + 2s of sleep
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/test", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	start := time.Now()
+	resp, err := gpcnClient.DoWithRetry(req)
+	elapsed := time.Since(start)
+	if resp != nil {
+		resp.Body.Close()
+	}
+
+	if err == nil {
+		t.Fatal("expected an error for a canceled context, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want it to wrap context.Canceled", err)
+	}
+	if elapsed > 200*time.Millisecond {
+		t.Errorf("DoWithRetry took %s, expected an immediate return: it slept through retry backoff", elapsed)
+	}
+	if got := attemptCount.Load(); got != 0 {
+		t.Errorf("server saw %d requests, want 0 for an already-canceled context", got)
+	}
+}
+
+// TestDoWithRetryCancelDuringBackoff verifies that canceling mid-flight wakes the
+// backoff sleep rather than running it to completion.
+func TestDoWithRetryCancelDuringBackoff(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	var attemptCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attemptCount.Add(1) == 1 {
+			cancel()
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.MaxRetries = 3
+	cfg.InitialRetryDelay = 500 * time.Millisecond
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/test", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	start := time.Now()
+	resp, err := gpcnClient.DoWithRetry(req)
+	elapsed := time.Since(start)
+	if resp != nil {
+		resp.Body.Close()
+	}
+
+	if err == nil {
+		t.Fatal("expected an error after cancellation, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want it to wrap context.Canceled", err)
+	}
+	if elapsed > 300*time.Millisecond {
+		t.Errorf("DoWithRetry took %s after cancellation, expected it to abandon the backoff sleep", elapsed)
+	}
+}
+
+// TestDoWithRetryRetriesRequestTimeout guards the distinction the cancellation fix
+// relies on: a per-request timeout (http.Client.Timeout) is a transient failure and
+// must still be retried, unlike a canceled caller context.
+func TestDoWithRetryRetriesRequestTimeout(t *testing.T) {
+	t.Parallel()
+
+	var attemptCount atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attemptCount.Add(1) == 1 {
+			time.Sleep(300 * time.Millisecond) // exceeds RequestTimeout below
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.MaxRetries = 2
+	cfg.InitialRetryDelay = 0
+	cfg.RequestTimeout = 50 * time.Millisecond
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/test", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := gpcnClient.DoWithRetry(req)
+	if err != nil {
+		t.Fatalf("DoWithRetry returned unexpected error: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if got := attemptCount.Load(); got != 2 {
+		t.Errorf("server saw %d requests, want 2: the timed-out attempt should have been retried", got)
 	}
 }

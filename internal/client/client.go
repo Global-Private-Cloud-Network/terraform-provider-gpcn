@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -128,12 +129,13 @@ func (c *GpcnClient) Config() *Config {
 
 // DoWithRetry performs an HTTP request with exponential backoff retry
 func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
+	ctx := req.Context()
 	var lastErr error
 	delay := c.config.InitialRetryDelay
 
 	for attempt := 0; attempt <= c.config.MaxRetries; attempt++ {
 		// Clone the request for retry (body needs special handling)
-		reqClone := req.Clone(req.Context())
+		reqClone := req.Clone(ctx)
 
 		// req.Clone() shallow-copies Body, so after the first attempt reads it the
 		// reader is exhausted. Reset it on retries using GetBody, which is set
@@ -156,6 +158,15 @@ func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 
 		lastErr = err
 
+		// A canceled or expired caller context is not a transient failure:
+		// retrying cannot succeed, and backing off first would keep Terraform
+		// sleeping after the user has already interrupted the run. Check the
+		// context itself rather than the error, so that a per-request timeout
+		// (http.Client.Timeout) stays retryable.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, fmt.Errorf("%w: %w", ctxErr, err)
+		}
+
 		// Check if error is retryable
 		var httpErr *HTTPError
 		if ok := isHTTPError(err, &httpErr); ok && !httpErr.IsRetryable() {
@@ -164,7 +175,9 @@ func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 
 		// Don't sleep after the last attempt
 		if attempt < c.config.MaxRetries {
-			time.Sleep(delay)
+			if sleepErr := sleepWithContext(ctx, delay); sleepErr != nil {
+				return nil, fmt.Errorf("%w: %w", sleepErr, lastErr)
+			}
 			// Exponential backoff with cap
 			delay *= 2
 			if delay > c.config.MaxRetryDelay {
@@ -174,6 +187,25 @@ func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 	}
 
 	return nil, fmt.Errorf("%w: %w", ErrMaxRetriesExceeded, lastErr)
+}
+
+// sleepWithContext waits for d to elapse, returning early with the context's
+// error if ctx is canceled or expires first. It replaces bare time.Sleep calls
+// so that retry backoff and polling intervals stay interruptible.
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return ctx.Err()
+	}
+
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // isHTTPError checks if the error is an HTTPError and assigns it to target
