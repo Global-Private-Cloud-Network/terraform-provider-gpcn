@@ -184,7 +184,7 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 	// Wait for the VM to actually be spun up before doing anything more
 	getVirtualMachineResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, resourceID, []string{VMStatusRunning.String(), VMStatusShutoff.String()}, DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS, DEFAULT_INITIAL_POLL_DELAY_SECONDS)
 	if err != nil {
-		return nil, client.NewPartialCreateError(resourceID, err)
+		return nil, &client.PartialCreateError{ResourceID: resourceID, Err: err}
 	}
 
 	tflog.Info(ctx, LogSuccessfullyProcessedVMCreate)

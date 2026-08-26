@@ -12,6 +12,5 @@ var NETWORK_TYPE_STANDARD = "standard"
 // Delete Network constants
 var DELETE_NETWORK_RETRY_COUNT = 5
 
-// DELETE_NETWORK_RETRY_INTERVAL is the interval between delete attempts. This is
-// a var, not a constant, because the tests decrease it.
+// DELETE_NETWORK_RETRY_INTERVAL is the interval between delete attempts.
 var DELETE_NETWORK_RETRY_INTERVAL = 5 * time.Second

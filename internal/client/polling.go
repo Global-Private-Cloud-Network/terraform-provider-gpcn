@@ -117,14 +117,6 @@ func PerformLongPollingWithConfig(gpcnClient *GpcnClient, ctx context.Context, a
 			return jobResponse, nil
 		}
 
-		// Re-sample before the timeout check: the value taken at the top of the
-		// loop predates the poll request above, so comparing against it would
-		// always grant one extra round trip past the deadline.
-		elapsed = time.Since(startTime)
-		if elapsed >= config.Timeout {
-			return nil, fmt.Errorf("job %s for action %q: %w (elapsed: %s)", jobId, action, ErrLongPollingTimeout, elapsed)
-		}
-
 		// pollCtx has the deadline. A limit on the interval is not necessary.
 		if err := SleepWithContext(pollCtx, interval); err != nil {
 			return nil, asTimeout(fmt.Errorf("polling for job %s for action %q: %w", jobId, action, err))

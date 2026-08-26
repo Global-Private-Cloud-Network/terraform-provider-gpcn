@@ -10,48 +10,38 @@ import (
 	"terraform-provider-gpcn/internal/client"
 )
 
-func TestPartialCreateErrorPreservesCauseAndID(t *testing.T) {
+// The message is the only record of the resource, so it must name the ID. The
+// cause must also stay reachable for errors.Is.
+func TestPartialCreateErrorNamesResourceAndKeepsCause(t *testing.T) {
 	t.Parallel()
 
 	cause := fmt.Errorf("status poll gave up: %w", context.Canceled)
-	err := client.NewPartialCreateError("vm-123", cause)
+	err := &client.PartialCreateError{ResourceID: "vm-123", Err: cause}
 
 	if !errors.Is(err, context.Canceled) {
-		t.Errorf("errors.Is(err, context.Canceled) = false, want the cause to stay reachable")
+		t.Error("errors.Is(err, context.Canceled) = false, want the cause to stay reachable")
 	}
 	if !strings.Contains(err.Error(), "vm-123") {
-		t.Errorf("error message %q does not name the resource that was created", err)
-	}
-
-	id, ok := client.PartialCreateResourceID(err)
-	if !ok || id != "vm-123" {
-		t.Errorf("PartialCreateResourceID = (%q, %v), want (\"vm-123\", true)", id, ok)
+		t.Errorf("error message %q does not name the resource that the API created", err)
 	}
 }
 
-// A resource implementation wraps the create error again. The ID must stay
-// available after that, or the resource is still lost.
-func TestPartialCreateResourceIDFoundThroughWrapping(t *testing.T) {
+// A resource implementation wraps the create error again. The ID must stay in
+// the message after that, or the operator cannot find the resource.
+func TestPartialCreateErrorSurvivesWrapping(t *testing.T) {
 	t.Parallel()
 
-	err := fmt.Errorf("creating network: %w", client.NewPartialCreateError("net-9", errors.New("boom")))
+	err := fmt.Errorf("creating network: %w", &client.PartialCreateError{ResourceID: "net-9", Err: errors.New("boom")})
 
-	id, ok := client.PartialCreateResourceID(err)
-	if !ok || id != "net-9" {
-		t.Errorf("PartialCreateResourceID = (%q, %v), want (\"net-9\", true)", id, ok)
+	if !strings.Contains(err.Error(), "net-9") {
+		t.Errorf("error message %q does not name the resource that the API created", err)
 	}
-}
 
-func TestPartialCreateResourceIDIgnoresOtherErrors(t *testing.T) {
-	t.Parallel()
-
-	if id, ok := client.PartialCreateResourceID(errors.New("plain failure")); ok {
-		t.Errorf("PartialCreateResourceID = (%q, true), want (\"\", false) for an unrelated error", id)
+	var partial *client.PartialCreateError
+	if !errors.As(err, &partial) {
+		t.Fatal("errors.As did not find the PartialCreateError")
 	}
-	if id, ok := client.PartialCreateResourceID(nil); ok {
-		t.Errorf("PartialCreateResourceID = (%q, true), want (\"\", false) for a nil error", id)
-	}
-	if err := client.NewPartialCreateError("vm-1", nil); err != nil {
-		t.Errorf("NewPartialCreateError with a nil cause = %v, want nil", err)
+	if partial.ResourceID != "net-9" {
+		t.Errorf("ResourceID = %q, want %q", partial.ResourceID, "net-9")
 	}
 }

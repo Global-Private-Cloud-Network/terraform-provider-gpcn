@@ -108,7 +108,7 @@ func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model Reso
 	// Perform a GET call to retrieve actual information about the Volume
 	getVolumeResponse, err := GetVolume(gpcnClient, ctx, resourceID)
 	if err != nil {
-		return nil, client.NewPartialCreateError(resourceID, err)
+		return nil, &client.PartialCreateError{ResourceID: resourceID, Err: err}
 	}
 
 	tflog.Info(ctx, LogSuccessfullyRetrievedVolumeCreate)

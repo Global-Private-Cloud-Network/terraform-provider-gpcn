@@ -159,9 +159,6 @@ func (r *volumesResource) Create(ctx context.Context, req resource.CreateRequest
 
 	getVolumeResponse, err := volumes.CreateVolume(r.client, ctx, plan)
 	if err != nil {
-		if handlePartialCreate(ctx, err, req.Plan, resp, volumes.ErrSummaryUnableToCreateVolume) {
-			return
-		}
 		resp.Diagnostics.AddError(
 			volumes.ErrSummaryUnableToCreateVolume,
 			err.Error(),

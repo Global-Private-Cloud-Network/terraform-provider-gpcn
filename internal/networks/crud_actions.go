@@ -138,7 +138,7 @@ func CreateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, model Res
 	// Perform a GET call to retrieve actual information about the Network
 	getNetworkResponse, err := GetNetwork(gpcnClient, ctx, resourceID)
 	if err != nil {
-		return nil, client.NewPartialCreateError(resourceID, err)
+		return nil, &client.PartialCreateError{ResourceID: resourceID, Err: err}
 	}
 
 	tflog.Info(ctx, LogSuccessfullyRetrievedNetworkCreate)

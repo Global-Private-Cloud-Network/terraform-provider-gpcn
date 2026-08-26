@@ -118,7 +118,7 @@ func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId stri
 	// Get the GPU details after creation
 	getGPUResponse, err := GetGPU(gpcnClient, ctx, resourceID)
 	if err != nil {
-		return nil, client.NewPartialCreateError(resourceID, err)
+		return nil, &client.PartialCreateError{ResourceID: resourceID, Err: err}
 	}
 
 	tflog.Info(ctx, LogSuccessfullyFinishedCreateGPU)

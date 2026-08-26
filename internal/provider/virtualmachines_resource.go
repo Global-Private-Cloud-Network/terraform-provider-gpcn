@@ -241,9 +241,6 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 
 	getVirtualMachineResponse, err := virtualmachines.CreateVirtualMachine(r.client, ctx, plan.ImageId.ValueString(), plan.SizeId.ValueString(), plan)
 	if err != nil {
-		if handlePartialCreate(ctx, err, req.Plan, resp, virtualmachines.ErrSummaryUnableToCreateVM) {
-			return
-		}
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToCreateVM,
 			err.Error(),

@@ -803,9 +803,9 @@ func TestPollForVirtualMachineStatusTimeoutCountsRequestTime(t *testing.T) {
 	}
 }
 
-// A create that fails after the API gives an ID must report that ID. If it does
-// not, the provider writes no state. The account then pays for a virtual machine
-// that no later plan or destroy can find.
+// A create that fails after the API gives an ID must name that ID in its
+// message. Terraform records no state for the machine, so the message is the
+// only way the operator learns that it exists.
 func TestCreateVirtualMachineReportsPartialCreate(t *testing.T) {
 	const (
 		jobID   = "job-partial"
@@ -843,11 +843,15 @@ func TestCreateVirtualMachineReportsPartialCreate(t *testing.T) {
 		t.Fatal("expected an error when the VM never reaches a target status, got nil")
 	}
 
-	resourceID, ok := client.PartialCreateResourceID(err)
-	if !ok {
-		t.Fatalf("error = %v, want it to report the ID of the virtual machine that was created", err)
+	if !strings.Contains(err.Error(), vmID) {
+		t.Errorf("error = %v, want the message to name the virtual machine that the API created", err)
 	}
-	if resourceID != vmID {
-		t.Errorf("partial create reported ID %q, want %q", resourceID, vmID)
+
+	var partial *client.PartialCreateError
+	if !errors.As(err, &partial) {
+		t.Fatalf("error = %v, want a PartialCreateError", err)
+	}
+	if partial.ResourceID != vmID {
+		t.Errorf("ResourceID = %q, want %q", partial.ResourceID, vmID)
 	}
 }

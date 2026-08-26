@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,13 +14,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
-
-// TestMain decreases the interval between network delete retries. The default
-// value of 5 seconds adds only delay to each test of the retry loop.
-func TestMain(m *testing.M) {
-	DELETE_NETWORK_RETRY_INTERVAL = 10 * time.Millisecond
-	os.Exit(m.Run())
-}
 
 const testDatacenterID = "datacenter-123"
 
@@ -344,12 +336,6 @@ func TestDeleteNetworkInterruptedReportsLastError(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	// Increase the interval, so that the cancellation happens during the interval
-	// and not during a request.
-	original := DELETE_NETWORK_RETRY_INTERVAL
-	DELETE_NETWORK_RETRY_INTERVAL = 2 * time.Second
-	defer func() { DELETE_NETWORK_RETRY_INTERVAL = original }()
 
 	var jobPolls int
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
