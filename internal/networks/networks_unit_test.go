@@ -4,15 +4,24 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
+
+// TestMain decreases the interval between network delete retries. The default
+// value of 5 seconds adds only delay to each test of the retry loop.
+func TestMain(m *testing.M) {
+	DELETE_NETWORK_RETRY_INTERVAL = 10 * time.Millisecond
+	os.Exit(m.Run())
+}
 
 const testDatacenterID = "datacenter-123"
 
@@ -325,5 +334,62 @@ func TestDeleteNetworkStopsRetryingOnContextCancellation(t *testing.T) {
 	}
 	if elapsed > 1*time.Second {
 		t.Errorf("DeleteNetwork took %s after cancellation, expected it to abandon the retry wait", elapsed)
+	}
+}
+
+// An interruption during the retry interval must not remove the delete error.
+// That error is the reason for the retry, and the operator needs it.
+func TestDeleteNetworkInterruptedReportsLastError(t *testing.T) {
+	const networkID = "network-lasterr-123"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Increase the interval, so that the cancellation happens during the interval
+	// and not during a request.
+	original := DELETE_NETWORK_RETRY_INTERVAL
+	DELETE_NETWORK_RETRY_INTERVAL = 2 * time.Second
+	defer func() { DELETE_NETWORK_RETRY_INTERVAL = original }()
+
+	var jobPolls int
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				jobPolls++
+				// The delete job fails. DeleteNetwork waits and tries again.
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"data":    map[string]any{"jobs": []any{map[string]any{"jobId": "job-1", "hasFailed": true}}},
+				})
+				if jobPolls == 1 {
+					// Interrupt the run during the interval.
+					go func() {
+						time.Sleep(100 * time.Millisecond)
+						cancel()
+					}()
+				}
+			case r.Method == http.MethodDelete:
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"data":    map[string]any{"jobId": "job-1"},
+				})
+			default:
+				testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": []any{}})
+			}
+		},
+	})
+	defer server.Close()
+
+	err := DeleteNetwork(gpcnClient, ctx, networkID)
+	if err == nil {
+		t.Fatal("expected an error after cancellation, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want it to wrap context.Canceled", err)
+	}
+	if !errors.Is(err, client.ErrJobFailed) {
+		t.Errorf("error = %v, want it to also report the delete failure it was retrying", err)
 	}
 }

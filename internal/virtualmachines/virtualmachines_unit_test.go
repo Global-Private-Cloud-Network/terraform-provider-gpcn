@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,15 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
+
+// TestMain decreases the delays of PollForVirtualMachineStatus for this package.
+// The default delays add 45 seconds to a test suite that uses only mock
+// responses. A test that must have a specific delay gives it as an argument.
+func TestMain(m *testing.M) {
+	VIRTUALMACHINE_STATUS_POLL_INTERVAL = 10 * time.Millisecond
+	DEFAULT_INITIAL_POLL_DELAY_SECONDS = 0
+	os.Exit(m.Run())
+}
 
 const (
 	testDatacenterID = "datacenter-123"
@@ -667,6 +677,8 @@ func TestPollForVirtualMachineStatusStopsOnContextCancellation(t *testing.T) {
 // wait in the poller: the initial delay, which defaults to 30 seconds.
 func TestPollForVirtualMachineStatusInitialDelayStopsOnCancellation(t *testing.T) {
 	const vmID = "vm-delay-cancel"
+	// TestMain sets DEFAULT_INITIAL_POLL_DELAY_SECONDS to zero.
+	const initialDelaySeconds = 30
 
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
@@ -680,7 +692,7 @@ func TestPollForVirtualMachineStatusInitialDelayStopsOnCancellation(t *testing.T
 	cancel()
 
 	start := time.Now()
-	_, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, 600, DEFAULT_INITIAL_POLL_DELAY_SECONDS)
+	_, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, 600, initialDelaySeconds)
 	elapsed := time.Since(start)
 
 	if !errors.Is(err, context.Canceled) {
@@ -688,6 +700,154 @@ func TestPollForVirtualMachineStatusInitialDelayStopsOnCancellation(t *testing.T
 	}
 	if elapsed > 500*time.Millisecond {
 		t.Errorf("poller took %s to return, expected it to skip the %ds initial delay on a canceled context",
-			elapsed, DEFAULT_INITIAL_POLL_DELAY_SECONDS)
+			elapsed, initialDelaySeconds)
+	}
+}
+
+// The API can report an empty status. The loop must not accept an empty status
+// as a target status, because the virtual machine did not start.
+func TestPollForVirtualMachineStatusRejectsEmptyStatus(t *testing.T) {
+	const vmID = "vm-empty-status"
+	var pollCount int
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			resp := newVMResponse(vmID, "test-vm")
+			pollCount++
+			if pollCount < 3 {
+				// The API did not set the status.
+				resp.Data.Status = ""
+			}
+			testutil.WriteJSONResponse(w, resp)
+		},
+	})
+	defer server.Close()
+
+	got, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, []string{"Running", "Shutoff"}, 600, 0)
+	if err != nil {
+		t.Fatalf("PollForVirtualMachineStatus failed: %v", err)
+	}
+	if got.Data.Status != "Running" {
+		t.Errorf("poller returned a VM with status %q, want it to have kept waiting for a target status", got.Data.Status)
+	}
+	if pollCount < 3 {
+		t.Errorf("server saw %d polls, want at least 3: the empty statuses should not have satisfied the wait", pollCount)
+	}
+}
+
+// A cancellation can happen during the status request or during an interval.
+// The error must keep the cause in both conditions.
+func TestPollForVirtualMachineStatusWrapsRequestFailure(t *testing.T) {
+	const vmID = "vm-cancel-in-request"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			// Interrupt the run during the request, not during the interval.
+			cancel()
+			time.Sleep(200 * time.Millisecond)
+			resp := newVMResponse(vmID, "test-vm")
+			resp.Data.Status = "Building"
+			testutil.WriteJSONResponse(w, resp)
+		},
+	})
+	defer server.Close()
+
+	_, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, 600, 0)
+	if err == nil {
+		t.Fatal("expected an error after cancellation, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want it to wrap context.Canceled", err)
+	}
+}
+
+// timeoutMaxSec must apply to the clock. A sum of the intervals ignores the time
+// of each status request. A request can continue for the request timeout
+// multiplied by the retry count.
+func TestPollForVirtualMachineStatusTimeoutCountsRequestTime(t *testing.T) {
+	const (
+		vmID         = "vm-slow-status"
+		requestDelay = 300 * time.Millisecond
+	)
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			time.Sleep(requestDelay)
+			resp := newVMResponse(vmID, "test-vm")
+			resp.Data.Status = "Building"
+			testutil.WriteJSONResponse(w, resp)
+		},
+	})
+	defer server.Close()
+
+	// Each request takes 300ms and the interval is 10ms. Therefore the clock, not
+	// a count of the intervals, must end the loop.
+	start := time.Now()
+	_, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, []string{"Running"}, 1, 0)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected a timeout error, got nil")
+	}
+	if !strings.Contains(err.Error(), "still not in the target status") {
+		t.Errorf("error = %v, want the status timeout message", err)
+	}
+	if elapsed > 3*time.Second {
+		t.Errorf("poller ran for %s against a 1s timeout: the request time is not being counted", elapsed)
+	}
+}
+
+// A create that fails after the API gives an ID must report that ID. If it does
+// not, the provider writes no state. The account then pays for a virtual machine
+// that no later plan or destroy can find.
+func TestCreateVirtualMachineReportsPartialCreate(t *testing.T) {
+	const (
+		jobID   = "job-partial"
+		vmID    = "vm-partial-789"
+		imageID = "550e8400-e29b-41d4-a716-446655440000"
+		sizeID  = "sku-abc-123"
+	)
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
+					Success: true,
+					Data: client.JobStatusDataResponse{
+						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: vmID}},
+					},
+				})
+			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+				// The create job is complete. The virtual machine exists.
+				testutil.HandleJobResponse(w, jobID, vmID, true)
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
+				// The provider cannot confirm that the machine started.
+				w.WriteHeader(http.StatusInternalServerError)
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	_, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, createTestVMModel("test-vm", testVMImage, false))
+	if err == nil {
+		t.Fatal("expected an error when the VM never reaches a target status, got nil")
+	}
+
+	resourceID, ok := client.PartialCreateResourceID(err)
+	if !ok {
+		t.Fatalf("error = %v, want it to report the ID of the virtual machine that was created", err)
+	}
+	if resourceID != vmID {
+		t.Errorf("partial create reported ID %q, want %q", resourceID, vmID)
 	}
 }

@@ -212,6 +212,9 @@ func (r *networksResource) Create(ctx context.Context, req resource.CreateReques
 
 	getNetworkResponse, err := networks.CreateNetwork(r.client, ctx, plan)
 	if err != nil {
+		if handlePartialCreate(ctx, err, req.Plan, resp, networks.ErrSummaryUnableToCreateNetwork) {
+			return
+		}
 		resp.Diagnostics.AddError(
 			networks.ErrSummaryUnableToCreateNetwork,
 			err.Error(),

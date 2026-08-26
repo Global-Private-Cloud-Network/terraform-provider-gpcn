@@ -217,6 +217,9 @@ func (r *gpuResource) Create(ctx context.Context, req resource.CreateRequest, re
 
 	getGPUResponse, err := gpu.CreateGPU(r.client, ctx, seriesId, plan)
 	if err != nil {
+		if handlePartialCreate(ctx, err, req.Plan, resp, gpu.ErrSummaryUnableToCreateGPU) {
+			return
+		}
 		resp.Diagnostics.AddError(
 			gpu.ErrSummaryUnableToCreateGPU,
 			err.Error(),

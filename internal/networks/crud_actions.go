@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"terraform-provider-gpcn/internal/client"
 
@@ -121,9 +120,11 @@ func CreateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, model Res
 		return nil, err
 	}
 
+	// The API accepted the create. After this point, an error can leave a network
+	// that Terraform does not record. Each error must give its ID.
 	jobResp, err := client.PerformLongPolling(gpcnClient, ctx, "Create GPCN Network", createNetworkResponse.Data.JobID)
 	if err != nil {
-		return nil, fmt.Errorf("create network polling failed: %w", err)
+		return nil, fmt.Errorf("create network polling failed (job %s can still complete and make a network): %w", createNetworkResponse.Data.JobID, err)
 	}
 
 	tflog.Info(ctx, LogLongPollingCompletedCreateNetwork)
@@ -137,7 +138,7 @@ func CreateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, model Res
 	// Perform a GET call to retrieve actual information about the Network
 	getNetworkResponse, err := GetNetwork(gpcnClient, ctx, resourceID)
 	if err != nil {
-		return nil, err
+		return nil, client.NewPartialCreateError(resourceID, err)
 	}
 
 	tflog.Info(ctx, LogSuccessfullyRetrievedNetworkCreate)
@@ -257,8 +258,10 @@ func DeleteNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkId
 	for errorCount := 1; errorCount <= DELETE_NETWORK_RETRY_COUNT; errorCount++ {
 		// Wait before retry (skip on first attempt)
 		if errorCount > 1 {
-			if sleepErr := client.SleepWithContext(ctx, time.Second*5); sleepErr != nil {
-				return fmt.Errorf(ErrDeleteNetworkInterruptedTemplate, networkId, sleepErr)
+			// Report lastErr also. It is the reason for the retry, and the
+			// operator needs it.
+			if sleepErr := client.SleepWithContext(ctx, DELETE_NETWORK_RETRY_INTERVAL); sleepErr != nil {
+				return fmt.Errorf(ErrFmtDeleteNetworkInterrupted, networkId, sleepErr, lastErr)
 			}
 		}
 

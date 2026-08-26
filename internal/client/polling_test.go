@@ -84,43 +84,104 @@ func TestPerformLongPollingStopsOnContextCancellation(t *testing.T) {
 	}
 }
 
-// TestPerformLongPollingTimeoutAccountsForPollDuration verifies that the timeout is
-// measured against time spent including the poll that just completed. Sampling
-// elapsed at the top of the loop instead granted one extra full round trip past the
-// deadline, which with a 60s request timeout turns a 10m polling_timeout into ~11m.
-func TestPerformLongPollingTimeoutAccountsForPollDuration(t *testing.T) {
+// config.Timeout must limit the full operation, not only the interval between
+// polls. A check on the elapsed time cannot stop a poll that is in progress: the
+// poll continues for its request timeout and all its retries.
+func TestPerformLongPollingTimeoutBoundsInFlightPoll(t *testing.T) {
 	t.Parallel()
 
-	const pollDuration = 200 * time.Millisecond
 	var pollCount atomic.Int32
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pollCount.Add(1)
-		time.Sleep(pollDuration)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(incompleteJobResponse))
+		// The job status endpoint does not answer.
+		time.Sleep(1 * time.Second)
 	}))
 	defer server.Close()
 
-	cfg := &client.PollingConfig{
-		Timeout:         50 * time.Millisecond,
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.RequestTimeout = 100 * time.Millisecond
+	cfg.MaxRetries = 3
+	cfg.InitialRetryDelay = 50 * time.Millisecond
+	cfg.MaxRetryDelay = 200 * time.Millisecond
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	pollCfg := &client.PollingConfig{
+		Timeout:         200 * time.Millisecond,
 		InitialInterval: 1 * time.Millisecond,
 		MaxInterval:     1 * time.Millisecond,
 	}
 
 	start := time.Now()
-	_, err := client.PerformLongPollingWithConfig(newPollingClient(t, server.URL), t.Context(), "create", "job-1", cfg)
+	_, err = client.PerformLongPollingWithConfig(gpcnClient, t.Context(), "create", "job-1", pollCfg)
 	elapsed := time.Since(start)
 
 	if !errors.Is(err, client.ErrLongPollingTimeout) {
 		t.Fatalf("error = %v, want it to wrap ErrLongPollingTimeout", err)
 	}
-	if got := pollCount.Load(); got != 1 {
-		t.Errorf("server saw %d polls, want 1: the timeout should be detected as soon as the first poll returns", got)
+	// The request timeout and the retry backoff together are approximately 750ms.
+	// A limit of 500ms detects a poll that continues past the deadline.
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("polling ran for %s with a %s timeout, want the deadline to cut off the in-flight poll", elapsed, pollCfg.Timeout)
 	}
-	// One poll has to complete before the deadline can be observed at all, so the
-	// floor is pollDuration; anything beyond that is overrun.
-	if elapsed > pollDuration+100*time.Millisecond {
-		t.Errorf("polling ran for %s with a %s timeout, want it to stop after the first poll (~%s)", elapsed, cfg.Timeout, pollDuration)
+	// DoWithRetry can correctly make a second attempt before the deadline. All
+	// four attempts must not complete.
+	if got := pollCount.Load(); got > 2 {
+		t.Errorf("server saw %d attempts, want no more than 2: the deadline should cut the retry schedule short", got)
+	}
+}
+
+// The loop has its own deadline. An interrupted run must still give
+// context.Canceled, not a polling timeout, so that a caller can tell the two
+// conditions apart.
+func TestPerformLongPollingCancellationIsNotReportedAsTimeout(t *testing.T) {
+	t.Parallel()
+
+	served := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(incompleteJobResponse))
+		select {
+		case served <- struct{}{}:
+		default:
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	cfg := &client.PollingConfig{
+		Timeout:         30 * time.Second,
+		InitialInterval: 2 * time.Second,
+		MaxInterval:     2 * time.Second,
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := client.PerformLongPollingWithConfig(newPollingClient(t, server.URL), ctx, "create", "job-1", cfg)
+		done <- err
+	}()
+
+	select {
+	case <-served:
+	case <-time.After(5 * time.Second):
+		t.Fatal("polling never reached the server")
+	}
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("error = %v, want it to wrap context.Canceled", err)
+		}
+		if errors.Is(err, client.ErrLongPollingTimeout) {
+			t.Errorf("error = %v, want a cancellation not to be reported as a polling timeout", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("polling did not return after the context was canceled")
 	}
 }

@@ -90,9 +90,11 @@ func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model Reso
 		return nil, err
 	}
 
+	// The API accepted the create. After this point, an error can leave a volume
+	// that Terraform does not record. Each error must give its ID.
 	jobResp, err := client.PerformLongPolling(gpcnClient, ctx, "Create GPCN Volume", createVolumeResponse.Data.JobID)
 	if err != nil {
-		return nil, fmt.Errorf("create volume polling failed: %w", err)
+		return nil, fmt.Errorf("create volume polling failed (job %s can still complete and make a volume): %w", createVolumeResponse.Data.JobID, err)
 	}
 
 	tflog.Info(ctx, LogLongPollingCompletedCreateVolume)
@@ -106,7 +108,7 @@ func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model Reso
 	// Perform a GET call to retrieve actual information about the Volume
 	getVolumeResponse, err := GetVolume(gpcnClient, ctx, resourceID)
 	if err != nil {
-		return nil, err
+		return nil, client.NewPartialCreateError(resourceID, err)
 	}
 
 	tflog.Info(ctx, LogSuccessfullyRetrievedVolumeCreate)

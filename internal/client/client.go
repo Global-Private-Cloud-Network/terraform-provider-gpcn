@@ -1,14 +1,12 @@
 package client
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"strconv"
-	"time"
 )
 
 // GpcnClient wraps http.Client with configuration and retry support
@@ -187,26 +185,6 @@ func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 	}
 
 	return nil, fmt.Errorf("%w: %w", ErrMaxRetriesExceeded, lastErr)
-}
-
-// SleepWithContext waits for d to elapse, returning early with the context's
-// error if ctx is canceled or expires first. Use it instead of time.Sleep for
-// every retry backoff and polling interval, so that an interrupted Terraform
-// run does not keep sleeping after the user has already given up on it.
-func SleepWithContext(ctx context.Context, d time.Duration) error {
-	if d <= 0 {
-		return ctx.Err()
-	}
-
-	timer := time.NewTimer(d)
-	defer timer.Stop()
-
-	select {
-	case <-timer.C:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
 
 // isHTTPError checks if the error is an HTTPError and assigns it to target

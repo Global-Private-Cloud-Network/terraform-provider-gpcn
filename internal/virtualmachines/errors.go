@@ -47,8 +47,17 @@ const (
 	WarnDetailRemovingNetworkInterfaceWithIDFailed = "Removing the network interface with ID '%s' failed"
 )
 
-// Polling constants
+// Polling formats. These have no %w verb. Use fmt.Sprintf or fmt.Errorf.
 const (
-	ErrVirtualMachineStatusTimeoutTemplate         = "After %d seconds, the virtual machine was still not in the target status. Please check the GPCN API for more information"
-	ErrVirtualMachineStatusPollInterruptedTemplate = "waiting for virtual machine %s to reach its target status was interrupted: %w"
+	ErrVirtualMachineStatusTimeoutTemplate = "After %d seconds, the virtual machine was still not in the target status. Please check the GPCN API for more information"
+)
+
+// Formats for wrapped errors. Each constant has a %w verb. Use fmt.Errorf.
+// fmt.Sprintf writes a literal "%!w(...)" into the diagnostic that the user
+// sees.
+const (
+	// %s is the virtual machine ID. %w is the context error.
+	ErrFmtVirtualMachineStatusPollInterrupted = "waiting for virtual machine %s to reach its target status was interrupted: %w"
+	// %s is the virtual machine ID. %w is the error from the status request.
+	ErrFmtVirtualMachineStatusPollFailed = "polling for the status of virtual machine %s failed: %w"
 )

@@ -222,7 +222,9 @@ func TestDoWithRetryStopsOnCancelledContext(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("error = %v, want it to wrap context.Canceled", err)
 	}
-	if elapsed > 200*time.Millisecond {
+	// The backoff schedule for this configuration is 3.5 seconds. A limit of one
+	// second detects a wait, and also tolerates a slow machine.
+	if elapsed > 1*time.Second {
 		t.Errorf("DoWithRetry took %s, expected an immediate return: it slept through retry backoff", elapsed)
 	}
 	if got := attemptCount.Load(); got != 0 {
@@ -273,7 +275,9 @@ func TestDoWithRetryCancelDuringBackoff(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("error = %v, want it to wrap context.Canceled", err)
 	}
-	if elapsed > 300*time.Millisecond {
+	// The backoff schedule after this point is 3.5 seconds. A limit of one second
+	// detects a wait, and also tolerates a slow machine.
+	if elapsed > 1*time.Second {
 		t.Errorf("DoWithRetry took %s after cancellation, expected it to abandon the backoff sleep", elapsed)
 	}
 }

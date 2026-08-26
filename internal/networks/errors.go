@@ -25,5 +25,13 @@ const (
 	ErrDetailUnableToGetNetworkWithID     = "Unable to get GPCN Network with ID '%s'"
 	ErrDetailUnableToUpdateNetworkWithID  = "Unable to update GPCN Network with ID '%s'"
 	ErrDetailUnableToDeleteNetworkWithID  = "Unable to delete GPCN Network with ID '%s'"
-	ErrDeleteNetworkInterruptedTemplate   = "waiting to retry the delete of GPCN Network '%s' was interrupted: %w"
+)
+
+// Formats for wrapped errors. Each constant has a %w verb. Use fmt.Errorf.
+// fmt.Sprintf writes a literal "%!w(...)" into the diagnostic that the user
+// sees.
+const (
+	// %s is the network ID. The first %w is the context error. The second %w is
+	// the delete error that caused the retry.
+	ErrFmtDeleteNetworkInterrupted = "waiting to retry the delete of GPCN Network '%s' was interrupted: %w (the delete was being retried after: %w)"
 )

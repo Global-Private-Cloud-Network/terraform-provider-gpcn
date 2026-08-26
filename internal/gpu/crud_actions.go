@@ -100,10 +100,11 @@ func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId stri
 		return nil, fmt.Errorf("failed to get job ID from create GPU response: %w", err)
 	}
 
-	// Perform long polling to wait for job completion
+	// The API accepted the create. After this point, an error can leave a GPU
+	// that Terraform does not record. Each error must give its ID.
 	jobResp, err := client.PerformLongPolling(gpcnClient, ctx, "Create GPCN GPU", jobID)
 	if err != nil {
-		return nil, fmt.Errorf("create GPU polling failed: %w", err)
+		return nil, fmt.Errorf("create GPU polling failed (job %s can still complete and make a GPU): %w", jobID, err)
 	}
 
 	tflog.Info(ctx, LogLongPollingCompletedCreateGPU)
@@ -117,7 +118,7 @@ func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId stri
 	// Get the GPU details after creation
 	getGPUResponse, err := GetGPU(gpcnClient, ctx, resourceID)
 	if err != nil {
-		return nil, err
+		return nil, client.NewPartialCreateError(resourceID, err)
 	}
 
 	tflog.Info(ctx, LogSuccessfullyFinishedCreateGPU)

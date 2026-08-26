@@ -166,9 +166,11 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 		return nil, fmt.Errorf("failed to get job ID from create VM response: %w", err)
 	}
 
+	// The API accepted the create. After this point, an error can leave a virtual
+	// machine that Terraform does not record. Each error must give its ID.
 	jobResp, err := client.PerformLongPolling(gpcnClient, ctx, "Create GPCN Virtual Machine", jobID)
 	if err != nil {
-		return nil, fmt.Errorf("create VM polling failed: %w", err)
+		return nil, fmt.Errorf("create VM polling failed (job %s can still complete and make a virtual machine): %w", jobID, err)
 	}
 
 	tflog.Info(ctx, LogLongPollingCompletedCreateVM)
@@ -182,7 +184,7 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 	// Wait for the VM to actually be spun up before doing anything more
 	getVirtualMachineResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, resourceID, []string{VMStatusRunning.String(), VMStatusShutoff.String()}, DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS, DEFAULT_INITIAL_POLL_DELAY_SECONDS)
 	if err != nil {
-		return nil, err
+		return nil, client.NewPartialCreateError(resourceID, err)
 	}
 
 	tflog.Info(ctx, LogSuccessfullyProcessedVMCreate)
@@ -244,8 +246,9 @@ func UpdateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, vi
 
 // Iteratively calls getVirtualMachine until the machine is in a target status, or it times out
 func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string, targetStatuses []string, timeoutMaxSec int, initialDelaySec int) (*ReadVirtualMachinesResponse, error) {
-	// Make all statuses lowercase for ease of comparison
-	targetStatusesLower := make([]string, len(targetStatuses))
+	// A length here, not a capacity, adds empty strings to the slice. An empty
+	// status from the API then matches each target status.
+	targetStatusesLower := make([]string, 0, len(targetStatuses))
 	for _, status := range targetStatuses {
 		targetStatusesLower = append(targetStatusesLower, strings.ToLower(status))
 	}
@@ -255,49 +258,47 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 	if initialDelaySec > 0 {
 		tflog.Info(ctx, fmt.Sprintf(LogInitialPollDelay, initialDelaySec))
 		if err := client.SleepWithContext(ctx, time.Duration(initialDelaySec)*time.Second); err != nil {
-			return nil, fmt.Errorf(ErrVirtualMachineStatusPollInterruptedTemplate, virtualMachineId, err)
+			return nil, fmt.Errorf(ErrFmtVirtualMachineStatusPollInterrupted, virtualMachineId, err)
 		}
 	}
-	var getResp *ReadVirtualMachinesResponse
-	var err error
-	secondsElapsed := 0
-	longPollIteration := 1
-	var errString string
-	for {
-		tflog.Info(ctx, fmt.Sprintf(LogStartingLongPollingIteration, longPollIteration, secondsElapsed))
 
-		getResp, err = GetVirtualMachine(gpcnClient, ctx, virtualMachineId)
+	// Measure the deadline with the clock, not with a sum of the intervals. Each
+	// GetVirtualMachine can continue for the request timeout multiplied by the
+	// retry count. A sum of the intervals ignores that time.
+	startTime := time.Now()
+	timeout := time.Duration(timeoutMaxSec) * time.Second
+	longPollIteration := 1
+	for {
+		tflog.Info(ctx, fmt.Sprintf(LogStartingLongPollingIteration, longPollIteration, int(time.Since(startTime).Seconds())))
+
+		// A caller uses errors.Is on this error to find a context cancellation.
+		// The cause must stay reachable.
+		getResp, err := GetVirtualMachine(gpcnClient, ctx, virtualMachineId)
 		if err != nil {
-			errString = err.Error()
-			break
+			return nil, fmt.Errorf(ErrFmtVirtualMachineStatusPollFailed, virtualMachineId, err)
 		}
 		tflog.Info(ctx, fmt.Sprintf(LogVMResponseStatus, getResp.Data.Status))
 
 		if slices.Contains(targetStatusesLower, strings.ToLower(getResp.Data.Status)) {
 			tflog.Info(ctx, fmt.Sprintf(LogVMStatusProceedingToAttach, getResp.Data.ID, getResp.Data.Status))
-			// Don't trust the API and do actions too quick. Wait an additional 5 seconds to verify it's actually in the status we want
-			if sleepErr := client.SleepWithContext(ctx, time.Second*5); sleepErr != nil {
-				return nil, fmt.Errorf(ErrVirtualMachineStatusPollInterruptedTemplate, virtualMachineId, sleepErr)
+			// Wait one more interval. The API can report the target status before
+			// the virtual machine is ready.
+			if sleepErr := client.SleepWithContext(ctx, VIRTUALMACHINE_STATUS_POLL_INTERVAL); sleepErr != nil {
+				return nil, fmt.Errorf(ErrFmtVirtualMachineStatusPollInterrupted, virtualMachineId, sleepErr)
 			}
-			break
+			return getResp, nil
 		}
-		// Return the context error directly rather than through errString, which
-		// would flatten it into a string and break errors.Is for callers.
-		if sleepErr := client.SleepWithContext(ctx, time.Second*5); sleepErr != nil {
-			return nil, fmt.Errorf(ErrVirtualMachineStatusPollInterruptedTemplate, virtualMachineId, sleepErr)
-		}
-		secondsElapsed += 5
-		longPollIteration += 1
 
-		if secondsElapsed > timeoutMaxSec {
-			errString = fmt.Sprintf(ErrVirtualMachineStatusTimeoutTemplate, timeoutMaxSec)
-			break
+		if time.Since(startTime) >= timeout {
+			//nolint:staticcheck // ST1005: Terraform shows this text to the user. It is not an internal Go error string.
+			return nil, fmt.Errorf(ErrVirtualMachineStatusTimeoutTemplate, timeoutMaxSec)
 		}
+
+		if sleepErr := client.SleepWithContext(ctx, VIRTUALMACHINE_STATUS_POLL_INTERVAL); sleepErr != nil {
+			return nil, fmt.Errorf(ErrFmtVirtualMachineStatusPollInterrupted, virtualMachineId, sleepErr)
+		}
+		longPollIteration++
 	}
-	if errString != "" {
-		return nil, errors.New(errString)
-	}
-	return getResp, nil
 }
 
 // Verify if public IP is set to true, the first network cannot be of type custom

@@ -3,11 +3,22 @@ package volumeattachments
 import (
 	"context"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"terraform-provider-gpcn/internal/testutil"
+	"terraform-provider-gpcn/internal/virtualmachines"
 )
+
+// AttachVolume stops and starts the virtual machine, therefore this package uses
+// the status poll interval. The default value of 5 seconds is the full duration
+// of this test suite.
+func TestMain(m *testing.M) {
+	virtualmachines.VIRTUALMACHINE_STATUS_POLL_INTERVAL = 10 * time.Millisecond
+	os.Exit(m.Run())
+}
 
 const (
 	testVMID  = "vm-test-123"

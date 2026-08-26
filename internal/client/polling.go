@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -72,14 +73,31 @@ func PerformLongPollingWithConfig(gpcnClient *GpcnClient, ctx context.Context, a
 	interval := config.InitialInterval
 	iteration := 1
 
+	// A check on the elapsed time limits only the interval between polls. A poll
+	// that is in progress continues for its request timeout and all its retries.
+	// With the default configuration this adds approximately 4 minutes.
+	pollCtx, cancel := context.WithTimeout(ctx, config.Timeout)
+	defer cancel()
+
+	// asTimeout changes an error that the deadline of pollCtx caused into
+	// ErrLongPollingTimeout. It does not change an error from the context of the
+	// caller. Therefore errors.Is(err, context.Canceled) is still true for an
+	// interrupted run.
+	asTimeout := func(err error) error {
+		if ctx.Err() == nil && errors.Is(pollCtx.Err(), context.DeadlineExceeded) {
+			return fmt.Errorf("job %s for action %q: %w (elapsed: %s)", jobId, action, ErrLongPollingTimeout, time.Since(startTime))
+		}
+		return err
+	}
+
 	for {
 		elapsed := time.Since(startTime)
 		tflog.Info(ctx, fmt.Sprintf(LogStartingLongPollingIteration, iteration, action, int(elapsed.Seconds())),
 			map[string]any{"job_id": jobId, "iteration": iteration})
 
-		jobResponse, err := poll(gpcnClient, ctx, jobId)
+		jobResponse, err := poll(gpcnClient, pollCtx, jobId)
 		if err != nil {
-			return nil, fmt.Errorf("polling for job %s failed: %w", jobId, err)
+			return nil, asTimeout(fmt.Errorf("polling for job %s failed: %w", jobId, err))
 		}
 
 		// Bounds check before accessing Jobs array
@@ -107,14 +125,9 @@ func PerformLongPollingWithConfig(gpcnClient *GpcnClient, ctx context.Context, a
 			return nil, fmt.Errorf("job %s for action %q: %w (elapsed: %s)", jobId, action, ErrLongPollingTimeout, elapsed)
 		}
 
-		// Sleep with exponential backoff, never past the deadline and never
-		// through a canceled context.
-		sleepFor := interval
-		if remaining := config.Timeout - elapsed; sleepFor > remaining {
-			sleepFor = remaining
-		}
-		if err := SleepWithContext(ctx, sleepFor); err != nil {
-			return nil, fmt.Errorf("polling for job %s for action %q: %w", jobId, action, err)
+		// pollCtx has the deadline. A limit on the interval is not necessary.
+		if err := SleepWithContext(pollCtx, interval); err != nil {
+			return nil, asTimeout(fmt.Errorf("polling for job %s for action %q: %w", jobId, action, err))
 		}
 
 		interval *= 2
