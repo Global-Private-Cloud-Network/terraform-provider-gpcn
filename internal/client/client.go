@@ -175,7 +175,7 @@ func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 
 		// Don't sleep after the last attempt
 		if attempt < c.config.MaxRetries {
-			if sleepErr := sleepWithContext(ctx, delay); sleepErr != nil {
+			if sleepErr := SleepWithContext(ctx, delay); sleepErr != nil {
 				return nil, fmt.Errorf("%w: %w", sleepErr, lastErr)
 			}
 			// Exponential backoff with cap
@@ -189,10 +189,11 @@ func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 	return nil, fmt.Errorf("%w: %w", ErrMaxRetriesExceeded, lastErr)
 }
 
-// sleepWithContext waits for d to elapse, returning early with the context's
-// error if ctx is canceled or expires first. It replaces bare time.Sleep calls
-// so that retry backoff and polling intervals stay interruptible.
-func sleepWithContext(ctx context.Context, d time.Duration) error {
+// SleepWithContext waits for d to elapse, returning early with the context's
+// error if ctx is canceled or expires first. Use it instead of time.Sleep for
+// every retry backoff and polling interval, so that an interrupted Terraform
+// run does not keep sleeping after the user has already given up on it.
+func SleepWithContext(ctx context.Context, d time.Duration) error {
 	if d <= 0 {
 		return ctx.Err()
 	}

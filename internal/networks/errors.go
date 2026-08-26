@@ -25,4 +25,6 @@ const (
 	ErrDetailUnableToGetNetworkWithID     = "Unable to get GPCN Network with ID '%s'"
 	ErrDetailUnableToUpdateNetworkWithID  = "Unable to update GPCN Network with ID '%s'"
 	ErrDetailUnableToDeleteNetworkWithID  = "Unable to delete GPCN Network with ID '%s'"
+	// %s is the network ID, %w the context error that ended the wait.
+	ErrDeleteNetworkInterruptedTemplate = "waiting to retry the delete of GPCN Network '%s' was interrupted: %w"
 )

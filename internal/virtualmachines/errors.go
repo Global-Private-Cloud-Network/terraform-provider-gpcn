@@ -50,4 +50,6 @@ const (
 // Polling constants
 const (
 	ErrVirtualMachineStatusTimeoutTemplate = "After %d seconds, the virtual machine was still not in the target status. Please check the GPCN API for more information"
+	// %s is the virtual machine ID, %w the context error that ended the wait.
+	ErrVirtualMachineStatusPollInterruptedTemplate = "waiting for virtual machine %s to reach its target status was interrupted: %w"
 )

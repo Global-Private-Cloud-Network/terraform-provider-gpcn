@@ -254,7 +254,9 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 	// Wait for initial delay before starting polling
 	if initialDelaySec > 0 {
 		tflog.Info(ctx, fmt.Sprintf(LogInitialPollDelay, initialDelaySec))
-		time.Sleep(time.Duration(initialDelaySec) * time.Second)
+		if err := client.SleepWithContext(ctx, time.Duration(initialDelaySec)*time.Second); err != nil {
+			return nil, fmt.Errorf(ErrVirtualMachineStatusPollInterruptedTemplate, virtualMachineId, err)
+		}
 	}
 	var getResp *ReadVirtualMachinesResponse
 	var err error
@@ -274,10 +276,16 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 		if slices.Contains(targetStatusesLower, strings.ToLower(getResp.Data.Status)) {
 			tflog.Info(ctx, fmt.Sprintf(LogVMStatusProceedingToAttach, getResp.Data.ID, getResp.Data.Status))
 			// Don't trust the API and do actions too quick. Wait an additional 5 seconds to verify it's actually in the status we want
-			time.Sleep(time.Second * 5)
+			if sleepErr := client.SleepWithContext(ctx, time.Second*5); sleepErr != nil {
+				return nil, fmt.Errorf(ErrVirtualMachineStatusPollInterruptedTemplate, virtualMachineId, sleepErr)
+			}
 			break
 		}
-		time.Sleep(time.Second * 5)
+		// Return the context error directly rather than through errString, which
+		// would flatten it into a string and break errors.Is for callers.
+		if sleepErr := client.SleepWithContext(ctx, time.Second*5); sleepErr != nil {
+			return nil, fmt.Errorf(ErrVirtualMachineStatusPollInterruptedTemplate, virtualMachineId, sleepErr)
+		}
 		secondsElapsed += 5
 		longPollIteration += 1
 

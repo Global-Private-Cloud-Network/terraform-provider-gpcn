@@ -3,6 +3,7 @@ package virtualmachines
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
@@ -602,5 +603,91 @@ func TestSetModelValuesNotPresentResolvesImageIdOnImport(t *testing.T) {
 	}
 	if result.ImageId.ValueString() != imageID {
 		t.Errorf("Expected image_id '%s', got '%s'", imageID, result.ImageId.ValueString())
+	}
+}
+
+// TestPollForVirtualMachineStatusStopsOnContextCancellation verifies that the
+// 5-second wait between status checks is interruptible. This loop runs for the
+// lifetime of a create, resize, or attach, so a bare sleep here keeps Terraform
+// working after the user has already interrupted the run.
+func TestPollForVirtualMachineStatusStopsOnContextCancellation(t *testing.T) {
+	const vmID = "vm-poll-cancel"
+	polled := make(chan struct{}, 1)
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID) {
+				resp := newVMResponse(vmID, "test-vm")
+				resp.Data.Status = "Building"
+				testutil.WriteJSONResponse(w, resp)
+				select {
+				case polled <- struct{}{}:
+				default:
+				}
+			}
+		},
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, 600, 0)
+		done <- err
+	}()
+
+	select {
+	case <-polled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("poller never reached the server")
+	}
+
+	// Let the status check return so the loop is inside its 5-second wait.
+	time.Sleep(100 * time.Millisecond)
+	canceledAt := time.Now()
+	cancel()
+
+	select {
+	case err := <-done:
+		if waited := time.Since(canceledAt); waited > 500*time.Millisecond {
+			t.Errorf("poller took %s to return after cancellation, expected it to abandon the interval wait", waited)
+		}
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("error = %v, want it to wrap context.Canceled", err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("poller did not return after the context was canceled")
+	}
+}
+
+// TestPollForVirtualMachineStatusInitialDelayStopsOnCancellation covers the other
+// wait in the poller: the initial delay, which defaults to 30 seconds.
+func TestPollForVirtualMachineStatusInitialDelayStopsOnCancellation(t *testing.T) {
+	const vmID = "vm-delay-cancel"
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			testutil.WriteJSONResponse(w, newVMResponse(vmID, "test-vm"))
+		},
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	start := time.Now()
+	_, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, 600, DEFAULT_INITIAL_POLL_DELAY_SECONDS)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want it to wrap context.Canceled", err)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("poller took %s to return, expected it to skip the %ds initial delay on a canceled context",
+			elapsed, DEFAULT_INITIAL_POLL_DELAY_SECONDS)
 	}
 }

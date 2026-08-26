@@ -257,7 +257,9 @@ func DeleteNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkId
 	for errorCount := 1; errorCount <= DELETE_NETWORK_RETRY_COUNT; errorCount++ {
 		// Wait before retry (skip on first attempt)
 		if errorCount > 1 {
-			time.Sleep(time.Second * 5)
+			if sleepErr := client.SleepWithContext(ctx, time.Second*5); sleepErr != nil {
+				return fmt.Errorf(ErrDeleteNetworkInterruptedTemplate, networkId, sleepErr)
+			}
 		}
 
 		response, err := gpcnClient.DoWithRetry(request)

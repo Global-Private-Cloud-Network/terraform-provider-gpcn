@@ -113,7 +113,7 @@ func PerformLongPollingWithConfig(gpcnClient *GpcnClient, ctx context.Context, a
 		if remaining := config.Timeout - elapsed; sleepFor > remaining {
 			sleepFor = remaining
 		}
-		if err := sleepWithContext(ctx, sleepFor); err != nil {
+		if err := SleepWithContext(ctx, sleepFor); err != nil {
 			return nil, fmt.Errorf("polling for job %s for action %q: %w", jobId, action, err)
 		}
 

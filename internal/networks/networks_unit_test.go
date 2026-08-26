@@ -2,6 +2,7 @@ package networks
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"testing"
@@ -274,5 +275,55 @@ func TestUpdateNetworkMockHTTP(t *testing.T) {
 	}
 	if !getCalled {
 		t.Error("Expected get network endpoint to be called")
+	}
+}
+
+// TestDeleteNetworkStopsRetryingOnContextCancellation verifies that the wait
+// between delete retries is interruptible. DeleteNetwork retries the job up to
+// DELETE_NETWORK_RETRY_COUNT times with a 5-second wait between attempts, so a
+// bare sleep here keeps a canceled destroy running for another 20 seconds.
+func TestDeleteNetworkStopsRetryingOnContextCancellation(t *testing.T) {
+	const networkID = "network-cancel-123"
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				// Report the delete job as failed so DeleteNetwork retries, and
+				// interrupt the run while that first attempt is in flight.
+				cancel()
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"data":    map[string]any{"jobs": []any{map[string]any{"jobId": "job-1", "hasFailed": true}}},
+				})
+			case r.Method == http.MethodDelete:
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"data":    map[string]any{"jobId": "job-1"},
+				})
+			default:
+				// No virtual machines attached to this network.
+				testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": []any{}})
+			}
+		},
+	})
+	defer server.Close()
+
+	start := time.Now()
+	err := DeleteNetwork(gpcnClient, ctx, networkID)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected an error after cancellation, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want it to wrap context.Canceled", err)
+	}
+	if elapsed > 1*time.Second {
+		t.Errorf("DeleteNetwork took %s after cancellation, expected it to abandon the retry wait", elapsed)
 	}
 }
