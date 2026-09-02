@@ -6,15 +6,17 @@ description: Describes commit message and PR conventions
 
 ## Authorization
 
-Never commit, push, or open a pull request on your own. The user must ask for each
-of these actions:
+Never push or open a pull request on your own. The user must ask for each of these
+actions:
 
-- Do not run `git commit` until the user asks for a commit.
 - Do not run `git push` until the user asks for a push.
 - Do not open a pull request until the user asks for one.
 
-Approval covers one action only. Approval to commit is not approval to push.
-Approval to push is not approval to open a pull request. Ask again for each step.
+Approval covers one action only. Approval to push is not approval to open a pull
+request. Ask again for each step.
+
+A commit stays local, and the user can undo it. You can commit your work without a
+request. Never push that commit without a request.
 
 When the work is ready, stop and report what you changed. Offer the next command.
 Let the user run it or ask you to run it.

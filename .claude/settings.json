@@ -6,9 +6,9 @@
         "hooks": [
           {
             "type": "command",
-            "command": "jq -r '.tool_input.command // \"\"' | grep -qE \"(git[[:space:]]+(commit|push)|gh[[:space:]]+pr[[:space:]]+create)\" && printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"Repo rule: commit, push, and PR creation each need explicit authorization from the user. See .claude/rules/commit-conventions.md\"}}' || true",
+            "command": "jq -r '.tool_input.command // \"\"' | grep -qE \"(git[[:space:]]+push|gh[[:space:]]+pr[[:space:]]+create)\" && printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"Repo rule: pushing and opening a pull request each need explicit authorization from the user. See .claude/rules/commit-conventions.md\"}}' || true",
             "timeout": 10,
-            "statusMessage": "Checking commit authorization rule"
+            "statusMessage": "Checking push authorization rule"
           }
         ]
       }
