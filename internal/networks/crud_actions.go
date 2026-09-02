@@ -124,7 +124,7 @@ func CreateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, model Res
 	// that Terraform does not record. Each error must give its ID.
 	jobResp, err := client.PerformLongPolling(gpcnClient, ctx, "Create GPCN Network", createNetworkResponse.Data.JobID)
 	if err != nil {
-		return nil, fmt.Errorf("create network polling failed (job %s can still complete and make a network): %w", createNetworkResponse.Data.JobID, err)
+		return nil, client.PartialCreateFromPoll(jobResp, fmt.Errorf("create network polling failed (job %s can still complete and make a network): %w", createNetworkResponse.Data.JobID, err))
 	}
 
 	tflog.Info(ctx, LogLongPollingCompletedCreateNetwork)

@@ -23,7 +23,7 @@ import (
 // responses. A test that must have a specific delay gives it as an argument.
 func TestMain(m *testing.M) {
 	VIRTUALMACHINE_STATUS_POLL_INTERVAL = 10 * time.Millisecond
-	DEFAULT_INITIAL_POLL_DELAY_SECONDS = 0
+	DEFAULT_INITIAL_POLL_DELAY = 0
 	os.Exit(m.Run())
 }
 
@@ -301,7 +301,7 @@ func TestPollForVirtualMachineStatusMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	response, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, []string{"Running"}, 10, 0)
+	response, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, []string{"Running"}, StatusPollOptions{Timeout: 10 * time.Second})
 	if err != nil {
 		t.Fatalf("PollForVirtualMachineStatus failed: %v", err)
 	}
@@ -645,7 +645,7 @@ func TestPollForVirtualMachineStatusStopsOnContextCancellation(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, 600, 0)
+		_, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, StatusPollOptions{Timeout: 10 * time.Minute})
 		done <- err
 	}()
 
@@ -677,8 +677,8 @@ func TestPollForVirtualMachineStatusStopsOnContextCancellation(t *testing.T) {
 // wait in the poller: the initial delay, which defaults to 30 seconds.
 func TestPollForVirtualMachineStatusInitialDelayStopsOnCancellation(t *testing.T) {
 	const vmID = "vm-delay-cancel"
-	// TestMain sets DEFAULT_INITIAL_POLL_DELAY_SECONDS to zero.
-	const initialDelaySeconds = 30
+	// TestMain sets DEFAULT_INITIAL_POLL_DELAY to zero.
+	const initialDelay = 30 * time.Second
 
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
@@ -692,15 +692,15 @@ func TestPollForVirtualMachineStatusInitialDelayStopsOnCancellation(t *testing.T
 	cancel()
 
 	start := time.Now()
-	_, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, 600, initialDelaySeconds)
+	_, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, StatusPollOptions{Timeout: 10 * time.Minute, InitialDelay: initialDelay})
 	elapsed := time.Since(start)
 
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("error = %v, want it to wrap context.Canceled", err)
 	}
 	if elapsed > 500*time.Millisecond {
-		t.Errorf("poller took %s to return, expected it to skip the %ds initial delay on a canceled context",
-			elapsed, initialDelaySeconds)
+		t.Errorf("poller took %s to return, expected it to skip the %s initial delay on a canceled context",
+			elapsed, initialDelay)
 	}
 }
 
@@ -724,7 +724,7 @@ func TestPollForVirtualMachineStatusRejectsEmptyStatus(t *testing.T) {
 	})
 	defer server.Close()
 
-	got, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, []string{"Running", "Shutoff"}, 600, 0)
+	got, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, []string{"Running", "Shutoff"}, StatusPollOptions{Timeout: 10 * time.Minute})
 	if err != nil {
 		t.Fatalf("PollForVirtualMachineStatus failed: %v", err)
 	}
@@ -757,7 +757,7 @@ func TestPollForVirtualMachineStatusWrapsRequestFailure(t *testing.T) {
 	})
 	defer server.Close()
 
-	_, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, 600, 0)
+	_, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, StatusPollOptions{Timeout: 10 * time.Minute})
 	if err == nil {
 		t.Fatal("expected an error after cancellation, got nil")
 	}
@@ -789,7 +789,7 @@ func TestPollForVirtualMachineStatusTimeoutCountsRequestTime(t *testing.T) {
 	// Each request takes 300ms and the interval is 10ms. Therefore the clock, not
 	// a count of the intervals, must end the loop.
 	start := time.Now()
-	_, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, []string{"Running"}, 1, 0)
+	_, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, []string{"Running"}, StatusPollOptions{Timeout: 1 * time.Second})
 	elapsed := time.Since(start)
 
 	if err == nil {
@@ -853,5 +853,43 @@ func TestCreateVirtualMachineReportsPartialCreate(t *testing.T) {
 	}
 	if partial.ResourceID != vmID {
 		t.Errorf("ResourceID = %q, want %q", partial.ResourceID, vmID)
+	}
+}
+
+// The API can report a target status before the virtual machine is ready. The
+// poll must read the status again after it waits, and continue if the machine
+// left the target status during that wait.
+func TestPollForVirtualMachineStatusConfirmsTargetStatus(t *testing.T) {
+	const vmID = "vm-flapping-status"
+	var pollCount int
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			pollCount++
+			resp := newVMResponse(vmID, "test-vm")
+			switch pollCount {
+			case 1:
+				resp.Data.Status = "Running" // the API reports the target early
+			case 2:
+				resp.Data.Status = "Building" // the confirmation read disagrees
+			default:
+				resp.Data.Status = "Running"
+			}
+			testutil.WriteJSONResponse(w, resp)
+		},
+	})
+	defer server.Close()
+
+	got, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID,
+		[]string{"Running"}, StatusPollOptions{Timeout: 10 * time.Minute})
+	if err != nil {
+		t.Fatalf("PollForVirtualMachineStatus failed: %v", err)
+	}
+	if got.Data.Status != "Running" {
+		t.Errorf("returned status %q, want %q", got.Data.Status, "Running")
+	}
+	if pollCount < 4 {
+		t.Errorf("server saw %d reads, want at least 4: the poll must confirm the status and continue after it disagrees", pollCount)
 	}
 }

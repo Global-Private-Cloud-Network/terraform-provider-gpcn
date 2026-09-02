@@ -23,6 +23,7 @@ func TestNetworksResource(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDestroy,
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
@@ -167,6 +168,7 @@ func TestNetworksResourceInvalidType(t *testing.T) {
 		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			CheckDestroy:             testAccCheckDestroy,
 			Steps: []resource.TestStep{
 				// Validate network_type value not in standard or custom
 				{
@@ -191,6 +193,7 @@ func TestNetworksResourceStandardValidator(t *testing.T) {
 		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			CheckDestroy:             testAccCheckDestroy,
 			Steps: []resource.TestStep{
 				{
 					Config: providerConfig + `
@@ -213,6 +216,7 @@ func TestNetworksResourceStandardValidator(t *testing.T) {
 		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			CheckDestroy:             testAccCheckDestroy,
 			Steps: []resource.TestStep{
 				{
 					Config: providerConfig + `
@@ -235,6 +239,7 @@ func TestNetworksResourceStandardValidator(t *testing.T) {
 		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			CheckDestroy:             testAccCheckDestroy,
 			Steps: []resource.TestStep{
 				{
 					Config: providerConfig + `
@@ -257,6 +262,7 @@ func TestNetworksResourceStandardValidator(t *testing.T) {
 		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			CheckDestroy:             testAccCheckDestroy,
 			Steps: []resource.TestStep{
 				{
 					Config: providerConfig + `
@@ -281,6 +287,7 @@ func TestNetworksResourceIpAddressValidator(t *testing.T) {
 		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			CheckDestroy:             testAccCheckDestroy,
 			Steps: []resource.TestStep{
 				{
 					Config: providerConfig + `
@@ -304,6 +311,7 @@ func TestNetworksResourceIpAddressValidator(t *testing.T) {
 		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			CheckDestroy:             testAccCheckDestroy,
 			Steps: []resource.TestStep{
 				{
 					Config: providerConfig + `
@@ -327,6 +335,7 @@ func TestNetworksResourceIpAddressValidator(t *testing.T) {
 		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			CheckDestroy:             testAccCheckDestroy,
 			Steps: []resource.TestStep{
 				{
 					Config: providerConfig + `
@@ -352,6 +361,7 @@ func TestNetworksResourceCIDRValidator(t *testing.T) {
 		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			CheckDestroy:             testAccCheckDestroy,
 			Steps: []resource.TestStep{
 				{
 					Config: providerConfig + `
@@ -377,6 +387,7 @@ func TestNetworksResourceDNSServersValidator(t *testing.T) {
 		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			CheckDestroy:             testAccCheckDestroy,
 			Steps: []resource.TestStep{
 				{
 					Config: providerConfig + `

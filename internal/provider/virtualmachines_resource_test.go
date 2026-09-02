@@ -49,6 +49,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDestroy,
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
@@ -286,6 +287,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDestroy,
 		Steps: []resource.TestStep{
 			// Set baseline
 			{
@@ -395,6 +397,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDestroy,
 		Steps: []resource.TestStep{
 			// Create VM with micro size
 			{
@@ -478,6 +481,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDestroy,
 		Steps: []resource.TestStep{
 			// Create VM with no volumes
 			{
@@ -552,6 +556,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDestroy,
 		Steps: []resource.TestStep{
 			// Create with ssh_key_id and username
 			{
@@ -663,6 +668,7 @@ func TestVirtualMachinesMissingSizeId(t *testing.T) {
 		`
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config:      config,
@@ -729,6 +735,7 @@ func TestVirtualMachinesInvalidAuth(t *testing.T) {
 			t.Parallel()
 			resource.UnitTest(t, resource.TestCase{
 				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				CheckDestroy:             testAccCheckDestroy,
 				Steps: []resource.TestStep{
 					{
 						Config:      vmConfigWithAuth(tc.authBlock),

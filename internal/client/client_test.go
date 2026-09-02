@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -321,5 +322,40 @@ func TestDoWithRetryRetriesRequestTimeout(t *testing.T) {
 
 	if got := attemptCount.Load(); got != 2 {
 		t.Errorf("server saw %d requests, want 2: the timed-out attempt should have been retried", got)
+	}
+}
+
+// A negative max_retries runs the loop zero times, so there is no error to
+// wrap. A %w verb on a nil error writes "%!w(<nil>)" into a diagnostic.
+func TestDoWithRetryNegativeMaxRetriesReportsAWellFormedError(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer server.Close()
+
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.MaxRetries = -1
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/test", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := gpcnClient.DoWithRetry(req)
+	if resp != nil {
+		resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if strings.Contains(err.Error(), "%!w") {
+		t.Errorf("error message is malformed: %v", err)
+	}
+	if !errors.Is(err, client.ErrMaxRetriesExceeded) {
+		t.Errorf("error = %v, want it to wrap ErrMaxRetriesExceeded", err)
 	}
 }

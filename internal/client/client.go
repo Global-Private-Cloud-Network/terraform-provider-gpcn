@@ -73,9 +73,19 @@ type HTTPError struct {
 	Body       string
 }
 
+// maxErrorBodyChars bounds the API response body that reaches an error message.
+// Terraform prints a diagnostic to the terminal and to the CI log, and a large
+// body there is both unreadable and a wider exposure of API data than the
+// failure needs.
+const maxErrorBodyChars = 512
+
 func (e *HTTPError) Error() string {
 	if e.Body != "" {
-		return fmt.Sprintf("HTTP error %d: %s", e.StatusCode, e.Body)
+		body := e.Body
+		if len(body) > maxErrorBodyChars {
+			body = body[:maxErrorBodyChars] + "... (truncated)"
+		}
+		return fmt.Sprintf("HTTP error %d: %s", e.StatusCode, body)
 	}
 	return "HTTP error " + strconv.Itoa(e.StatusCode)
 }
@@ -184,6 +194,11 @@ func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 		}
 	}
 
+	if lastErr == nil {
+		// The loop body never ran, which happens only when MaxRetries is
+		// negative. A %w verb on a nil error writes "%!w(<nil>)".
+		return nil, fmt.Errorf("%w: max_retries is %d, which permits no attempt", ErrMaxRetriesExceeded, c.config.MaxRetries)
+	}
 	return nil, fmt.Errorf("%w: %w", ErrMaxRetriesExceeded, lastErr)
 }
 

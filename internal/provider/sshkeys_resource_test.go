@@ -22,6 +22,7 @@ func TestSSHKeyResourceUpload(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDestroy,
 		Steps: []resource.TestStep{
 			// Create an SSH key using a sample public key
 			{

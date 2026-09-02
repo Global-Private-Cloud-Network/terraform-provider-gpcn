@@ -22,6 +22,7 @@ func TestVolumesResource(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDestroy,
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
@@ -157,6 +158,7 @@ func TestVolumesResourceInvalidSize(t *testing.T) {
 	t.Run("invalid_size", func(t *testing.T) {
 		resource.Test(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			CheckDestroy:             testAccCheckDestroy,
 			Steps: []resource.TestStep{
 				{
 					Config: providerConfig + `

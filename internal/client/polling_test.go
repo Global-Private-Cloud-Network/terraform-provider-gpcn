@@ -185,3 +185,114 @@ func TestPerformLongPollingCancellationIsNotReportedAsTimeout(t *testing.T) {
 		t.Fatal("polling did not return after the context was canceled")
 	}
 }
+
+// A per-request timeout also wraps context.DeadlineExceeded. Reporting it as a
+// polling timeout names the wrong cause and claims a 30-second deadline expired
+// after 50 milliseconds, so the conversion must also require pollCtx to be
+// expired.
+func TestPerformLongPollingRequestTimeoutIsNotAPollingTimeout(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(300 * time.Millisecond) // always exceeds RequestTimeout below
+	}))
+	defer server.Close()
+
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.RequestTimeout = 50 * time.Millisecond
+	cfg.MaxRetries = 0
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	pollCfg := &client.PollingConfig{Timeout: 30 * time.Second, InitialInterval: time.Millisecond, MaxInterval: time.Millisecond}
+
+	start := time.Now()
+	_, err = client.PerformLongPollingWithConfig(gpcnClient, t.Context(), "create", "job-1", pollCfg)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected an error from the timed-out request")
+	}
+	if errors.Is(err, client.ErrLongPollingTimeout) {
+		t.Errorf("error = %v, want a request timeout, not a polling timeout: only %s of the %s deadline had passed",
+			err, elapsed.Round(time.Millisecond), pollCfg.Timeout)
+	}
+}
+
+// The response that accompanies an error carries the resource ID, so a create
+// that the run interrupted can still name what the API made.
+func TestPerformLongPollingReturnsLastResourceIDOnFailure(t *testing.T) {
+	t.Parallel()
+
+	const resourceID = "res-77"
+	var polls atomic.Int32
+	served := make(chan struct{}, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		polls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"success":true,"data":{"jobs":[{"jobId":"job-1","isCompleted":false,"resourceId":"` + resourceID + `"}]}}`))
+		select {
+		case served <- struct{}{}:
+		default:
+		}
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	done := make(chan error, 1)
+	var got *client.JobStatusMultiResponse
+	go func() {
+		resp, err := client.PerformLongPollingWithConfig(newPollingClient(t, server.URL), ctx, "create", "job-1",
+			&client.PollingConfig{Timeout: 30 * time.Second, InitialInterval: 2 * time.Second, MaxInterval: 2 * time.Second})
+		got = resp
+		done <- err
+	}()
+
+	<-served
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	if err := <-done; err == nil {
+		t.Fatal("expected an error after cancellation")
+	}
+	id, err := client.GetJobResourceID(got)
+	if err != nil {
+		t.Fatalf("GetJobResourceID on the returned response: %v", err)
+	}
+	if id != resourceID {
+		t.Errorf("resource ID = %q, want %q", id, resourceID)
+	}
+}
+
+// A job with no resource ID is an error. The base URL alone addresses the
+// collection, so an empty ID reads every resource instead of one, and it gives
+// a PartialCreateError nothing to name.
+func TestGetJobResourceIDRejectsEmptyID(t *testing.T) {
+	t.Parallel()
+
+	resp := &client.JobStatusMultiResponse{}
+	resp.Data.Jobs = []client.JobResponse{{JobID: "job-1", ResourceId: ""}}
+
+	if _, err := client.GetJobResourceID(resp); !errors.Is(err, client.ErrEmptyResourceID) {
+		t.Errorf("error = %v, want ErrEmptyResourceID", err)
+	}
+}
+
+// PartialCreateFromPoll must not claim a resource it cannot name.
+func TestPartialCreateFromPollWithoutResourceID(t *testing.T) {
+	t.Parallel()
+
+	cause := errors.New("polling failed")
+	if got := client.PartialCreateFromPoll(nil, cause); !errors.Is(got, cause) || errors.Is(got, context.Canceled) {
+		t.Errorf("PartialCreateFromPoll(nil, cause) = %v, want the cause unchanged", got)
+	}
+
+	var partial *client.PartialCreateError
+	if errors.As(client.PartialCreateFromPoll(nil, cause), &partial) {
+		t.Error("PartialCreateFromPoll reported a partial create with no resource ID")
+	}
+}

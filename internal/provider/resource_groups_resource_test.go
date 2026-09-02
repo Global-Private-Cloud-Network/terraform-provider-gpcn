@@ -25,6 +25,7 @@ func TestResourceGroupResource(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDestroy,
 		Steps: []resource.TestStep{
 			// Create and Read testing (with description)
 			{
@@ -110,6 +111,7 @@ func TestResourceGroupNameLengthValidator(t *testing.T) {
 		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			CheckDestroy:             testAccCheckDestroy,
 			Steps: []resource.TestStep{
 				{
 					// 65-character name (exceeds 64 max)
@@ -130,6 +132,7 @@ func TestResourceGroupDescriptionLengthValidator(t *testing.T) {
 		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			CheckDestroy:             testAccCheckDestroy,
 			Steps: []resource.TestStep{
 				{
 					// 256-character description (exceeds 255 max)

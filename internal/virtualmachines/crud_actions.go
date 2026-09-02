@@ -170,7 +170,7 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 	// machine that Terraform does not record. Each error must give its ID.
 	jobResp, err := client.PerformLongPolling(gpcnClient, ctx, "Create GPCN Virtual Machine", jobID)
 	if err != nil {
-		return nil, fmt.Errorf("create VM polling failed (job %s can still complete and make a virtual machine): %w", jobID, err)
+		return nil, client.PartialCreateFromPoll(jobResp, fmt.Errorf("create VM polling failed (job %s can still complete and make a virtual machine): %w", jobID, err))
 	}
 
 	tflog.Info(ctx, LogLongPollingCompletedCreateVM)
@@ -182,7 +182,8 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 	}
 
 	// Wait for the VM to actually be spun up before doing anything more
-	getVirtualMachineResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, resourceID, []string{VMStatusRunning.String(), VMStatusShutoff.String()}, DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS, DEFAULT_INITIAL_POLL_DELAY_SECONDS)
+	getVirtualMachineResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, resourceID, []string{VMStatusRunning.String(), VMStatusShutoff.String()},
+		StatusPollOptions{Timeout: DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT, InitialDelay: DEFAULT_INITIAL_POLL_DELAY})
 	if err != nil {
 		return nil, &client.PartialCreateError{ResourceID: resourceID, Err: err}
 	}
@@ -244,20 +245,33 @@ func UpdateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, vi
 	return nil
 }
 
+// StatusPollOptions bounds a call to PollForVirtualMachineStatus. The fields
+// are named because two positional durations can be exchanged without an error
+// from the compiler.
+type StatusPollOptions struct {
+	// Timeout is the maximum time to wait for a target status.
+	Timeout time.Duration
+	// InitialDelay is the wait before the first status request.
+	InitialDelay time.Duration
+}
+
 // Iteratively calls getVirtualMachine until the machine is in a target status, or it times out
-func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string, targetStatuses []string, timeoutMaxSec int, initialDelaySec int) (*ReadVirtualMachinesResponse, error) {
+func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string, targetStatuses []string, opts StatusPollOptions) (*ReadVirtualMachinesResponse, error) {
 	// A length here, not a capacity, adds empty strings to the slice. An empty
 	// status from the API then matches each target status.
 	targetStatusesLower := make([]string, 0, len(targetStatuses))
 	for _, status := range targetStatuses {
 		targetStatusesLower = append(targetStatusesLower, strings.ToLower(status))
 	}
+	inTargetStatus := func(resp *ReadVirtualMachinesResponse) bool {
+		return slices.Contains(targetStatusesLower, strings.ToLower(resp.Data.Status))
+	}
 	tflog.Info(ctx, fmt.Sprintf(LogStartingPollForVMStatusWithID, virtualMachineId))
 
 	// Wait for initial delay before starting polling
-	if initialDelaySec > 0 {
-		tflog.Info(ctx, fmt.Sprintf(LogInitialPollDelay, initialDelaySec))
-		if err := client.SleepWithContext(ctx, time.Duration(initialDelaySec)*time.Second); err != nil {
+	if opts.InitialDelay > 0 {
+		tflog.Info(ctx, fmt.Sprintf(LogInitialPollDelay, int(opts.InitialDelay.Seconds())))
+		if err := client.SleepWithContext(ctx, opts.InitialDelay); err != nil {
 			return nil, fmt.Errorf(ErrFmtVirtualMachineStatusPollInterrupted, virtualMachineId, err)
 		}
 	}
@@ -266,7 +280,6 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 	// GetVirtualMachine can continue for the request timeout multiplied by the
 	// retry count. A sum of the intervals ignores that time.
 	startTime := time.Now()
-	timeout := time.Duration(timeoutMaxSec) * time.Second
 	longPollIteration := 1
 	for {
 		tflog.Info(ctx, fmt.Sprintf(LogStartingLongPollingIteration, longPollIteration, int(time.Since(startTime).Seconds())))
@@ -279,19 +292,27 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 		}
 		tflog.Info(ctx, fmt.Sprintf(LogVMResponseStatus, getResp.Data.Status))
 
-		if slices.Contains(targetStatusesLower, strings.ToLower(getResp.Data.Status)) {
+		if inTargetStatus(getResp) {
 			tflog.Info(ctx, fmt.Sprintf(LogVMStatusProceedingToAttach, getResp.Data.ID, getResp.Data.Status))
-			// Wait one more interval. The API can report the target status before
-			// the virtual machine is ready.
+			// The API can report a target status before the virtual machine is
+			// ready. Wait, then read the status again to confirm it.
 			if sleepErr := client.SleepWithContext(ctx, VIRTUALMACHINE_STATUS_POLL_INTERVAL); sleepErr != nil {
 				return nil, fmt.Errorf(ErrFmtVirtualMachineStatusPollInterrupted, virtualMachineId, sleepErr)
 			}
-			return getResp, nil
+			confirmResp, err := GetVirtualMachine(gpcnClient, ctx, virtualMachineId)
+			if err != nil {
+				return nil, fmt.Errorf(ErrFmtVirtualMachineStatusPollFailed, virtualMachineId, err)
+			}
+			if inTargetStatus(confirmResp) {
+				return confirmResp, nil
+			}
+			// The machine left the target status during the wait. Continue.
+			tflog.Info(ctx, fmt.Sprintf(LogVMResponseStatus, confirmResp.Data.Status))
 		}
 
-		if time.Since(startTime) >= timeout {
+		if time.Since(startTime) >= opts.Timeout {
 			//nolint:staticcheck // ST1005: Terraform shows this text to the user. It is not an internal Go error string.
-			return nil, fmt.Errorf(ErrVirtualMachineStatusTimeoutTemplate, timeoutMaxSec)
+			return nil, fmt.Errorf(ErrVirtualMachineStatusTimeoutTemplate, int(opts.Timeout.Seconds()))
 		}
 
 		if sleepErr := client.SleepWithContext(ctx, VIRTUALMACHINE_STATUS_POLL_INTERVAL); sleepErr != nil {

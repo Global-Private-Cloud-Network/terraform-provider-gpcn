@@ -23,3 +23,16 @@ func (e *PartialCreateError) Error() string {
 }
 
 func (e *PartialCreateError) Unwrap() error { return e.Err }
+
+// PartialCreateFromPoll reports a create that the API accepted but the provider
+// did not finish. jobResp is the response that PerformLongPolling returned with
+// err. If it names a resource, the result names that resource and tells the
+// operator what to do. If it does not, err passes through unchanged, because
+// there is no ID to give.
+func PartialCreateFromPoll(jobResp *JobStatusMultiResponse, err error) error {
+	resourceID, idErr := GetJobResourceID(jobResp)
+	if idErr != nil {
+		return err
+	}
+	return &PartialCreateError{ResourceID: resourceID, Err: err}
+}

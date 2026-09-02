@@ -21,6 +21,7 @@ func TestGPUResource(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDestroy,
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
@@ -123,6 +124,7 @@ func TestGPUResourceInitialAuthNoOp(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: providerConfig + fmt.Sprintf(`
@@ -205,6 +207,7 @@ func TestGPUResourceNoAvailability(t *testing.T) {
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: providerConfig + fmt.Sprintf(`
@@ -294,6 +297,7 @@ func TestGPUResourceInvalidSeries(t *testing.T) {
 			t.Parallel()
 			resource.UnitTest(t, resource.TestCase{
 				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				CheckDestroy:             testAccCheckDestroy,
 				Steps: []resource.TestStep{
 					{
 						Config:      gpuConfigWithSeries(tc.seriesField, tc.gpuCount, tc.imageName),
@@ -309,6 +313,7 @@ func TestGPUResourceInvalidImageName(t *testing.T) {
 	t.Parallel()
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: providerConfig + `
@@ -334,6 +339,7 @@ func TestGPUResourceInvalidGPUCount(t *testing.T) {
 		t.Parallel()
 		resource.UnitTest(t, resource.TestCase{
 			ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+			CheckDestroy:             testAccCheckDestroy,
 			Steps: []resource.TestStep{
 				{
 					Config: providerConfig + `
@@ -359,6 +365,7 @@ func TestGPUResourceMissingAuth(t *testing.T) {
 	t.Parallel()
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             testAccCheckDestroy,
 		Steps: []resource.TestStep{
 			{
 				Config: providerConfig + `
