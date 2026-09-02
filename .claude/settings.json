@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command // \"\"' | grep -qE \"(git[[:space:]]+(commit|push)|gh[[:space:]]+pr[[:space:]]+create)\" && printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"ask\",\"permissionDecisionReason\":\"Repo rule: commit, push, and PR creation each need explicit authorization from the user. See .claude/rules/commit-conventions.md\"}}' || true",
+            "timeout": 10,
+            "statusMessage": "Checking commit authorization rule"
+          }
+        ]
+      }
+    ]
+  }
+}
