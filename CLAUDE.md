@@ -115,6 +115,10 @@ The `internal/client/` package provides a configurable HTTP client:
 
 - **Retry with backoff**: Use `client.DoWithRetry(req)` for requests that should retry on transient failures.
 
+## Commits
+
+Read `.claude/rules/commit-conventions.md` before you commit, push, or open a pull request, including a draft pull request.
+
 ## Releasing
 
 To prepare a new release:
