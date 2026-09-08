@@ -8,11 +8,13 @@ import (
 
 	"terraform-provider-gpcn/internal/client"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -62,14 +64,23 @@ func (p *gpcnProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp 
 			"request_timeout": schema.Int64Attribute{
 				Description: "Timeout in seconds for individual HTTP requests to the GPCN API. Defaults to 60 seconds.",
 				Optional:    true,
+				Validators: []validator.Int64{
+					int64validator.AtLeast(1),
+				},
 			},
 			"polling_timeout": schema.Int64Attribute{
 				Description: "Timeout in seconds for async operations (create, update, delete). Defaults to 600 seconds (10 minutes).",
 				Optional:    true,
+				Validators: []validator.Int64{
+					int64validator.AtLeast(1),
+				},
 			},
 			"max_retries": schema.Int64Attribute{
 				Description: "Maximum number of retries for transient failures. Defaults to 3.",
 				Optional:    true,
+				Validators: []validator.Int64{
+					int64validator.Between(0, 10),
+				},
 			},
 		},
 	}
