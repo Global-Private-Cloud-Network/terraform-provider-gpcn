@@ -25,7 +25,7 @@ type authTransport struct {
 func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
 
-	req.Header.Add("x-api-key", t.apiKey)
+	req.Header.Set("x-api-key", t.apiKey)
 
 	// Add correlation ID to request headers if present
 	if correlationID := GetCorrelationID(req.Context()); correlationID != "" {
