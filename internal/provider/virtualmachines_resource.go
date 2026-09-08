@@ -572,8 +572,11 @@ func (r *virtualMachinesResource) ModifyPlan(ctx context.Context, req resource.M
 	// Fetch only the sizes that are valid in-place upgrade targets for this VM
 	upgradeable, err := virtualmachinesizes.FetchSizes(r.client, ctx, state.DatacenterId.ValueString(), state.ID.ValueString())
 	if err != nil {
-		// If the call fails, default to requiring replacement rather than allowing an unknown operation
-		resp.RequiresReplace.Append(path.Root("size_id"))
+		// A transient error here must fail the plan, not propose a destroy.
+		resp.Diagnostics.AddError(
+			virtualmachines.ErrSummaryUnableToDetermineSizeChange,
+			fmt.Sprintf(virtualmachines.ErrDetailFetchUpgradeSizesFailed, err.Error()),
+		)
 		return
 	}
 

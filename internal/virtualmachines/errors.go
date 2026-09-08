@@ -19,6 +19,7 @@ const (
 	ErrSummaryEncounteredErrorGettingJobInfo      = "Encountered an error getting job info"
 	ErrSummaryEncounteredValidationError          = "Encountered a validation error"
 	ErrSummaryUnableToUpdatePublicIPConfiguration = "Unable to update public IP configuration"
+	ErrSummaryUnableToDetermineSizeChange         = "Unable to determine whether size_id change requires replacement"
 )
 
 // Warning summary constants
@@ -40,6 +41,7 @@ const (
 	ErrDetailStartingVM                = "Error starting virtual machine with ID %s"
 	ErrDetailCannotRemoveLastNetwork   = "unable to remove the last Network attached to a virtual machine"
 	ErrDetailNetworkTypeMustBeStandard = "the prospective primary network (first in the list) is of type custom. The value for allocatePublicIp can only be set to true if the primary network's network_type is standard"
+	ErrDetailFetchUpgradeSizesFailed   = "The provider could not fetch the valid upgrade targets for this Virtual Machine, so it cannot tell whether the size_id change is an in-place upgrade. This error is often transient. Re-run the plan. Underlying error: %s"
 )
 
 // Warning detail message templates
