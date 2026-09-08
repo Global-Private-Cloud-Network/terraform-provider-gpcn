@@ -204,7 +204,7 @@ func UpdateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkId
 	}
 	tflog.Info(ctx, LogConstructedUpdateNetworkRequestBody)
 
-	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+model.ID.ValueString(), bytes.NewBuffer(jsonUpdateNetworkRequestBody))
+	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+networkId, bytes.NewBuffer(jsonUpdateNetworkRequestBody))
 	if err != nil {
 		return nil, err
 	}

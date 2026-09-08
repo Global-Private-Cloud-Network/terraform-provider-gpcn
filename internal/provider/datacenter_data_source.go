@@ -224,11 +224,12 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		return
 	}
 
-	if !state.GPUEnabled.IsNull() && state.GPUEnabled.ValueBool() {
+	if !state.GPUEnabled.IsNull() {
+		want := state.GPUEnabled.ValueBool()
 		unfiltered := datacenterResponse.Data
 		filtered := unfiltered[:0]
 		for _, dc := range unfiltered {
-			if dc.GPUEnabled {
+			if dc.GPUEnabled == want {
 				filtered = append(filtered, dc)
 			}
 		}
@@ -238,17 +239,18 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		if len(unfiltered) > 0 && len(filtered) == 0 {
 			resp.Diagnostics.AddError(
 				datacenters.ErrSummaryUnableGetDatacenters,
-				datacenters.ErrDetailDatacenterNoGPUEnabled,
+				fmt.Sprintf(datacenters.ErrDetailDatacenterNoGPUEnabled, want),
 			)
 			return
 		}
 	}
 
-	if !state.CustomImages.IsNull() && state.CustomImages.ValueBool() {
+	if !state.CustomImages.IsNull() {
+		want := state.CustomImages.ValueBool()
 		unfiltered := datacenterResponse.Data
 		filtered := unfiltered[:0]
 		for _, dc := range unfiltered {
-			if dc.CustomImages {
+			if dc.CustomImages == want {
 				filtered = append(filtered, dc)
 			}
 		}
@@ -256,7 +258,7 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		if len(unfiltered) > 0 && len(filtered) == 0 {
 			resp.Diagnostics.AddError(
 				datacenters.ErrSummaryUnableGetDatacenters,
-				datacenters.ErrDetailDatacenterNoCustomImages,
+				fmt.Sprintf(datacenters.ErrDetailDatacenterNoCustomImages, want),
 			)
 			return
 		}

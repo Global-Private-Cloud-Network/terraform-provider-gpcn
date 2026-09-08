@@ -33,7 +33,7 @@ func parseDNSServers(raw string) types.List {
 	if raw == "" {
 		return types.ListValueMust(types.StringType, []attr.Value{})
 	}
-	parts := strings.Split(raw, ", ")
+	parts := strings.Split(raw, ",")
 	elements := make([]attr.Value, len(parts))
 	for i, p := range parts {
 		elements[i] = types.StringValue(strings.TrimSpace(p))
