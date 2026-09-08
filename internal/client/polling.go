@@ -90,7 +90,7 @@ func PerformLongPollingWithConfig(gpcnClient *GpcnClient, ctx context.Context, a
 		job := jobResponse.Data.Jobs[0]
 
 		if job.HasFailed {
-			return nil, fmt.Errorf("job %s for action %q: %w", jobId, action, ErrJobFailed)
+			return nil, fmt.Errorf("job %s for action %q: %w: %s", jobId, action, ErrJobFailed, jobResponse.Message)
 		}
 
 		if job.IsCompleted {
