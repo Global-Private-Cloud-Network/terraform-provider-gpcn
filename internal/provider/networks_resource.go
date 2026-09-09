@@ -102,11 +102,15 @@ func (r *networksResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"gateway": schema.StringAttribute{
-				Description: "The default gateway IP address for the network",
+			"gateway_ip": schema.StringAttribute{
+				Description: "The default gateway IP address for the network. Must be an IPv4 address inside cidr_block. If omitted, it defaults to the first usable host of cidr_block",
+				Optional:    true,
 				Computed:    true,
+				Validators: []validator.String{
+					networks.IpAddressValidator{},
+				},
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
+					networks.DefaultRouteFromCIDR{},
 				},
 			},
 			"connected_vms": schema.StringAttribute{

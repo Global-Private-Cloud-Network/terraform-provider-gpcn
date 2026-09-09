@@ -62,17 +62,12 @@ func dnsServersToString(dnsServers types.List) string {
 func CreateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*readNetworkResponse, error) {
 	tflog.Info(ctx, LogStartingCreateNetwork)
 	isStandardNetwork := model.NetworkType == types.StringValue("standard")
-	var defaultRoute string
-	if isStandardNetwork {
-		defaultRoute = "10.0.0.1"
-	} else {
-		defaultRoute = ""
-	}
+	defaultRoute := model.GatewayIP.ValueString()
 
 	// Create a new request from the model
 	createNetworkRequestBody := map[string]any{
 		"defaultRoute":           defaultRoute,
-		"defaultRouteEnabled":    isStandardNetwork,
+		"defaultRouteEnabled":    defaultRoute != "",
 		"datacenterId":           model.DatacenterId.ValueString(),
 		"description":            model.Description.ValueString(),
 		"dhcpStartAddress":       model.DHCPStartAddress.ValueString(),
@@ -177,18 +172,13 @@ func GetNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkID st
 func UpdateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkId string, model ResourceModel) (*readNetworkResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateNetworkWithID, networkId))
 	isStandardNetwork := model.NetworkType == types.StringValue("standard")
-	var defaultRoute string
-	if isStandardNetwork {
-		defaultRoute = "10.0.0.1"
-	} else {
-		defaultRoute = ""
-	}
+	defaultRoute := model.GatewayIP.ValueString()
 
 	// Create a new request from the model
 	updateNetworkRequestBody := map[string]any{
 		"cidrBlock":              model.CIDRBlock.ValueString(),
 		"defaultRoute":           defaultRoute,
-		"defaultRouteEnabled":    isStandardNetwork,
+		"defaultRouteEnabled":    defaultRoute != "",
 		"description":            model.Description.ValueString(),
 		"dhcpStartAddress":       model.DHCPStartAddress.ValueString(),
 		"dhcpEndAddress":         model.DHCPEndAddress.ValueString(),

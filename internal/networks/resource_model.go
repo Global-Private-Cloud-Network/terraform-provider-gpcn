@@ -18,7 +18,7 @@ type ResourceModel struct {
 	LastUpdated      types.String `tfsdk:"last_updated"`
 	SNAT             types.String `tfsdk:"snat"`
 	CIDRBlock        types.String `tfsdk:"cidr_block"`
-	Gateway          types.String `tfsdk:"gateway"`
+	GatewayIP        types.String `tfsdk:"gateway_ip"`
 	ConnectedVMs     types.String `tfsdk:"connected_vms"`
 	NetworkType      types.String `tfsdk:"network_type"`
 	DatacenterId     types.String `tfsdk:"datacenter_id"`
@@ -60,7 +60,7 @@ func MapNetworkResponseToModel(ctx context.Context, response *readNetworkRespons
 	model.Description = types.StringValue(response.Data.Description)
 	model.SNAT = types.StringValue(response.Data.SNAT)
 	model.CIDRBlock = types.StringValue(response.Data.CIDRBlock)
-	model.Gateway = types.StringValue(response.Data.Gateway)
+	model.GatewayIP = types.StringValue(response.Data.Gateway)
 	model.ConnectedVMs = types.StringValue(response.Data.ConnectedVMs)
 	model.DNSServers = parseDNSServers(response.Data.DNSServers)
 

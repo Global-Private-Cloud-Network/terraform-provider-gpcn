@@ -36,6 +36,9 @@ resource "gpcn_network" "example_standard" {
   # Network configuration
   cidr_block = "10.0.0.0/24"
 
+  # Optional: default route (gateway). Defaults to the first usable host of cidr_block.
+  # gateway_ip = "10.0.0.1"
+
   # DHCP range (both required together)
   dhcp_start_address = "10.0.0.10"
   dhcp_end_address   = "10.0.0.254"

@@ -94,8 +94,8 @@ func TestMapNetworkResponseToModelUnit(t *testing.T) {
 	if result.CIDRBlock.ValueString() != "10.0.0.0/24" {
 		t.Errorf("Expected CIDR block '10.0.0.0/24', got '%s'", result.CIDRBlock.ValueString())
 	}
-	if result.Gateway.ValueString() != "10.0.0.1" {
-		t.Errorf("Expected gateway '10.0.0.1', got '%s'", result.Gateway.ValueString())
+	if result.GatewayIP.ValueString() != "10.0.0.1" {
+		t.Errorf("Expected gateway_ip '10.0.0.1', got '%s'", result.GatewayIP.ValueString())
 	}
 	if result.ConnectedVMs.ValueString() != "2" {
 		t.Errorf("Expected connected VMs '2', got '%s'", result.ConnectedVMs.ValueString())
@@ -274,5 +274,86 @@ func TestUpdateNetworkMockHTTP(t *testing.T) {
 	}
 	if !getCalled {
 		t.Error("Expected get network endpoint to be called")
+	}
+}
+
+func TestFirstUsableHostFromCIDR(t *testing.T) {
+	cases := []struct {
+		cidr string
+		want string
+	}{
+		{"10.0.0.0/24", "10.0.0.1"},
+		{"192.168.5.0/24", "192.168.5.1"},
+		{"10.20.0.0/22", "10.20.0.1"},
+	}
+	for _, c := range cases {
+		got, err := firstUsableHostFromCIDR(c.cidr)
+		if err != nil {
+			t.Errorf("firstUsableHostFromCIDR(%q) returned error: %v", c.cidr, err)
+			continue
+		}
+		if got != c.want {
+			t.Errorf("firstUsableHostFromCIDR(%q) = %q, want %q", c.cidr, got, c.want)
+		}
+	}
+	if _, err := firstUsableHostFromCIDR("not-a-cidr"); err == nil {
+		t.Error("Expected error for invalid CIDR, got nil")
+	}
+}
+
+// TestCreateNetworkDefaultRoute confirms the POST body sends gateway_ip as defaultRoute,
+// and sets defaultRouteEnabled from whether a value is present. The DefaultRouteFromCIDR
+// plan modifier resolves the value before create, so create sends it unchanged.
+func TestCreateNetworkDefaultRoute(t *testing.T) {
+	const (
+		jobID     = "job-dr"
+		networkID = "network-dr"
+	)
+	cases := []struct {
+		name        string
+		gatewayIP   types.String
+		wantRoute   string
+		wantEnabled bool
+	}{
+		{"value present", types.StringValue("192.168.5.1"), "192.168.5.1", true},
+		{"value absent", types.StringNull(), "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var gotDefaultRoute any
+			var gotEnabled any
+			server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+				T: t,
+				Handler: func(w http.ResponseWriter, r *http.Request) {
+					switch {
+					case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/networks/"):
+						body := testutil.ReadRequestBody(r)
+						gotDefaultRoute = body["defaultRoute"]
+						gotEnabled = body["defaultRouteEnabled"]
+						testutil.HandleCreateJobResponse(w, jobID, "Network creation job started")
+					case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+						testutil.HandleJobResponse(w, jobID, networkID, true)
+					case r.Method == "GET" && strings.Contains(r.URL.Path, "/networks/"+networkID):
+						testutil.WriteJSONResponse(w, newNetworkResponse(networkID, "test-network", "standard"))
+					default:
+						testutil.LogUnexpectedRequest(t, w, r)
+					}
+				},
+			})
+			defer server.Close()
+
+			model := createTestResourceModel("standard", "192.168.5.0/24", "10.0.0.10", "10.0.0.254", "8.8.8.8, 8.8.4.4")
+			model.GatewayIP = c.gatewayIP
+
+			if _, err := CreateNetwork(gpcnClient, context.Background(), model); err != nil {
+				t.Fatalf("CreateNetwork failed: %v", err)
+			}
+			if gotDefaultRoute != c.wantRoute {
+				t.Errorf("Expected defaultRoute '%s', got '%v'", c.wantRoute, gotDefaultRoute)
+			}
+			if gotEnabled != c.wantEnabled {
+				t.Errorf("Expected defaultRouteEnabled %v, got '%v'", c.wantEnabled, gotEnabled)
+			}
+		})
 	}
 }

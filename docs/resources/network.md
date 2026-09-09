@@ -50,6 +50,9 @@ resource "gpcn_network" "example_standard" {
   # Network configuration
   cidr_block = "10.0.0.0/24"
 
+  # Optional: default route (gateway). Defaults to the first usable host of cidr_block.
+  # gateway_ip = "10.0.0.1"
+
   # DHCP range (both required together)
   dhcp_start_address = "10.0.0.10"
   dhcp_end_address   = "10.0.0.254"
@@ -92,12 +95,12 @@ output "gpcn_network_example_custom" {
 - `dhcp_end_address` (String) Ending IP address of the DHCP range. Must be specified together with dhcp_start_address. Only applicable for standard networks
 - `dhcp_start_address` (String) Starting IP address of the DHCP range. Must be specified together with dhcp_end_address. Only applicable for standard networks
 - `dns_servers` (List of String) List of DNS server IPv4 addresses. Only applicable for standard networks
+- `gateway_ip` (String) The default gateway IP address for the network. Must be an IPv4 address inside cidr_block. If omitted, it defaults to the first usable host of cidr_block
 
 ### Read-Only
 
 - `connected_vms` (String) The number of virtual machines currently connected to this network
 - `created_time` (String) Timestamp when the network was created in ISO-8601 format
-- `gateway` (String) The default gateway IP address for the network
 - `id` (String) Unique identifier for the network in UUID format
 - `last_updated` (String) Timestamp when the network was last updated in ISO-8601 format
 - `location` (Map of String) Location details including datacenter, region, and country information

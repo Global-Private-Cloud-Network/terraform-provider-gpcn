@@ -1,3 +1,13 @@
+## Unreleased
+
+BREAKING CHANGES:
+
+- **Network**: The computed `gateway` attribute is renamed to `gateway_ip`. Update configurations and references from `gateway` to `gateway_ip`.
+
+ENHANCEMENTS:
+
+- **Network**: `gateway_ip` is now configurable and sets the network default route. It must be an IPv4 address inside `cidr_block`. When omitted, it defaults to the first usable host of `cidr_block`.
+
 ## 1.0.2 (July 12, 2026)
 
 ENHANCEMENTS:

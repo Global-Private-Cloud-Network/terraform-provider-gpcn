@@ -60,7 +60,7 @@ func TestNetworksResource(t *testing.T) {
 					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "last_updated"),
 					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "connected_vms"),
 					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "created_time"),
-					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "gateway"),
+					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "gateway_ip"),
 					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "location.country"),
 					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "location.datacenter"),
 					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "location.region"),
