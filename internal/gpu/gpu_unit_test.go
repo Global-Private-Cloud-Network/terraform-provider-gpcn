@@ -274,6 +274,252 @@ func TestMapGPUResponseToModelUnit(t *testing.T) {
 	}
 }
 
+const inventoryJSONA6000 = `{
+  "success": true,
+  "message": "ok",
+  "data": {
+    "series": [
+      {
+        "id": "series-a6000",
+        "name": "NVIDIA RTX A6000 Series",
+        "code": "nvidia-rtx_a6000-series",
+        "availability": [
+          {
+            "datacenterId": "datacenter-123",
+            "datacenterName": "US-East-1",
+            "datacenterCode": "us-east-1",
+            "gpuCounts": [
+              {
+                "count": 1,
+                "specs": {"gpuDescription": "1x A6000", "vcpu": 6, "memoryGiB": 24, "storageGB": 256},
+                "availableSkus": [
+                  {"skuCode": "gpu_1x_a6000_low_ram", "description": "low", "specs": {"gpuDescription": "1x A6000 low", "vcpu": 6, "memoryGiB": 24, "storageGB": 256}},
+                  {"skuCode": "gpu_1x_a6000", "description": "std", "specs": {"gpuDescription": "1x A6000", "vcpu": 6, "memoryGiB": 48, "storageGB": 256}}
+                ]
+              },
+              {
+                "count": 2,
+                "specs": {"gpuDescription": "2x A6000", "vcpu": 14, "memoryGiB": 96, "storageGB": 512},
+                "availableSkus": [
+                  {"skuCode": "gpu_2x_a6000", "description": "std", "specs": {"gpuDescription": "2x A6000", "vcpu": 14, "memoryGiB": 96, "storageGB": 512}}
+                ]
+              }
+            ]
+          },
+          {
+            "datacenterId": "other-dc",
+            "datacenterName": "Other",
+            "datacenterCode": "other",
+            "gpuCounts": [
+              {
+                "count": 1,
+                "specs": {"gpuDescription": "1x A6000", "vcpu": 6, "memoryGiB": 48, "storageGB": 256},
+                "availableSkus": [
+                  {"skuCode": "gpu_1x_a6000_other", "description": "std", "specs": {"gpuDescription": "1x A6000", "vcpu": 6, "memoryGiB": 48, "storageGB": 256}}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}`
+
+func TestFetchInventoryMockHTTP(t *testing.T) {
+	const seriesCode = "nvidia-rtx_a6000-series"
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/inventory") {
+				query := r.URL.Query()
+				if query.Get("datacenterId") != testDatacenterID {
+					t.Errorf("Expected datacenterId '%s', got '%s'", testDatacenterID, query.Get("datacenterId"))
+				}
+				if query.Get("code") != seriesCode {
+					t.Errorf("Expected code '%s', got '%s'", seriesCode, query.Get("code"))
+				}
+				if query.Has("count") {
+					t.Errorf("Expected no count query param, got '%s'", query.Get("count"))
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(inventoryJSONA6000))
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	items, err := FetchInventory(gpcnClient, context.Background(), testDatacenterID, seriesCode, 0)
+	if err != nil {
+		t.Fatalf("FetchInventory failed: %v", err)
+	}
+
+	// Three SKUs in the matching datacenter (2 at count 1, 1 at count 2); the
+	// "other-dc" SKU is filtered out.
+	if len(items) != 3 {
+		t.Fatalf("Expected 3 SKUs, got %d", len(items))
+	}
+
+	var found gpuFound
+	for _, item := range items {
+		if item.SkuCode == "gpu_1x_a6000_other" {
+			t.Error("Expected SKU from a different datacenter to be filtered out")
+		}
+		if item.SkuCode == "gpu_1x_a6000" {
+			found.item = item
+			found.ok = true
+		}
+	}
+	if !found.ok {
+		t.Fatal("Expected to find SKU 'gpu_1x_a6000'")
+	}
+	if found.item.SeriesName != "NVIDIA RTX A6000 Series" || found.item.SeriesCode != seriesCode {
+		t.Errorf("Unexpected series on SKU: %+v", found.item)
+	}
+	if found.item.GPUCount != 1 || found.item.VCPU != 6 || found.item.MemoryGiB != 48 || found.item.StorageGB != 256 {
+		t.Errorf("Unexpected per-SKU specs: %+v", found.item)
+	}
+}
+
+type gpuFound struct {
+	item FlatInventory
+	ok   bool
+}
+
+func TestFetchInventoryCountFilterMockHTTP(t *testing.T) {
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/inventory") {
+				if r.URL.Query().Get("count") != "1" {
+					t.Errorf("Expected count '1', got '%s'", r.URL.Query().Get("count"))
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(inventoryJSONA6000))
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	items, err := FetchInventory(gpcnClient, context.Background(), testDatacenterID, "nvidia-rtx_a6000-series", 1)
+	if err != nil {
+		t.Fatalf("FetchInventory failed: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("Expected 2 SKUs at count 1, got %d", len(items))
+	}
+	for _, item := range items {
+		if item.GPUCount != 1 {
+			t.Errorf("Expected only count-1 SKUs, got count %d", item.GPUCount)
+		}
+	}
+}
+
+func TestFetchInventoryEmptyMockHTTP(t *testing.T) {
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/inventory") {
+				testutil.WriteJSONResponse(w, newInventoryResponse("series-123", "nvidia-h100_series", testDatacenterID, 2, 0))
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	items, err := FetchInventory(gpcnClient, context.Background(), testDatacenterID, "nvidia-h100_series", 2)
+	if err != nil {
+		t.Fatalf("Expected no error for empty inventory, got: %v", err)
+	}
+	if len(items) != 0 {
+		t.Errorf("Expected 0 SKUs, got %d", len(items))
+	}
+}
+
+func TestCreateGPUWithSkuCodeMockHTTP(t *testing.T) {
+	const (
+		jobID    = "job-sku-1"
+		gpuID    = "gpu-sku-1"
+		seriesID = "series-sku-1"
+		skuCode  = "gpu_1x_a6000"
+	)
+
+	var createCalled bool
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/gpu/"):
+				createCalled = true
+				req := testutil.ReadRequestBody(r)
+				// sku_code is additive: the API still needs seriesId and gpuCount.
+				if req["skuCode"] != skuCode {
+					t.Errorf("Expected skuCode '%s', got '%v'", skuCode, req["skuCode"])
+				}
+				if req["seriesId"] != seriesID {
+					t.Errorf("Expected seriesId '%s', got '%v'", seriesID, req["seriesId"])
+				}
+				if int64(req["gpuCount"].(float64)) != 2 {
+					t.Errorf("Expected gpuCount 2, got '%v'", req["gpuCount"])
+				}
+				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
+					Success: true,
+					Message: "GPU creation job started",
+					Data: client.JobStatusDataResponse{
+						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: gpuID}},
+					},
+				})
+
+			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, gpuID, true)
+
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/"+gpuID):
+				testutil.WriteJSONResponse(w, newGPUResponse(gpuID, "test-gpu"))
+
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	model := createTestGPUModel("test-gpu", "", "nvidia-rtx_a6000-series", testImageName, 2)
+	model.SkuCode = types.StringValue(skuCode)
+
+	response, err := CreateGPU(gpcnClient, context.Background(), seriesID, model)
+	if err != nil {
+		t.Fatalf("CreateGPU failed: %v", err)
+	}
+	if response == nil {
+		t.Fatal("Expected response, got nil")
+		return
+	}
+	if !createCalled {
+		t.Error("Expected create endpoint to be called")
+	}
+}
+
+func TestMapGPUResponseToModelSkuCodeUnit(t *testing.T) {
+	response := newGPUResponse("gpu-123", "test-gpu")
+	response.Data.Configuration.SkuCode = "gpu_1x_a6000"
+
+	model := createTestGPUModel("test-gpu", "", "", testImageName, 0)
+	model.GPUCount = types.Int64Null()
+	model.SkuCode = types.StringNull()
+
+	result := MapGPUResponseToModel(context.Background(), response, model)
+	if result.SkuCode.ValueString() != "gpu_1x_a6000" {
+		t.Errorf("Expected sku_code back-filled to 'gpu_1x_a6000', got '%s'", result.SkuCode.ValueString())
+	}
+}
+
 func TestCheckInventoryMockHTTP(t *testing.T) {
 	const (
 		seriesCode = "nvidia-h100_series"
@@ -307,25 +553,18 @@ func TestCheckInventoryMockHTTP(t *testing.T) {
 
 	model := createTestGPUModel("test-gpu", "", seriesCode, testImageName, gpuCount)
 
-	response, err := CheckInventory(gpcnClient, context.Background(), model)
+	inventory, err := CheckInventory(gpcnClient, context.Background(), model)
 	if err != nil {
 		t.Fatalf("CheckInventory failed: %v", err)
-	}
-	if response == nil {
-		t.Fatal("Expected response, got nil")
-		return
 	}
 	if !inventoryCalled {
 		t.Error("Expected inventory endpoint to be called")
 	}
-	if len(response.Data.Series) == 0 {
-		t.Fatal("Expected inventory data, got empty series")
+	if len(inventory) != 5 {
+		t.Fatalf("Expected 5 available SKUs, got %d", len(inventory))
 	}
-	if response.Data.Series[0].ID != "series-123" {
-		t.Errorf("Expected series ID 'series-123', got '%s'", response.Data.Series[0].ID)
-	}
-	if len(response.Data.Series[0].Availability[0].GPUCounts[0].AvailableSkus) != 5 {
-		t.Errorf("Expected 5 available SKUs, got %d", len(response.Data.Series[0].Availability[0].GPUCounts[0].AvailableSkus))
+	if inventory[0].SeriesID != "series-123" {
+		t.Errorf("Expected series ID 'series-123', got '%s'", inventory[0].SeriesID)
 	}
 }
 

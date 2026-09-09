@@ -236,6 +236,76 @@ func TestGPUResourceNoAvailability(t *testing.T) {
 	})
 }
 
+func TestGPUResourceSkuCode(t *testing.T) {
+	t.Parallel()
+	rName := acctest.RandString(8)
+	gpuName := fmt.Sprintf("gpu-sku-%s", rName)
+	sshKeyName := fmt.Sprintf("gpu-sku-key-%s", rName)
+
+	config := providerConfig + fmt.Sprintf(`
+			data "gpcn_datacenters" "central_us" {
+				country_name = "United States"
+				region_name  = "central"
+				name         = "Kansas"
+				gpu_enabled  = true
+			}
+
+			data "gpcn_gpu_inventory" "a6000" {
+				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+				series_code   = "nvidia-rtx_a6000-series"
+				gpu_count     = 1
+			}
+
+			resource "gpcn_ssh_key" "test" {
+				name       = "%s"
+				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
+			}
+
+			resource "gpcn_gpu" "test" {
+				name          = "%s"
+				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+				series_code   = "nvidia-rtx_a6000-series"
+				gpu_count     = 1
+				sku_code      = data.gpcn_gpu_inventory.a6000.inventory[0].sku_code
+				image_name    = "ubuntu-22.04"
+				initial_auth = {
+					ssh_key_id = gpcn_ssh_key.test.id
+				}
+			}
+			`, sshKeyName, gpuName)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			// Look up a sku_code from the inventory data source, then create from it
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnGPUTest, plancheck.ResourceActionCreate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet("data.gpcn_gpu_inventory.a6000", "inventory.0.sku_code"),
+					resource.TestCheckResourceAttrSet(gpcnGPUTest, "id"),
+					resource.TestCheckResourceAttrSet(gpcnGPUTest, "sku_code"),
+					// The read back-fills the series and count the SKU resolves to
+					resource.TestCheckResourceAttr(gpcnGPUTest, "series_code", "nvidia-rtx_a6000-series"),
+					resource.TestCheckResourceAttr(gpcnGPUTest, "gpu_count", "1"),
+					resource.TestCheckResourceAttr(gpcnGPUTest, "name", gpuName),
+				),
+			},
+			// ImportState testing
+			{
+				ResourceName:            gpcnGPUTest,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"image_name", "created_time", "last_updated"},
+			},
+		},
+	})
+}
+
 /*
 *
 ----- Unit tests -----

@@ -15,6 +15,7 @@ type ResourceModel struct {
 	DatacenterId types.String `tfsdk:"datacenter_id"`
 	SeriesName   types.String `tfsdk:"series_name"`
 	SeriesCode   types.String `tfsdk:"series_code"`
+	SkuCode      types.String `tfsdk:"sku_code"`
 	GPUCount     types.Int64  `tfsdk:"gpu_count"`
 	ImageName    types.String `tfsdk:"image_name"`
 	InitialAuth  types.Object `tfsdk:"initial_auth"`
@@ -80,6 +81,9 @@ func setModelValuesNotPresent(ctx context.Context, response *readGPUResponse, mo
 	}
 	if model.SeriesCode.IsNull() || model.SeriesCode.ValueString() == "" {
 		model.SeriesCode = types.StringValue(response.Data.Configuration.Code)
+	}
+	if model.SkuCode.IsNull() || model.SkuCode.ValueString() == "" {
+		model.SkuCode = types.StringValue(response.Data.Configuration.SkuCode)
 	}
 	if model.GPUCount.IsNull() {
 		model.GPUCount = types.Int64Value(response.Data.Configuration.GPUCount)

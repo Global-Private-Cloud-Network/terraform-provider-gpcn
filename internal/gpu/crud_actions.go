@@ -26,6 +26,7 @@ type readGPUResponse struct {
 		Configuration struct {
 			Name     string `json:"name"`
 			Code     string `json:"code"`
+			SkuCode  string `json:"skuCode"`
 			GPUCount int64  `json:"gpuCount"`
 			CPU      int64  `json:"cpu"`
 			RAM      int64  `json:"ram"`
@@ -61,6 +62,11 @@ func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId stri
 		"name":         plan.Name.ValueString(),
 		"imageName":    plan.ImageName.ValueString(),
 		"sshKeyId":     auth.SshKeyId.ValueString(),
+	}
+
+	// A SKU code pins the exact SKU within the series when available.
+	if !plan.SkuCode.IsNull() && plan.SkuCode.ValueString() != "" {
+		createGPURequestBody["skuCode"] = plan.SkuCode.ValueString()
 	}
 
 	jsonCreateGPURequestBody, err := json.Marshal(createGPURequestBody)
