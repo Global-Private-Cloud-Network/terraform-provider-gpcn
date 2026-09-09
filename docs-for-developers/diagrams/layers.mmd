@@ -1,0 +1,29 @@
+flowchart TB
+    TF[Terraform core]
+
+    subgraph glue["internal/provider — framework glue"]
+        PROV[provider.go<br/>Configure, Resources, DataSources]
+        RES["{resource}_resource.go<br/>Schema, thin CRUD, ImportState"]
+    end
+
+    subgraph logic["internal/{resource} — per-resource API logic"]
+        MODEL[resource_model.go<br/>ResourceModel + response mapper]
+        CRUD[crud_actions.go<br/>CreateX / GetX / UpdateX / DeleteX]
+        EXTRA[validators.go, plan_modifiers.go<br/>errors.go, logging.go, constants.go]
+    end
+
+    subgraph shared["internal/client — shared HTTP + polling"]
+        CLIENT[client.go<br/>GpcnClient, authTransport, DoWithRetry]
+        POLL[polling.go<br/>PerformLongPolling]
+        CORR[correlation.go<br/>WithCorrelationID]
+    end
+
+    API[(GPCN API)]
+
+    TF <--> glue
+    RES --> CRUD
+    RES --> MODEL
+    CRUD --> CLIENT
+    CRUD --> POLL
+    CLIENT --> API
+    POLL --> API

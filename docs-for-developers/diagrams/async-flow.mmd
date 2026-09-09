@@ -1,0 +1,29 @@
+sequenceDiagram
+    autonumber
+    participant TF as Terraform core
+    participant P as internal/provider<br/>(schema resource)
+    participant R as internal/{resource}<br/>(crud_actions.go)
+    participant C as internal/client<br/>(GpcnClient)
+    participant API as GPCN API
+
+    TF->>P: Create / Read / Update / Delete
+    P->>P: ctx = client.WithCorrelationID(ctx)
+    P->>R: CreateNetwork(client, ctx, model)
+    R->>R: build map[string]any body, json.Marshal
+    R->>C: DoWithRetry(request)
+    Note over C: authTransport adds x-api-key,<br/>x-Correlation-ID, prepends Host.<br/>Retries 5xx / 429 with backoff.
+    C->>API: POST /v1/resource/...
+    API-->>C: 202 { jobId }
+    C-->>R: response body
+    R->>C: PerformLongPolling(client, ctx, action, jobId)
+    loop until job done or timeout
+        C->>API: POST /v1/.../jobs-status { jobIds }
+        API-->>C: job status (backoff on pending)
+    end
+    C-->>R: completed job
+    R->>C: GetJobResourceID(jobResp)
+    R->>API: GET /v1/resource/{id}
+    API-->>R: full resource object
+    R-->>P: response struct
+    P->>P: MapXxxResponseToModel(ctx, resp, &model)
+    P->>TF: resp.State.Set(ctx, model)

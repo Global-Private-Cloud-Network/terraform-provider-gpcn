@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Terraform provider for GPCN (cloud infrastructure platform) built with Terraform Plugin Framework (v1.16.1). Manages networks, volumes, virtual machines, and GPUs, plus a datacenter data source.
+Terraform provider for GPCN (cloud infrastructure platform) built with Terraform Plugin Framework (v1.19.0). Manages networks, volumes, virtual machines, and GPUs, plus a datacenter data source.
 
 ## Environment Setup
 
@@ -33,6 +33,8 @@ make testacc LOGLEVEL=debug  # Control log level
 ```
 
 ## Architecture
+
+For the full picture (layers, the async request flow diagram, and a step-by-step guide to adding a resource), see `docs-for-developers/`. The `.claude/rules/` files codify these patterns: `resource-authoring.md`, `client-async.md`, and `testing.md`.
 
 ### Resource Package Pattern
 
