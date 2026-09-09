@@ -27,20 +27,23 @@ func (m DefaultRouteFromCIDR) PlanModifyString(ctx context.Context, req planmodi
 		return
 	}
 
-	var cidr types.String
+	var networkType, cidr types.String
+	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("network_type"), &networkType)...)
 	resp.Diagnostics.Append(req.Plan.GetAttribute(ctx, path.Root("cidr_block"), &cidr)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
 
-	if !cidr.IsNull() && !cidr.IsUnknown() && cidr.ValueString() != "" {
+	// Only a standard network gets a default route. A custom network keeps the
+	// server value.
+	if networkType.ValueString() == NETWORK_TYPE_STANDARD && !cidr.IsNull() && !cidr.IsUnknown() && cidr.ValueString() != "" {
 		if host, err := firstUsableHostFromCIDR(cidr.ValueString()); err == nil {
 			resp.PlanValue = types.StringValue(host)
 			return
 		}
 	}
 
-	// The CIDR is not known yet. Preserve the state value like UseStateForUnknown.
+	// No value to derive. Preserve the state value like UseStateForUnknown.
 	if !req.StateValue.IsNull() {
 		resp.PlanValue = req.StateValue
 	}

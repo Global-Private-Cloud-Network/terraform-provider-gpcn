@@ -14,20 +14,23 @@ import (
 
 var testDefaultRouteSchema = schema.Schema{
 	Attributes: map[string]schema.Attribute{
-		"cidr_block": schema.StringAttribute{Optional: true, Computed: true},
-		"gateway_ip": schema.StringAttribute{Optional: true, Computed: true},
+		"network_type": schema.StringAttribute{Required: true},
+		"cidr_block":   schema.StringAttribute{Optional: true, Computed: true},
+		"gateway_ip":   schema.StringAttribute{Optional: true, Computed: true},
 	},
 }
 
-func planWithCIDR(cidr tftypes.Value) tfsdk.Plan {
+func planWith(networkType string, cidr tftypes.Value) tfsdk.Plan {
 	raw := tftypes.NewValue(tftypes.Object{
 		AttributeTypes: map[string]tftypes.Type{
-			"cidr_block": tftypes.String,
-			"gateway_ip": tftypes.String,
+			"network_type": tftypes.String,
+			"cidr_block":   tftypes.String,
+			"gateway_ip":   tftypes.String,
 		},
 	}, map[string]tftypes.Value{
-		"cidr_block": cidr,
-		"gateway_ip": tftypes.NewValue(tftypes.String, tftypes.UnknownValue),
+		"network_type": tftypes.NewValue(tftypes.String, networkType),
+		"cidr_block":   cidr,
+		"gateway_ip":   tftypes.NewValue(tftypes.String, tftypes.UnknownValue),
 	})
 	return tfsdk.Plan{Raw: raw, Schema: testDefaultRouteSchema}
 }
@@ -39,17 +42,20 @@ func TestDefaultRouteFromCIDR(t *testing.T) {
 
 	tests := []struct {
 		name        string
+		networkType string
 		configValue types.String
 		stateValue  types.String
 		cidr        tftypes.Value
 		wantUnknown bool
 		want        string
 	}{
-		{"user value kept", types.StringValue("10.0.0.9"), types.StringNull(), cidrValue("10.0.0.0/24"), false, "10.0.0.9"},
-		{"derived from cidr", types.StringNull(), types.StringNull(), cidrValue("192.168.5.0/24"), false, "192.168.5.1"},
-		{"cidr unknown preserves state", types.StringNull(), types.StringValue("10.0.0.1"), unknownCIDR, false, "10.0.0.1"},
-		{"cidr unknown no state stays unknown", types.StringNull(), types.StringNull(), unknownCIDR, true, ""},
-		{"cidr null no state stays unknown", types.StringNull(), types.StringNull(), nullCIDR, true, ""},
+		{"user value kept", "standard", types.StringValue("10.0.0.9"), types.StringNull(), cidrValue("10.0.0.0/24"), false, "10.0.0.9"},
+		{"derived from cidr", "standard", types.StringNull(), types.StringNull(), cidrValue("192.168.5.0/24"), false, "192.168.5.1"},
+		{"cidr unknown preserves state", "standard", types.StringNull(), types.StringValue("10.0.0.1"), unknownCIDR, false, "10.0.0.1"},
+		{"cidr unknown no state stays unknown", "standard", types.StringNull(), types.StringNull(), unknownCIDR, true, ""},
+		{"cidr null no state stays unknown", "standard", types.StringNull(), types.StringNull(), nullCIDR, true, ""},
+		{"custom does not derive", "custom", types.StringNull(), types.StringNull(), cidrValue("192.168.5.0/24"), true, ""},
+		{"custom preserves state", "custom", types.StringNull(), types.StringValue(""), cidrValue("192.168.5.0/24"), false, ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -58,7 +64,7 @@ func TestDefaultRouteFromCIDR(t *testing.T) {
 				StateValue:  tc.stateValue,
 				PlanValue:   types.StringUnknown(),
 				Path:        path.Root("gateway_ip"),
-				Plan:        planWithCIDR(tc.cidr),
+				Plan:        planWith(tc.networkType, tc.cidr),
 			}
 			resp := &planmodifier.StringResponse{PlanValue: types.StringUnknown()}
 			DefaultRouteFromCIDR{}.PlanModifyString(context.Background(), req, resp)
