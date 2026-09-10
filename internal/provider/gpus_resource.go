@@ -106,15 +106,25 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"sku_code": schema.StringAttribute{
+				Description: "Optional exact SKU code within the series. When set, the API provisions this specific SKU if available; when omitted, it picks the first available SKU. series and gpu_count are still required",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					// Changing the sku_code requires us to destroy and create a new GPU
+					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"gpu_count": schema.Int64Attribute{
-				Description: "The number of GPUs tied to the Virtual Machine. Must be 1, 2, or 4",
+				Description: "The number of GPUs tied to the Virtual Machine. Must be 1, 2, 4, or 8",
 				Required:    true,
 				PlanModifiers: []planmodifier.Int64{
 					// Changing the gpu_count requires us to destroy and create a new GPU
 					int64planmodifier.RequiresReplace(),
 				},
 				Validators: []validator.Int64{
-					int64validator.OneOf(1, 2, 4),
+					int64validator.OneOf(1, 2, 4, 8),
 				},
 			},
 			"image_name": schema.StringAttribute{
@@ -201,19 +211,19 @@ func (r *gpuResource) Create(ctx context.Context, req resource.CreateRequest, re
 		plan.SeriesCode = types.StringValue(code)
 	}
 
-	// Check series code availability with datacenterId and GPU Count
+	// The API always needs the series ID, so look up inventory even when the user
+	// pins a sku_code.
 	inventory, err := gpu.CheckInventory(r.client, ctx, plan)
-
 	if err != nil {
 		resp.Diagnostics.AddError(
-			"Unable to create GPCN GPU",
+			gpu.ErrSummaryUnableToCreateGPU,
 			err.Error(),
 		)
 		return
 	}
 
-	// Extract the series ID from the inventory response
-	seriesId := inventory.Data.Series[0].ID
+	// Every SKU for the series shares the series ID the create call needs.
+	seriesId := inventory[0].SeriesID
 
 	getGPUResponse, err := gpu.CreateGPU(r.client, ctx, seriesId, plan)
 	if err != nil {

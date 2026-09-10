@@ -27,6 +27,10 @@ const (
 	LogSuccessfullyRetrievedInventory       = "Successfully retrieved GPU inventory response"
 	LogValidatingInventoryResponseStructure = "Validating inventory response structure"
 	LogInventoryAvailable                   = "GPU inventory available for series code %s in datacenter %s with GPU count %d"
+
+	// FetchInventory messages
+	LogStartingFetchInventory       = "Starting FetchInventory for datacenter %s, series code %s, GPU count %d"
+	LogSuccessfullyFetchedInventory = "Successfully fetched %d GPU inventory SKUs for datacenter %s"
 )
 
 // Drift-detection messages for resources deleted outside of Terraform

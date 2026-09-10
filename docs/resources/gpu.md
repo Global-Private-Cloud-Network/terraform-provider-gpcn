@@ -16,7 +16,7 @@ Manages a GPU resource in GPCN
 # Example: Creating GPCN GPUs
 #
 # This example demonstrates creating GPU resources by specifying either
-# a series name or series code. GPU count must be 1, 2, or 4. A GPU with
+# a series name or series code. GPU count must be 1, 2, 4, or 8. A GPU with
 # the provided specs is not guaranteed to be available
 
 terraform {
@@ -47,17 +47,31 @@ resource "gpcn_ssh_key" "uploaded" {
   public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
 }
 
+# List the available A6000 SKUs with a GPU count of 1
+data "gpcn_gpu_inventory" "a6000" {
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+
+  # Only one can be specified but one must be
+  # series_name = "NVIDIA RTX A6000 Series"
+  series_code = "nvidia-rtx_a6000-series"
+
+  gpu_count = 1
+}
+
 resource "gpcn_gpu" "example" {
   name = "terraform-demo-gpu"
 
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
   # Only one can be specified but one must be
-  series_name = "NVIDIA RTX A6000 Series"
-  # series_code = "nvidia-rtx_a6000-series"
+  series_name = data.gpcn_gpu_inventory.a6000.inventory[0].name
+  # series_code = data.gpcn_gpu_inventory.a6000.inventory[0].code
 
-  # Can only be one of 1,2, or 4
-  gpu_count = 1
+  # Can only be one of 1, 2, 4, or 8
+  gpu_count = data.gpcn_gpu_inventory.a6000.inventory[0].gpu_count
+
+  # Optionally specified to guarantee this specific SKU
+  sku_code = data.gpcn_gpu_inventory.a6000.inventory[0].sku_code
 
   # Must be one of "ubuntu-22.04" or "ubuntu-24.04"
   image_name = "ubuntu-22.04"
@@ -82,7 +96,7 @@ resource "gpcn_gpu" "example" {
 ### Required
 
 - `datacenter_id` (String) Unique identifier of the datacenter where the GPU will be created. Changing this value requires replacing the GPU
-- `gpu_count` (Number) The number of GPUs tied to the Virtual Machine. Must be 1, 2, or 4
+- `gpu_count` (Number) The number of GPUs tied to the Virtual Machine. Must be 1, 2, 4, or 8
 - `image_name` (String) The operating system image to use for the GPU. Must be one of: "ubuntu-22.04" or "ubuntu-24.04"
 - `initial_auth` (Attributes) Initial authentication configuration for the GPU. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine (see [below for nested schema](#nestedatt--initial_auth))
 - `name` (String) Human-readable name for the GPU. Must be 1-60 characters, starting and ending with an alphanumeric character, containing only letters, digits, spaces, periods, and hyphens
@@ -91,6 +105,7 @@ resource "gpcn_gpu" "example" {
 
 - `series_code` (String) Short code of the GPU series. Exactly one of series_name or series_code must be specified
 - `series_name` (String) Human-readable name of the GPU series. Exactly one of series_name or series_code must be specified
+- `sku_code` (String) Optional exact SKU code within the series. When set, the API provisions this specific SKU if available; when omitted, it picks the first available SKU. series and gpu_count are still required
 
 ### Read-Only
 
