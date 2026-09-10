@@ -1,3 +1,29 @@
+## 1.1.0 (September 9, 2026)
+
+BREAKING CHANGES:
+
+- **Network**: The computed `gateway` attribute is renamed to `gateway_ip`. Update configurations and references from `gateway` to `gateway_ip`.
+- **Network**: Changing `cidr_block` or `gateway_ip` now requires replacing the network.
+
+FEATURES:
+
+- **Network**: `gateway_ip` is now configurable and sets the network default route. It must be an IPv4 address inside `cidr_block`. For standard networks, when omitted it defaults to the first usable host of `cidr_block`
+
+ENHANCEMENTS:
+
+- **State**: A resource deleted outside Terraform is removed from state on read and treated as success on delete, instead of wedging the resource so that plan, refresh, and destroy all fail. Applies to every resource.
+- Upgraded `google.golang.org/grpc` to v1.83.2, `terraform-plugin-log`, and other dependencies; upgraded Go to 1.26.6.
+
+BUG FIXES:
+
+- **Network**: The default route of `10.0.0.1` has been removed, instead relying on a user-provided or, if omitted, the first entry in a `cidr_block`
+- **Provider**: `request_timeout`, `polling_timeout`, and `max_retries` now reject zero or negative values at plan time instead of disabling the timeout or skipping retries.
+- **Virtual Machines**: A transient API error during size lookup now fails the plan instead of forcing a destroy and re-create.
+- **Datacenters**: The `gpu_enabled` and `custom_images` filters are now applied when set to `false`, which was previously ignored.
+- **Networks**: `dns_servers` returned by the API without a space after the comma now parse correctly.
+- **Client**: The API key is now sent as a single `x-api-key` header value.
+- **Client**: Job failure errors now include the server's message, such as a quota limit, so the cause is actionable.
+
 ## 1.0.2 (July 12, 2026)
 
 ENHANCEMENTS:
