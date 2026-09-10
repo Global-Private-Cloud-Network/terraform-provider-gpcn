@@ -44,7 +44,7 @@ data "gpcn_datacenters" "central_us" {
 data "gpcn_gpu_inventory" "a6000" {
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 
-  # Only one can be specified but one must be
+  # Optional. Filter by series. Specify at most one of series_name or series_code.
   # series_name = "NVIDIA RTX A6000 Series"
   series_code = "nvidia-rtx_a6000-series"
 

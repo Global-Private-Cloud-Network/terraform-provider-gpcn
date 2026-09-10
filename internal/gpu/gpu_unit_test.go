@@ -363,30 +363,24 @@ func TestFetchInventoryMockHTTP(t *testing.T) {
 		t.Fatalf("Expected 3 SKUs, got %d", len(items))
 	}
 
-	var found gpuFound
-	for _, item := range items {
+	var found *FlatInventory
+	for i, item := range items {
 		if item.SkuCode == "gpu_1x_a6000_other" {
 			t.Error("Expected SKU from a different datacenter to be filtered out")
 		}
 		if item.SkuCode == "gpu_1x_a6000" {
-			found.item = item
-			found.ok = true
+			found = &items[i]
 		}
 	}
-	if !found.ok {
+	if found == nil {
 		t.Fatal("Expected to find SKU 'gpu_1x_a6000'")
 	}
-	if found.item.SeriesName != "NVIDIA RTX A6000 Series" || found.item.SeriesCode != seriesCode {
-		t.Errorf("Unexpected series on SKU: %+v", found.item)
+	if found.SeriesName != "NVIDIA RTX A6000 Series" || found.SeriesCode != seriesCode {
+		t.Errorf("Unexpected series on SKU: %+v", *found)
 	}
-	if found.item.GPUCount != 1 || found.item.VCPU != 6 || found.item.MemoryGiB != 48 || found.item.StorageGB != 256 {
-		t.Errorf("Unexpected per-SKU specs: %+v", found.item)
+	if found.GPUCount != 1 || found.VCPU != 6 || found.MemoryGiB != 48 || found.StorageGB != 256 {
+		t.Errorf("Unexpected per-SKU specs: %+v", *found)
 	}
-}
-
-type gpuFound struct {
-	item FlatInventory
-	ok   bool
 }
 
 func TestFetchInventoryCountFilterMockHTTP(t *testing.T) {
