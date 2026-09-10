@@ -91,7 +91,7 @@ func (r *networksResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				},
 			},
 			"cidr_block": schema.StringAttribute{
-				Description: "CIDR block defining the IP address range for the network (e.g., 10.0.0.0/24)",
+				Description: "CIDR block defining the IP address range for the network (e.g., 10.0.0.0/24). Changing this value requires replacing the network",
 				Optional:    true,
 				Computed:    true,
 				Validators: []validator.String{
@@ -100,13 +100,19 @@ func (r *networksResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
+					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"gateway": schema.StringAttribute{
-				Description: "The default gateway IP address for the network",
+			"gateway_ip": schema.StringAttribute{
+				Description: "The default gateway IP address for the network. Must be an IPv4 address inside cidr_block. If omitted, it defaults to the first usable host of cidr_block. Changing this value requires replacing the network",
+				Optional:    true,
 				Computed:    true,
+				Validators: []validator.String{
+					networks.IpAddressValidator{},
+				},
 				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
+					networks.DefaultRouteFromCIDR{},
+					stringplanmodifier.RequiresReplace(),
 				},
 			},
 			"connected_vms": schema.StringAttribute{

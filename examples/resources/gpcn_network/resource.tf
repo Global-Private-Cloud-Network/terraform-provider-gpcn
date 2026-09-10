@@ -9,7 +9,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>1.0.2"
+      version = "~>1.1.0"
     }
   }
 }
@@ -35,6 +35,9 @@ resource "gpcn_network" "example_standard" {
 
   # Network configuration
   cidr_block = "10.0.0.0/24"
+
+  # Optional: default route (gateway). Defaults to the first usable host of cidr_block.
+  # gateway_ip = "10.0.0.1"
 
   # DHCP range (both required together)
   dhcp_start_address = "10.0.0.10"
