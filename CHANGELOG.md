@@ -1,3 +1,13 @@
+## 1.2.0 (September 10, 2026)
+
+FEATURES:
+
+- **Data Source: `gpcn_gpu_inventory`**: New data source to list the available GPU SKUs for a datacenter, with optional filtering by GPU series (`series_name` or `series_code`) and `gpu_count`. Each entry exposes a `sku_code`.
+
+ENHANCEMENTS:
+
+- **GPU**: New optional `sku_code` attribute on `gpcn_gpu` pins an exact SKU within the series. When omitted, the API picks the first available SKU. Changing it requires replacement.
+
 ## 1.1.0 (September 9, 2026)
 
 BREAKING CHANGES:
