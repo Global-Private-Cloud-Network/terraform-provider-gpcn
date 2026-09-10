@@ -56,6 +56,9 @@ resource "gpcn_gpu" "example" {
   # Can only be one of 1, 2, 4, or 8
   gpu_count = data.gpcn_gpu_inventory.a6000.inventory[0].gpu_count
 
+  # Optionally specified to guarantee this specific SKU
+  sku_code = data.gpcn_gpu_inventory.a6000.inventory[0].sku_code
+
   # Must be one of "ubuntu-22.04" or "ubuntu-24.04"
   image_name = "ubuntu-22.04"
 
