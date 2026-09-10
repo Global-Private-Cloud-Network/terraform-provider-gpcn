@@ -90,12 +90,12 @@ output "gpcn_network_example_custom" {
 
 ### Optional
 
-- `cidr_block` (String) CIDR block defining the IP address range for the network (e.g., 10.0.0.0/24)
+- `cidr_block` (String) CIDR block defining the IP address range for the network (e.g., 10.0.0.0/24). Changing this value requires replacing the network
 - `description` (String) Additional information about the network to provide context for its purpose
 - `dhcp_end_address` (String) Ending IP address of the DHCP range. Must be specified together with dhcp_start_address. Only applicable for standard networks
 - `dhcp_start_address` (String) Starting IP address of the DHCP range. Must be specified together with dhcp_end_address. Only applicable for standard networks
 - `dns_servers` (List of String) List of DNS server IPv4 addresses. Only applicable for standard networks
-- `gateway_ip` (String) The default gateway IP address for the network. Must be an IPv4 address inside cidr_block. If omitted, it defaults to the first usable host of cidr_block
+- `gateway_ip` (String) The default gateway IP address for the network. Must be an IPv4 address inside cidr_block. If omitted, it defaults to the first usable host of cidr_block. Changing this value requires replacing the network
 
 ### Read-Only
 
