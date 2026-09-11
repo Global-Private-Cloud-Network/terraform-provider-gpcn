@@ -223,6 +223,45 @@ func TestGetNetworkMockHTTP(t *testing.T) {
 	}
 }
 
+func TestGetNetworkInterfacesSortsByInterfaceIndex(t *testing.T) {
+	const vmID = "vm-sort-123"
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces") {
+				// Return the interfaces out of order to prove the sort
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true, "message": "Network interfaces retrieved",
+					"data": []map[string]any{
+						{"id": "interface-c", "networkInterface": 2, "networkId": "network-c"},
+						{"id": "interface-a", "networkInterface": 0, "networkId": "network-a"},
+						{"id": "interface-b", "networkInterface": 1, "networkId": "network-b"},
+					},
+				})
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	interfaces, err := GetNetworkInterfaces(gpcnClient, context.Background(), vmID)
+	if err != nil {
+		t.Fatalf("GetNetworkInterfaces failed: %v", err)
+	}
+
+	want := []int64{0, 1, 2}
+	if len(interfaces) != len(want) {
+		t.Fatalf("Expected %d interfaces, got %d", len(want), len(interfaces))
+	}
+	for i, w := range want {
+		if got := interfaces[i].NetworkInterface.ValueInt64(); got != w {
+			t.Errorf("Interface at index %d: expected NetworkInterface %d, got %d", i, w, got)
+		}
+	}
+}
+
 func TestUpdateNetworkMockHTTP(t *testing.T) {
 	const networkID = "network-update-123"
 

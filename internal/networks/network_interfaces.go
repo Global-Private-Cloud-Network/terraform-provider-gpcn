@@ -2,6 +2,7 @@ package networks
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -152,6 +153,14 @@ func GetNetworkInterfaces(gpcnClient *client.GpcnClient, ctx context.Context, vi
 			NetworkType:      types.StringValue(inter.NetworkType),
 		})
 	}
+
+	// Sort for a stable order
+	slices.SortStableFunc(networkInterfaces, func(a, b ReadVirtualMachineNetworkDataResponseTF) int {
+		if c := cmp.Compare(a.NetworkInterface.ValueInt64(), b.NetworkInterface.ValueInt64()); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.ID.ValueString(), b.ID.ValueString())
+	})
 
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyRetrievedAllNetworkInterfaces, virtualMachineId))
 	return networkInterfaces, nil
