@@ -158,6 +158,7 @@ resource "gpcn_volume_attachment" "vm_storage_attachment" {
 - `last_updated` (String) Timestamp when the virtual machine was last updated in ISO-8601 format
 - `location` (Map of String) Location details including datacenter, region, and country information
 - `network_hotplug` (Boolean) Whether the virtual machine supports hot modifications without the virtual machine being in Shutoff status
+- `network_interfaces` (Attributes List) The network interfaces attached to the virtual machine, one per attached network (see [below for nested schema](#nestedatt--network_interfaces))
 - `public_ip` (String) The public IP address, if allocate_public_ip is True
 
 <a id="nestedatt--initial_auth"></a>
@@ -171,6 +172,24 @@ Optional:
 
 - `password` (String, Sensitive) Password for authentication. Must be 12-20 characters, contain only letters, digits, and ! @ # % - _ ., and include at least one uppercase letter, one lowercase letter, one digit, and one symbol. Cannot be set when ssh_key_id is set. username defaults to the image default if not specified
 - `ssh_key_id` (String) ID of the SSH key to use for authentication. Cannot be set together with password
+
+
+<a id="nestedatt--network_interfaces"></a>
+### Nested Schema for `network_interfaces`
+
+Read-Only:
+
+- `cidr_block` (String) The CIDR block of the attached network
+- `gateway_ip` (String) The gateway IP address of the attached network
+- `id` (String) The ID of the network interface
+- `is_primary` (Boolean) Whether this is the primary interface
+- `network_id` (String) The ID of the attached network
+- `network_interface` (Number) The interface index on the virtual machine
+- `network_name` (String) The name of the attached network
+- `network_type` (String) The type of the attached network
+- `private_ip` (String) The private IP address on the interface
+- `public_ip` (String) The public IP address on the interface, if one is allocated
+- `public_ip_id` (String) The ID of the allocated public IP address, if one is allocated
 
 ## Import
 

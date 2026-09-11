@@ -3,6 +3,8 @@ package virtualmachines
 import (
 	"context"
 
+	"terraform-provider-gpcn/internal/networks"
+
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -33,6 +35,43 @@ func (m PublicIpPlanModifier) PlanModifyString(ctx context.Context, req planmodi
 	// If allocate_public_ip is changing, mark public_ip as unknown
 	if !stateAllocatePublicIp.Equal(planAllocatePublicIp) {
 		resp.PlanValue = types.StringUnknown()
+		return
+	}
+
+	// Otherwise, preserve the state value (like UseStateForUnknown)
+	resp.PlanValue = req.StateValue
+}
+
+// NetworkInterfacesPlanModifier marks network_interfaces as unknown when
+// network_ids or allocate_public_ip changes. Both inputs change the interface
+// set or its contents, so the value must refresh after apply.
+type NetworkInterfacesPlanModifier struct{}
+
+func (m NetworkInterfacesPlanModifier) Description(_ context.Context) string {
+	return "Marks network_interfaces as unknown when network_ids or allocate_public_ip changes"
+}
+
+func (m NetworkInterfacesPlanModifier) MarkdownDescription(_ context.Context) string {
+	return "Marks network_interfaces as unknown when network_ids or allocate_public_ip changes"
+}
+
+func (m NetworkInterfacesPlanModifier) PlanModifyList(ctx context.Context, req planmodifier.ListRequest, resp *planmodifier.ListResponse) {
+	// If the resource is being created, leave it unknown
+	if req.StateValue.IsNull() {
+		return
+	}
+
+	var stateNetworkIds, planNetworkIds types.List
+	req.State.GetAttribute(ctx, path.Root("network_ids"), &stateNetworkIds)
+	req.Plan.GetAttribute(ctx, path.Root("network_ids"), &planNetworkIds)
+
+	var stateAllocatePublicIp, planAllocatePublicIp types.Bool
+	req.State.GetAttribute(ctx, path.Root("allocate_public_ip"), &stateAllocatePublicIp)
+	req.Plan.GetAttribute(ctx, path.Root("allocate_public_ip"), &planAllocatePublicIp)
+
+	// If either input changes, mark network_interfaces as unknown so it refreshes
+	if !stateNetworkIds.Equal(planNetworkIds) || !stateAllocatePublicIp.Equal(planAllocatePublicIp) {
+		resp.PlanValue = types.ListUnknown(types.ObjectType{AttrTypes: networks.ReadVirtualMachineNetworkDataResponseTF{}.AttrTypes()})
 		return
 	}
 

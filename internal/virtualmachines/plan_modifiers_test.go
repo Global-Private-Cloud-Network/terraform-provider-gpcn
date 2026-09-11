@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"terraform-provider-gpcn/internal/networks"
+
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -118,6 +120,116 @@ func TestPublicIpPlanModifier(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, tc.run)
 	}
+}
+
+// Tests for NetworkInterfacesPlanModifier
+var testNetworkInterfacesSchema = schema.Schema{
+	Attributes: map[string]schema.Attribute{
+		"network_ids":        schema.ListAttribute{Required: true, ElementType: types.StringType},
+		"allocate_public_ip": schema.BoolAttribute{Required: true},
+	},
+}
+
+var interfaceElemType = types.ObjectType{AttrTypes: networks.ReadVirtualMachineNetworkDataResponseTF{}.AttrTypes()}
+
+func createNetworkRawValue(networkIds []string, allocatePublicIp bool) tftypes.Value {
+	ids := make([]tftypes.Value, len(networkIds))
+	for i, id := range networkIds {
+		ids[i] = tftypes.NewValue(tftypes.String, id)
+	}
+
+	return tftypes.NewValue(tftypes.Object{
+		AttributeTypes: map[string]tftypes.Type{
+			"network_ids":        tftypes.List{ElementType: tftypes.String},
+			"allocate_public_ip": tftypes.Bool,
+		},
+	}, map[string]tftypes.Value{
+		"network_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, ids),
+		"allocate_public_ip": tftypes.NewValue(tftypes.Bool, allocatePublicIp),
+	})
+}
+
+func testInterfaceList(t *testing.T) types.List {
+	t.Helper()
+	list, diags := types.ListValueFrom(context.Background(), interfaceElemType, []networks.ReadVirtualMachineNetworkDataResponseTF{{
+		ID:               types.StringValue("interface-001"),
+		NetworkInterface: types.Int64Value(0),
+		IsPrimary:        types.BoolValue(true),
+		PublicIP:         types.StringValue(""),
+		PublicIPID:       types.StringValue(""),
+		PrivateIP:        types.StringValue("10.0.0.5"),
+		NetworkName:      types.StringValue("default-network"),
+		NetworkID:        types.StringValue("network-a"),
+		CIDRBlock:        types.StringValue("10.0.0.0/24"),
+		GatewayIP:        types.StringValue("10.0.0.1"),
+		NetworkType:      types.StringValue("standard"),
+	}})
+	if diags.HasError() {
+		t.Fatalf("failed to build interface list: %v", diags)
+	}
+	return list
+}
+
+func TestNetworkInterfacesPlanModifier(t *testing.T) {
+	stateList := testInterfaceList(t)
+
+	t.Run("on create leaves unknown", func(t *testing.T) {
+		req := planmodifier.ListRequest{
+			StateValue: types.ListNull(interfaceElemType),
+			PlanValue:  types.ListUnknown(interfaceElemType),
+			Path:       path.Root("network_interfaces"),
+		}
+		resp := &planmodifier.ListResponse{PlanValue: req.PlanValue}
+		NetworkInterfacesPlanModifier{}.PlanModifyList(context.Background(), req, resp)
+		if !resp.PlanValue.IsUnknown() {
+			t.Errorf("expected unknown, got %v", resp.PlanValue)
+		}
+	})
+
+	t.Run("network_ids change marks unknown", func(t *testing.T) {
+		req := planmodifier.ListRequest{
+			StateValue: stateList,
+			PlanValue:  stateList,
+			Path:       path.Root("network_interfaces"),
+			State:      tfsdk.State{Raw: createNetworkRawValue([]string{"network-a", "network-b"}, false), Schema: testNetworkInterfacesSchema},
+			Plan:       tfsdk.Plan{Raw: createNetworkRawValue([]string{"network-a"}, false), Schema: testNetworkInterfacesSchema},
+		}
+		resp := &planmodifier.ListResponse{PlanValue: req.PlanValue}
+		NetworkInterfacesPlanModifier{}.PlanModifyList(context.Background(), req, resp)
+		if !resp.PlanValue.IsUnknown() {
+			t.Errorf("expected unknown when network_ids changes, got %v", resp.PlanValue)
+		}
+	})
+
+	t.Run("allocate_public_ip change marks unknown", func(t *testing.T) {
+		req := planmodifier.ListRequest{
+			StateValue: stateList,
+			PlanValue:  stateList,
+			Path:       path.Root("network_interfaces"),
+			State:      tfsdk.State{Raw: createNetworkRawValue([]string{"network-a"}, false), Schema: testNetworkInterfacesSchema},
+			Plan:       tfsdk.Plan{Raw: createNetworkRawValue([]string{"network-a"}, true), Schema: testNetworkInterfacesSchema},
+		}
+		resp := &planmodifier.ListResponse{PlanValue: req.PlanValue}
+		NetworkInterfacesPlanModifier{}.PlanModifyList(context.Background(), req, resp)
+		if !resp.PlanValue.IsUnknown() {
+			t.Errorf("expected unknown when allocate_public_ip changes, got %v", resp.PlanValue)
+		}
+	})
+
+	t.Run("inputs unchanged preserves value", func(t *testing.T) {
+		req := planmodifier.ListRequest{
+			StateValue: stateList,
+			PlanValue:  types.ListUnknown(interfaceElemType),
+			Path:       path.Root("network_interfaces"),
+			State:      tfsdk.State{Raw: createNetworkRawValue([]string{"network-a"}, false), Schema: testNetworkInterfacesSchema},
+			Plan:       tfsdk.Plan{Raw: createNetworkRawValue([]string{"network-a"}, false), Schema: testNetworkInterfacesSchema},
+		}
+		resp := &planmodifier.ListResponse{PlanValue: req.PlanValue}
+		NetworkInterfacesPlanModifier{}.PlanModifyList(context.Background(), req, resp)
+		if !resp.PlanValue.Equal(stateList) {
+			t.Errorf("expected preserved state value, got %v", resp.PlanValue)
+		}
+	})
 }
 
 // Tests for ConfigurationPlanModifier

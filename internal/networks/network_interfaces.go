@@ -2,6 +2,7 @@ package networks
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -40,7 +41,7 @@ type ReadVirtualMachineNetworkDataResponse struct {
 type ReadVirtualMachineNetworkDataResponseTF struct {
 	ID               types.String `tfsdk:"id"`
 	NetworkInterface types.Int64  `tfsdk:"network_interface"`
-	IsPrimary        types.Int64  `tfsdk:"is_primary"`
+	IsPrimary        types.Bool   `tfsdk:"is_primary"`
 	PublicIP         types.String `tfsdk:"public_ip"`
 	PublicIPID       types.String `tfsdk:"public_ip_id"`
 	PrivateIP        types.String `tfsdk:"private_ip"`
@@ -55,7 +56,7 @@ func (o ReadVirtualMachineNetworkDataResponseTF) AttrTypes() map[string]attr.Typ
 	return map[string]attr.Type{
 		"id":                types.StringType,
 		"network_interface": types.Int64Type,
-		"is_primary":        types.Int64Type,
+		"is_primary":        types.BoolType,
 		"public_ip":         types.StringType,
 		"public_ip_id":      types.StringType,
 		"private_ip":        types.StringType,
@@ -141,7 +142,7 @@ func GetNetworkInterfaces(gpcnClient *client.GpcnClient, ctx context.Context, vi
 		networkInterfaces = append(networkInterfaces, ReadVirtualMachineNetworkDataResponseTF{
 			ID:               types.StringValue(inter.ID),
 			NetworkInterface: types.Int64Value(inter.NetworkInterface),
-			IsPrimary:        types.Int64Value(inter.IsPrimary),
+			IsPrimary:        types.BoolValue(inter.IsPrimary == 1),
 			PublicIP:         types.StringValue(inter.PublicIP),
 			PublicIPID:       types.StringValue(inter.PublicIPID),
 			PrivateIP:        types.StringValue(inter.PrivateIP),
@@ -152,6 +153,14 @@ func GetNetworkInterfaces(gpcnClient *client.GpcnClient, ctx context.Context, vi
 			NetworkType:      types.StringValue(inter.NetworkType),
 		})
 	}
+
+	// Sort for a stable order
+	slices.SortStableFunc(networkInterfaces, func(a, b ReadVirtualMachineNetworkDataResponseTF) int {
+		if c := cmp.Compare(a.NetworkInterface.ValueInt64(), b.NetworkInterface.ValueInt64()); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.ID.ValueString(), b.ID.ValueString())
+	})
 
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyRetrievedAllNetworkInterfaces, virtualMachineId))
 	return networkInterfaces, nil
@@ -214,7 +223,7 @@ func SetNextNetworkInterfaceToPrimary(gpcnClient *client.GpcnClient, ctx context
 	}
 	// Find the next interface in the list that is not the previous primary
 	networkInterfaceIdx := slices.IndexFunc(allNetworkInterfaces, func(networkInterface ReadVirtualMachineNetworkDataResponseTF) bool {
-		return networkInterface.IsPrimary.ValueInt64() != 1
+		return !networkInterface.IsPrimary.ValueBool()
 	})
 	if networkInterfaceIdx < -1 {
 		return errors.New("no network interfaces found that were not marked as primary")
@@ -385,7 +394,7 @@ func UpdateNetworkInterfaces(gpcnClient *client.GpcnClient, ctx context.Context,
 		interfaceIdx := slices.IndexFunc(networkInterfaces, func(data ReadVirtualMachineNetworkDataResponseTF) bool {
 			return strings.EqualFold(data.NetworkID.ValueString(), val)
 		})
-		if interfaceIdx > -1 && networkInterfaces[interfaceIdx].IsPrimary.ValueInt64() == 1 {
+		if interfaceIdx > -1 && networkInterfaces[interfaceIdx].IsPrimary.ValueBool() {
 			// Issue a call to set the next interface to be the primary
 			err := SetNextNetworkInterfaceToPrimary(gpcnClient, ctx, vmId, networkInterfaces)
 			if err != nil {

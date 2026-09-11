@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"terraform-provider-gpcn/internal/client"
+	"terraform-provider-gpcn/internal/networks"
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -402,6 +403,17 @@ func TestSetNetworkModelValuesNotPresentWithPublicIP(t *testing.T) {
 	}
 	if result.NetworkIds.IsNull() {
 		t.Error("Expected NetworkIds to be populated")
+	}
+
+	var ifaces []networks.ReadVirtualMachineNetworkDataResponseTF
+	if diags := result.NetworkInterfaces.ElementsAs(context.Background(), &ifaces, false); diags.HasError() {
+		t.Fatalf("Failed to read network interfaces: %v", diags)
+	}
+	if len(ifaces) != 1 {
+		t.Fatalf("Expected 1 network interface, got %d", len(ifaces))
+	}
+	if ifaces[0].PrivateIP.ValueString() != "10.0.0.5" {
+		t.Errorf("Expected private IP '10.0.0.5', got '%s'", ifaces[0].PrivateIP.ValueString())
 	}
 }
 
