@@ -8,7 +8,6 @@ import (
 	"terraform-provider-gpcn/internal/networks"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
-	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
@@ -83,7 +82,7 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 
 	// Find the primary network interface
 	interfaceIdx := slices.IndexFunc(networkInterfaces, func(inter networks.ReadVirtualMachineNetworkDataResponseTF) bool {
-		return inter.IsPrimary == types.Int64Value(1)
+		return inter.IsPrimary.ValueBool()
 	})
 
 	// This means none are set to primary, which should be impossible

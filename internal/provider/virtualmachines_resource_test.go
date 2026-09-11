@@ -126,6 +126,8 @@ func TestVirtualMachinesResource(t *testing.T) {
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.cpu"),
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.ram"),
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.base_storage"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.#", "2"),
+					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "network_interfaces.0.network_id"),
 				),
 			},
 			// ImportState testing
@@ -175,10 +177,13 @@ func TestVirtualMachinesResource(t *testing.T) {
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction("gpcn_resource_group.vm_group", plancheck.ResourceActionDestroy),
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
+						// network_ids changes, so network_interfaces must refresh after apply
+						plancheck.ExpectUnknownValue(gpcnVirtualMachineTest, tfjsonpath.New("network_interfaces")),
 					},
 				},
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("network_ids"), knownvalue.ListSizeExact(1)),
+					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("network_interfaces"), knownvalue.ListSizeExact(1)),
 					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("resource_group_id"), knownvalue.Null()),
 				},
 			},

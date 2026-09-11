@@ -153,6 +153,61 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 					boolplanmodifier.UseStateForUnknown(),
 				},
 			},
+			"network_interfaces": schema.ListNestedAttribute{
+				Description: "The network interfaces attached to the virtual machine, one per attached network",
+				Computed:    true,
+				PlanModifiers: []planmodifier.List{
+					virtualmachines.NetworkInterfacesPlanModifier{},
+				},
+				NestedObject: schema.NestedAttributeObject{
+					Attributes: map[string]schema.Attribute{
+						"id": schema.StringAttribute{
+							Description: "The ID of the network interface",
+							Computed:    true,
+						},
+						"network_interface": schema.Int64Attribute{
+							Description: "The interface index on the virtual machine",
+							Computed:    true,
+						},
+						"is_primary": schema.BoolAttribute{
+							Description: "Whether this is the primary interface",
+							Computed:    true,
+						},
+						"public_ip": schema.StringAttribute{
+							Description: "The public IP address on the interface, if one is allocated",
+							Computed:    true,
+						},
+						"public_ip_id": schema.StringAttribute{
+							Description: "The ID of the allocated public IP address, if one is allocated",
+							Computed:    true,
+						},
+						"private_ip": schema.StringAttribute{
+							Description: "The private IP address on the interface",
+							Computed:    true,
+						},
+						"network_name": schema.StringAttribute{
+							Description: "The name of the attached network",
+							Computed:    true,
+						},
+						"network_id": schema.StringAttribute{
+							Description: "The ID of the attached network",
+							Computed:    true,
+						},
+						"cidr_block": schema.StringAttribute{
+							Description: "The CIDR block of the attached network",
+							Computed:    true,
+						},
+						"gateway_ip": schema.StringAttribute{
+							Description: "The gateway IP address of the attached network",
+							Computed:    true,
+						},
+						"network_type": schema.StringAttribute{
+							Description: "The type of the attached network",
+							Computed:    true,
+						},
+					},
+				},
+			},
 			"resource_group_id": schema.StringAttribute{
 				Description: "Optional ID of the resource group to assign this virtual machine to",
 				Optional:    true,
@@ -469,7 +524,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 
 		for _, adapter := range networkInterfaces {
 			// Cannot remove the primary interface
-			if adapter.IsPrimary.ValueInt64() != 1 {
+			if !adapter.IsPrimary.ValueBool() {
 				err = networks.RemoveNetworkInterface(r.client, ctx, state.ID.ValueString(), adapter.ID.ValueString())
 				if err != nil {
 					resp.Diagnostics.AddWarning(

@@ -17,21 +17,22 @@ import (
 )
 
 type ResourceModel struct {
-	ID               types.String `tfsdk:"id"`
-	Name             types.String `tfsdk:"name"`
-	DatacenterId     types.String `tfsdk:"datacenter_id"`
-	SizeId           types.String `tfsdk:"size_id"`
-	ImageId          types.String `tfsdk:"image_id"`
-	CreatedTime      types.String `tfsdk:"created_time"`
-	LastUpdated      types.String `tfsdk:"last_updated"`
-	Location         types.Map    `tfsdk:"location"`
-	Configuration    types.Map    `tfsdk:"configuration"`
-	AllocatePublicIp types.Bool   `tfsdk:"allocate_public_ip"`
-	PublicIp         types.String `tfsdk:"public_ip"`
-	NetworkIds       types.List   `tfsdk:"network_ids"`
-	NetworkHotplug   types.Bool   `tfsdk:"network_hotplug"`
-	InitialAuth      types.Object `tfsdk:"initial_auth"`
-	ResourceGroupId  types.String `tfsdk:"resource_group_id"`
+	ID                types.String `tfsdk:"id"`
+	Name              types.String `tfsdk:"name"`
+	DatacenterId      types.String `tfsdk:"datacenter_id"`
+	SizeId            types.String `tfsdk:"size_id"`
+	ImageId           types.String `tfsdk:"image_id"`
+	CreatedTime       types.String `tfsdk:"created_time"`
+	LastUpdated       types.String `tfsdk:"last_updated"`
+	Location          types.Map    `tfsdk:"location"`
+	Configuration     types.Map    `tfsdk:"configuration"`
+	AllocatePublicIp  types.Bool   `tfsdk:"allocate_public_ip"`
+	PublicIp          types.String `tfsdk:"public_ip"`
+	NetworkIds        types.List   `tfsdk:"network_ids"`
+	NetworkInterfaces types.List   `tfsdk:"network_interfaces"`
+	NetworkHotplug    types.Bool   `tfsdk:"network_hotplug"`
+	InitialAuth       types.Object `tfsdk:"initial_auth"`
+	ResourceGroupId   types.String `tfsdk:"resource_group_id"`
 }
 
 type ResourceModelInitialAuth struct {
@@ -204,6 +205,8 @@ func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.Gpc
 
 	// Set the base public IP, might be replaced later
 	model.PublicIp = types.StringValue("")
+	interfaceElemType := types.ObjectType{AttrTypes: networks.ReadVirtualMachineNetworkDataResponseTF{}.AttrTypes()}
+	model.NetworkInterfaces = types.ListNull(interfaceElemType)
 	// Fetch network interfaces for the virtual machine
 	networkInterfaces, err := networks.GetNetworkInterfaces(gpcnClient, ctx, virtualMachineID)
 	if err != nil {
@@ -212,6 +215,14 @@ func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.Gpc
 			fmt.Sprintf("Failed to fetch network interfaces for VM %s: %s", virtualMachineID, err.Error()),
 		)
 		return model, allDiags
+	}
+
+	interfaceList, interfaceDiags := types.ListValueFrom(ctx, interfaceElemType, networkInterfaces)
+	if interfaceDiags.HasError() {
+		allDiags.Append(interfaceDiags...)
+		model.NetworkInterfaces = types.ListNull(interfaceElemType)
+	} else {
+		model.NetworkInterfaces = interfaceList
 	}
 
 	if len(networkInterfaces) > 0 {
