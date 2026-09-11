@@ -1,3 +1,9 @@
+## 1.3.0 (September 11, 2026)
+
+FEATURES:
+
+- **Virtual Machine**: New computed `network_interfaces` attribute on `gpcn_virtualmachine` lists the attached interfaces. Each entry exposes `private_ip`, `public_ip`, `public_ip_id`, `is_primary`, and the associated network details (`network_id`, `network_name`, `cidr_block`, `gateway_ip`, `network_type`).
+
 ## 1.2.0 (September 10, 2026)
 
 FEATURES:
