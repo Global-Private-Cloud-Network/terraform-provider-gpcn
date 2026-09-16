@@ -450,8 +450,9 @@ func TestSetNextNetworkInterfaceToPrimaryNoCandidates(t *testing.T) {
 	if err == nil {
 		t.Fatal("Expected an error when the virtual machine has no candidate interface, got nil")
 	}
-	if err.Error() != ErrDetailNoCandidateNetworkInterface {
-		t.Errorf("Expected the guard error '%s', got '%s'", ErrDetailNoCandidateNetworkInterface, err.Error())
+	const want = "the virtual machine has no candidate network interface to promote"
+	if err.Error() != want {
+		t.Errorf("Expected the guard error '%s', got '%s'", want, err.Error())
 	}
 	if requested.Load() {
 		t.Error("Expected no HTTP request when the virtual machine has no candidate interface")
@@ -621,10 +622,20 @@ func TestUpdateNetworkInterfacesPromotesSurvivingInterfaceUnit(t *testing.T) {
 		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
 	}
 
-	want := "PUT " + networkInterfacePath(vmID, "interface-c")
+	// A trailing GET says that the handoff flag no longer stops the second promotion.
+	want := []string{
+		"PUT " + networkInterfacePath(vmID, "interface-c"),
+		"DELETE " + networkInterfacePath(vmID, "interface-a"),
+		"DELETE " + networkInterfacePath(vmID, "interface-b"),
+	}
 	got := recorder.recorded()
-	if len(got) == 0 || got[0] != want {
-		t.Errorf("Expected the promotion to target the surviving interface with '%s', got %v", want, got)
+	if len(got) != len(want) {
+		t.Fatalf("Expected requests %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Expected request %d to be '%s', got '%s'", i, want[i], got[i])
+		}
 	}
 }
 
@@ -958,7 +969,7 @@ func TestUpdateNetworkInterfacesKeepsBackendPrimaryWhenRefreshLagsUnit(t *testin
 	}
 }
 
-func TestUpdateNetworkInterfacesPromotesReorderedPrimaryUnit(t *testing.T) {
+func TestUpdateNetworkInterfacesKeepsPrimaryOnReorderUnit(t *testing.T) {
 	const vmID = "vm-reordered-primary"
 	var recorder requestRecorder
 
@@ -982,13 +993,12 @@ func TestUpdateNetworkInterfacesPromotesReorderedPrimaryUnit(t *testing.T) {
 		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
 	}
 
-	want := "PUT " + networkInterfacePath(vmID, "interface-b")
-	if got := singlePutRequest(t, recorder.recorded()); got != want {
-		t.Errorf("Expected the reorder to promote the configured primary with '%s', got '%s'", want, got)
+	if got := recorder.recorded(); len(got) != 0 {
+		t.Errorf("Expected no request when the reorder keeps the current primary, got %v", got)
 	}
 }
 
-func TestUpdateNetworkInterfacesPromotesPrependedPrimaryUnit(t *testing.T) {
+func TestUpdateNetworkInterfacesKeepsPrimaryOnPrependUnit(t *testing.T) {
 	const vmID = "vm-prepended-primary"
 	var recorder requestRecorder
 
@@ -1011,11 +1021,7 @@ func TestUpdateNetworkInterfacesPromotesPrependedPrimaryUnit(t *testing.T) {
 		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
 	}
 
-	want := []string{
-		"POST " + interfaceListPath(vmID),
-		"GET " + interfaceListPath(vmID),
-		"PUT " + networkInterfacePath(vmID, "interface-b"),
-	}
+	want := []string{"POST " + interfaceListPath(vmID)}
 	got := recorder.recorded()
 	if len(got) != len(want) {
 		t.Fatalf("Expected requests %v, got %v", want, got)
