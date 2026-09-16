@@ -509,4 +509,7 @@ func TestDetachVolumeVMGoneDuringStopKeepsHTTPError(t *testing.T) {
 	if !client.IsNotFound(err) {
 		t.Errorf("expected client.IsNotFound to be true for a gone VM, got false for error: %v", err)
 	}
+	if !strings.Contains(err.Error(), "could not be stopped") {
+		t.Errorf("expected the error to report the failed stop, got: %v", err)
+	}
 }

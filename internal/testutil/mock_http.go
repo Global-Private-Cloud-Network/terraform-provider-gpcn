@@ -117,6 +117,8 @@ func LogUnexpectedRequest(t *testing.T, w http.ResponseWriter, r *http.Request) 
 // tested through it.
 func SetupMockServerWithRealTransport(config MockServerConfig) (*httptest.Server, *client.GpcnClient) {
 	server := httptest.NewServer(http.HandlerFunc(config.Handler))
+	// A failure below leaves the listener open, so the cleanup closes it.
+	config.T.Cleanup(server.Close)
 
 	cfg := client.DefaultConfig(server.URL, "test-key")
 	cfg.MaxRetries = 0

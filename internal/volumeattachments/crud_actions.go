@@ -104,8 +104,8 @@ func conditionallyStopVM(gpcnClient *client.GpcnClient, ctx context.Context, vmI
 			// The re-check proves the VM is gone, so Delete may drop the attachment.
 			return false, checkErr
 		}
-		// The VM answers the re-check. The error must not read as a missing VM,
-		// or Delete drops the attachment without a detach.
+		// The re-check does not prove the VM is gone. The error must not read as
+		// not-found, or Delete drops the attachment without a detach.
 		return false, errors.New(err.Error())
 	}
 
