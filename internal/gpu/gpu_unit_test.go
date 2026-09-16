@@ -799,7 +799,9 @@ func TestMapGPUResponseToModelRefreshesDriftUnit(t *testing.T) {
 	model := createTestGPUModel("stale-name", "NVIDIA RTX A6000 Series", "nvidia-rtx_a6000-series", testImageName, 2)
 	model.SkuCode = types.StringValue("gpu_2x_a6000")
 
+	// Read maps first and refreshes second, so the test follows the same order.
 	result := MapGPUResponseToModel(context.Background(), response, model)
+	result = RefreshGPUModelFromResponse(response, result)
 
 	if result.Name.ValueString() != "renamed-in-portal" {
 		t.Errorf("Expected Name 'renamed-in-portal', got '%s'", result.Name.ValueString())
@@ -840,5 +842,54 @@ func TestMapGPUResponseToModelKeepsImageAndAuthUnit(t *testing.T) {
 	}
 	if auth.SshKeyId.ValueString() != testSSHKeyID {
 		t.Errorf("Expected SshKeyId '%s', got '%s'", testSSHKeyID, auth.SshKeyId.ValueString())
+	}
+}
+
+func TestMapGPUResponseToModelKeepsPlanValuesUnit(t *testing.T) {
+	response := newGPUResponse("gpu-123", "renamed-in-portal")
+	response.Data.Configuration.GPUCount = 4
+
+	model := createTestGPUModel("planned-name", "NVIDIA RTX A6000 Series", "nvidia-rtx_a6000-series", testImageName, 2)
+
+	result := MapGPUResponseToModel(context.Background(), response, model)
+
+	if result.Name.ValueString() != "planned-name" {
+		t.Errorf("Expected Name 'planned-name', got '%s'", result.Name.ValueString())
+	}
+	if result.GPUCount.ValueInt64() != 2 {
+		t.Errorf("Expected GPUCount 2, got %d", result.GPUCount.ValueInt64())
+	}
+}
+
+func TestRefreshGPUModelFromResponseKeepsValuesOnEmptyUnit(t *testing.T) {
+	response := newGPUResponse("gpu-123", "")
+	response.Data.Datacenter.ID = ""
+	response.Data.Configuration.Name = ""
+	response.Data.Configuration.Code = ""
+	response.Data.Configuration.SkuCode = ""
+	response.Data.Configuration.GPUCount = 0
+
+	model := createTestGPUModel("configured-name", "NVIDIA RTX A6000 Series", "nvidia-rtx_a6000-series", testImageName, 2)
+	model.SkuCode = types.StringValue("gpu_2x_a6000")
+
+	result := RefreshGPUModelFromResponse(response, model)
+
+	if result.Name.ValueString() != "configured-name" {
+		t.Errorf("Expected Name 'configured-name', got '%s'", result.Name.ValueString())
+	}
+	if result.DatacenterId.ValueString() != testDatacenterID {
+		t.Errorf("Expected DatacenterId '%s', got '%s'", testDatacenterID, result.DatacenterId.ValueString())
+	}
+	if result.SeriesName.ValueString() != "NVIDIA RTX A6000 Series" {
+		t.Errorf("Expected SeriesName 'NVIDIA RTX A6000 Series', got '%s'", result.SeriesName.ValueString())
+	}
+	if result.SeriesCode.ValueString() != "nvidia-rtx_a6000-series" {
+		t.Errorf("Expected SeriesCode 'nvidia-rtx_a6000-series', got '%s'", result.SeriesCode.ValueString())
+	}
+	if result.SkuCode.ValueString() != "gpu_2x_a6000" {
+		t.Errorf("Expected SkuCode 'gpu_2x_a6000', got '%s'", result.SkuCode.ValueString())
+	}
+	if result.GPUCount.ValueInt64() != 2 {
+		t.Errorf("Expected GPUCount 2, got %d", result.GPUCount.ValueInt64())
 	}
 }

@@ -759,6 +759,7 @@ func TestMapVirtualMachineResponseToModelRefreshesDrift(t *testing.T) {
 	if diags.HasError() {
 		t.Fatalf("Unexpected diagnostics: %v", diags)
 	}
+	result = RefreshVirtualMachineModelFromResponse(response, result)
 
 	if result.Name.ValueString() != newName {
 		t.Errorf("Expected name '%s', got '%s'", newName, result.Name.ValueString())
@@ -768,5 +769,68 @@ func TestMapVirtualMachineResponseToModelRefreshesDrift(t *testing.T) {
 	}
 	if result.DatacenterId.ValueString() != newDatacenterID {
 		t.Errorf("Expected datacenter_id '%s', got '%s'", newDatacenterID, result.DatacenterId.ValueString())
+	}
+}
+
+func TestMapVirtualMachineResponseToModelKeepsPlanValues(t *testing.T) {
+	const (
+		vmID            = "vm-plan-123"
+		apiName         = "canonicalised-in-api"
+		apiSkuID        = "sku-uuid-api"
+		apiDatacenterID = "datacenter-api"
+	)
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces") {
+				testutil.WriteJSONResponse(w, emptyNetworkInterfacesResponse())
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	response := newVMResponse(vmID, apiName)
+	response.Data.Configuration.SkuId = apiSkuID
+	response.Data.Datacenter.ID = apiDatacenterID
+
+	// Create and Update map over the plan. A lagging API must not replace the planned values.
+	model := createTestVMModel("planned-vm", testVMImage, false)
+
+	result, diags := MapVirtualMachineResponseToModel(context.Background(), gpcnClient, response, model)
+	if diags.HasError() {
+		t.Fatalf("Unexpected diagnostics: %v", diags)
+	}
+
+	if result.Name.ValueString() != "planned-vm" {
+		t.Errorf("Expected name 'planned-vm', got '%s'", result.Name.ValueString())
+	}
+	if result.SizeId.ValueString() != "sku-uuid-test" {
+		t.Errorf("Expected size_id 'sku-uuid-test', got '%s'", result.SizeId.ValueString())
+	}
+	if result.DatacenterId.ValueString() != testDatacenterID {
+		t.Errorf("Expected datacenter_id '%s', got '%s'", testDatacenterID, result.DatacenterId.ValueString())
+	}
+}
+
+func TestRefreshVirtualMachineModelFromResponseKeepsValuesOnEmpty(t *testing.T) {
+	response := newVMResponse("vm-empty-123", "")
+	response.Data.Configuration.SkuId = ""
+	response.Data.Datacenter.ID = ""
+
+	model := createTestVMModel("configured-vm", testVMImage, false)
+
+	result := RefreshVirtualMachineModelFromResponse(response, model)
+
+	if result.Name.ValueString() != "configured-vm" {
+		t.Errorf("Expected name 'configured-vm', got '%s'", result.Name.ValueString())
+	}
+	if result.SizeId.ValueString() != "sku-uuid-test" {
+		t.Errorf("Expected size_id 'sku-uuid-test', got '%s'", result.SizeId.ValueString())
+	}
+	if result.DatacenterId.ValueString() != testDatacenterID {
+		t.Errorf("Expected datacenter_id '%s', got '%s'", testDatacenterID, result.DatacenterId.ValueString())
 	}
 }

@@ -63,18 +63,31 @@ func MapGPUResponseToModel(ctx context.Context, response *readGPUResponse, model
 		model.Location = types.MapNull(types.StringType)
 	}
 
-	model = applyResponseValues(ctx, response, model)
+	// If model doesn't already have these populated, set them
+	model = setModelValuesNotPresent(ctx, response, model)
 
 	return model
 }
 
-func applyResponseValues(ctx context.Context, response *readGPUResponse, model ResourceModel) ResourceModel {
-	model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
-	model.Name = types.StringValue(response.Data.Name)
-	model.SeriesName = types.StringValue(response.Data.Configuration.Name)
-	model.SeriesCode = types.StringValue(response.Data.Configuration.Code)
-	model.SkuCode = types.StringValue(response.Data.Configuration.SkuCode)
-	model.GPUCount = types.Int64Value(response.Data.Configuration.GPUCount)
+func setModelValuesNotPresent(ctx context.Context, response *readGPUResponse, model ResourceModel) ResourceModel {
+	if model.DatacenterId.IsNull() {
+		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
+	}
+	if model.Name.IsNull() {
+		model.Name = types.StringValue(response.Data.Name)
+	}
+	if model.SeriesName.IsNull() || model.SeriesName.ValueString() == "" {
+		model.SeriesName = types.StringValue(response.Data.Configuration.Name)
+	}
+	if model.SeriesCode.IsNull() || model.SeriesCode.ValueString() == "" {
+		model.SeriesCode = types.StringValue(response.Data.Configuration.Code)
+	}
+	if model.SkuCode.IsNull() || model.SkuCode.ValueString() == "" {
+		model.SkuCode = types.StringValue(response.Data.Configuration.SkuCode)
+	}
+	if model.GPUCount.IsNull() {
+		model.GPUCount = types.Int64Value(response.Data.Configuration.GPUCount)
+	}
 
 	// The API returns a longer image name than the one the user configures, so a
 	// refresh here would show permanent drift.
@@ -90,6 +103,31 @@ func applyResponseValues(ctx context.Context, response *readGPUResponse, model R
 		if !diags.HasError() {
 			model.InitialAuth = authObj
 		}
+	}
+	return model
+}
+
+// RefreshGPUModelFromResponse reports the drift that Read must show. An empty
+// response field leaves the model value alone, because an omitted field must not
+// blank a required attribute.
+func RefreshGPUModelFromResponse(response *readGPUResponse, model ResourceModel) ResourceModel {
+	if response.Data.Datacenter.ID != "" {
+		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
+	}
+	if response.Data.Name != "" {
+		model.Name = types.StringValue(response.Data.Name)
+	}
+	if response.Data.Configuration.Name != "" {
+		model.SeriesName = types.StringValue(response.Data.Configuration.Name)
+	}
+	if response.Data.Configuration.Code != "" {
+		model.SeriesCode = types.StringValue(response.Data.Configuration.Code)
+	}
+	if response.Data.Configuration.SkuCode != "" {
+		model.SkuCode = types.StringValue(response.Data.Configuration.SkuCode)
+	}
+	if response.Data.Configuration.GPUCount != 0 {
+		model.GPUCount = types.Int64Value(response.Data.Configuration.GPUCount)
 	}
 	return model
 }

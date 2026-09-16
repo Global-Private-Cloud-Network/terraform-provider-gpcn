@@ -207,6 +207,7 @@ func (r *volumesResource) Read(ctx context.Context, req resource.ReadRequest, re
 	}
 
 	state = volumes.MapVolumeResponseToModel(ctx, getVolumeResponse, state)
+	state = volumes.RefreshVolumeModelFromResponse(getVolumeResponse, state)
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, state)

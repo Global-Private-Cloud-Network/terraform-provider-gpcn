@@ -102,10 +102,6 @@ func MapNetworkResponseToModel(ctx context.Context, response *readNetworkRespons
 		}
 	}
 
-	model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
-	model.Name = types.StringValue(response.Data.Name)
-	model.NetworkType = types.StringValue(response.Data.NetworkType)
-
 	// If model doesn't already have these populated, set them
 	model = setModelValuesNotPresent(response, model)
 
@@ -113,12 +109,37 @@ func MapNetworkResponseToModel(ctx context.Context, response *readNetworkRespons
 }
 
 func setModelValuesNotPresent(response *readNetworkResponse, model ResourceModel) ResourceModel {
+	if model.DatacenterId.IsNull() {
+		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
+	}
+	if model.Name.IsNull() {
+		model.Name = types.StringValue(response.Data.Name)
+	}
+	if model.NetworkType.IsNull() {
+		model.NetworkType = types.StringValue(response.Data.NetworkType)
+	}
 	start, end := getDHCPAddresses(response)
 	if model.DHCPStartAddress.IsNull() && start != "" {
 		model.DHCPStartAddress = types.StringValue(start)
 	}
 	if model.DHCPEndAddress.IsNull() && end != "" {
 		model.DHCPEndAddress = types.StringValue(end)
+	}
+	return model
+}
+
+// RefreshNetworkModelFromResponse overwrites the configured attributes with the API values, so
+// Read detects drift. An empty response field leaves the model value alone, because the API omits
+// a field that the practitioner must set.
+func RefreshNetworkModelFromResponse(response *readNetworkResponse, model ResourceModel) ResourceModel {
+	if response.Data.Datacenter.ID != "" {
+		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
+	}
+	if response.Data.Name != "" {
+		model.Name = types.StringValue(response.Data.Name)
+	}
+	if response.Data.NetworkType != "" {
+		model.NetworkType = types.StringValue(response.Data.NetworkType)
 	}
 	return model
 }

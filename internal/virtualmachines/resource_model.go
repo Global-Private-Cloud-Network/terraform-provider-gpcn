@@ -110,21 +110,35 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 	return model, allDiags
 }
 
+// Read calls this after MapVirtualMachineResponseToModel so an out-of-band change shows as drift.
+// Create and Update must not call it, because a lagging API then breaks the planned values.
+// An empty field means the response omits it, so the model value stays.
+func RefreshVirtualMachineModelFromResponse(response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
+	if response.Data.Datacenter.ID != "" {
+		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
+	}
+	if response.Data.Name != "" {
+		model.Name = types.StringValue(response.Data.Name)
+	}
+	if response.Data.Configuration.SkuId != "" {
+		model.SizeId = types.StringValue(response.Data.Configuration.SkuId)
+	}
+	return model
+}
+
 func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient, response *ReadVirtualMachinesResponse, model ResourceModel) (ResourceModel, diag.Diagnostics) {
 	var allDiags diag.Diagnostics
 
-	// Refresh these three from the response so a portal-side change shows as drift.
-	// An empty field means the response omits it, so the model value stays.
-	if response.Data.Datacenter.ID != "" {
+	if model.DatacenterId.IsNull() {
 		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
 	}
 	var imageIdDiags diag.Diagnostics
 	model.ImageId, imageIdDiags = resolveImageId(gpcnClient, ctx, model.ImageId, model.DatacenterId.ValueString(), response)
 	allDiags.Append(imageIdDiags...)
-	if response.Data.Name != "" {
+	if model.Name.IsNull() {
 		model.Name = types.StringValue(response.Data.Name)
 	}
-	if response.Data.Configuration.SkuId != "" {
+	if model.SizeId.IsNull() {
 		model.SizeId = types.StringValue(response.Data.Configuration.SkuId)
 	}
 

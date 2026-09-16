@@ -469,9 +469,9 @@ func TestRemoveNetworkInterfaceByNetworkIdMissingInterface(t *testing.T) {
 
 func TestMapNetworkResponseToModelRefreshesConfiguredAttributes(t *testing.T) {
 	response := newNetworkResponse("network-123", "renamed-in-portal", "standard")
-	model := createTestResourceModel("standard", "10.0.0.0/24", "10.0.0.10", "10.0.0.254", "8.8.8.8, 8.8.4.4")
+	model := createTestResourceModel("custom", "10.0.0.0/24", "10.0.0.10", "10.0.0.254", "8.8.8.8, 8.8.4.4")
 
-	result := MapNetworkResponseToModel(context.Background(), response, model)
+	result := RefreshNetworkModelFromResponse(response, MapNetworkResponseToModel(context.Background(), response, model))
 
 	if result.Name.ValueString() != "renamed-in-portal" {
 		t.Errorf("Expected name 'renamed-in-portal', got '%s'", result.Name.ValueString())
@@ -481,5 +481,40 @@ func TestMapNetworkResponseToModelRefreshesConfiguredAttributes(t *testing.T) {
 	}
 	if result.NetworkType.ValueString() != "standard" {
 		t.Errorf("Expected network type 'standard', got '%s'", result.NetworkType.ValueString())
+	}
+}
+
+func TestRefreshNetworkModelFromResponseKeepsValuesOnEmptyUnit(t *testing.T) {
+	response := newNetworkResponse("network-123", "", "")
+	response.Data.Datacenter.ID = ""
+	model := createTestResourceModel("standard", "10.0.0.0/24", "10.0.0.10", "10.0.0.254", "8.8.8.8, 8.8.4.4")
+
+	result := RefreshNetworkModelFromResponse(response, model)
+
+	if result.Name.ValueString() != "test-network" {
+		t.Errorf("Expected name 'test-network', got '%s'", result.Name.ValueString())
+	}
+	if result.DatacenterId.ValueString() != testDatacenterID {
+		t.Errorf("Expected datacenter ID '%s', got '%s'", testDatacenterID, result.DatacenterId.ValueString())
+	}
+	if result.NetworkType.ValueString() != "standard" {
+		t.Errorf("Expected network type 'standard', got '%s'", result.NetworkType.ValueString())
+	}
+}
+
+func TestMapNetworkResponseToModelKeepsPlanValuesUnit(t *testing.T) {
+	response := newNetworkResponse("network-123", "renamed-in-portal", "standard")
+	model := createTestResourceModel("custom", "10.0.0.0/24", "10.0.0.10", "10.0.0.254", "8.8.8.8, 8.8.4.4")
+
+	result := MapNetworkResponseToModel(context.Background(), response, model)
+
+	if result.Name.ValueString() != "test-network" {
+		t.Errorf("Expected name 'test-network', got '%s'", result.Name.ValueString())
+	}
+	if result.DatacenterId.ValueString() != testDatacenterID {
+		t.Errorf("Expected datacenter ID '%s', got '%s'", testDatacenterID, result.DatacenterId.ValueString())
+	}
+	if result.NetworkType.ValueString() != "custom" {
+		t.Errorf("Expected network type 'custom', got '%s'", result.NetworkType.ValueString())
 	}
 }
