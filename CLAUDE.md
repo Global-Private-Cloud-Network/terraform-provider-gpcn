@@ -2,7 +2,13 @@
 
 ## Project Overview
 
-Terraform provider for GPCN (cloud infrastructure platform) built with Terraform Plugin Framework (v1.16.1). Manages networks, volumes, virtual machines, and GPUs, plus a datacenter data source.
+Terraform provider for GPCN (cloud infrastructure platform) built with Terraform Plugin Framework (v1.19.0).
+
+Resources: `gpcn_gpu`, `gpcn_network`, `gpcn_resource_group`, `gpcn_ssh_key`, `gpcn_virtualmachine`, `gpcn_volume`, `gpcn_volume_attachment`.
+
+Data sources: `gpcn_datacenters`, `gpcn_gpu_inventory`, `gpcn_virtualmachine_images`, `gpcn_virtualmachine_sizes`.
+
+Registration lives in `Resources()` / `DataSources()` in `internal/provider/provider.go`.
 
 ## Environment Setup
 
@@ -26,17 +32,21 @@ make install  # Install locally
 make fmt      # Format code
 make lint     # Lint
 make generate # Generate documentation
-make test     # Run unit tests (no API credentials needed)
+make test     # Run unit tests (no API credentials)
+make coverage # Unit tests with a coverage profile plus coverage.html
 make testacc  # Run acceptance tests (creates real resources, requires credentials)
-make testaccnamed TEST=TestAccNetworkResource_basic  # Run specific acceptance test
+make testaccnamed TEST=TestNetworksResource  # Run a specific test
 make testacc LOGLEVEL=debug  # Control log level
 ```
+
+`make test` needs a `terraform` binary on PATH: the `resource.UnitTest` cases drive
+real terraform runs against a mock server. It needs no API credentials.
 
 ## Architecture
 
 ### Resource Package Pattern
 
-Each resource follows this structure in `internal/{resource}/`:
+Packages under `internal/{resource}/` usually contain:
 
 - `resource_model.go`: Terraform state model structs
 - `crud_actions.go`: HTTP request/response logic and API calls
@@ -46,32 +56,53 @@ Each resource follows this structure in `internal/{resource}/`:
 - `errors.go`: Error message constants
 - `constants.go`: API endpoints and other constants
 
+That is the usual shape, not a rule. Packages add topic files: `networks` has
+`network_interfaces.go` and `default_route.go`; `virtualmachines` has
+`lifecycle.go`, `sizes.go`, `update_helpers.go`; `volumes` has `sizes.go` and
+`virtualmachines.go`; `gpu` has `inventory.go`.
+
+Exceptions:
+
+- `internal/volumeattachments` has no `constants.go` — it composes `volumes` and `virtualmachines` and reuses their endpoints.
+- `internal/datacenters` holds only constants and errors; its HTTP is inline in `internal/provider/datacenter_data_source.go`. Copy the newer data-source packages (`internal/virtualmachinesizes`, `internal/virtualmachineimages`) instead.
+
+Shared helpers live in `internal/helpers` and `internal/testutil`.
+
 Resource schema definitions live in `internal/provider/{resource}_resource.go`.
 
 ### Key Design Patterns
 
 1. **Separation of Concerns**: `internal/provider/` handles Terraform framework integration; `internal/{resource}/` handles API communication
-2. **Async Operations**: Create/update/delete return job IDs; `internal/client/polling.go` long-polls until completion
+2. **Async Operations**: Only endpoints that return a job are polled — networks, volumes, virtual machines, GPUs, and attachments. Resource groups and SSH keys are synchronous. `internal/client/polling.go` long-polls until completion. Two envelope shapes exist: `client.JobStatusSingularResponse` (`data.jobId`) and `client.JobStatusMultiResponse` (`data.jobs[]`, read via `client.GetJobID`). The jobs endpoint constant lives in `internal/client/constants.go`
 3. **Error/Logging Constants**: Centralized in each resource's `errors.go` and `logging.go`
 4. **API Versioning**: All endpoints use versioned paths (e.g., `/v1/resource/virtual-machines/`), defined in each resource's `constants.go`
+5. **Internal import direction**: `client` and `helpers` are leaves; `networks` builds on them, `virtualmachines` on `networks`, `volumeattachments` on `virtualmachines` and `volumes`. Keep it acyclic
 
 ### Virtual Machine Specifics
 
-- Size uses `category` (`general`, `memory`) + `tier` (e.g., `G-Small-1`)
-- Tier upgrades within the same category don't require replacement; downgrades or category changes do
-- `allocate_public_ip` controls whether `public_ip` is populated
+- `size_id` is required: a SKU ID from the `gpcn_virtualmachine_sizes` data source (categories are `general-purpose` and `memory-optimized`)
+- Whether a `size_id` change is an in-place update or a replacement is decided in `ModifyPlan`, which asks the API for the VM's legal upgrade targets (`GET /v1/resource/data-centers/{id}/virtual-machine-sizes?vmId=`). A lookup failure fails the plan rather than proposing a destroy
+- `image_id` comes from the `gpcn_virtualmachine_images` data source; changing it requires replacement
+- `initial_auth` is create-only: later changes update Terraform state with no API call
+- `allocate_public_ip` controls whether `public_ip` is populated; `network_interfaces` is computed, one entry per attached network
 
 ### GPU Specifics
 
 - Specify GPU series by `series_name` (human-readable) or `series_code`; exactly one required
-- GPU count must be 1, 2, or 4
+- `sku_code` is optional and pins an exact SKU within the series; discover SKUs with the `gpcn_gpu_inventory` data source
+- `gpu_count` must be 1, 2, 4, or 8
 - `image_name` specifies the OS image; must be `"ubuntu-22.04"` or `"ubuntu-24.04"` (required, changing requires replacement)
+- `initial_auth.ssh_key_id` is required and create-only
 - Inventory is checked before creation via `CheckInventory()`
 
 ## Testing
 
-- **Unit tests**: Use `MockTransport` from `internal/testutil/mock_http.go` to intercept HTTP calls. Run with `make test`.
-- **Acceptance tests**: Create real resources. Run with `make testacc`. Run individual tests to iterate faster.
+The only unit/acceptance split is `TF_ACC`: `resource.Test` cases skip without it,
+`resource.UnitTest` cases always run. Acceptance tests are named
+`Test<Thing>Resource...`; there is no `TestAcc*` prefix in this repo.
+
+- **Unit tests**: `testutil.SetupMockServerWithGpcnClient` (`internal/testutil/mock_http.go`) serves mocked HTTP. It bypasses `authTransport`, so not-found and `HTTPError` paths cannot be tested through it — use `testutil.SetupMockServerWithRealTransport`, or `client.NewGpcnClient` against an `httptest` server, for those. Run with `make test`.
+- **Acceptance tests**: Create real resources, and there are no sweepers, so a failed run leaves them behind. Run with `make testacc`. Run individual tests to iterate faster.
 
 ## Documentation
 
@@ -106,7 +137,7 @@ Run `make lint` before committing.
 
 The `internal/client/` package provides a configurable HTTP client:
 
-- **Correlation IDs**: All requests include a correlation ID for tracing. Use `client.WithCorrelationID(ctx)` at the start of CRUD operations. The ID appears in logs and is sent via request headers.
+- **Correlation IDs**: Nothing adds one automatically. Call `client.WithCorrelationID(ctx)` at the start of a CRUD method; only then does the ID appear in logs and in the request header.
 
 - **Configurable timeouts**: Users can customize via provider config:
   - `request_timeout`: Individual HTTP request timeout (default: 60s)
@@ -114,6 +145,14 @@ The `internal/client/` package provides a configurable HTTP client:
   - `max_retries`: Retry count for transient failures (default: 3)
 
 - **Retry with backoff**: Use `client.DoWithRetry(req)` for requests that should retry on transient failures.
+
+### CI
+
+- `test.yml` (PRs and `main`): lint, unit tests with terraform installed, build, and a docs-drift check that regenerates docs and fails on any difference.
+- `security.yml`: govulncheck and CodeQL, on PRs, `main`, and weekly.
+- `release.yml`: goreleaser on `v*` tags, with GPG-signed checksums.
+- Dependabot: gomod at `/` and GitHub Actions, both weekly.
+- Acceptance tests never run in CI.
 
 ## Commits
 
@@ -130,7 +169,7 @@ To prepare a new release:
    - `examples/provider-install-verification/main.tf`
 3. Run `make` to regenerate documentation (this copies examples into `docs/`)
 4. Commit all changes
-5. Create and push the version tag: `git tag vX.Y.Z && git push origin vX.Y.Z`
+5. Create the tag (`git tag vX.Y.Z`) and ask the user to push it — pushing needs explicit authorization, see `.claude/rules/commit-conventions.md`
 
 ## MCP Servers
 
