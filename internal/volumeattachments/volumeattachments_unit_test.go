@@ -329,8 +329,8 @@ func TestDetachVolumeVMNotFoundKeepsHTTPError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected DetachVolume to fail when the VM is gone")
 	}
-	if !strings.Contains(err.Error(), "could not be stopped") {
-		t.Errorf("expected the error to come from the stop site, got: %v", err)
+	if !strings.Contains(err.Error(), "could not be read") {
+		t.Errorf("expected the error to come from the read site, got: %v", err)
 	}
 	if !client.IsNotFound(err) {
 		t.Errorf("expected client.IsNotFound to be true, got false for error: %v", err)
@@ -345,8 +345,8 @@ func TestAttachVolumeVMNotFoundKeepsHTTPError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected AttachVolume to fail when the VM is gone")
 	}
-	if !strings.Contains(err.Error(), "could not be stopped") {
-		t.Errorf("expected the error to come from the stop site, got: %v", err)
+	if !strings.Contains(err.Error(), "could not be read") {
+		t.Errorf("expected the error to come from the read site, got: %v", err)
 	}
 	if !client.IsNotFound(err) {
 		t.Errorf("expected client.IsNotFound to be true, got false for error: %v", err)
@@ -376,14 +376,7 @@ func vmRestartFailureServer(t *testing.T, volumeAction string) (func(), *client.
 				testutil.HandleCreateJobResponse(w, testJobID, volumeAction+" started")
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"data": map[string]any{
-						"jobs": []map[string]any{
-							{"jobId": testJobID, "resourceId": testVolID, "isCompleted": true, "hasFailed": false},
-						},
-					},
-				})
+				testutil.HandleJobResponse(w, testJobID, testVolID, true)
 
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
@@ -475,8 +468,9 @@ func TestAttachVolumeStopCallFailureOnLiveVMIsNotNotFound(t *testing.T) {
 	assertStopFailureOnLiveVM(t, AttachVolume(gpcnClient, context.Background(), testVMID, testVolID))
 }
 
-// vmGoneDuringStopServer deletes the VM under the stop call: POST /stop returns 404 and
-// every later GET returns 404 too.
+// vmGoneDuringStopServer deletes the VM under the stop call: POST /stop fails with 500 and
+// every later GET returns 404. The two statuses differ, so only the re-check error carries
+// the not-found the caller must see.
 func vmGoneDuringStopServer(t *testing.T) (func(), *client.GpcnClient) {
 	var stopAttempted bool
 
@@ -493,7 +487,7 @@ func vmGoneDuringStopServer(t *testing.T) (func(), *client.GpcnClient) {
 
 			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/stop"):
 				stopAttempted = true
-				w.WriteHeader(http.StatusNotFound)
+				w.WriteHeader(http.StatusInternalServerError)
 
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
