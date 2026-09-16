@@ -35,14 +35,14 @@ make generate # Generate documentation
 make test     # Run unit tests (no API credentials)
 make coverage # Unit tests with a coverage profile plus coverage.html
 make testacc  # Run acceptance tests (creates real resources, requires credentials)
-make testaccnamed TEST=TestNetworksResource  # Run a specific test
+make testaccnamed TEST='TestNetworksResource$'  # Run one test
 make testacc LOGLEVEL=debug  # Control log level
 ```
 
 `make test` needs a `terraform` binary, taken from `PATH` or downloaded by
 terraform-plugin-testing when `PATH` has none. The `resource.UnitTest` cases run
 real terraform: the validator cases stop at validation, and the plan-behaviour
-tests (`internal/provider/gpus_resource_plan_test.go`) drive terraform against an
+tests (`internal/provider/*_resource_plan_test.go`) drive terraform against an
 `httptest` mock of the GPCN API. No API credentials are needed.
 
 ## Architecture
@@ -77,9 +77,10 @@ Resource schema definitions live in `internal/provider/{resource}_resource.go`.
 
 1. **Separation of Concerns**: `internal/provider/` handles Terraform framework integration; `internal/{resource}/` handles API communication
 2. **Async Operations**: Only endpoints that return a job are polled — networks, volumes, virtual machines, GPUs, and attachments. Resource groups and SSH keys are synchronous. `internal/client/polling.go` long-polls until completion. Two envelope shapes exist: `client.JobStatusSingularResponse` (`data.jobId`) and `client.JobStatusMultiResponse` (`data.jobs[]`, read via `client.GetJobID`). The jobs endpoint constant lives in `internal/client/constants.go`
-3. **Error/Logging Constants**: Centralized in each resource's `errors.go` and `logging.go`
-4. **API Versioning**: All endpoints use versioned paths (e.g., `/v1/resource/virtual-machines/`), defined in each resource's `constants.go`
-5. **Internal import direction**: `client` and `helpers` are leaves; `networks` builds on them, `virtualmachines` on `networks`, `volumeattachments` on `virtualmachines` and `volumes`. Keep it acyclic
+3. **Read refresh**: each resource's Read calls `Refresh<X>ModelFromResponse` after the mapper. It refreshes only attributes that can change out of band and that Terraform can reconcile: `name` everywhere, `size_gb` on volumes, `size_id` on virtual machines. Attributes fixed at creation keep the configured value. Create and Update never refresh; they keep the planned values
+4. **Error/Logging Constants**: Centralized in each resource's `errors.go` and `logging.go`
+5. **API Versioning**: All endpoints use versioned paths (e.g., `/v1/resource/virtual-machines/`), defined in each resource's `constants.go`
+6. **Internal import direction**: `client` and `helpers` are leaves; `networks` builds on them, `virtualmachines` on `networks`, `volumeattachments` on `virtualmachines` and `volumes`. Keep it acyclic
 
 ### Virtual Machine Specifics
 
@@ -107,7 +108,9 @@ carries no marker either — `TestNetworksResource` and
 `TestVirtualMachinesSizeUpgrade` are both acceptance cases, while
 `TestNetworksResourceInvalidType` is a `resource.UnitTest` one. Identify an
 acceptance test by that call, and pass its exact function name to
-`make testaccnamed TEST=...`.
+`make testaccnamed TEST=...`, anchored with a trailing `$`. The target's
+`-run` regexp is unanchored, so a bare `TestNetworksResource` also runs the
+five longer names that start with it.
 
 - **Unit tests**: `testutil.SetupMockServerWithGpcnClient` (`internal/testutil/mock_http.go`) serves mocked HTTP. It bypasses `authTransport`, so not-found and `HTTPError` paths cannot be tested through it — use `testutil.SetupMockServerWithRealTransport`, or `client.NewGpcnClient` against an `httptest` server, for those. Run with `make test`.
 - **Acceptance tests**: Create real resources, and there are no sweepers, so a failed run leaves them behind. Run with `make testacc`. Run individual tests to iterate faster.
