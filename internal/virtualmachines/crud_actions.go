@@ -245,7 +245,7 @@ func UpdateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, vi
 // Iteratively calls getVirtualMachine until the machine is in a target status, or it times out
 func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string, targetStatuses []string, timeoutMaxSec int, initialDelaySec int) (*ReadVirtualMachinesResponse, error) {
 	// Make all statuses lowercase for ease of comparison
-	targetStatusesLower := make([]string, len(targetStatuses))
+	targetStatusesLower := make([]string, 0, len(targetStatuses))
 	for _, status := range targetStatuses {
 		targetStatusesLower = append(targetStatusesLower, strings.ToLower(status))
 	}
@@ -260,34 +260,35 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 	var err error
 	secondsElapsed := 0
 	longPollIteration := 1
-	var errString string
+	var pollErr error
 	for {
 		tflog.Info(ctx, fmt.Sprintf(LogStartingLongPollingIteration, longPollIteration, secondsElapsed))
 
 		getResp, err = GetVirtualMachine(gpcnClient, ctx, virtualMachineId)
 		if err != nil {
-			errString = err.Error()
+			pollErr = err
 			break
 		}
 		tflog.Info(ctx, fmt.Sprintf(LogVMResponseStatus, getResp.Data.Status))
 
 		if slices.Contains(targetStatusesLower, strings.ToLower(getResp.Data.Status)) {
 			tflog.Info(ctx, fmt.Sprintf(LogVMStatusProceedingToAttach, getResp.Data.ID, getResp.Data.Status))
-			// Don't trust the API and do actions too quick. Wait an additional 5 seconds to verify it's actually in the status we want
-			time.Sleep(time.Second * 5)
+			// Don't trust the API and do actions too quick. Wait an additional interval to verify it's actually in the status we want
+			time.Sleep(vmStatusPollInterval)
 			break
 		}
-		time.Sleep(time.Second * 5)
+		time.Sleep(vmStatusPollInterval)
 		secondsElapsed += 5
 		longPollIteration += 1
 
 		if secondsElapsed > timeoutMaxSec {
-			errString = fmt.Sprintf(ErrVirtualMachineStatusTimeoutTemplate, timeoutMaxSec)
+			//nolint:staticcheck // ST1005: the template is a user-facing Terraform diagnostic sentence
+			pollErr = fmt.Errorf(ErrVirtualMachineStatusTimeoutTemplate, timeoutMaxSec)
 			break
 		}
 	}
-	if errString != "" {
-		return nil, errors.New(errString)
+	if pollErr != nil {
+		return nil, pollErr
 	}
 	return getResp, nil
 }

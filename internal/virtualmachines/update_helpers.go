@@ -2,6 +2,7 @@ package virtualmachines
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"terraform-provider-gpcn/internal/client"
@@ -89,7 +90,7 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 	if interfaceIdx < 0 {
 		diags.AddError(
 			ErrSummaryErrorRetrievingNetworkIfaces,
-			ErrDetailNetworkInterfacesForVM,
+			fmt.Sprintf(ErrDetailNetworkInterfacesForVM, vmID),
 		)
 		return diags
 	}

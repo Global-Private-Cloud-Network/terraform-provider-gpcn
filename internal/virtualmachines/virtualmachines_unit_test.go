@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -67,6 +68,13 @@ func newVMResponse(id, name string) *ReadVirtualMachinesResponse {
 	resp.Data.Datacenter.CountryAbbr = "US"
 	resp.Data.Datacenter.Country = "United States"
 	return resp
+}
+
+func useFastVMStatusPollInterval(t *testing.T) {
+	t.Helper()
+	original := vmStatusPollInterval
+	vmStatusPollInterval = 5 * time.Millisecond
+	t.Cleanup(func() { vmStatusPollInterval = original })
 }
 
 func emptyNetworkInterfacesResponse() map[string]any {
@@ -273,6 +281,7 @@ func TestUpdateVirtualMachineMockHTTP(t *testing.T) {
 }
 
 func TestPollForVirtualMachineStatusMockHTTP(t *testing.T) {
+	useFastVMStatusPollInterval(t)
 	const vmID = "vm-poll-123"
 	pollCount := 0
 
@@ -614,5 +623,150 @@ func TestSetModelValuesNotPresentResolvesImageIdOnImport(t *testing.T) {
 	}
 	if result.ImageId.ValueString() != imageID {
 		t.Errorf("Expected image_id '%s', got '%s'", imageID, result.ImageId.ValueString())
+	}
+}
+
+func TestPollForVirtualMachineStatusIgnoresEmptyStatus(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	const vmID = "vm-poll-empty-status"
+	pollCount := 0
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID) {
+				pollCount++
+				resp := newVMResponse(vmID, "test-vm")
+				if pollCount < 2 {
+					resp.Data.Status = ""
+				}
+				testutil.WriteJSONResponse(w, resp)
+			}
+		},
+	})
+	defer server.Close()
+
+	response, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, []string{"Running"}, 30, 0)
+	if err != nil {
+		t.Fatalf("PollForVirtualMachineStatus failed: %v", err)
+	}
+	if response == nil {
+		t.Fatal("Expected response, got nil")
+		return
+	}
+	if pollCount < 2 {
+		t.Errorf("Expected the poller to keep polling past an empty status, got %d poll(s)", pollCount)
+	}
+	if response.Data.Status != "Running" {
+		t.Errorf("Expected final status 'Running', got '%s'", response.Data.Status)
+	}
+}
+
+func TestPollForVirtualMachineStatusPreservesNotFound(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"message":"virtual machine not found"}`))
+	}))
+	defer server.Close()
+
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.MaxRetries = 0
+	cfg.InitialRetryDelay = 0
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	_, err = PollForVirtualMachineStatus(gpcnClient, context.Background(), "vm-gone-123", []string{"Running"}, 10, 0)
+	if err == nil {
+		t.Fatal("Expected an error, got nil")
+	}
+	if !client.IsNotFound(err) {
+		t.Errorf("Expected the poller to preserve the 404 so IsNotFound reports it, got '%v'", err)
+	}
+}
+
+func TestUpdatePublicIPIfChangedReportsMissingPrimaryInterface(t *testing.T) {
+	const vmID = "vm-no-primary-123"
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces") {
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true, "message": "Network interfaces retrieved",
+					"data": []map[string]any{{
+						"id": "interface-003", "networkInterface": 0, "isPrimary": 0,
+						"publicIp": "", "publicIpId": "", "privateIp": "10.0.0.20",
+						"networkName": "no-primary-network", "networkId": "network-003",
+						"cidrBlock": "10.0.0.0/24", "gatewayIp": "10.0.0.1", "networkType": "standard",
+					}},
+				})
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	state := createTestVMModel("test-vm", testVMImage, false)
+	plan := createTestVMModel("test-vm", testVMImage, true)
+
+	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if !diags.HasError() {
+		t.Fatal("Expected an error diagnostic when no interface is primary")
+	}
+
+	detail := diags.Errors()[0].Detail()
+	if strings.Contains(detail, "%s") {
+		t.Errorf("Expected the detail to be formatted, got '%s'", detail)
+	}
+	if !strings.Contains(detail, vmID) {
+		t.Errorf("Expected the detail to name the virtual machine '%s', got '%s'", vmID, detail)
+	}
+}
+
+func TestMapVirtualMachineResponseToModelRefreshesDrift(t *testing.T) {
+	const (
+		vmID            = "vm-drift-123"
+		newName         = "renamed-in-portal"
+		newSkuID        = "sku-uuid-resized"
+		newDatacenterID = "datacenter-999"
+	)
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces") {
+				testutil.WriteJSONResponse(w, emptyNetworkInterfacesResponse())
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	response := newVMResponse(vmID, newName)
+	response.Data.Configuration.SkuId = newSkuID
+	response.Data.Datacenter.ID = newDatacenterID
+
+	// State still holds the values Terraform last wrote, before the out-of-band change
+	model := createTestVMModel("stale-vm", testVMImage, false)
+
+	result, diags := MapVirtualMachineResponseToModel(context.Background(), gpcnClient, response, model)
+	if diags.HasError() {
+		t.Fatalf("Unexpected diagnostics: %v", diags)
+	}
+
+	if result.Name.ValueString() != newName {
+		t.Errorf("Expected name '%s', got '%s'", newName, result.Name.ValueString())
+	}
+	if result.SizeId.ValueString() != newSkuID {
+		t.Errorf("Expected size_id '%s', got '%s'", newSkuID, result.SizeId.ValueString())
+	}
+	if result.DatacenterId.ValueString() != newDatacenterID {
+		t.Errorf("Expected datacenter_id '%s', got '%s'", newDatacenterID, result.DatacenterId.ValueString())
 	}
 }

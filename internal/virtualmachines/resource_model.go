@@ -113,16 +113,18 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient, response *ReadVirtualMachinesResponse, model ResourceModel) (ResourceModel, diag.Diagnostics) {
 	var allDiags diag.Diagnostics
 
-	if model.DatacenterId.IsNull() {
+	// Refresh these three from the response so a portal-side change shows as drift.
+	// An empty field means the response omits it, so the model value stays.
+	if response.Data.Datacenter.ID != "" {
 		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
 	}
 	var imageIdDiags diag.Diagnostics
 	model.ImageId, imageIdDiags = resolveImageId(gpcnClient, ctx, model.ImageId, model.DatacenterId.ValueString(), response)
 	allDiags.Append(imageIdDiags...)
-	if model.Name.IsNull() {
+	if response.Data.Name != "" {
 		model.Name = types.StringValue(response.Data.Name)
 	}
-	if model.SizeId.IsNull() {
+	if response.Data.Configuration.SkuId != "" {
 		model.SizeId = types.StringValue(response.Data.Configuration.SkuId)
 	}
 
