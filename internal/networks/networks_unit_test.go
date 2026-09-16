@@ -396,3 +396,90 @@ func TestCreateNetworkDefaultRoute(t *testing.T) {
 		})
 	}
 }
+
+func newNetworkInterface(id, networkID string, isPrimary bool) ReadVirtualMachineNetworkDataResponseTF {
+	return ReadVirtualMachineNetworkDataResponseTF{
+		ID:               types.StringValue(id),
+		NetworkInterface: types.Int64Value(0),
+		IsPrimary:        types.BoolValue(isPrimary),
+		NetworkID:        types.StringValue(networkID),
+	}
+}
+
+func TestSetNextNetworkInterfaceToPrimaryAllPrimary(t *testing.T) {
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("SetNextNetworkInterfaceToPrimary panicked instead of returning an error: %v", r)
+		}
+	}()
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			testutil.LogUnexpectedRequest(t, w, r)
+		},
+	})
+	defer server.Close()
+
+	allPrimary := []ReadVirtualMachineNetworkDataResponseTF{
+		newNetworkInterface("interface-a", "network-a", true),
+		newNetworkInterface("interface-b", "network-b", true),
+	}
+
+	err := SetNextNetworkInterfaceToPrimary(gpcnClient, context.Background(), "vm-all-primary", allPrimary)
+	if err == nil {
+		t.Fatal("Expected an error when every network interface is already primary, got nil")
+	}
+}
+
+func TestRemoveNetworkInterfaceByNetworkIdMissingInterface(t *testing.T) {
+	const (
+		vmID      = "vm-missing-123"
+		networkID = "network-not-attached"
+	)
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/network-interfaces") {
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true, "message": "Network interfaces retrieved",
+					"data": []map[string]any{
+						{"id": "interface-a", "networkInterface": 0, "networkId": "network-a"},
+					},
+				})
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	err := RemoveNetworkInterfaceByNetworkId(gpcnClient, context.Background(), vmID, networkID)
+	if err == nil {
+		t.Fatal("Expected an error when the network has no matching interface, got nil")
+	}
+	if !strings.Contains(err.Error(), networkID) {
+		t.Errorf("Expected error to name network ID '%s', got '%s'", networkID, err.Error())
+	}
+	if strings.Contains(err.Error(), "%s") {
+		t.Errorf("Expected error to have no unfilled format verb, got '%s'", err.Error())
+	}
+}
+
+func TestMapNetworkResponseToModelRefreshesConfiguredAttributes(t *testing.T) {
+	response := newNetworkResponse("network-123", "renamed-in-portal", "standard")
+	model := createTestResourceModel("standard", "10.0.0.0/24", "10.0.0.10", "10.0.0.254", "8.8.8.8, 8.8.4.4")
+
+	result := MapNetworkResponseToModel(context.Background(), response, model)
+
+	if result.Name.ValueString() != "renamed-in-portal" {
+		t.Errorf("Expected name 'renamed-in-portal', got '%s'", result.Name.ValueString())
+	}
+	if result.DatacenterId.ValueString() != "dc-123" {
+		t.Errorf("Expected datacenter ID 'dc-123', got '%s'", result.DatacenterId.ValueString())
+	}
+	if result.NetworkType.ValueString() != "standard" {
+		t.Errorf("Expected network type 'standard', got '%s'", result.NetworkType.ValueString())
+	}
+}

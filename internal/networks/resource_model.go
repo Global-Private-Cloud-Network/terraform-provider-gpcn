@@ -102,6 +102,10 @@ func MapNetworkResponseToModel(ctx context.Context, response *readNetworkRespons
 		}
 	}
 
+	model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
+	model.Name = types.StringValue(response.Data.Name)
+	model.NetworkType = types.StringValue(response.Data.NetworkType)
+
 	// If model doesn't already have these populated, set them
 	model = setModelValuesNotPresent(response, model)
 
@@ -109,15 +113,6 @@ func MapNetworkResponseToModel(ctx context.Context, response *readNetworkRespons
 }
 
 func setModelValuesNotPresent(response *readNetworkResponse, model ResourceModel) ResourceModel {
-	if model.DatacenterId.IsNull() {
-		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
-	}
-	if model.Name.IsNull() {
-		model.Name = types.StringValue(response.Data.Name)
-	}
-	if model.NetworkType.IsNull() {
-		model.NetworkType = types.StringValue(response.Data.NetworkType)
-	}
 	start, end := getDHCPAddresses(response)
 	if model.DHCPStartAddress.IsNull() && start != "" {
 		model.DHCPStartAddress = types.StringValue(start)

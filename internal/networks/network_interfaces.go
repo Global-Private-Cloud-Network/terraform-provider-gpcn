@@ -225,7 +225,7 @@ func SetNextNetworkInterfaceToPrimary(gpcnClient *client.GpcnClient, ctx context
 	networkInterfaceIdx := slices.IndexFunc(allNetworkInterfaces, func(networkInterface ReadVirtualMachineNetworkDataResponseTF) bool {
 		return !networkInterface.IsPrimary.ValueBool()
 	})
-	if networkInterfaceIdx < -1 {
+	if networkInterfaceIdx < 0 {
 		return errors.New("no network interfaces found that were not marked as primary")
 	}
 	nextPrimaryNetworkInterfaceID := allNetworkInterfaces[networkInterfaceIdx].ID.ValueString()
@@ -299,7 +299,7 @@ func RemoveNetworkInterfaceByNetworkId(gpcnClient *client.GpcnClient, ctx contex
 	}
 	// If the networkId doesn't have a corresponding interface, something went wrong
 	if networkInterfaceId == "" {
-		return errors.New(ErrDetailRemoveNetworkInterfaceFailed)
+		return fmt.Errorf(ErrDetailRemoveNetworkInterfaceFailed, networkId)
 	}
 
 	// If it does, remove it
