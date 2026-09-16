@@ -52,6 +52,7 @@ const (
 	LogStartingSetNextNetworkInterfaceToPrimary = "Starting SetNextNetworkInterfaceToPrimary for Virtual Machine ID %s"
 	LogSettingNetworkInterfaceAsPrimary         = "Setting network interface with ID %s as primary"
 	LogSuccessfullySetNetworkInterfaceAsPrimary = "Successfully set network interface with ID %s as primary"
+	LogNetworkInterfaceAlreadyPrimary           = "A network interface of Virtual Machine ID %s is already primary. Skipping the promotion"
 	LogPromotingAddedNetworkInterface           = "No network interface survives the removal for Virtual Machine ID %s. Promoting an added interface"
 
 	// RemoveNetworkInterface messages

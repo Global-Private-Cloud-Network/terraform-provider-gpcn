@@ -128,11 +128,11 @@ func setModelValuesNotPresent(response *readNetworkResponse, model ResourceModel
 	return model
 }
 
-// RefreshNetworkModelFromResponse refreshes the name. The name is the one configured
-// attribute that MapNetworkResponseToModel does not refresh. A change to the datacenter
-// or to the network type requires replacement, so the model keeps the configured value.
-// An empty response name leaves the model value alone, because the API omits a field
-// that the practitioner must set.
+// RefreshNetworkModelFromResponse refreshes the name for Read. MapNetworkResponseToModel
+// fills the name only when the state value is null. The model keeps the configured network
+// type and datacenter ID, because a change to either one requires replacement. An empty
+// response name leaves the model value alone, because the API omits a field that the
+// practitioner must set.
 func RefreshNetworkModelFromResponse(response *readNetworkResponse, model ResourceModel) ResourceModel {
 	if response.Data.Name != "" {
 		model.Name = types.StringValue(response.Data.Name)
