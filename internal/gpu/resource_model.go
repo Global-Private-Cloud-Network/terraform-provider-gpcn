@@ -89,8 +89,8 @@ func setModelValuesNotPresent(ctx context.Context, response *readGPUResponse, mo
 		model.GPUCount = types.Int64Value(response.Data.Configuration.GPUCount)
 	}
 
-	// The API returns a longer image name than the one the user configures, so a
-	// refresh here would show permanent drift.
+	// The API returns a longer image name than the user configures. A refresh here
+	// shows permanent drift.
 	if model.ImageName.IsNull() || model.ImageName.ValueString() == "" {
 		model.ImageName = types.StringValue(response.Data.Image)
 	}
@@ -109,7 +109,9 @@ func setModelValuesNotPresent(ctx context.Context, response *readGPUResponse, mo
 
 // RefreshGPUModelFromResponse reports the drift that Read must show. An empty
 // response field leaves the model value alone, because an omitted field must not
-// blank a required attribute.
+// blank a required attribute. sku_code stays out: it requires replacement, and a
+// substituted SKU would plan a replacement on every refresh. The fill-if-null path
+// in setModelValuesNotPresent still populates it.
 func RefreshGPUModelFromResponse(response *readGPUResponse, model ResourceModel) ResourceModel {
 	if response.Data.Datacenter.ID != "" {
 		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
@@ -122,9 +124,6 @@ func RefreshGPUModelFromResponse(response *readGPUResponse, model ResourceModel)
 	}
 	if response.Data.Configuration.Code != "" {
 		model.SeriesCode = types.StringValue(response.Data.Configuration.Code)
-	}
-	if response.Data.Configuration.SkuCode != "" {
-		model.SkuCode = types.StringValue(response.Data.Configuration.SkuCode)
 	}
 	if response.Data.Configuration.GPUCount != 0 {
 		model.GPUCount = types.Int64Value(response.Data.Configuration.GPUCount)

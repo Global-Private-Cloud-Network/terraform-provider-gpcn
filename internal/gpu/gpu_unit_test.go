@@ -815,8 +815,9 @@ func TestMapGPUResponseToModelRefreshesDriftUnit(t *testing.T) {
 	if result.SeriesCode.ValueString() != "nvidia-h100_series" {
 		t.Errorf("Expected SeriesCode 'nvidia-h100_series', got '%s'", result.SeriesCode.ValueString())
 	}
-	if result.SkuCode.ValueString() != "gpu_4x_h100" {
-		t.Errorf("Expected SkuCode 'gpu_4x_h100', got '%s'", result.SkuCode.ValueString())
+	// A refresh of sku_code would plan a replacement, so the configured value wins.
+	if result.SkuCode.ValueString() != "gpu_2x_a6000" {
+		t.Errorf("Expected SkuCode 'gpu_2x_a6000', got '%s'", result.SkuCode.ValueString())
 	}
 	if result.GPUCount.ValueInt64() != 4 {
 		t.Errorf("Expected GPUCount 4, got %d", result.GPUCount.ValueInt64())
@@ -830,7 +831,9 @@ func TestMapGPUResponseToModelKeepsImageAndAuthUnit(t *testing.T) {
 
 	model := createTestGPUModel("test-gpu", "NVIDIA RTX A6000 Series", "nvidia-rtx_a6000-series", testImageName, 2)
 
+	// Read maps first and refreshes second, so the test follows the same order.
 	result := MapGPUResponseToModel(context.Background(), response, model)
+	result = RefreshGPUModelFromResponse(response, result)
 
 	if result.ImageName.ValueString() != testImageName {
 		t.Errorf("Expected ImageName '%s', got '%s'", testImageName, result.ImageName.ValueString())

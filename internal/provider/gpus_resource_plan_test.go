@@ -21,6 +21,9 @@ const (
 	gpuPlanTestSeriesCode   = "nvidia-rtx_a6000-series"
 	gpuPlanTestSkuCode      = "gpu_1x_a6000"
 	gpuPlanTestImageName    = "ubuntu-22.04"
+	// The API returns a longer image name than the configuration, so the fixture
+	// proves that Read keeps the configured value.
+	gpuPlanTestAPIImageName = "Ubuntu 22.04 LTS (x86_64)"
 	gpuPlanTestSshKeyID     = "key-1"
 	gpuPlanTestTimestamp    = "2026-01-02T15:04:05Z"
 )
@@ -79,13 +82,13 @@ func gpuPlanTestReadBody(name string) map[string]any {
 				"country":     "United States",
 			},
 			"sshKeyId": gpuPlanTestSshKeyID,
-			"image":    gpuPlanTestImageName,
+			"image":    gpuPlanTestAPIImageName,
 		},
 	}
 }
 
 // startGPUPlanMockServer serves the GPU endpoints a rename needs. The handler keeps
-// the name from the last create or update, so the read after an apply agrees with
+// the name from the last create or update. The read after an apply then agrees with
 // the configuration and leaves the refresh plan empty. The returned function renames
 // the GPU out of band, which is how a test creates drift.
 func startGPUPlanMockServer(t *testing.T) (*httptest.Server, func(string)) {
