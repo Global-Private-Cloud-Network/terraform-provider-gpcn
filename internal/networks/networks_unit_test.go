@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -413,9 +414,12 @@ func TestSetNextNetworkInterfaceToPrimaryAllPrimary(t *testing.T) {
 		}
 	}()
 
+	var requested atomic.Bool
+
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
+			requested.Store(true)
 			testutil.LogUnexpectedRequest(t, w, r)
 		},
 	})
@@ -429,6 +433,12 @@ func TestSetNextNetworkInterfaceToPrimaryAllPrimary(t *testing.T) {
 	err := SetNextNetworkInterfaceToPrimary(gpcnClient, context.Background(), "vm-all-primary", allPrimary)
 	if err == nil {
 		t.Fatal("Expected an error when every network interface is already primary, got nil")
+	}
+	if !strings.Contains(err.Error(), "not marked as primary") {
+		t.Errorf("Expected the guard error about interfaces not marked as primary, got '%s'", err.Error())
+	}
+	if requested.Load() {
+		t.Error("Expected no HTTP request when every network interface is already primary")
 	}
 }
 
