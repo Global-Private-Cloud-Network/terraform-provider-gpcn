@@ -39,8 +39,11 @@ make testaccnamed TEST=TestNetworksResource  # Run a specific test
 make testacc LOGLEVEL=debug  # Control log level
 ```
 
-`make test` needs a `terraform` binary on PATH: the `resource.UnitTest` cases drive
-real terraform runs against a mock server. It needs no API credentials.
+`make test` needs a `terraform` binary, taken from `PATH` or downloaded by
+terraform-plugin-testing when `PATH` has none. The `resource.UnitTest` cases run
+real terraform: the validator cases stop at validation, and the plan-behaviour
+tests (`internal/provider/gpus_resource_plan_test.go`) drive terraform against an
+`httptest` mock of the GPCN API. No API credentials are needed.
 
 ## Architecture
 
@@ -98,8 +101,13 @@ Resource schema definitions live in `internal/provider/{resource}_resource.go`.
 ## Testing
 
 The only unit/acceptance split is `TF_ACC`: `resource.Test` cases skip without it,
-`resource.UnitTest` cases always run. Acceptance tests are named
-`Test<Thing>Resource...`; there is no `TestAcc*` prefix in this repo.
+`resource.UnitTest` cases always run. An acceptance test is any function that
+calls `resource.Test`; there is no `TestAcc*` prefix in this repo, and the name
+carries no marker either — `TestNetworksResource` and
+`TestVirtualMachinesSizeUpgrade` are both acceptance cases, while
+`TestNetworksResourceInvalidType` is a `resource.UnitTest` one. Identify an
+acceptance test by that call, and pass its exact function name to
+`make testaccnamed TEST=...`.
 
 - **Unit tests**: `testutil.SetupMockServerWithGpcnClient` (`internal/testutil/mock_http.go`) serves mocked HTTP. It bypasses `authTransport`, so not-found and `HTTPError` paths cannot be tested through it — use `testutil.SetupMockServerWithRealTransport`, or `client.NewGpcnClient` against an `httptest` server, for those. Run with `make test`.
 - **Acceptance tests**: Create real resources, and there are no sweepers, so a failed run leaves them behind. Run with `make testacc`. Run individual tests to iterate faster.
