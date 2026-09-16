@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
 )
 
@@ -286,5 +287,45 @@ func TestDetachVolumeHotplugEnabled(t *testing.T) {
 	}
 	if !detachCalled {
 		t.Error("expected detach endpoint to be called")
+	}
+}
+
+func vmNotFoundServer(t *testing.T) (func(), *client.GpcnClient) {
+	server, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+testVMID) {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			testutil.LogUnexpectedRequest(t, w, r)
+		},
+	})
+	return server.Close, gpcnClient
+}
+
+func TestDetachVolumeVMNotFoundKeepsHTTPError(t *testing.T) {
+	closeServer, gpcnClient := vmNotFoundServer(t)
+	defer closeServer()
+
+	err := DetachVolume(gpcnClient, context.Background(), testVMID, testVolID)
+	if err == nil {
+		t.Fatal("expected DetachVolume to fail when the VM is gone")
+	}
+	if !client.IsNotFound(err) {
+		t.Errorf("expected client.IsNotFound to be true, got false for error: %v", err)
+	}
+}
+
+func TestAttachVolumeVMNotFoundKeepsHTTPError(t *testing.T) {
+	closeServer, gpcnClient := vmNotFoundServer(t)
+	defer closeServer()
+
+	err := AttachVolume(gpcnClient, context.Background(), testVMID, testVolID)
+	if err == nil {
+		t.Fatal("expected AttachVolume to fail when the VM is gone")
+	}
+	if !client.IsNotFound(err) {
+		t.Errorf("expected client.IsNotFound to be true, got false for error: %v", err)
 	}
 }

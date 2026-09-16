@@ -10,6 +10,6 @@ const (
 
 	ErrDetailExpectedGpcnClient    = "Expected *client.GpcnClient, got: %T. Please report this issue to the provider developers."
 	ErrDetailVolumeAlreadyAttached = "volume %s is already attached to virtual machine %s, which is different from the requested virtual machine %s"
-	ErrDetailVMStopFailed          = "virtual machine %s could not be stopped: %s"
-	ErrDetailVMStartFailed         = "virtual machine %s could not be started after volume operation: %s"
+	ErrDetailVMStopFailed          = "virtual machine %s could not be stopped: %w"
+	ErrDetailVMStartFailed         = "virtual machine %s could not be started after volume operation: %w"
 )
