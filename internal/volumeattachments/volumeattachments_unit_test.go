@@ -5,9 +5,11 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
+	"terraform-provider-gpcn/internal/virtualmachines"
 )
 
 const (
@@ -52,6 +54,14 @@ func volumeResponse(volID, attachedVMID string) map[string]any {
 			"createdAt": "2024-01-01T00:00:00Z", "updatedAt": "2024-01-01T00:00:00Z",
 		},
 	}
+}
+
+// useFastVMStatusPollInterval keeps the VM status poller from sleeping for whole seconds.
+func useFastVMStatusPollInterval(t *testing.T) {
+	t.Helper()
+	original := virtualmachines.VM_STATUS_POLL_INTERVAL
+	virtualmachines.VM_STATUS_POLL_INTERVAL = 5 * time.Millisecond
+	t.Cleanup(func() { virtualmachines.VM_STATUS_POLL_INTERVAL = original })
 }
 
 func TestGetAttachedVMIdAttached(t *testing.T) {
@@ -143,6 +153,8 @@ func TestAttachVolumeHotplugEnabled(t *testing.T) {
 }
 
 func TestAttachVolumeHotplugDisabledStopsAndStartsVM(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+
 	var stopCalled, startCalled, attachCalled bool
 	vmStatus := "Running"
 
@@ -312,6 +324,9 @@ func TestDetachVolumeVMNotFoundKeepsHTTPError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected DetachVolume to fail when the VM is gone")
 	}
+	if !strings.Contains(err.Error(), "could not be stopped") {
+		t.Errorf("expected the error to come from the stop site, got: %v", err)
+	}
 	if !client.IsNotFound(err) {
 		t.Errorf("expected client.IsNotFound to be true, got false for error: %v", err)
 	}
@@ -325,13 +340,16 @@ func TestAttachVolumeVMNotFoundKeepsHTTPError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected AttachVolume to fail when the VM is gone")
 	}
+	if !strings.Contains(err.Error(), "could not be stopped") {
+		t.Errorf("expected the error to come from the stop site, got: %v", err)
+	}
 	if !client.IsNotFound(err) {
 		t.Errorf("expected client.IsNotFound to be true, got false for error: %v", err)
 	}
 }
 
-// vmRestartFailureServer drives the hotplug-disabled path to the restart site: the VM stops,
-// the volume operation succeeds, then POST /start returns 404 while the VM stays Shutoff.
+// vmRestartFailureServer drives the hotplug-disabled path to the restart site. The VM stops
+// and the volume operation succeeds. Then POST /start returns 404 while the VM stays Shutoff.
 func vmRestartFailureServer(t *testing.T, volumeAction string) (func(), *client.GpcnClient) {
 	vmStatus := "Running"
 
@@ -387,6 +405,8 @@ func assertRestartFailure(t *testing.T, err error) {
 }
 
 func TestDetachVolumeRestartFailureIsNotNotFound(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+
 	closeServer, gpcnClient := vmRestartFailureServer(t, "detach")
 	defer closeServer()
 
@@ -394,8 +414,99 @@ func TestDetachVolumeRestartFailureIsNotNotFound(t *testing.T) {
 }
 
 func TestAttachVolumeRestartFailureIsNotNotFound(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+
 	closeServer, gpcnClient := vmRestartFailureServer(t, "attach")
 	defer closeServer()
 
 	assertRestartFailure(t, AttachVolume(gpcnClient, context.Background(), testVMID, testVolID))
+}
+
+// vmStopFailureServer drives the hotplug-disabled path to a failed stop call. The VM stays
+// Running and answers every GET, but POST /stop returns 404.
+func vmStopFailureServer(t *testing.T) (func(), *client.GpcnClient) {
+	server, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+testVMID):
+				testutil.WriteJSONResponse(w, vmResponse(testVMID, 0, "Running"))
+
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/stop"):
+				w.WriteHeader(http.StatusNotFound)
+
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	return server.Close, gpcnClient
+}
+
+func assertStopFailureOnLiveVM(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected a stop failure to be reported")
+	}
+	if !strings.Contains(err.Error(), "could not be stopped") {
+		t.Errorf("expected the error to report the failed stop, got: %v", err)
+	}
+	if client.IsNotFound(err) {
+		t.Errorf("expected client.IsNotFound to be false for a live VM, got true for error: %v", err)
+	}
+}
+
+func TestDetachVolumeStopCallFailureOnLiveVMIsNotNotFound(t *testing.T) {
+	closeServer, gpcnClient := vmStopFailureServer(t)
+	defer closeServer()
+
+	assertStopFailureOnLiveVM(t, DetachVolume(gpcnClient, context.Background(), testVMID, testVolID))
+}
+
+func TestAttachVolumeStopCallFailureOnLiveVMIsNotNotFound(t *testing.T) {
+	closeServer, gpcnClient := vmStopFailureServer(t)
+	defer closeServer()
+
+	assertStopFailureOnLiveVM(t, AttachVolume(gpcnClient, context.Background(), testVMID, testVolID))
+}
+
+// vmGoneDuringStopServer deletes the VM under the stop call: POST /stop returns 404 and
+// every later GET returns 404 too.
+func vmGoneDuringStopServer(t *testing.T) (func(), *client.GpcnClient) {
+	var stopAttempted bool
+
+	server, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+testVMID):
+				if stopAttempted {
+					w.WriteHeader(http.StatusNotFound)
+					return
+				}
+				testutil.WriteJSONResponse(w, vmResponse(testVMID, 0, "Running"))
+
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/stop"):
+				stopAttempted = true
+				w.WriteHeader(http.StatusNotFound)
+
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	return server.Close, gpcnClient
+}
+
+func TestDetachVolumeVMGoneDuringStopKeepsHTTPError(t *testing.T) {
+	closeServer, gpcnClient := vmGoneDuringStopServer(t)
+	defer closeServer()
+
+	err := DetachVolume(gpcnClient, context.Background(), testVMID, testVolID)
+	if err == nil {
+		t.Fatal("expected DetachVolume to fail when the VM disappears under the stop call")
+	}
+	if !client.IsNotFound(err) {
+		t.Errorf("expected client.IsNotFound to be true for a gone VM, got false for error: %v", err)
+	}
 }

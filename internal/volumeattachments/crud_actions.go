@@ -2,6 +2,7 @@ package volumeattachments
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -95,14 +96,17 @@ func conditionallyStopVM(gpcnClient *client.GpcnClient, ctx context.Context, vmI
 	if err != nil {
 		// Stop failed — check if a concurrent operation already stopped the VM
 		checkResp, checkErr := virtualmachines.GetVirtualMachine(gpcnClient, ctx, vmId)
-		if checkErr != nil {
-			return false, err // return original error
-		}
-		if strings.EqualFold(checkResp.Data.Status, virtualmachines.VMStatusShutoff.String()) {
+		if checkErr == nil && strings.EqualFold(checkResp.Data.Status, virtualmachines.VMStatusShutoff.String()) {
 			tflog.Info(ctx, LogSkippingStopVMAlreadyStopped)
 			return false, nil // someone else stopped it; we should not start it
 		}
-		return false, err
+		if client.IsNotFound(checkErr) {
+			// The re-check proves the VM is gone, so Delete may drop the attachment.
+			return false, checkErr
+		}
+		// The VM answers the re-check. The error must not read as a missing VM,
+		// or Delete drops the attachment without a detach.
+		return false, errors.New(err.Error())
 	}
 
 	return true, nil
