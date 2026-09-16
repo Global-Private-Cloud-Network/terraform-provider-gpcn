@@ -25,4 +25,7 @@ const (
 	ErrDetailUnableToGetNetworkWithID     = "Unable to get GPCN Network with ID '%s'"
 	ErrDetailUnableToUpdateNetworkWithID  = "Unable to update GPCN Network with ID '%s'"
 	ErrDetailUnableToDeleteNetworkWithID  = "Unable to delete GPCN Network with ID '%s'"
+
+	ErrDetailReplacePrimaryInterfaceFailed  = "error replacing primary interface: %w"
+	ErrDetailRefreshNetworkInterfacesFailed = "error refreshing the network interfaces of virtual machine ID '%s' before promoting a primary: %w"
 )

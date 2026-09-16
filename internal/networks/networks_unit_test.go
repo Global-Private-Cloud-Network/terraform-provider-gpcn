@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -525,5 +526,155 @@ func TestMapNetworkResponseToModelKeepsPlanValuesUnit(t *testing.T) {
 	}
 	if result.NetworkType.ValueString() != "custom" {
 		t.Errorf("Expected network type 'custom', got '%s'", result.NetworkType.ValueString())
+	}
+}
+
+// requestRecorder collects the requests that matter to an assertion. The mock server
+// serves each request on its own goroutine, so the mutex guards the slice.
+type requestRecorder struct {
+	mu       sync.Mutex
+	requests []string
+}
+
+func (r *requestRecorder) record(method, path string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.requests = append(r.requests, method+" "+path)
+}
+
+func (r *requestRecorder) recorded() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.requests...)
+}
+
+func networkInterfacePath(vmID, networkInterfaceID string) string {
+	return VIRTUAL_MACHINES_BASE_URL_V1 + vmID + "/network-interfaces/" + networkInterfaceID
+}
+
+func interfaceListPath(vmID string) string {
+	return VIRTUAL_MACHINES_BASE_URL_V1 + vmID + "/network-interfaces"
+}
+
+// updateInterfacesMockHandler answers every call that UpdateNetworkInterfaces makes. The
+// listResponse names the interfaces that a re-fetch finds.
+func updateInterfacesMockHandler(t *testing.T, recorder *requestRecorder, listResponse []map[string]any) func(http.ResponseWriter, *http.Request) {
+	t.Helper()
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/v1/resource/jobs/"):
+			testutil.HandleJobResponse(w, "job-1", "", true)
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/network-interfaces"):
+			recorder.record(r.Method, r.URL.Path)
+			testutil.WriteJSONResponse(w, map[string]any{
+				"success": true, "message": "Network interfaces retrieved", "data": listResponse,
+			})
+		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/network-interfaces"):
+			recorder.record(r.Method, r.URL.Path)
+			testutil.HandleCreateJobResponse(w, "job-1", "Add network interface job started")
+		case r.Method == "DELETE":
+			recorder.record(r.Method, r.URL.Path)
+			testutil.HandleCreateJobResponse(w, "job-1", "Remove network interface job started")
+		case r.Method == "PUT":
+			recorder.record(r.Method, r.URL.Path)
+			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "Primary interface updated"})
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}
+}
+
+func TestUpdateNetworkInterfacesPromotesSurvivingInterfaceUnit(t *testing.T) {
+	const vmID = "vm-survivor"
+	var recorder requestRecorder
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T:       t,
+		Handler: updateInterfacesMockHandler(t, &recorder, nil),
+	})
+	defer server.Close()
+
+	networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
+		newNetworkInterface("interface-a", "network-a", true),
+		newNetworkInterface("interface-b", "network-b", false),
+		newNetworkInterface("interface-c", "network-c", false),
+	}
+
+	err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
+		[]string{"network-a", "network-b", "network-c"}, []string{"network-c"}, networkInterfaces)
+	if err != nil {
+		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
+	}
+
+	want := "PUT " + networkInterfacePath(vmID, "interface-c")
+	got := recorder.recorded()
+	if len(got) == 0 || got[0] != want {
+		t.Errorf("Expected the promotion to target the surviving interface with '%s', got %v", want, got)
+	}
+}
+
+func TestUpdateNetworkInterfacesPromotesAddedInterfaceUnit(t *testing.T) {
+	const vmID = "vm-single-nic"
+	var recorder requestRecorder
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: updateInterfacesMockHandler(t, &recorder, []map[string]any{
+			{"id": "interface-b", "networkInterface": 0, "networkId": "network-b"},
+		}),
+	})
+	defer server.Close()
+
+	networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
+		newNetworkInterface("interface-a", "network-a", true),
+	}
+
+	err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
+		[]string{"network-a"}, []string{"network-b"}, networkInterfaces)
+	if err != nil {
+		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
+	}
+
+	want := []string{
+		"DELETE " + networkInterfacePath(vmID, "interface-a"),
+		"POST " + interfaceListPath(vmID),
+		"GET " + interfaceListPath(vmID),
+		"PUT " + networkInterfacePath(vmID, "interface-b"),
+	}
+	got := recorder.recorded()
+	if len(got) != len(want) {
+		t.Fatalf("Expected requests %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Expected request %d to be '%s', got '%s'", i, want[i], got[i])
+		}
+	}
+}
+
+func TestUpdateNetworkInterfacesRemovesLastInterfaceUnit(t *testing.T) {
+	const vmID = "vm-no-interfaces-left"
+	var recorder requestRecorder
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T:       t,
+		Handler: updateInterfacesMockHandler(t, &recorder, nil),
+	})
+	defer server.Close()
+
+	networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
+		newNetworkInterface("interface-a", "network-a", true),
+	}
+
+	err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
+		[]string{"network-a"}, []string{}, networkInterfaces)
+	if err != nil {
+		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
+	}
+
+	want := []string{"DELETE " + networkInterfacePath(vmID, "interface-a")}
+	got := recorder.recorded()
+	if len(got) != 1 || got[0] != want[0] {
+		t.Errorf("Expected only %v, got %v", want, got)
 	}
 }
