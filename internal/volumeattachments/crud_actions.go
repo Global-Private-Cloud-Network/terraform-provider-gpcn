@@ -103,7 +103,8 @@ func conditionallyStopVM(gpcnClient *client.GpcnClient, ctx context.Context, vmI
 		}
 		if client.IsNotFound(checkErr) {
 			// The re-check proves the VM is gone, so Delete may drop the attachment.
-			return false, fmt.Errorf(ErrDetailVMStopFailed, vmId, checkErr)
+			// Only the re-check wraps, so IsNotFound reads the 404 and not the stop status.
+			return false, fmt.Errorf(ErrDetailVMStopFailed, vmId, fmt.Errorf("%s (re-check: %w)", err.Error(), checkErr))
 		}
 		// The re-check does not prove the VM is gone. The error must not read as
 		// not-found, or Delete drops the attachment without a detach.

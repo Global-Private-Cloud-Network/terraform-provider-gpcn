@@ -132,14 +132,7 @@ func TestAttachVolumeHotplugEnabled(t *testing.T) {
 				testutil.HandleCreateJobResponse(w, testJobID, "attach started")
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"data": map[string]any{
-						"jobs": []map[string]any{
-							{"jobId": testJobID, "resourceId": testVolID, "isCompleted": true, "hasFailed": false},
-						},
-					},
-				})
+				testutil.HandleJobResponse(w, testJobID, testVolID, true)
 
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
@@ -185,14 +178,7 @@ func TestAttachVolumeHotplugDisabledStopsAndStartsVM(t *testing.T) {
 				testutil.HandleCreateJobResponse(w, testJobID, "attach started")
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"data": map[string]any{
-						"jobs": []map[string]any{
-							{"jobId": testJobID, "resourceId": testVolID, "isCompleted": true, "hasFailed": false},
-						},
-					},
-				})
+				testutil.HandleJobResponse(w, testJobID, testVolID, true)
 
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
@@ -239,14 +225,7 @@ func TestAttachVolumeAlreadyStoppedDoesNotStart(t *testing.T) {
 				testutil.HandleCreateJobResponse(w, testJobID, "attach started")
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"data": map[string]any{
-						"jobs": []map[string]any{
-							{"jobId": testJobID, "resourceId": testVolID, "isCompleted": true, "hasFailed": false},
-						},
-					},
-				})
+				testutil.HandleJobResponse(w, testJobID, testVolID, true)
 
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
@@ -282,14 +261,7 @@ func TestDetachVolumeHotplugEnabled(t *testing.T) {
 				testutil.HandleCreateJobResponse(w, testJobID, "detach started")
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"data": map[string]any{
-						"jobs": []map[string]any{
-							{"jobId": testJobID, "resourceId": testVolID, "isCompleted": true, "hasFailed": false},
-						},
-					},
-				})
+				testutil.HandleJobResponse(w, testJobID, testVolID, true)
 
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
@@ -332,6 +304,9 @@ func TestDetachVolumeVMNotFoundKeepsHTTPError(t *testing.T) {
 	if !strings.Contains(err.Error(), "could not be read") {
 		t.Errorf("expected the error to come from the read site, got: %v", err)
 	}
+	if strings.Contains(err.Error(), "could not be stopped") {
+		t.Errorf("a failed read must not be reported as a failed stop: %v", err)
+	}
 	if !client.IsNotFound(err) {
 		t.Errorf("expected client.IsNotFound to be true, got false for error: %v", err)
 	}
@@ -347,6 +322,9 @@ func TestAttachVolumeVMNotFoundKeepsHTTPError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "could not be read") {
 		t.Errorf("expected the error to come from the read site, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "could not be stopped") {
+		t.Errorf("a failed read must not be reported as a failed stop: %v", err)
 	}
 	if !client.IsNotFound(err) {
 		t.Errorf("expected client.IsNotFound to be true, got false for error: %v", err)
@@ -510,6 +488,9 @@ func TestDetachVolumeVMGoneDuringStopKeepsHTTPError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "could not be stopped") {
 		t.Errorf("expected the error to report the failed stop, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "500") {
+		t.Errorf("expected the error to keep the stop failure status, got: %v", err)
 	}
 }
 
