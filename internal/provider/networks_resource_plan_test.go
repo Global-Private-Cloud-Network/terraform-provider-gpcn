@@ -56,8 +56,8 @@ func networkPlanTestReadBody(name string) map[string]any {
 }
 
 // startNetworkPlanMockServer serves the network endpoints a rename needs. The handler
-// keeps the name from the last create or update, so the read after an apply agrees with
-// the configuration and leaves the refresh plan empty. The returned function renames the
+// keeps the name from the last create or update. The read after an apply then matches the
+// configuration, so the refresh plan stays empty. The returned function renames the
 // network out of band, which is how a test creates drift.
 func startNetworkPlanMockServer(t *testing.T) (*httptest.Server, func(string)) {
 	t.Helper()
@@ -127,6 +127,7 @@ resource "gpcn_network" "test" {
 `, host, name, networkPlanTestDatacenterID, networkPlanTestCIDRBlock, networkPlanTestDHCPStart, networkPlanTestDHCPEnd, networkPlanTestDNSServer)
 }
 
+// TestNetworkResourcePlanRename pins the in-place rename path; it does not guard a fix.
 func TestNetworkResourcePlanRename(t *testing.T) {
 	t.Parallel()
 	server, _ := startNetworkPlanMockServer(t)

@@ -196,6 +196,7 @@ func TestGPUResourcePlanRenameWithSeriesCode(t *testing.T) {
 	})
 }
 
+// The test pins the in-place rename path. It does not guard a fix.
 func TestGPUResourcePlanRenameWithSeriesName(t *testing.T) {
 	t.Parallel()
 	server, _ := startGPUPlanMockServer(t)

@@ -196,8 +196,10 @@ resource "gpcn_virtualmachine" "test" {
 `, host, name, vmPlanTestDatacenterID, vmPlanTestSizeID, vmPlanTestImageID, vmPlanTestNetworkID, vmPlanTestSshKeyID, vmPlanTestUsername)
 }
 
+// TestVirtualMachineResourcePlanDetectsOutOfBandRename mutates the shared polling
+// globals, so it must not run beside the package acceptance tests. Go completes every
+// sequential test before a parallel test resumes, which keeps the mutation isolated.
 func TestVirtualMachineResourcePlanDetectsOutOfBandRename(t *testing.T) {
-	t.Parallel()
 	shortenVirtualMachinePolling(t)
 	server, setName := startVirtualMachinePlanMockServer(t)
 
