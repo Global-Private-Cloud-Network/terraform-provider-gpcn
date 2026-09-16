@@ -2,8 +2,10 @@ package provider
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync"
 	"testing"
 
@@ -23,18 +25,21 @@ const (
 	volPlanTestTimestamp    = "2026-01-02T15:04:05Z"
 )
 
+var volPlanTestSkuSizes = map[string]int64{"sku-128": 128, "sku-256": volPlanTestSizeGb}
+
 func volPlanTestSizesBody() map[string]any {
+	availableSizes := make([]map[string]any, 0, len(volPlanTestSkuSizes))
+	for _, skuId := range slices.Sorted(maps.Keys(volPlanTestSkuSizes)) {
+		availableSizes = append(availableSizes, map[string]any{"skuId": skuId, "sizeGb": volPlanTestSkuSizes[skuId]})
+	}
 	return map[string]any{
 		"success": true,
 		"message": "ok",
 		"data": map[string]any{
 			"datacenterId": volPlanTestDatacenterID,
 			"volumeTypes": []map[string]any{{
-				"componentCode": volPlanTestComponent,
-				"availableSizes": []map[string]any{
-					{"skuId": "sku-128", "sizeGb": 128},
-					{"skuId": "sku-256", "sizeGb": volPlanTestSizeGb},
-				},
+				"componentCode":  volPlanTestComponent,
+				"availableSizes": availableSizes,
 			}},
 		},
 	}
@@ -67,10 +72,10 @@ func volPlanTestReadBody(name string, sizeGb int64) map[string]any {
 	}
 }
 
-// startVolumePlanMockServer serves the volume endpoints a drift test needs. The handler
-// keeps the name from the last create and the size from the last resize, so the read
-// after an apply agrees with the configuration and leaves the refresh plan empty. The
-// returned functions change the stored values out of band, which is how a test creates drift.
+// startVolumePlanMockServer serves the volume endpoints a drift test needs.
+// The handler keeps the name and size that the last create or resize set.
+// The read after an apply then agrees with the configuration.
+// The returned functions change the stored values out of band to create drift.
 func startVolumePlanMockServer(t *testing.T) (*httptest.Server, func(string), func(int64)) {
 	t.Helper()
 
@@ -86,8 +91,10 @@ func startVolumePlanMockServer(t *testing.T) (*httptest.Server, func(string), fu
 			testutil.WriteJSONResponse(w, volPlanTestSizesBody())
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/volumes/":
 			body := testutil.ReadRequestBody(r)
+			skuId, _ := body["skuId"].(string)
 			mu.Lock()
 			name, _ = body["name"].(string)
+			sizeGb = volPlanTestSkuSizes[skuId]
 			mu.Unlock()
 			testutil.HandleCreateJobResponse(w, "job-1", "create issued")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
@@ -207,6 +214,44 @@ func TestVolumeResourcePlanDetectsOutOfBandResize(t *testing.T) {
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "size_gb", fmt.Sprint(volPlanTestSizeGb)),
+				),
+			},
+		},
+	})
+}
+
+// An out-of-band grow plans a replacement because Terraform must shrink the volume back,
+// and shrinking requires one. This test pins that consequence.
+func TestVolumeResourcePlanOutOfBandGrowPlansReplacement(t *testing.T) {
+	t.Parallel()
+	server, _, setSize := startVolumePlanMockServer(t)
+
+	config := volPlanTestConfig(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionCreate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "size_gb", fmt.Sprint(volPlanTestSizeGb)),
+				),
+			},
+			{
+				PreConfig: func() { setSize(512) },
+				Config:    config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionReplace),
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(

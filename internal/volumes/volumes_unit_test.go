@@ -383,6 +383,23 @@ func TestMapVolumeResponseToModelImportUnknownVolumeTypeUnit(t *testing.T) {
 
 	result := MapVolumeResponseToModel(context.Background(), response, ResourceModel{})
 
+	if result.VolumeType.ValueString() != "Ultra-NVMe" {
+		t.Errorf("Expected VolumeType 'Ultra-NVMe', got '%s'", result.VolumeType.ValueString())
+	}
+}
+
+func TestMapVolumeResponseToModelImportKeepsNullOnEmptyUnit(t *testing.T) {
+	response := newVolumeResponse("volume-123", "", 0, "sku-uuid-10")
+	response.Data.VolumeType.Name = ""
+
+	result := MapVolumeResponseToModel(context.Background(), response, ResourceModel{})
+
+	if !result.Name.IsNull() {
+		t.Errorf("Expected Name to stay null, got '%s'", result.Name.ValueString())
+	}
+	if !result.SizeGb.IsNull() {
+		t.Errorf("Expected SizeGb to stay null, got %d", result.SizeGb.ValueInt64())
+	}
 	if !result.VolumeType.IsNull() {
 		t.Errorf("Expected VolumeType to stay null, got '%s'", result.VolumeType.ValueString())
 	}

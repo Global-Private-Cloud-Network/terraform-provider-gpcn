@@ -62,19 +62,16 @@ func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel
 	if model.DatacenterId.IsNull() {
 		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
 	}
-	if model.Name.IsNull() {
+	if model.Name.IsNull() && response.Data.Name != "" {
 		model.Name = types.StringValue(response.Data.Name)
 	}
-	if model.SizeGb.IsNull() {
+	if model.SizeGb.IsNull() && response.Data.SizeGb != 0 {
 		model.SizeGb = types.Int64Value(response.Data.SizeGb)
 	}
-	// The schema accepts only the canonical keys. Import leaves the attribute null
-	// when the API sends a name we do not know. Terraform then reports the missing
-	// Required attribute instead of a value the validator rejects.
-	if model.VolumeType.IsNull() {
-		if canonical, found := canonicalVolumeType(response.Data.VolumeType.Name); found {
-			model.VolumeType = types.StringValue(canonical)
-		}
+	// The API can send the volume type in a different case. The canonical key keeps
+	// the configured value from planning a replacement.
+	if model.VolumeType.IsNull() && response.Data.VolumeType.Name != "" {
+		model.VolumeType = types.StringValue(canonicalVolumeType(response.Data.VolumeType.Name))
 	}
 	return model
 }
@@ -93,11 +90,11 @@ func RefreshVolumeModelFromResponse(response *readVolumesResponse, model Resourc
 	return model
 }
 
-func canonicalVolumeType(name string) (string, bool) {
+func canonicalVolumeType(name string) string {
 	for key := range volumeTypeMapping {
 		if strings.EqualFold(key, name) {
-			return key, true
+			return key
 		}
 	}
-	return "", false
+	return name
 }
