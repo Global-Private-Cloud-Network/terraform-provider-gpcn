@@ -329,3 +329,73 @@ func TestAttachVolumeVMNotFoundKeepsHTTPError(t *testing.T) {
 		t.Errorf("expected client.IsNotFound to be true, got false for error: %v", err)
 	}
 }
+
+// vmRestartFailureServer drives the hotplug-disabled path to the restart site: the VM stops,
+// the volume operation succeeds, then POST /start returns 404 while the VM stays Shutoff.
+func vmRestartFailureServer(t *testing.T, volumeAction string) (func(), *client.GpcnClient) {
+	vmStatus := "Running"
+
+	server, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+testVMID):
+				testutil.WriteJSONResponse(w, vmResponse(testVMID, 0, vmStatus))
+
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/stop"):
+				vmStatus = "Shutoff"
+				testutil.WriteJSONResponse(w, map[string]bool{"success": true})
+
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/start"):
+				w.WriteHeader(http.StatusNotFound)
+
+			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+testVolID+"/"+volumeAction):
+				testutil.HandleCreateJobResponse(w, testJobID, volumeAction+" started")
+
+			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"data": map[string]any{
+						"jobs": []map[string]any{
+							{"jobId": testJobID, "resourceId": testVolID, "isCompleted": true, "hasFailed": false},
+						},
+					},
+				})
+
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	return server.Close, gpcnClient
+}
+
+func assertRestartFailure(t *testing.T, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("expected a restart failure to be reported")
+	}
+	if !strings.Contains(err.Error(), testVMID) {
+		t.Errorf("expected the error to name VM %s, got: %v", testVMID, err)
+	}
+	if !strings.Contains(err.Error(), "could not be started") {
+		t.Errorf("expected the error to report the failed restart, got: %v", err)
+	}
+	if client.IsNotFound(err) {
+		t.Errorf("expected client.IsNotFound to be false for a restart failure, got true for error: %v", err)
+	}
+}
+
+func TestDetachVolumeRestartFailureIsNotNotFound(t *testing.T) {
+	closeServer, gpcnClient := vmRestartFailureServer(t, "detach")
+	defer closeServer()
+
+	assertRestartFailure(t, DetachVolume(gpcnClient, context.Background(), testVMID, testVolID))
+}
+
+func TestAttachVolumeRestartFailureIsNotNotFound(t *testing.T) {
+	closeServer, gpcnClient := vmRestartFailureServer(t, "attach")
+	defer closeServer()
+
+	assertRestartFailure(t, AttachVolume(gpcnClient, context.Background(), testVMID, testVolID))
+}
