@@ -408,13 +408,7 @@ func newNetworkInterface(id, networkID string, isPrimary bool) ReadVirtualMachin
 	}
 }
 
-func TestSetNextNetworkInterfaceToPrimaryAllPrimary(t *testing.T) {
-	defer func() {
-		if r := recover(); r != nil {
-			t.Fatalf("SetNextNetworkInterfaceToPrimary panicked instead of returning an error: %v", r)
-		}
-	}()
-
+func TestSetNextNetworkInterfaceToPrimarySkipsWhenAlreadyPrimary(t *testing.T) {
 	var requested atomic.Bool
 
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
@@ -798,5 +792,112 @@ func TestUpdateNetworkInterfacesPromotesPreferredAddedInterfaceUnit(t *testing.T
 	want := "PUT " + networkInterfacePath(vmID, "interface-c")
 	if got := singlePutRequest(t, recorder.recorded()); got != want {
 		t.Errorf("Expected the promotion to target the configured primary with '%s', got '%s'", want, got)
+	}
+}
+
+func TestUpdateNetworkInterfacesPromotesPreferredAddedInterfaceOverSurvivorUnit(t *testing.T) {
+	const vmID = "vm-preferred-added-over-survivor"
+	var recorder requestRecorder
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: updateInterfacesMockHandler(t, &recorder, []map[string]any{
+			{"id": "interface-b", "networkInterface": 0, "networkId": "network-b"},
+			{"id": "interface-c", "networkInterface": 1, "networkId": "network-c"},
+		}),
+	})
+	defer server.Close()
+
+	networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
+		newNetworkInterface("interface-a", "network-a", true),
+		newNetworkInterface("interface-b", "network-b", false),
+	}
+
+	err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
+		[]string{"network-a", "network-b"}, []string{"network-c", "network-b"}, networkInterfaces)
+	if err != nil {
+		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
+	}
+
+	want := "PUT " + networkInterfacePath(vmID, "interface-c")
+	if got := singlePutRequest(t, recorder.recorded()); got != want {
+		t.Errorf("Expected the promotion to target the added configured primary with '%s', got '%s'", want, got)
+	}
+}
+
+func TestUpdateNetworkInterfacesPromotesPreferredOverBackendPrimaryUnit(t *testing.T) {
+	const vmID = "vm-preferred-over-backend-primary"
+	var recorder requestRecorder
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: updateInterfacesMockHandler(t, &recorder, []map[string]any{
+			{"id": "interface-b", "networkInterface": 0, "networkId": "network-b"},
+			{"id": "interface-c", "networkInterface": 1, "networkId": "network-c", "isPrimary": 1},
+		}),
+	})
+	defer server.Close()
+
+	networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
+		newNetworkInterface("interface-a", "network-a", true),
+	}
+
+	err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
+		[]string{"network-a"}, []string{"network-b", "network-c"}, networkInterfaces)
+	if err != nil {
+		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
+	}
+
+	want := "PUT " + networkInterfacePath(vmID, "interface-b")
+	if got := singlePutRequest(t, recorder.recorded()); got != want {
+		t.Errorf("Expected the promotion to target the configured primary with '%s', got '%s'", want, got)
+	}
+}
+
+func TestUpdateNetworkInterfacesIgnoresInFlightDeleteOnRefreshUnit(t *testing.T) {
+	// The refreshed list still holds the removed interface, because its delete is in flight.
+	cases := []struct {
+		name             string
+		removedIsPrimary bool
+	}{
+		{name: "removed interface is still primary", removedIsPrimary: true},
+		{name: "removed interface is no longer primary", removedIsPrimary: false},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			const vmID = "vm-lagging-delete"
+			var recorder requestRecorder
+
+			laggingInterface := map[string]any{"id": "interface-a", "networkInterface": 0, "networkId": "network-a"}
+			if c.removedIsPrimary {
+				laggingInterface["isPrimary"] = 1
+			}
+
+			server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+				T: t,
+				Handler: updateInterfacesMockHandler(t, &recorder, []map[string]any{
+					laggingInterface,
+					{"id": "interface-c", "networkInterface": 1, "networkId": "network-c"},
+				}),
+			})
+			defer server.Close()
+
+			networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
+				newNetworkInterface("interface-a", "network-a", true),
+			}
+
+			// The attach of network-b has not reached the list yet.
+			err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
+				[]string{"network-a"}, []string{"network-b", "network-c"}, networkInterfaces)
+			if err != nil {
+				t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
+			}
+
+			want := "PUT " + networkInterfacePath(vmID, "interface-c")
+			if got := singlePutRequest(t, recorder.recorded()); got != want {
+				t.Errorf("Expected the promotion to skip the removed interface and target '%s', got '%s'", want, got)
+			}
+		})
 	}
 }
