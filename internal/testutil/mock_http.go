@@ -116,6 +116,8 @@ func LogUnexpectedRequest(t *testing.T, w http.ResponseWriter, r *http.Request) 
 // SetupMockServerWithGpcnClient bypasses that transport, so not-found paths cannot be
 // tested through it.
 func SetupMockServerWithRealTransport(config MockServerConfig) (*httptest.Server, *client.GpcnClient) {
+	config.T.Helper()
+
 	server := httptest.NewServer(http.HandlerFunc(config.Handler))
 	// A failure below leaves the listener open, so the cleanup closes it.
 	config.T.Cleanup(server.Close)

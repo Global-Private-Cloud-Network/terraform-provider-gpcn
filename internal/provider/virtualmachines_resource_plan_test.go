@@ -34,11 +34,14 @@ func shortenVirtualMachinePolling(t *testing.T) {
 	t.Helper()
 
 	previousInterval := virtualmachines.VM_STATUS_POLL_INTERVAL
+	previousSettle := virtualmachines.VM_STATUS_SETTLE_WAIT
 	previousDelay := virtualmachines.DEFAULT_INITIAL_POLL_DELAY_SECONDS
 	virtualmachines.VM_STATUS_POLL_INTERVAL = 5 * time.Millisecond
+	virtualmachines.VM_STATUS_SETTLE_WAIT = 5 * time.Millisecond
 	virtualmachines.DEFAULT_INITIAL_POLL_DELAY_SECONDS = 0
 	t.Cleanup(func() {
 		virtualmachines.VM_STATUS_POLL_INTERVAL = previousInterval
+		virtualmachines.VM_STATUS_SETTLE_WAIT = previousSettle
 		virtualmachines.DEFAULT_INITIAL_POLL_DELAY_SECONDS = previousDelay
 	})
 }
@@ -96,22 +99,6 @@ func vmPlanTestNetworkInterfacesBody() map[string]any {
 	}
 }
 
-func vmPlanTestImagesBody() map[string]any {
-	return map[string]any{
-		"success": true,
-		"message": "ok",
-		"data": []map[string]any{{
-			"id":        1,
-			"name":      "Linux",
-			"sortOrder": 1,
-			"images": []map[string]any{{
-				"id":   vmPlanTestImageID,
-				"name": vmPlanTestImageName,
-			}},
-		}},
-	}
-}
-
 // startVirtualMachinePlanMockServer serves the endpoints a rename needs. The handler
 // keeps the name from the last create or update, so the read after an apply agrees with
 // the configuration and leaves the refresh plan empty. The returned function renames the
@@ -157,8 +144,6 @@ func startVirtualMachinePlanMockServer(t *testing.T) (*httptest.Server, func(str
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodDelete && r.URL.Path == vmPath:
 			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-images":
-			testutil.WriteJSONResponse(w, vmPlanTestImagesBody())
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}

@@ -59,9 +59,14 @@ func volumeResponse(volID, attachedVMID string) map[string]any {
 // useFastVMStatusPollInterval keeps the VM status poller from sleeping for whole seconds.
 func useFastVMStatusPollInterval(t *testing.T) {
 	t.Helper()
-	original := virtualmachines.VM_STATUS_POLL_INTERVAL
+	originalInterval := virtualmachines.VM_STATUS_POLL_INTERVAL
+	originalSettle := virtualmachines.VM_STATUS_SETTLE_WAIT
 	virtualmachines.VM_STATUS_POLL_INTERVAL = 5 * time.Millisecond
-	t.Cleanup(func() { virtualmachines.VM_STATUS_POLL_INTERVAL = original })
+	virtualmachines.VM_STATUS_SETTLE_WAIT = 5 * time.Millisecond
+	t.Cleanup(func() {
+		virtualmachines.VM_STATUS_POLL_INTERVAL = originalInterval
+		virtualmachines.VM_STATUS_SETTLE_WAIT = originalSettle
+	})
 }
 
 func TestGetAttachedVMIdAttached(t *testing.T) {
@@ -511,5 +516,57 @@ func TestDetachVolumeVMGoneDuringStopKeepsHTTPError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "could not be stopped") {
 		t.Errorf("expected the error to report the failed stop, got: %v", err)
+	}
+}
+
+func TestDetachVolumeConcurrentStopIsAbsorbed(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+
+	var stopAttempted, detachCalled, startCalled bool
+	vmStatus := "Running"
+
+	server, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+testVMID):
+				testutil.WriteJSONResponse(w, vmResponse(testVMID, 0, vmStatus))
+
+			// Another process stops the VM while this stop call fails.
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/stop"):
+				stopAttempted = true
+				vmStatus = "Shutoff"
+				w.WriteHeader(http.StatusInternalServerError)
+
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/start"):
+				startCalled = true
+				vmStatus = "Running"
+				testutil.WriteJSONResponse(w, map[string]bool{"success": true})
+
+			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+testVolID+"/detach"):
+				detachCalled = true
+				testutil.HandleCreateJobResponse(w, testJobID, "detach started")
+
+			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, testJobID, testVolID, true)
+
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	if err := DetachVolume(gpcnClient, context.Background(), testVMID, testVolID); err != nil {
+		t.Fatalf("expected the concurrent stop to be absorbed, got: %v", err)
+	}
+	if !stopAttempted {
+		t.Error("expected the stop call to be attempted")
+	}
+	if !detachCalled {
+		t.Error("expected detach endpoint to be called")
+	}
+	if startCalled {
+		t.Error("expected start NOT to be called when another process stopped the VM")
 	}
 }
