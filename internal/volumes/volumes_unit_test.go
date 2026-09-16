@@ -347,6 +347,7 @@ func TestGetVolumeSkuIdInvalidSizeMockHTTP(t *testing.T) {
 func TestMapVolumeResponseToModelRefreshesDriftUnit(t *testing.T) {
 	response := newVolumeResponse("volume-123", "renamed-in-portal", 512, "sku-uuid-11")
 	response.Data.Datacenter.ID = "datacenter-999"
+	response.Data.VolumeType.Name = "NVMe"
 	model := createTestVolumeModel("stale-name", "SSD", 128)
 
 	result := RefreshVolumeModelFromResponse(response, MapVolumeResponseToModel(context.Background(), response, model))
@@ -357,32 +358,33 @@ func TestMapVolumeResponseToModelRefreshesDriftUnit(t *testing.T) {
 	if result.SizeGb.ValueInt64() != 512 {
 		t.Errorf("Expected SizeGb 512, got %d", result.SizeGb.ValueInt64())
 	}
-	if result.DatacenterId.ValueString() != "datacenter-999" {
-		t.Errorf("Expected DatacenterId 'datacenter-999', got '%s'", result.DatacenterId.ValueString())
+	if result.DatacenterId.ValueString() != testDatacenterID {
+		t.Errorf("Expected DatacenterId '%s' to survive, got '%s'", testDatacenterID, result.DatacenterId.ValueString())
+	}
+	if result.VolumeType.ValueString() != "SSD" {
+		t.Errorf("Expected VolumeType 'SSD' to survive, got '%s'", result.VolumeType.ValueString())
 	}
 }
 
-func TestMapVolumeResponseToModelVolumeTypeCasingUnit(t *testing.T) {
-	response := newVolumeResponse("volume-123", "test-volume", 256, "sku-uuid-10")
+func TestMapVolumeResponseToModelImportCanonicalisesVolumeTypeUnit(t *testing.T) {
+	response := newVolumeResponse("volume-123", "imported-volume", 256, "sku-uuid-10")
 	response.Data.VolumeType.Name = "nvme"
-	model := createTestVolumeModel("test-volume", "SSD", 256)
 
-	result := RefreshVolumeModelFromResponse(response, MapVolumeResponseToModel(context.Background(), response, model))
+	result := MapVolumeResponseToModel(context.Background(), response, ResourceModel{})
 
 	if result.VolumeType.ValueString() != "NVMe" {
 		t.Errorf("Expected VolumeType 'NVMe', got '%s'", result.VolumeType.ValueString())
 	}
 }
 
-func TestMapVolumeResponseToModelUnknownVolumeTypeUnit(t *testing.T) {
-	response := newVolumeResponse("volume-123", "test-volume", 256, "sku-uuid-10")
-	response.Data.VolumeType.Name = "foo"
-	model := createTestVolumeModel("test-volume", "SSD", 256)
+func TestMapVolumeResponseToModelImportUnknownVolumeTypeUnit(t *testing.T) {
+	response := newVolumeResponse("volume-123", "imported-volume", 256, "sku-uuid-10")
+	response.Data.VolumeType.Name = "Ultra-NVMe"
 
-	result := RefreshVolumeModelFromResponse(response, MapVolumeResponseToModel(context.Background(), response, model))
+	result := MapVolumeResponseToModel(context.Background(), response, ResourceModel{})
 
-	if result.VolumeType.ValueString() != "SSD" {
-		t.Errorf("Expected VolumeType 'SSD' to survive, got '%s'", result.VolumeType.ValueString())
+	if !result.VolumeType.IsNull() {
+		t.Errorf("Expected VolumeType to stay null, got '%s'", result.VolumeType.ValueString())
 	}
 }
 

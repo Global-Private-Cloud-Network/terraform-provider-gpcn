@@ -273,8 +273,8 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 
 		if slices.Contains(targetStatusesLower, strings.ToLower(getResp.Data.Status)) {
 			tflog.Info(ctx, fmt.Sprintf(LogVMStatusProceedingToAttach, getResp.Data.ID, getResp.Data.Status))
-			// The API can report the target status before the change is complete. Wait one
-			// more interval to confirm it.
+			// The API can report the target status before the change is complete.
+			// The extra wait lowers that risk.
 			time.Sleep(VM_STATUS_POLL_INTERVAL)
 			break
 		}

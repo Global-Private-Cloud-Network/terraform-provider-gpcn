@@ -68,30 +68,27 @@ func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel
 	if model.SizeGb.IsNull() {
 		model.SizeGb = types.Int64Value(response.Data.SizeGb)
 	}
+	// The schema accepts only the canonical keys. Import leaves the attribute null
+	// when the API sends a name we do not know. Terraform then reports the missing
+	// Required attribute instead of a value the validator rejects.
 	if model.VolumeType.IsNull() {
-		model.VolumeType = types.StringValue(response.Data.VolumeType.Name)
+		if canonical, found := canonicalVolumeType(response.Data.VolumeType.Name); found {
+			model.VolumeType = types.StringValue(canonical)
+		}
 	}
 	return model
 }
 
-// Overwrite the configured attributes so Read reports drift. Only Read calls this
-// function. Create and Update must keep the planned values. Terraform rejects the
-// apply when the API lags or canonicalises a value.
+// Read refreshes only the attributes that change out of band and that Terraform can
+// reconcile. The attributes fixed at creation keep the configured value. A vocabulary
+// mismatch there plans a destroy and create forever. Only Read calls this function.
 func RefreshVolumeModelFromResponse(response *readVolumesResponse, model ResourceModel) ResourceModel {
 	// An attribute the API omits must not blank a Required value.
-	if response.Data.Datacenter.ID != "" {
-		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
-	}
 	if response.Data.Name != "" {
 		model.Name = types.StringValue(response.Data.Name)
 	}
 	if response.Data.SizeGb != 0 {
 		model.SizeGb = types.Int64Value(response.Data.SizeGb)
-	}
-
-	// The schema accepts only the canonical keys. Keep the old value when the API sends a name we do not know.
-	if canonical, found := canonicalVolumeType(response.Data.VolumeType.Name); found {
-		model.VolumeType = types.StringValue(canonical)
 	}
 	return model
 }

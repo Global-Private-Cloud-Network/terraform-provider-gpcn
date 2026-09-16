@@ -477,7 +477,7 @@ func TestRemoveNetworkInterfaceByNetworkIdMissingInterface(t *testing.T) {
 	}
 }
 
-func TestMapNetworkResponseToModelRefreshesConfiguredAttributes(t *testing.T) {
+func TestRefreshNetworkModelFromResponseAfterMapUnit(t *testing.T) {
 	response := newNetworkResponse("network-123", "renamed-in-portal", "standard")
 	model := createTestResourceModel("custom", "10.0.0.0/24", "10.0.0.10", "10.0.0.254", "8.8.8.8, 8.8.4.4")
 
@@ -486,18 +486,17 @@ func TestMapNetworkResponseToModelRefreshesConfiguredAttributes(t *testing.T) {
 	if result.Name.ValueString() != "renamed-in-portal" {
 		t.Errorf("Expected name 'renamed-in-portal', got '%s'", result.Name.ValueString())
 	}
-	if result.DatacenterId.ValueString() != "dc-123" {
-		t.Errorf("Expected datacenter ID 'dc-123', got '%s'", result.DatacenterId.ValueString())
+	if result.DatacenterId.ValueString() != testDatacenterID {
+		t.Errorf("Expected datacenter ID '%s', got '%s'", testDatacenterID, result.DatacenterId.ValueString())
 	}
-	if result.NetworkType.ValueString() != "standard" {
-		t.Errorf("Expected network type 'standard', got '%s'", result.NetworkType.ValueString())
+	if result.NetworkType.ValueString() != "custom" {
+		t.Errorf("Expected network type 'custom', got '%s'", result.NetworkType.ValueString())
 	}
 }
 
 func TestRefreshNetworkModelFromResponseKeepsValuesOnEmptyUnit(t *testing.T) {
-	response := newNetworkResponse("network-123", "", "")
-	response.Data.Datacenter.ID = ""
-	model := createTestResourceModel("standard", "10.0.0.0/24", "10.0.0.10", "10.0.0.254", "8.8.8.8, 8.8.4.4")
+	response := newNetworkResponse("network-123", "", "standard")
+	model := createTestResourceModel("custom", "10.0.0.0/24", "10.0.0.10", "10.0.0.254", "8.8.8.8, 8.8.4.4")
 
 	result := RefreshNetworkModelFromResponse(response, model)
 
@@ -507,8 +506,8 @@ func TestRefreshNetworkModelFromResponseKeepsValuesOnEmptyUnit(t *testing.T) {
 	if result.DatacenterId.ValueString() != testDatacenterID {
 		t.Errorf("Expected datacenter ID '%s', got '%s'", testDatacenterID, result.DatacenterId.ValueString())
 	}
-	if result.NetworkType.ValueString() != "standard" {
-		t.Errorf("Expected network type 'standard', got '%s'", result.NetworkType.ValueString())
+	if result.NetworkType.ValueString() != "custom" {
+		t.Errorf("Expected network type 'custom', got '%s'", result.NetworkType.ValueString())
 	}
 }
 

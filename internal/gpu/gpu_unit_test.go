@@ -806,21 +806,21 @@ func TestMapGPUResponseToModelRefreshesDriftUnit(t *testing.T) {
 	if result.Name.ValueString() != "renamed-in-portal" {
 		t.Errorf("Expected Name 'renamed-in-portal', got '%s'", result.Name.ValueString())
 	}
-	if result.DatacenterId.ValueString() != "datacenter-456" {
-		t.Errorf("Expected DatacenterId 'datacenter-456', got '%s'", result.DatacenterId.ValueString())
+	// The attributes below are fixed at creation, so the configured value wins.
+	if result.DatacenterId.ValueString() != testDatacenterID {
+		t.Errorf("Expected DatacenterId '%s', got '%s'", testDatacenterID, result.DatacenterId.ValueString())
 	}
-	if result.SeriesName.ValueString() != "NVIDIA H100 Series" {
-		t.Errorf("Expected SeriesName 'NVIDIA H100 Series', got '%s'", result.SeriesName.ValueString())
+	if result.SeriesName.ValueString() != "NVIDIA RTX A6000 Series" {
+		t.Errorf("Expected SeriesName 'NVIDIA RTX A6000 Series', got '%s'", result.SeriesName.ValueString())
 	}
-	if result.SeriesCode.ValueString() != "nvidia-h100_series" {
-		t.Errorf("Expected SeriesCode 'nvidia-h100_series', got '%s'", result.SeriesCode.ValueString())
+	if result.SeriesCode.ValueString() != "nvidia-rtx_a6000-series" {
+		t.Errorf("Expected SeriesCode 'nvidia-rtx_a6000-series', got '%s'", result.SeriesCode.ValueString())
 	}
-	// A refresh of sku_code would plan a replacement, so the configured value wins.
 	if result.SkuCode.ValueString() != "gpu_2x_a6000" {
 		t.Errorf("Expected SkuCode 'gpu_2x_a6000', got '%s'", result.SkuCode.ValueString())
 	}
-	if result.GPUCount.ValueInt64() != 4 {
-		t.Errorf("Expected GPUCount 4, got %d", result.GPUCount.ValueInt64())
+	if result.GPUCount.ValueInt64() != 2 {
+		t.Errorf("Expected GPUCount 2, got %d", result.GPUCount.ValueInt64())
 	}
 }
 
@@ -831,7 +831,6 @@ func TestMapGPUResponseToModelKeepsImageAndAuthUnit(t *testing.T) {
 
 	model := createTestGPUModel("test-gpu", "NVIDIA RTX A6000 Series", "nvidia-rtx_a6000-series", testImageName, 2)
 
-	// Read maps first and refreshes second, so the test follows the same order.
 	result := MapGPUResponseToModel(context.Background(), response, model)
 	result = RefreshGPUModelFromResponse(response, result)
 
@@ -866,33 +865,12 @@ func TestMapGPUResponseToModelKeepsPlanValuesUnit(t *testing.T) {
 
 func TestRefreshGPUModelFromResponseKeepsValuesOnEmptyUnit(t *testing.T) {
 	response := newGPUResponse("gpu-123", "")
-	response.Data.Datacenter.ID = ""
-	response.Data.Configuration.Name = ""
-	response.Data.Configuration.Code = ""
-	response.Data.Configuration.SkuCode = ""
-	response.Data.Configuration.GPUCount = 0
 
 	model := createTestGPUModel("configured-name", "NVIDIA RTX A6000 Series", "nvidia-rtx_a6000-series", testImageName, 2)
-	model.SkuCode = types.StringValue("gpu_2x_a6000")
 
 	result := RefreshGPUModelFromResponse(response, model)
 
 	if result.Name.ValueString() != "configured-name" {
 		t.Errorf("Expected Name 'configured-name', got '%s'", result.Name.ValueString())
-	}
-	if result.DatacenterId.ValueString() != testDatacenterID {
-		t.Errorf("Expected DatacenterId '%s', got '%s'", testDatacenterID, result.DatacenterId.ValueString())
-	}
-	if result.SeriesName.ValueString() != "NVIDIA RTX A6000 Series" {
-		t.Errorf("Expected SeriesName 'NVIDIA RTX A6000 Series', got '%s'", result.SeriesName.ValueString())
-	}
-	if result.SeriesCode.ValueString() != "nvidia-rtx_a6000-series" {
-		t.Errorf("Expected SeriesCode 'nvidia-rtx_a6000-series', got '%s'", result.SeriesCode.ValueString())
-	}
-	if result.SkuCode.ValueString() != "gpu_2x_a6000" {
-		t.Errorf("Expected SkuCode 'gpu_2x_a6000', got '%s'", result.SkuCode.ValueString())
-	}
-	if result.GPUCount.ValueInt64() != 2 {
-		t.Errorf("Expected GPUCount 2, got %d", result.GPUCount.ValueInt64())
 	}
 }

@@ -107,26 +107,15 @@ func setModelValuesNotPresent(ctx context.Context, response *readGPUResponse, mo
 	return model
 }
 
-// RefreshGPUModelFromResponse reports the drift that Read must show. An empty
-// response field leaves the model value alone, because an omitted field must not
-// blank a required attribute. sku_code stays out: it requires replacement, and a
-// substituted SKU would plan a replacement on every refresh. The fill-if-null path
-// in setModelValuesNotPresent still populates it.
+// RefreshGPUModelFromResponse reports the drift that Read must show. Only the
+// name can change out of band and reconcile, so only the name refreshes. Every
+// other attribute is fixed at creation, and a refresh of one risks a vocabulary
+// mismatch that plans a replacement forever. The fill-if-null path in
+// setModelValuesNotPresent still populates them. An empty response name leaves
+// the model value alone.
 func RefreshGPUModelFromResponse(response *readGPUResponse, model ResourceModel) ResourceModel {
-	if response.Data.Datacenter.ID != "" {
-		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
-	}
 	if response.Data.Name != "" {
 		model.Name = types.StringValue(response.Data.Name)
-	}
-	if response.Data.Configuration.Name != "" {
-		model.SeriesName = types.StringValue(response.Data.Configuration.Name)
-	}
-	if response.Data.Configuration.Code != "" {
-		model.SeriesCode = types.StringValue(response.Data.Configuration.Code)
-	}
-	if response.Data.Configuration.GPUCount != 0 {
-		model.GPUCount = types.Int64Value(response.Data.Configuration.GPUCount)
 	}
 	return model
 }

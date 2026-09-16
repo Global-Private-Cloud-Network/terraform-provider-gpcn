@@ -112,11 +112,11 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 
 // Read calls this after MapVirtualMachineResponseToModel so an out-of-band change shows as drift.
 // Create and Update must not call it, because a lagging API then breaks the planned values.
+// Only name and size_id refresh. The other attributes are fixed at creation and cannot drift.
+// A refresh of them risks a vocabulary mismatch that plans a destroy and create forever.
+// network_ids and allocate_public_ip stay out for the reasons at their fill-if-null sites.
 // An empty field means the response omits it, so the model value stays.
 func RefreshVirtualMachineModelFromResponse(response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
-	if response.Data.Datacenter.ID != "" {
-		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
-	}
 	if response.Data.Name != "" {
 		model.Name = types.StringValue(response.Data.Name)
 	}
@@ -254,7 +254,8 @@ func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.Gpc
 				model.PublicIp = iface.PublicIP
 			}
 		}
-		// Set the network IDs in the model
+		// network_ids holds the user's ordered intent, and element 0 names the primary interface.
+		// The API returns its own order, so it must not replace a configured list.
 		if model.NetworkIds.IsNull() {
 			var networkDiags diag.Diagnostics
 			model.NetworkIds, networkDiags = types.ListValueFrom(ctx, types.StringType, networkIds)
@@ -264,7 +265,8 @@ func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.Gpc
 			}
 		}
 
-		// Set AllocatePublicIp if it's currently null
+		// allocate_public_ip records the user's intent, and public_ip reports the observed value.
+		// Only a null intent takes its value from the observation.
 		if model.AllocatePublicIp.IsNull() {
 			model.AllocatePublicIp = types.BoolValue(hasPublicIp)
 		}

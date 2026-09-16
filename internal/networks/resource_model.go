@@ -128,18 +128,13 @@ func setModelValuesNotPresent(response *readNetworkResponse, model ResourceModel
 	return model
 }
 
-// RefreshNetworkModelFromResponse overwrites the configured attributes with the API values, so
-// Read detects drift. An empty response field leaves the model value alone, because the API omits
-// a field that the practitioner must set.
+// RefreshNetworkModelFromResponse refreshes only the name, because the name is the one attribute
+// Terraform reconciles after drift. The datacenter and the network type are
+// fixed at creation, so the model keeps the configured value. An empty response name leaves the
+// model value alone, because the API omits a field that the practitioner must set.
 func RefreshNetworkModelFromResponse(response *readNetworkResponse, model ResourceModel) ResourceModel {
-	if response.Data.Datacenter.ID != "" {
-		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
-	}
 	if response.Data.Name != "" {
 		model.Name = types.StringValue(response.Data.Name)
-	}
-	if response.Data.NetworkType != "" {
-		model.NetworkType = types.StringValue(response.Data.NetworkType)
 	}
 	return model
 }

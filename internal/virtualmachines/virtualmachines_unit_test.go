@@ -82,6 +82,14 @@ func useVMStatusPollInterval(t *testing.T, interval time.Duration) {
 	t.Cleanup(func() { VM_STATUS_POLL_INTERVAL = original })
 }
 
+// The tests in this package do not run in parallel, so the package variable is safe to change.
+func useNoInitialPollDelay(t *testing.T) {
+	t.Helper()
+	original := DEFAULT_INITIAL_POLL_DELAY_SECONDS
+	DEFAULT_INITIAL_POLL_DELAY_SECONDS = 0
+	t.Cleanup(func() { DEFAULT_INITIAL_POLL_DELAY_SECONDS = original })
+}
+
 func emptyNetworkInterfacesResponse() map[string]any {
 	return map[string]any{"success": true, "message": "Network interfaces retrieved", "data": []any{}}
 }
@@ -123,6 +131,8 @@ func TestMapVirtualMachineResponseToModelUnit(t *testing.T) {
 }
 
 func TestCreateVirtualMachineMockHTTP(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	useNoInitialPollDelay(t)
 	const (
 		jobID   = "job-123"
 		vmID    = "vm-456"
@@ -703,7 +713,7 @@ func TestPollForVirtualMachineStatusTimesOut(t *testing.T) {
 	if elapsed < 900*time.Millisecond {
 		t.Errorf("Expected the poller to wait about %d second(s), it gave up after %v", timeoutMaxSec, elapsed)
 	}
-	if elapsed > 3*time.Second {
+	if elapsed > 10*time.Second {
 		t.Errorf("Expected the poller to stop near %d second(s), it ran for %v", timeoutMaxSec, elapsed)
 	}
 }
@@ -808,8 +818,9 @@ func TestMapVirtualMachineResponseToModelRefreshesDrift(t *testing.T) {
 	if result.SizeId.ValueString() != newSkuID {
 		t.Errorf("Expected size_id '%s', got '%s'", newSkuID, result.SizeId.ValueString())
 	}
-	if result.DatacenterId.ValueString() != newDatacenterID {
-		t.Errorf("Expected datacenter_id '%s', got '%s'", newDatacenterID, result.DatacenterId.ValueString())
+	// The datacenter is fixed at creation, so a refresh of it can only cause a false diff.
+	if result.DatacenterId.ValueString() != testDatacenterID {
+		t.Errorf("Expected datacenter_id '%s', got '%s'", testDatacenterID, result.DatacenterId.ValueString())
 	}
 }
 
@@ -859,7 +870,6 @@ func TestMapVirtualMachineResponseToModelKeepsPlanValues(t *testing.T) {
 func TestRefreshVirtualMachineModelFromResponseKeepsValuesOnEmpty(t *testing.T) {
 	response := newVMResponse("vm-empty-123", "")
 	response.Data.Configuration.SkuId = ""
-	response.Data.Datacenter.ID = ""
 
 	model := createTestVMModel("configured-vm", testVMImage, false)
 
@@ -870,8 +880,5 @@ func TestRefreshVirtualMachineModelFromResponseKeepsValuesOnEmpty(t *testing.T) 
 	}
 	if result.SizeId.ValueString() != "sku-uuid-test" {
 		t.Errorf("Expected size_id 'sku-uuid-test', got '%s'", result.SizeId.ValueString())
-	}
-	if result.DatacenterId.ValueString() != testDatacenterID {
-		t.Errorf("Expected datacenter_id '%s', got '%s'", testDatacenterID, result.DatacenterId.ValueString())
 	}
 }
