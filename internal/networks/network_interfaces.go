@@ -240,7 +240,7 @@ func SetNextNetworkInterfaceToPrimary(gpcnClient *client.GpcnClient, ctx context
 		})
 	}
 	if networkInterfaceIdx < 0 {
-		return errors.New("no network interfaces found that were not marked as primary")
+		return errors.New(ErrDetailNoCandidateNetworkInterface)
 	}
 	if candidateNetworkInterfaces[networkInterfaceIdx].IsPrimary.ValueBool() {
 		tflog.Info(ctx, fmt.Sprintf(LogNetworkInterfaceAlreadyPrimary, virtualMachineID))
@@ -434,7 +434,7 @@ func UpdateNetworkInterfaces(gpcnClient *client.GpcnClient, ctx context.Context,
 	})
 
 	// A promotion must not land on an interface that this call removes moments later.
-	handoffIsDeferred := false
+	handoffIsComplete := false
 	if primaryIsRemoved && len(newNetworksList) > 0 {
 		var survivingInterfaces []ReadVirtualMachineNetworkDataResponseTF
 		for _, data := range networkInterfaces {
@@ -450,8 +450,7 @@ func UpdateNetworkInterfaces(gpcnClient *client.GpcnClient, ctx context.Context,
 			if err != nil {
 				return fmt.Errorf(ErrDetailReplacePrimaryInterfaceFailed, err)
 			}
-		} else {
-			handoffIsDeferred = true
+			handoffIsComplete = true
 		}
 	}
 
@@ -479,26 +478,46 @@ func UpdateNetworkInterfaces(gpcnClient *client.GpcnClient, ctx context.Context,
 		}
 	}
 
-	if handoffIsDeferred {
+	// The first configured network ID is the primary, so a reorder alone changes the primary.
+	if len(newNetworksList) == 0 || handoffIsComplete {
+		return nil
+	}
+	if !primaryIsRemoved && isPrimaryFor(networkInterfaces, preferredNetworkID) {
+		return nil
+	}
+	if primaryIsRemoved {
 		tflog.Info(ctx, fmt.Sprintf(LogPromotingAddedNetworkInterface, vmId))
-		refreshedInterfaces, err := GetNetworkInterfaces(gpcnClient, ctx, vmId)
-		if err != nil {
-			return fmt.Errorf(ErrDetailRefreshNetworkInterfacesFailed, vmId, err)
+	}
+
+	refreshedInterfaces, err := GetNetworkInterfaces(gpcnClient, ctx, vmId)
+	if err != nil {
+		return fmt.Errorf(ErrDetailRefreshNetworkInterfacesFailed, vmId, err)
+	}
+	// A delete that is still in flight keeps a removed interface in the refreshed list.
+	var configuredInterfaces []ReadVirtualMachineNetworkDataResponseTF
+	for _, data := range refreshedInterfaces {
+		if slices.ContainsFunc(newNetworksList, func(val string) bool {
+			return strings.EqualFold(data.NetworkID.ValueString(), val)
+		}) {
+			configuredInterfaces = append(configuredInterfaces, data)
 		}
-		// A delete that is still in flight keeps a removed interface in the refreshed list.
-		var configuredInterfaces []ReadVirtualMachineNetworkDataResponseTF
-		for _, data := range refreshedInterfaces {
-			if slices.ContainsFunc(newNetworksList, func(val string) bool {
-				return strings.EqualFold(data.NetworkID.ValueString(), val)
-			}) {
-				configuredInterfaces = append(configuredInterfaces, data)
-			}
-		}
-		err = SetNextNetworkInterfaceToPrimary(gpcnClient, ctx, vmId, preferredNetworkID, configuredInterfaces)
-		if err != nil {
-			return fmt.Errorf(ErrDetailReplacePrimaryInterfaceFailed, err)
-		}
+	}
+	// An attach that the refresh misses leaves nothing to promote. The next Read reconciles.
+	if len(configuredInterfaces) == 0 {
+		tflog.Info(ctx, fmt.Sprintf(LogNoConfiguredNetworkInterfaceAfterRefresh, vmId))
+		return nil
+	}
+
+	err = SetNextNetworkInterfaceToPrimary(gpcnClient, ctx, vmId, preferredNetworkID, configuredInterfaces)
+	if err != nil {
+		return fmt.Errorf(ErrDetailReplacePrimaryInterfaceFailed, err)
 	}
 
 	return nil
+}
+
+func isPrimaryFor(networkInterfaces []ReadVirtualMachineNetworkDataResponseTF, networkID string) bool {
+	return slices.ContainsFunc(networkInterfaces, func(data ReadVirtualMachineNetworkDataResponseTF) bool {
+		return strings.EqualFold(data.NetworkID.ValueString(), networkID) && data.IsPrimary.ValueBool()
+	})
 }

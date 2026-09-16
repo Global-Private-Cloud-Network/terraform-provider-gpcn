@@ -53,7 +53,8 @@ const (
 	LogSettingNetworkInterfaceAsPrimary         = "Setting network interface with ID %s as primary"
 	LogSuccessfullySetNetworkInterfaceAsPrimary = "Successfully set network interface with ID %s as primary"
 	LogNetworkInterfaceAlreadyPrimary           = "A network interface of Virtual Machine ID %s is already primary. Skipping the promotion"
-	LogPromotingAddedNetworkInterface           = "The configured primary network of Virtual Machine ID %s has no interface yet. Promoting it after the attach"
+	LogPromotingAddedNetworkInterface           = "The configured primary network of Virtual Machine ID %s had no surviving interface. Re-selecting a primary after the attach"
+	LogNoConfiguredNetworkInterfaceAfterRefresh = "The refreshed network interfaces of Virtual Machine ID %s name no configured network yet. Keeping the primary that the backend chose"
 
 	// RemoveNetworkInterface messages
 	LogStartingRemoveNetworkInterfaceWithIDs = "Starting RemoveNetworkInterface for Virtual Machine ID %s with network interface ID %s"
