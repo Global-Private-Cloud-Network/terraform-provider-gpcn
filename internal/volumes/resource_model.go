@@ -74,8 +74,9 @@ func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel
 	return model
 }
 
-// Overwrite the configured attributes so Read reports drift. Only Read calls this: Create and Update must keep
-// the planned values, or Terraform rejects the apply when the API lags or canonicalises a value.
+// Overwrite the configured attributes so Read reports drift. Only Read calls this
+// function. Create and Update must keep the planned values. Terraform rejects the
+// apply when the API lags or canonicalises a value.
 func RefreshVolumeModelFromResponse(response *readVolumesResponse, model ResourceModel) ResourceModel {
 	// An attribute the API omits must not blank a Required value.
 	if response.Data.Datacenter.ID != "" {

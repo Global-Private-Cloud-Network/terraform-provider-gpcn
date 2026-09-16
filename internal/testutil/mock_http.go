@@ -111,8 +111,8 @@ func LogUnexpectedRequest(t *testing.T, w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusNotFound)
 }
 
-// SetupMockServerWithRealTransport builds the client through NewGpcnClient, so the real
-// authTransport stays in the stack and a mocked 404 arrives as *client.HTTPError.
+// SetupMockServerWithRealTransport builds the client through NewGpcnClient. The real
+// authTransport stays in the stack, so a mocked 404 arrives as *client.HTTPError.
 // SetupMockServerWithGpcnClient bypasses that transport, so not-found paths cannot be
 // tested through it.
 func SetupMockServerWithRealTransport(config MockServerConfig) (*httptest.Server, *client.GpcnClient) {
