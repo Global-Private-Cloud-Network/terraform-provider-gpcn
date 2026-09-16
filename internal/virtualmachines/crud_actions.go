@@ -258,11 +258,11 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 	}
 	var getResp *ReadVirtualMachinesResponse
 	var err error
-	secondsElapsed := 0
 	longPollIteration := 1
 	var pollErr error
+	pollStart := time.Now()
 	for {
-		tflog.Info(ctx, fmt.Sprintf(LogStartingLongPollingIteration, longPollIteration, secondsElapsed))
+		tflog.Info(ctx, fmt.Sprintf(LogStartingLongPollingIteration, longPollIteration, int(time.Since(pollStart).Seconds())))
 
 		getResp, err = GetVirtualMachine(gpcnClient, ctx, virtualMachineId)
 		if err != nil {
@@ -273,15 +273,15 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 
 		if slices.Contains(targetStatusesLower, strings.ToLower(getResp.Data.Status)) {
 			tflog.Info(ctx, fmt.Sprintf(LogVMStatusProceedingToAttach, getResp.Data.ID, getResp.Data.Status))
-			// Don't trust the API and do actions too quick. Wait an additional interval to verify it's actually in the status we want
-			time.Sleep(vmStatusPollInterval)
+			// The API can report the target status before the change is complete. Wait one
+			// more interval to confirm it.
+			time.Sleep(VM_STATUS_POLL_INTERVAL)
 			break
 		}
-		time.Sleep(vmStatusPollInterval)
-		secondsElapsed += 5
+		time.Sleep(VM_STATUS_POLL_INTERVAL)
 		longPollIteration += 1
 
-		if secondsElapsed > timeoutMaxSec {
+		if time.Since(pollStart) > time.Duration(timeoutMaxSec)*time.Second {
 			//nolint:staticcheck // ST1005: the template is a user-facing Terraform diagnostic sentence
 			pollErr = fmt.Errorf(ErrVirtualMachineStatusTimeoutTemplate, timeoutMaxSec)
 			break

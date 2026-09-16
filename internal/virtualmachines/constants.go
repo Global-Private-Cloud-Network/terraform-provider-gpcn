@@ -11,7 +11,7 @@ var DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS int = 300
 var DEFAULT_INITIAL_POLL_DELAY_SECONDS int = 30
 
 // The tests shorten this interval, so it is a variable and not a constant.
-var vmStatusPollInterval = 5 * time.Second
+var VM_STATUS_POLL_INTERVAL = 5 * time.Second
 
 // VMStatus represents the lifecycle status of a virtual machine
 type VMStatus string
