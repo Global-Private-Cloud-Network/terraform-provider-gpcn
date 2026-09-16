@@ -2,6 +2,7 @@ package volumes
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -51,24 +52,28 @@ func MapVolumeResponseToModel(ctx context.Context, response *readVolumesResponse
 		model.Location = types.MapNull(types.StringType)
 	}
 
-	// If model doesn't already have these populated, set them
-	model = setModelValuesNotPresent(response, model)
+	model = setModelValuesFromResponse(response, model)
 
 	return model
 }
 
-func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel) ResourceModel {
-	if model.DatacenterId.IsNull() {
-		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
-	}
-	if model.Name.IsNull() {
-		model.Name = types.StringValue(response.Data.Name)
-	}
-	if model.SizeGb.IsNull() {
-		model.SizeGb = types.Int64Value(response.Data.SizeGb)
-	}
-	if model.VolumeType.IsNull() {
-		model.VolumeType = types.StringValue(response.Data.VolumeType.Name)
+func setModelValuesFromResponse(response *readVolumesResponse, model ResourceModel) ResourceModel {
+	model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
+	model.Name = types.StringValue(response.Data.Name)
+	model.SizeGb = types.Int64Value(response.Data.SizeGb)
+
+	// The schema accepts only the canonical keys. Keep the old value when the API sends a name we do not know.
+	if canonical, found := canonicalVolumeType(response.Data.VolumeType.Name); found {
+		model.VolumeType = types.StringValue(canonical)
 	}
 	return model
+}
+
+func canonicalVolumeType(name string) (string, bool) {
+	for key := range volumeTypeMapping {
+		if strings.EqualFold(key, name) {
+			return key, true
+		}
+	}
+	return "", false
 }

@@ -343,3 +343,65 @@ func TestGetVolumeSkuIdInvalidSizeMockHTTP(t *testing.T) {
 		t.Errorf("Expected error to contain validation message, got '%s'", err.Error())
 	}
 }
+
+func TestMapVolumeResponseToModelRefreshesDriftUnit(t *testing.T) {
+	response := newVolumeResponse("volume-123", "renamed-in-portal", 512, "sku-uuid-11")
+	response.Data.Datacenter.ID = "datacenter-999"
+	model := createTestVolumeModel("stale-name", "SSD", 128)
+
+	result := MapVolumeResponseToModel(context.Background(), response, model)
+
+	if result.Name.ValueString() != "renamed-in-portal" {
+		t.Errorf("Expected Name 'renamed-in-portal', got '%s'", result.Name.ValueString())
+	}
+	if result.SizeGb.ValueInt64() != 512 {
+		t.Errorf("Expected SizeGb 512, got %d", result.SizeGb.ValueInt64())
+	}
+	if result.DatacenterId.ValueString() != "datacenter-999" {
+		t.Errorf("Expected DatacenterId 'datacenter-999', got '%s'", result.DatacenterId.ValueString())
+	}
+}
+
+func TestMapVolumeResponseToModelVolumeTypeCasingUnit(t *testing.T) {
+	response := newVolumeResponse("volume-123", "test-volume", 256, "sku-uuid-10")
+	response.Data.VolumeType.Name = "nvme"
+	model := createTestVolumeModel("test-volume", "SSD", 256)
+
+	result := MapVolumeResponseToModel(context.Background(), response, model)
+
+	if result.VolumeType.ValueString() != "NVMe" {
+		t.Errorf("Expected VolumeType 'NVMe', got '%s'", result.VolumeType.ValueString())
+	}
+}
+
+func TestMapVolumeResponseToModelUnknownVolumeTypeUnit(t *testing.T) {
+	response := newVolumeResponse("volume-123", "test-volume", 256, "sku-uuid-10")
+	response.Data.VolumeType.Name = "foo"
+	model := createTestVolumeModel("test-volume", "SSD", 256)
+
+	result := MapVolumeResponseToModel(context.Background(), response, model)
+
+	if result.VolumeType.ValueString() != "SSD" {
+		t.Errorf("Expected VolumeType 'SSD' to survive, got '%s'", result.VolumeType.ValueString())
+	}
+}
+
+func TestMapVolumeResponseToModelImportPopulatesUnit(t *testing.T) {
+	response := newVolumeResponse("volume-123", "imported-volume", 256, "sku-uuid-10")
+	model := ResourceModel{}
+
+	result := MapVolumeResponseToModel(context.Background(), response, model)
+
+	if result.Name.ValueString() != "imported-volume" {
+		t.Errorf("Expected Name 'imported-volume', got '%s'", result.Name.ValueString())
+	}
+	if result.SizeGb.ValueInt64() != 256 {
+		t.Errorf("Expected SizeGb 256, got %d", result.SizeGb.ValueInt64())
+	}
+	if result.DatacenterId.ValueString() != testDatacenterID {
+		t.Errorf("Expected DatacenterId '%s', got '%s'", testDatacenterID, result.DatacenterId.ValueString())
+	}
+	if result.VolumeType.ValueString() != "SSD" {
+		t.Errorf("Expected VolumeType 'SSD', got '%s'", result.VolumeType.ValueString())
+	}
+}
