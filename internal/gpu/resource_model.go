@@ -63,34 +63,26 @@ func MapGPUResponseToModel(ctx context.Context, response *readGPUResponse, model
 		model.Location = types.MapNull(types.StringType)
 	}
 
-	// If model doesn't already have these populated, set them
-	model = setModelValuesNotPresent(ctx, response, model)
+	model = applyResponseValues(ctx, response, model)
 
 	return model
 }
 
-func setModelValuesNotPresent(ctx context.Context, response *readGPUResponse, model ResourceModel) ResourceModel {
-	if model.DatacenterId.IsNull() {
-		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
-	}
-	if model.Name.IsNull() {
-		model.Name = types.StringValue(response.Data.Name)
-	}
-	if model.SeriesName.IsNull() || model.SeriesName.ValueString() == "" {
-		model.SeriesName = types.StringValue(response.Data.Configuration.Name)
-	}
-	if model.SeriesCode.IsNull() || model.SeriesCode.ValueString() == "" {
-		model.SeriesCode = types.StringValue(response.Data.Configuration.Code)
-	}
-	if model.SkuCode.IsNull() || model.SkuCode.ValueString() == "" {
-		model.SkuCode = types.StringValue(response.Data.Configuration.SkuCode)
-	}
-	if model.GPUCount.IsNull() {
-		model.GPUCount = types.Int64Value(response.Data.Configuration.GPUCount)
-	}
+func applyResponseValues(ctx context.Context, response *readGPUResponse, model ResourceModel) ResourceModel {
+	model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
+	model.Name = types.StringValue(response.Data.Name)
+	model.SeriesName = types.StringValue(response.Data.Configuration.Name)
+	model.SeriesCode = types.StringValue(response.Data.Configuration.Code)
+	model.SkuCode = types.StringValue(response.Data.Configuration.SkuCode)
+	model.GPUCount = types.Int64Value(response.Data.Configuration.GPUCount)
+
+	// The API returns a longer image name than the one the user configures, so a
+	// refresh here would show permanent drift.
 	if model.ImageName.IsNull() || model.ImageName.ValueString() == "" {
 		model.ImageName = types.StringValue(response.Data.Image)
 	}
+
+	// initial_auth changes the state only, so the API value must not win.
 	if model.InitialAuth.IsNull() && response.Data.SshKeyId != "" {
 		authObj, diags := types.ObjectValueFrom(ctx, ResourceModelInitialAuth{}.AttrTypes(), ResourceModelInitialAuth{
 			SshKeyId: types.StringValue(response.Data.SshKeyId),

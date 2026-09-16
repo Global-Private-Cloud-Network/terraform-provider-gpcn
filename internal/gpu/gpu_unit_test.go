@@ -14,6 +14,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 const testDatacenterID = "datacenter-123"
@@ -784,5 +785,60 @@ func TestDeleteGPUMockHTTP(t *testing.T) {
 	}
 	if !jobStatusCalled {
 		t.Error("Expected job status endpoint to be called")
+	}
+}
+
+func TestMapGPUResponseToModelRefreshesDriftUnit(t *testing.T) {
+	response := newGPUResponse("gpu-123", "renamed-in-portal")
+	response.Data.Datacenter.ID = "datacenter-456"
+	response.Data.Configuration.Name = "NVIDIA H100 Series"
+	response.Data.Configuration.Code = "nvidia-h100_series"
+	response.Data.Configuration.SkuCode = "gpu_4x_h100"
+	response.Data.Configuration.GPUCount = 4
+
+	model := createTestGPUModel("stale-name", "NVIDIA RTX A6000 Series", "nvidia-rtx_a6000-series", testImageName, 2)
+	model.SkuCode = types.StringValue("gpu_2x_a6000")
+
+	result := MapGPUResponseToModel(context.Background(), response, model)
+
+	if result.Name.ValueString() != "renamed-in-portal" {
+		t.Errorf("Expected Name 'renamed-in-portal', got '%s'", result.Name.ValueString())
+	}
+	if result.DatacenterId.ValueString() != "datacenter-456" {
+		t.Errorf("Expected DatacenterId 'datacenter-456', got '%s'", result.DatacenterId.ValueString())
+	}
+	if result.SeriesName.ValueString() != "NVIDIA H100 Series" {
+		t.Errorf("Expected SeriesName 'NVIDIA H100 Series', got '%s'", result.SeriesName.ValueString())
+	}
+	if result.SeriesCode.ValueString() != "nvidia-h100_series" {
+		t.Errorf("Expected SeriesCode 'nvidia-h100_series', got '%s'", result.SeriesCode.ValueString())
+	}
+	if result.SkuCode.ValueString() != "gpu_4x_h100" {
+		t.Errorf("Expected SkuCode 'gpu_4x_h100', got '%s'", result.SkuCode.ValueString())
+	}
+	if result.GPUCount.ValueInt64() != 4 {
+		t.Errorf("Expected GPUCount 4, got %d", result.GPUCount.ValueInt64())
+	}
+}
+
+func TestMapGPUResponseToModelKeepsImageAndAuthUnit(t *testing.T) {
+	response := newGPUResponse("gpu-123", "test-gpu")
+	response.Data.Image = "ubuntu-22.04-lts-server-cloudimg-amd64"
+	response.Data.SshKeyId = "ssh-key-from-api"
+
+	model := createTestGPUModel("test-gpu", "NVIDIA RTX A6000 Series", "nvidia-rtx_a6000-series", testImageName, 2)
+
+	result := MapGPUResponseToModel(context.Background(), response, model)
+
+	if result.ImageName.ValueString() != testImageName {
+		t.Errorf("Expected ImageName '%s', got '%s'", testImageName, result.ImageName.ValueString())
+	}
+	var auth ResourceModelInitialAuth
+	diags := result.InitialAuth.As(context.Background(), &auth, basetypes.ObjectAsOptions{})
+	if diags.HasError() {
+		t.Fatalf("Failed to read initial_auth: %v", diags)
+	}
+	if auth.SshKeyId.ValueString() != testSSHKeyID {
+		t.Errorf("Expected SshKeyId '%s', got '%s'", testSSHKeyID, auth.SshKeyId.ValueString())
 	}
 }
