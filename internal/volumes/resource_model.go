@@ -77,8 +77,9 @@ func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel
 }
 
 // Read refreshes only the attributes that change out of band and that Terraform can
-// reconcile. The attributes fixed at creation keep the configured value. A vocabulary
-// mismatch there plans a destroy and create forever. Only Read calls this function.
+// reconcile. The datacenter_id and volume_type attributes keep the configured value.
+// The API can report them in a different vocabulary. A refresh of them plans a
+// destroy and create forever. Only Read calls this function.
 func RefreshVolumeModelFromResponse(response *readVolumesResponse, model ResourceModel) ResourceModel {
 	// An attribute the API omits must not blank a Required value.
 	if response.Data.Name != "" {

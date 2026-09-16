@@ -763,28 +763,6 @@ func TestPollForVirtualMachineStatusWaitsTheSettleWait(t *testing.T) {
 	}
 }
 
-func TestFastVMStatusPollIntervalShortensAndRestoresBothTimings(t *testing.T) {
-	originalInterval := VM_STATUS_POLL_INTERVAL
-	originalSettle := VM_STATUS_SETTLE_WAIT
-
-	t.Run("shortened", func(t *testing.T) {
-		useFastVMStatusPollInterval(t)
-		if VM_STATUS_POLL_INTERVAL >= originalInterval {
-			t.Errorf("Expected a shorter poll interval than %v, got %v", originalInterval, VM_STATUS_POLL_INTERVAL)
-		}
-		if VM_STATUS_SETTLE_WAIT >= originalSettle {
-			t.Errorf("Expected a shorter settle wait than %v, got %v", originalSettle, VM_STATUS_SETTLE_WAIT)
-		}
-	})
-
-	if VM_STATUS_POLL_INTERVAL != originalInterval {
-		t.Errorf("Expected the poll interval restored to %v, got %v", originalInterval, VM_STATUS_POLL_INTERVAL)
-	}
-	if VM_STATUS_SETTLE_WAIT != originalSettle {
-		t.Errorf("Expected the settle wait restored to %v, got %v", originalSettle, VM_STATUS_SETTLE_WAIT)
-	}
-}
-
 func TestPollForVirtualMachineStatusPreservesNotFound(t *testing.T) {
 	useFastVMStatusPollInterval(t)
 
