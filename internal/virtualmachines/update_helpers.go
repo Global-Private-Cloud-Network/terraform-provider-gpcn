@@ -89,8 +89,8 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 	// This means none are set to primary, which should be impossible
 	if interfaceIdx < 0 {
 		diags.AddError(
-			ErrSummaryErrorRetrievingNetworkIfaces,
-			fmt.Sprintf(ErrDetailNetworkInterfacesForVM, vmID),
+			ErrSummaryNoPrimaryNetworkInterface,
+			fmt.Sprintf(ErrDetailNoPrimaryNetworkInterface, vmID),
 		)
 		return diags
 	}

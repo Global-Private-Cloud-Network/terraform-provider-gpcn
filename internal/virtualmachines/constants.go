@@ -13,6 +13,9 @@ var DEFAULT_INITIAL_POLL_DELAY_SECONDS int = 30
 // The tests shorten this interval, so it is a variable and not a constant.
 var VM_STATUS_POLL_INTERVAL = 5 * time.Second
 
+// The poller waits this long after a status match, so a lagging API cannot mislead it.
+var VM_STATUS_SETTLE_WAIT = 5 * time.Second
+
 // VMStatus represents the lifecycle status of a virtual machine
 type VMStatus string
 

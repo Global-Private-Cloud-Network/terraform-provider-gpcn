@@ -112,9 +112,10 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 
 // Read calls this after MapVirtualMachineResponseToModel so an out-of-band change shows as drift.
 // Create and Update must not call it, because a lagging API then breaks the planned values.
-// Only name and size_id refresh. The other attributes are fixed at creation and cannot drift.
-// A refresh of them risks a vocabulary mismatch that plans a destroy and create forever.
-// network_ids and allocate_public_ip stay out for the reasons at their fill-if-null sites.
+// Only name and size_id refresh. datacenter_id and image_id force replacement.
+// A refresh of them can only produce a false diff from a vocabulary mismatch.
+// network_ids and allocate_public_ip stay out because they carry the intent of the user.
+// See the reasons at their fill-if-null sites.
 // An empty field means the response omits it, so the model value stays.
 func RefreshVirtualMachineModelFromResponse(response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
 	if response.Data.Name != "" {

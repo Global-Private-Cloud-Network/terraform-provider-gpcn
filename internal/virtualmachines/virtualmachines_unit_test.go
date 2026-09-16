@@ -73,6 +73,14 @@ func newVMResponse(id, name string) *ReadVirtualMachinesResponse {
 func useFastVMStatusPollInterval(t *testing.T) {
 	t.Helper()
 	useVMStatusPollInterval(t, 5*time.Millisecond)
+	useVMStatusSettleWait(t, 5*time.Millisecond)
+}
+
+func useVMStatusSettleWait(t *testing.T, wait time.Duration) {
+	t.Helper()
+	original := VM_STATUS_SETTLE_WAIT
+	VM_STATUS_SETTLE_WAIT = wait
+	t.Cleanup(func() { VM_STATUS_SETTLE_WAIT = original })
 }
 
 func useVMStatusPollInterval(t *testing.T, interval time.Duration) {
@@ -82,7 +90,8 @@ func useVMStatusPollInterval(t *testing.T, interval time.Duration) {
 	t.Cleanup(func() { VM_STATUS_POLL_INTERVAL = original })
 }
 
-// The tests in this package do not run in parallel, so the package variable is safe to change.
+// Only sequential tests change these package variables, so the change is safe.
+// Go resumes a parallel test after every sequential test ends.
 func useNoInitialPollDelay(t *testing.T) {
 	t.Helper()
 	original := DEFAULT_INITIAL_POLL_DELAY_SECONDS
@@ -718,6 +727,64 @@ func TestPollForVirtualMachineStatusTimesOut(t *testing.T) {
 	}
 }
 
+func TestPollForVirtualMachineStatusWaitsTheSettleWait(t *testing.T) {
+	// The settle wait must be its own dial, so the poll interval stays near zero here.
+	useVMStatusPollInterval(t, time.Millisecond)
+	useVMStatusSettleWait(t, 120*time.Millisecond)
+	const vmID = "vm-settle-123"
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID) {
+				testutil.WriteJSONResponse(w, newVMResponse(vmID, "test-vm"))
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	start := time.Now()
+	response, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, []string{"Running"}, 30, 0)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("PollForVirtualMachineStatus failed: %v", err)
+	}
+	if response == nil {
+		t.Fatal("Expected response, got nil")
+	}
+	if elapsed < 100*time.Millisecond {
+		t.Errorf("Expected the poller to settle for about %v after the match, it returned after %v", VM_STATUS_SETTLE_WAIT, elapsed)
+	}
+	if elapsed > 5*time.Second {
+		t.Errorf("Expected the poller to return soon after the settle wait, it ran for %v", elapsed)
+	}
+}
+
+func TestFastVMStatusPollIntervalShortensAndRestoresBothTimings(t *testing.T) {
+	originalInterval := VM_STATUS_POLL_INTERVAL
+	originalSettle := VM_STATUS_SETTLE_WAIT
+
+	t.Run("shortened", func(t *testing.T) {
+		useFastVMStatusPollInterval(t)
+		if VM_STATUS_POLL_INTERVAL >= originalInterval {
+			t.Errorf("Expected a shorter poll interval than %v, got %v", originalInterval, VM_STATUS_POLL_INTERVAL)
+		}
+		if VM_STATUS_SETTLE_WAIT >= originalSettle {
+			t.Errorf("Expected a shorter settle wait than %v, got %v", originalSettle, VM_STATUS_SETTLE_WAIT)
+		}
+	})
+
+	if VM_STATUS_POLL_INTERVAL != originalInterval {
+		t.Errorf("Expected the poll interval restored to %v, got %v", originalInterval, VM_STATUS_POLL_INTERVAL)
+	}
+	if VM_STATUS_SETTLE_WAIT != originalSettle {
+		t.Errorf("Expected the settle wait restored to %v, got %v", originalSettle, VM_STATUS_SETTLE_WAIT)
+	}
+}
+
 func TestPollForVirtualMachineStatusPreservesNotFound(t *testing.T) {
 	useFastVMStatusPollInterval(t)
 
@@ -770,12 +837,14 @@ func TestUpdatePublicIPIfChangedReportsMissingPrimaryInterface(t *testing.T) {
 		t.Fatal("Expected an error diagnostic when no interface is primary")
 	}
 
-	detail := diags.Errors()[0].Detail()
-	if strings.Contains(detail, "%s") {
-		t.Errorf("Expected the detail to be formatted, got '%s'", detail)
+	summary := diags.Errors()[0].Summary()
+	if summary != ErrSummaryNoPrimaryNetworkInterface {
+		t.Errorf("Expected the summary '%s', got '%s'", ErrSummaryNoPrimaryNetworkInterface, summary)
 	}
-	if !strings.Contains(detail, vmID) {
-		t.Errorf("Expected the detail to name the virtual machine '%s', got '%s'", vmID, detail)
+	detail := diags.Errors()[0].Detail()
+	expectedDetail := fmt.Sprintf(ErrDetailNoPrimaryNetworkInterface, vmID)
+	if detail != expectedDetail {
+		t.Errorf("Expected the detail '%s', got '%s'", expectedDetail, detail)
 	}
 }
 
