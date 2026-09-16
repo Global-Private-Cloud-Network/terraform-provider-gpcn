@@ -489,7 +489,7 @@ func TestDetachVolumeVMGoneDuringStopKeepsHTTPError(t *testing.T) {
 	if !strings.Contains(err.Error(), "could not be stopped") {
 		t.Errorf("expected the error to report the failed stop, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "500") {
+	if !strings.Contains(err.Error(), "HTTP error 500") {
 		t.Errorf("expected the error to keep the stop failure status, got: %v", err)
 	}
 }
