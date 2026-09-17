@@ -107,12 +107,10 @@ func setModelValuesNotPresent(ctx context.Context, response *readGPUResponse, mo
 	return model
 }
 
-// RefreshGPUModelFromResponse reports the drift that Read must show. Only the
-// name can change out of band and reconcile, so only the name refreshes. Every
-// other attribute is fixed at creation. A refresh of one risks a vocabulary
-// mismatch that plans a replacement forever. The fill-if-null path in
-// setModelValuesNotPresent still populates them. An empty response name leaves
-// the model value alone.
+// Only the name can change out of band and reconcile in place. A refresh of any other
+// attribute risks a false diff that replaces the GPU.
+// setModelValuesNotPresent still fills those attributes when the state leaves them unset.
+// An empty name is an omission, not a rename.
 func RefreshGPUModelFromResponse(response *readGPUResponse, model ResourceModel) ResourceModel {
 	if response.Data.Name != "" {
 		model.Name = types.StringValue(response.Data.Name)

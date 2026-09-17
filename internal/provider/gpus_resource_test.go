@@ -305,7 +305,7 @@ func TestGPUResourceSkuCode(t *testing.T) {
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"image_name", "created_time", "last_updated"},
 			},
-			// A name change must not replace a GPU that pins its series by series_code
+			// A name change must not replace a GPU that pins its series by series_code.
 			{
 				Config: config(gpuNameUpdated),
 				ConfigPlanChecks: resource.ConfigPlanChecks{

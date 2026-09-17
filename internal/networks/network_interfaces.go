@@ -210,13 +210,8 @@ func AddNetworkInterface(gpcnClient *client.GpcnClient, ctx context.Context, vir
 	return nil
 }
 
-// The caller passes only the candidates that survive the update. The preferred network ID
-// names the configured primary. The selection follows this order:
-// 1. The preferred network holds a candidate that is primary. Do nothing.
-// 2. The preferred network holds a candidate. Promote it.
-// 3. No candidate names the preferred network, but one candidate is primary. Do nothing.
-// 4. Promote the first candidate that is not primary.
-// 5. No candidate is left. Return an error.
+// The caller passes only the candidates that survive the update.
+// The preferred network ID names the primary that the practitioner configured.
 func SetNextNetworkInterfaceToPrimary(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineID, preferredNetworkID string, candidateNetworkInterfaces []ReadVirtualMachineNetworkDataResponseTF) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingSetNextNetworkInterfaceToPrimary, virtualMachineID))
 
