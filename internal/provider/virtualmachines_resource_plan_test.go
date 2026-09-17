@@ -30,6 +30,8 @@ const (
 
 // shortenVirtualMachinePolling removes the waits the create, stop, and delete paths
 // take. The package variables carry production defaults that make this test minutes long.
+// A caller must stay sequential, because Go resumes a parallel test only after every
+// sequential test ends.
 func shortenVirtualMachinePolling(t *testing.T) {
 	t.Helper()
 
@@ -46,7 +48,18 @@ func shortenVirtualMachinePolling(t *testing.T) {
 	})
 }
 
-func vmPlanTestReadBody(name, status string) map[string]any {
+func vmPlanTestSizesBody() map[string]any {
+	return map[string]any{
+		"success": true,
+		"message": "ok",
+		"data": map[string]any{
+			"datacenterId": vmPlanTestDatacenterID,
+			"categories":   []map[string]any{},
+		},
+	}
+}
+
+func vmPlanTestReadBody(name, status, skuId string) map[string]any {
 	return map[string]any{
 		"success": true,
 		"message": "ok",
@@ -58,7 +71,7 @@ func vmPlanTestReadBody(name, status string) map[string]any {
 			"updatedAt": vmPlanTestTimestamp,
 			"configuration": map[string]any{
 				"name":    vmPlanTestSizeCode,
-				"skuId":   vmPlanTestSizeID,
+				"skuId":   skuId,
 				"skuCode": "g-small-1",
 				"cpu":     2,
 				"ram":     4,
@@ -99,15 +112,17 @@ func vmPlanTestNetworkInterfacesBody() map[string]any {
 	}
 }
 
-// startVirtualMachinePlanMockServer serves the endpoints a rename needs. The handler
-// keeps the name from the last create or update, so the read after an apply agrees with
-// the configuration and leaves the refresh plan empty. The returned function renames the
-// virtual machine out of band, which is how a test creates drift.
-func startVirtualMachinePlanMockServer(t *testing.T) (*httptest.Server, func(string)) {
+// startVirtualMachinePlanMockServer serves the endpoints a drift test needs. The handler
+// keeps the name from the last create or update. The read after an apply then agrees with
+// the configuration and leaves the refresh plan empty. The returned functions change the
+// stored name and SKU out of band, which is how a test creates drift.
+// The sizes arm reports no upgrade target, so a planned size change asks for a replacement.
+func startVirtualMachinePlanMockServer(t *testing.T) (*httptest.Server, func(string), func(string)) {
 	t.Helper()
 
 	var mu sync.Mutex
 	name := ""
+	skuId := vmPlanTestSizeID
 	status := virtualmachines.VMStatusRunning.String()
 
 	vmPath := "/v1/resource/virtual-machines/" + vmPlanTestID
@@ -129,11 +144,13 @@ func startVirtualMachinePlanMockServer(t *testing.T) (*httptest.Server, func(str
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodGet && r.URL.Path == vmPath+"/network-interfaces":
 			testutil.WriteJSONResponse(w, vmPlanTestNetworkInterfacesBody())
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
 		case r.Method == http.MethodGet && r.URL.Path == vmPath:
 			mu.Lock()
-			currentName, currentStatus := name, status
+			currentName, currentStatus, currentSku := name, status, skuId
 			mu.Unlock()
-			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus))
+			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, currentSku))
 		case r.Method == http.MethodPut && r.URL.Path == vmPath:
 			body := testutil.ReadRequestBody(r)
 			mu.Lock()
@@ -156,7 +173,13 @@ func startVirtualMachinePlanMockServer(t *testing.T) (*httptest.Server, func(str
 		mu.Unlock()
 	}
 
-	return server, setName
+	setSkuId := func(newSkuId string) {
+		mu.Lock()
+		skuId = newSkuId
+		mu.Unlock()
+	}
+
+	return server, setName, setSkuId
 }
 
 func vmPlanTestConfig(host, name string) string {
@@ -181,12 +204,9 @@ resource "gpcn_virtualmachine" "test" {
 `, host, name, vmPlanTestDatacenterID, vmPlanTestSizeID, vmPlanTestImageID, vmPlanTestNetworkID, vmPlanTestSshKeyID, vmPlanTestUsername)
 }
 
-// TestVirtualMachineResourcePlanDetectsOutOfBandRename mutates the shared polling
-// globals, so it must not run beside the package acceptance tests. Go completes every
-// sequential test before a parallel test resumes, which keeps the mutation isolated.
 func TestVirtualMachineResourcePlanDetectsOutOfBandRename(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	server, setName := startVirtualMachinePlanMockServer(t)
+	server, setName, _ := startVirtualMachinePlanMockServer(t)
 
 	config := vmPlanTestConfig(server.URL, "vm-plan-a")
 
@@ -215,6 +235,44 @@ func TestVirtualMachineResourcePlanDetectsOutOfBandRename(t *testing.T) {
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "name", "vm-plan-a"),
+				),
+			},
+		},
+	})
+}
+
+// A refreshed size_id would plan a downgrade that the API refuses, and Terraform would
+// then replace the VM. Read keeps the configured value to prevent that.
+func TestVirtualMachineResourcePlanIgnoresOutOfBandResize(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, _, setSkuId := startVirtualMachinePlanMockServer(t)
+
+	config := vmPlanTestConfig(server.URL, "vm-plan-b")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionCreate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "size_id", vmPlanTestSizeID),
+				),
+			},
+			{
+				PreConfig: func() { setSkuId("sku-2") },
+				Config:    config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionNoop),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "size_id", vmPlanTestSizeID),
 				),
 			},
 		},

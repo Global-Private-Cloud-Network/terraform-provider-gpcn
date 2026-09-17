@@ -344,28 +344,6 @@ func TestGetVolumeSkuIdInvalidSizeMockHTTP(t *testing.T) {
 	}
 }
 
-func TestMapVolumeResponseToModelRefreshesDriftUnit(t *testing.T) {
-	response := newVolumeResponse("volume-123", "renamed-in-portal", 512, "sku-uuid-11")
-	response.Data.Datacenter.ID = "datacenter-999"
-	response.Data.VolumeType.Name = "NVMe"
-	model := createTestVolumeModel("stale-name", "SSD", 128)
-
-	result := RefreshVolumeModelFromResponse(response, MapVolumeResponseToModel(context.Background(), response, model))
-
-	if result.Name.ValueString() != "renamed-in-portal" {
-		t.Errorf("Expected Name 'renamed-in-portal', got '%s'", result.Name.ValueString())
-	}
-	if result.SizeGb.ValueInt64() != 512 {
-		t.Errorf("Expected SizeGb 512, got %d", result.SizeGb.ValueInt64())
-	}
-	if result.DatacenterId.ValueString() != testDatacenterID {
-		t.Errorf("Expected DatacenterId '%s' to survive, got '%s'", testDatacenterID, result.DatacenterId.ValueString())
-	}
-	if result.VolumeType.ValueString() != "SSD" {
-		t.Errorf("Expected VolumeType 'SSD' to survive, got '%s'", result.VolumeType.ValueString())
-	}
-}
-
 func TestMapVolumeResponseToModelImportCanonicalisesVolumeTypeUnit(t *testing.T) {
 	response := newVolumeResponse("volume-123", "imported-volume", 256, "sku-uuid-10")
 	response.Data.VolumeType.Name = "nvme"
@@ -409,8 +387,7 @@ func TestMapVolumeResponseToModelImportPopulatesUnit(t *testing.T) {
 	response := newVolumeResponse("volume-123", "imported-volume", 256, "sku-uuid-10")
 	model := ResourceModel{}
 
-	// Read calls both, so import goes through the same pair.
-	result := RefreshVolumeModelFromResponse(response, MapVolumeResponseToModel(context.Background(), response, model))
+	result := MapVolumeResponseToModel(context.Background(), response, model)
 
 	if result.Name.ValueString() != "imported-volume" {
 		t.Errorf("Expected Name 'imported-volume', got '%s'", result.Name.ValueString())
@@ -426,8 +403,12 @@ func TestMapVolumeResponseToModelImportPopulatesUnit(t *testing.T) {
 	}
 }
 
+// Read, Create and Update all map over the model, so no API value replaces a configured one.
+// Reconciling a change to one of these attributes can destroy the volume.
 func TestMapVolumeResponseToModelKeepsPlanValuesUnit(t *testing.T) {
 	response := newVolumeResponse("volume-123", "renamed-in-portal", 512, "sku-uuid-11")
+	response.Data.Datacenter.ID = "datacenter-999"
+	response.Data.VolumeType.Name = "NVMe"
 	model := createTestVolumeModel("planned-name", "SSD", 128)
 
 	result := MapVolumeResponseToModel(context.Background(), response, model)
@@ -437,22 +418,6 @@ func TestMapVolumeResponseToModelKeepsPlanValuesUnit(t *testing.T) {
 	}
 	if result.SizeGb.ValueInt64() != 128 {
 		t.Errorf("Expected SizeGb 128, got %d", result.SizeGb.ValueInt64())
-	}
-}
-
-func TestRefreshVolumeModelFromResponseKeepsValuesOnEmptyUnit(t *testing.T) {
-	response := newVolumeResponse("volume-123", "", 0, "sku-uuid-10")
-	response.Data.Datacenter.ID = ""
-	response.Data.VolumeType.Name = ""
-	model := createTestVolumeModel("configured-name", "SSD", 256)
-
-	result := RefreshVolumeModelFromResponse(response, model)
-
-	if result.Name.ValueString() != "configured-name" {
-		t.Errorf("Expected Name 'configured-name', got '%s'", result.Name.ValueString())
-	}
-	if result.SizeGb.ValueInt64() != 256 {
-		t.Errorf("Expected SizeGb 256, got %d", result.SizeGb.ValueInt64())
 	}
 	if result.DatacenterId.ValueString() != testDatacenterID {
 		t.Errorf("Expected DatacenterId '%s', got '%s'", testDatacenterID, result.DatacenterId.ValueString())

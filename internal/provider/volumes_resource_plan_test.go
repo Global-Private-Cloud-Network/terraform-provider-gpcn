@@ -150,7 +150,9 @@ resource "gpcn_volume" "test" {
 `, host, volPlanTestName, volPlanTestDatacenterID, volPlanTestVolumeType, volPlanTestSizeGb)
 }
 
-func TestVolumeResourcePlanDetectsOutOfBandRename(t *testing.T) {
+// Read keeps the configured name and size_gb instead of refreshing them.
+// Reconciling a drifted name replaces the volume, and reconciling a drifted grow replaces it too.
+func TestVolumeResourcePlanIgnoresOutOfBandRename(t *testing.T) {
 	t.Parallel()
 	server, setName, _ := startVolumePlanMockServer(t)
 
@@ -176,8 +178,7 @@ func TestVolumeResourcePlanDetectsOutOfBandRename(t *testing.T) {
 				Config:    config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						// The name carries RequiresReplace, so the drift the refresh finds plans a replacement.
-						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionReplace),
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionNoop),
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -188,7 +189,7 @@ func TestVolumeResourcePlanDetectsOutOfBandRename(t *testing.T) {
 	})
 }
 
-func TestVolumeResourcePlanDetectsOutOfBandResize(t *testing.T) {
+func TestVolumeResourcePlanIgnoresOutOfBandShrink(t *testing.T) {
 	t.Parallel()
 	server, _, setSize := startVolumePlanMockServer(t)
 
@@ -213,7 +214,7 @@ func TestVolumeResourcePlanDetectsOutOfBandResize(t *testing.T) {
 				Config:    config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionUpdate),
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionNoop),
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -224,9 +225,7 @@ func TestVolumeResourcePlanDetectsOutOfBandResize(t *testing.T) {
 	})
 }
 
-// An out-of-band grow plans a replacement because Terraform must shrink the volume back,
-// and shrinking requires one. This test pins that consequence.
-func TestVolumeResourcePlanOutOfBandGrowPlansReplacement(t *testing.T) {
+func TestVolumeResourcePlanIgnoresOutOfBandGrow(t *testing.T) {
 	t.Parallel()
 	server, _, setSize := startVolumePlanMockServer(t)
 
@@ -251,7 +250,7 @@ func TestVolumeResourcePlanOutOfBandGrowPlansReplacement(t *testing.T) {
 				Config:    config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionReplace),
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionNoop),
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(

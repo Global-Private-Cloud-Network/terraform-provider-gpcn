@@ -850,7 +850,7 @@ func TestMapVirtualMachineResponseToModelRefreshesDrift(t *testing.T) {
 	response.Data.Configuration.SkuId = newSkuID
 	response.Data.Datacenter.ID = newDatacenterID
 
-	// State still holds the values Terraform last wrote, before the out-of-band change
+	// State still holds the values Terraform last wrote, before the out-of-band change.
 	model := createTestVMModel("stale-vm", testVMImage, false)
 
 	result, diags := MapVirtualMachineResponseToModel(context.Background(), gpcnClient, response, model)
@@ -862,8 +862,9 @@ func TestMapVirtualMachineResponseToModelRefreshesDrift(t *testing.T) {
 	if result.Name.ValueString() != newName {
 		t.Errorf("Expected name '%s', got '%s'", newName, result.Name.ValueString())
 	}
-	if result.SizeId.ValueString() != newSkuID {
-		t.Errorf("Expected size_id '%s', got '%s'", newSkuID, result.SizeId.ValueString())
+	// A refreshed size_id plans a downgrade, and the API rejects it, so the VM is replaced.
+	if result.SizeId.ValueString() != "sku-uuid-test" {
+		t.Errorf("Expected size_id 'sku-uuid-test' to survive, got '%s'", result.SizeId.ValueString())
 	}
 	// The datacenter is fixed at creation, so a refresh of it can only cause a false diff.
 	if result.DatacenterId.ValueString() != testDatacenterID {
@@ -916,7 +917,6 @@ func TestMapVirtualMachineResponseToModelKeepsPlanValues(t *testing.T) {
 
 func TestRefreshVirtualMachineModelFromResponseKeepsValuesOnEmpty(t *testing.T) {
 	response := newVMResponse("vm-empty-123", "")
-	response.Data.Configuration.SkuId = ""
 
 	model := createTestVMModel("configured-vm", testVMImage, false)
 
@@ -924,8 +924,5 @@ func TestRefreshVirtualMachineModelFromResponseKeepsValuesOnEmpty(t *testing.T) 
 
 	if result.Name.ValueString() != "configured-vm" {
 		t.Errorf("Expected name 'configured-vm', got '%s'", result.Name.ValueString())
-	}
-	if result.SizeId.ValueString() != "sku-uuid-test" {
-		t.Errorf("Expected size_id 'sku-uuid-test', got '%s'", result.SizeId.ValueString())
 	}
 }

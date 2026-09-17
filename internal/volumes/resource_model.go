@@ -58,6 +58,8 @@ func MapVolumeResponseToModel(ctx context.Context, response *readVolumesResponse
 	return model
 }
 
+// A refresh of name or size_gb from the API can destroy the volume, so this fills only null
+// values. A drifted name and a drifted grow both reconcile by replacement.
 func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel) ResourceModel {
 	if model.DatacenterId.IsNull() {
 		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
@@ -72,22 +74,6 @@ func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel
 	// the configured value from planning a replacement.
 	if model.VolumeType.IsNull() && response.Data.VolumeType.Name != "" {
 		model.VolumeType = types.StringValue(canonicalVolumeType(response.Data.VolumeType.Name))
-	}
-	return model
-}
-
-// Read refreshes only the attributes that change out of band and that Terraform can
-// reconcile. The datacenter_id and volume_type attributes keep the configured value.
-// Both force replacement, so a refresh of them is never worth a false diff.
-// The API also returns volume_type in a different case. The fill-if-null site
-// normalises that case through canonicalVolumeType. Only Read calls this function.
-func RefreshVolumeModelFromResponse(response *readVolumesResponse, model ResourceModel) ResourceModel {
-	// An attribute the API omits must not blank a Required value.
-	if response.Data.Name != "" {
-		model.Name = types.StringValue(response.Data.Name)
-	}
-	if response.Data.SizeGb != 0 {
-		model.SizeGb = types.Int64Value(response.Data.SizeGb)
 	}
 	return model
 }

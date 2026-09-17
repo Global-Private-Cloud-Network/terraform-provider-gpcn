@@ -110,20 +110,14 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 	return model, allDiags
 }
 
-// Read calls this after MapVirtualMachineResponseToModel so an out-of-band change shows as drift.
-// Create and Update must not call it, because a lagging API then breaks the planned values.
-// Only name and size_id refresh.
-// A false diff on datacenter_id or image_id forces a replacement, a risk that outweighs the drift.
-// The response names the image rather than identifying it, so image_id would need a lookup.
-// network_ids and allocate_public_ip stay out because they carry the intent of the user.
-// See the reasons at their fill-if-null sites.
-// An empty field means the response omits it, so the model value stays.
+// Read calls this after MapVirtualMachineResponseToModel, so an out-of-band change shows
+// as drift. Create and Update must not call it, because a lagging API then overwrites the
+// planned values. Only the name refreshes, because Terraform reconciles a rename in place.
+// A refresh of any other attribute plans a replacement or discards a configured value.
+// An empty name is an omission, not a rename.
 func RefreshVirtualMachineModelFromResponse(response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
 	if response.Data.Name != "" {
 		model.Name = types.StringValue(response.Data.Name)
-	}
-	if response.Data.Configuration.SkuId != "" {
-		model.SizeId = types.StringValue(response.Data.Configuration.SkuId)
 	}
 	return model
 }
