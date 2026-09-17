@@ -127,3 +127,14 @@ func setModelValuesNotPresent(response *readNetworkResponse, model ResourceModel
 	}
 	return model
 }
+
+// MapNetworkResponseToModel fills the name only when it is null, so Read needs this
+// second pass to show a rename. The network type and datacenter ID keep the configured
+// value, because reconciling either one requires replacement. An empty name is an
+// omission, not a rename.
+func RefreshNetworkModelFromResponse(response *readNetworkResponse, model ResourceModel) ResourceModel {
+	if response.Data.Name != "" {
+		model.Name = types.StringValue(response.Data.Name)
+	}
+	return model
+}

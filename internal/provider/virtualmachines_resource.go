@@ -349,6 +349,7 @@ func (r *virtualMachinesResource) Read(ctx context.Context, req resource.ReadReq
 	var mapDiags diag.Diagnostics
 	state, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, state)
 	resp.Diagnostics.Append(mapDiags...)
+	state = virtualmachines.RefreshVirtualMachineModelFromResponse(getVirtualMachineResponse, state)
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, state)

@@ -267,6 +267,7 @@ func (r *networksResource) Read(ctx context.Context, req resource.ReadRequest, r
 	tflog.Info(ctx, networks.LogSuccessfullyRetrievedGPCNNetworkRead)
 
 	state = networks.MapNetworkResponseToModel(ctx, getNetworkResponse, state)
+	state = networks.RefreshNetworkModelFromResponse(getNetworkResponse, state)
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, state)

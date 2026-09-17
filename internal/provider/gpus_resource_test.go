@@ -240,9 +240,11 @@ func TestGPUResourceSkuCode(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
 	gpuName := fmt.Sprintf("gpu-sku-%s", rName)
+	gpuNameUpdated := fmt.Sprintf("gpu-sku-updated-%s", rName)
 	sshKeyName := fmt.Sprintf("gpu-sku-key-%s", rName)
 
-	config := providerConfig + fmt.Sprintf(`
+	config := func(name string) string {
+		return providerConfig + fmt.Sprintf(`
 			data "gpcn_datacenters" "central_us" {
 				country_name = "United States"
 				region_name  = "central"
@@ -272,14 +274,15 @@ func TestGPUResourceSkuCode(t *testing.T) {
 					ssh_key_id = gpcn_ssh_key.test.id
 				}
 			}
-			`, sshKeyName, gpuName)
+			`, sshKeyName, name)
+	}
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Look up a sku_code from the inventory data source, then create from it
 			{
-				Config: config,
+				Config: config(gpuName),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnGPUTest, plancheck.ResourceActionCreate),
@@ -301,6 +304,18 @@ func TestGPUResourceSkuCode(t *testing.T) {
 				ImportState:             true,
 				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"image_name", "created_time", "last_updated"},
+			},
+			// A name change must not replace a GPU that pins its series by series_code.
+			{
+				Config: config(gpuNameUpdated),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnGPUTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnGPUTest, "name", gpuNameUpdated),
+				),
 			},
 		},
 	})
