@@ -167,7 +167,7 @@ func overlappingVpcs(err error) (string, bool) {
 	if !ok {
 		return "", true
 	}
-	hidden, _ := details["hiddenOverlapCount"].(float64)
+	hidden, hasHidden := details["hiddenOverlapCount"].(float64)
 	parts := make([]string, 0, len(rows))
 	for _, row := range rows {
 		fields, isObject := row.(map[string]any)
@@ -185,7 +185,7 @@ func overlappingVpcs(err error) (string, bool) {
 		return "", true
 	}
 	rendered := strings.Join(parts, ", ")
-	if hidden > 0 {
+	if hasHidden && hidden > 0 {
 		rendered += fmt.Sprintf(ErrDetailVpcOverlapHiddenSuffix, int(hidden))
 	}
 	return rendered, true
