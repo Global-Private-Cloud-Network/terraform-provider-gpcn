@@ -36,7 +36,7 @@ func (r *volumeAttachmentResource) Metadata(_ context.Context, req resource.Meta
 
 func (r *volumeAttachmentResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages the attachment of a volume to a virtual machine. A volume can only be attached to one virtual machine at a time. GPCN attaches a volume to a running virtual machine, so the provider never stops it. GPCN refuses a virtual machine that is not in a settled state, and the provider reports that refusal with the API's own message.",
+		Description: "Manages the attachment of a volume to a virtual machine. A volume can only be attached to one virtual machine at a time. GPCN attaches a volume to a virtual machine that is Running, Stopped or Shutoff, so the provider never stops it. GPCN refuses any other status and the provider reports that refusal with the API's own message.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the attachment (equal to the volume ID).",
