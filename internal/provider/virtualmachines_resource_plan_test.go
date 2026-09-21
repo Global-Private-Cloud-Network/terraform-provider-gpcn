@@ -570,10 +570,27 @@ func vmPlanTestReadBodyWithHotplug(name, status string, hotplug int) map[string]
 	return body
 }
 
+// vmSegmentNic pairs an interface id with the segment it carries, so a mock keeps the id
+// stable while the list around it changes.
+type vmSegmentNic struct {
+	nicID     string
+	segmentID string
+}
+
+// vmSegmentNicsFromIds numbers the interfaces the way GPCN does, from the slot after the
+// birth interface.
+func vmSegmentNicsFromIds(segmentIDs []string) []vmSegmentNic {
+	nics := make([]vmSegmentNic, 0, len(segmentIDs))
+	for index, segmentID := range segmentIDs {
+		nics = append(nics, vmSegmentNic{nicID: fmt.Sprintf("nic-%d", index+2), segmentID: segmentID})
+	}
+	return nics
+}
+
 // vmSegmentPlanTestNetworkInterfacesBody lists the birth subnet interface and one L2 row
 // per segment that attached. A test can then observe the state a failed attach leaves
 // behind. An L2 interface carries no address and no subnet, so those columns are null.
-func vmSegmentPlanTestNetworkInterfacesBody(birthSubnetID string, attached []string) map[string]any {
+func vmSegmentPlanTestNetworkInterfacesBody(birthSubnetID string, attached []vmSegmentNic) map[string]any {
 	rows := make([]map[string]any, 0, 1+len(attached))
 	rows = append(rows, map[string]any{
 		"id":               "nic-1",
@@ -596,9 +613,9 @@ func vmSegmentPlanTestNetworkInterfacesBody(birthSubnetID string, attached []str
 		"l2SegmentId":      nil,
 		"l2SegmentName":    nil,
 	})
-	for index, segmentID := range attached {
+	for index, nic := range attached {
 		rows = append(rows, map[string]any{
-			"id":               fmt.Sprintf("nic-%d", index+2),
+			"id":               nic.nicID,
 			"networkInterface": index + 2,
 			"isPrimary":        0,
 			"macAddress":       fmt.Sprintf("fa:16:3e:00:00:%02d", index+2),
@@ -615,8 +632,8 @@ func vmSegmentPlanTestNetworkInterfacesBody(birthSubnetID string, attached []str
 			"subnetName":       nil,
 			"vpcId":            nil,
 			"vpcName":          nil,
-			"l2SegmentId":      segmentID,
-			"l2SegmentName":    "segment-" + segmentID,
+			"l2SegmentId":      nic.segmentID,
+			"l2SegmentName":    "name of " + nic.segmentID,
 		})
 	}
 	return map[string]any{"success": true, "message": "ok", "data": rows}
@@ -701,7 +718,7 @@ func startVirtualMachineSegmentAttachMockServer(t *testing.T) (*httptest.Server,
 			currentSubnet := birthSubnetID
 			current := append([]string(nil), attached...)
 			mu.Unlock()
-			testutil.WriteJSONResponse(w, vmSegmentPlanTestNetworkInterfacesBody(currentSubnet, current))
+			testutil.WriteJSONResponse(w, vmSegmentPlanTestNetworkInterfacesBody(currentSubnet, vmSegmentNicsFromIds(current)))
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/"):
 			mu.Lock()
 			attached = nil
@@ -824,7 +841,7 @@ func startVirtualMachineSegmentHotplugMockServer(t *testing.T, hotplug int) (*ht
 			currentSubnet := birthSubnetID
 			current := append([]string(nil), attached...)
 			mu.Unlock()
-			testutil.WriteJSONResponse(w, vmSegmentPlanTestNetworkInterfacesBody(currentSubnet, current))
+			testutil.WriteJSONResponse(w, vmSegmentPlanTestNetworkInterfacesBody(currentSubnet, vmSegmentNicsFromIds(current)))
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/"):
 			mu.Lock()
 			attached = nil
@@ -931,4 +948,141 @@ func TestVirtualMachineResourcePlanCreateStopsForASegmentAttachWithoutHotplug(t 
 			})
 		})
 	}
+}
+
+// startVirtualMachineSegmentUpdateMockServer keeps one interface row per attached
+// segment and gives each a stable id. It records the segment verbs in the order they
+// arrive, so a test reads what the provider changed and what it left alone.
+func startVirtualMachineSegmentUpdateMockServer(t *testing.T, hotplug int) (*httptest.Server, func() []string) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	birthSubnetID := ""
+	status := virtualmachines.VMStatusRunning.String()
+	nextNic := 2
+	var attached []vmSegmentNic
+	var events []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			birthSubnetID, _ = body["subnetId"].(string)
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			body := testutil.ReadRequestBody(r)
+			segmentID, _ := body["l2SegmentId"].(string)
+			mu.Lock()
+			events = append(events, "attach "+segmentID)
+			attached = append(attached, vmSegmentNic{nicID: fmt.Sprintf("nic-%d", nextNic), segmentID: segmentID})
+			nextNic++
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/"):
+			nicID := strings.TrimPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/")
+			mu.Lock()
+			events = append(events, "detach "+nicID)
+			attached = slices.DeleteFunc(attached, func(nic vmSegmentNic) bool { return nic.nicID == nicID })
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-4", "detach issued")
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mu.Lock()
+			currentSubnet := birthSubnetID
+			current := append([]vmSegmentNic(nil), attached...)
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmSegmentPlanTestNetworkInterfacesBody(currentSubnet, current))
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			events = append(events, "stop")
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/start":
+			mu.Lock()
+			events = append(events, "start")
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, hotplug))
+		case r.Method == http.MethodPut && r.URL.Path == vmPlanTestPath:
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			if updated, ok := body["name"].(string); ok {
+				name = updated
+			}
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	recorded := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), events...)
+	}
+
+	return server, recorded
+}
+
+// A segment list changes in place. The provider detaches the interface that carries the
+// segment the configuration dropped and attaches one for the segment it gained. An image
+// with network hotplug takes the change while the machine runs.
+func TestVirtualMachineResourcePlanAttachesAndDetachesSegments(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachineSegmentUpdateMockServer(t, 1)
+
+	var afterCreate []string
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmSegmentListPlanTestConfig(server.URL, "vm-plan-segment-swap", vmPlanTestSegmentID),
+				Check: func(*terraform.State) error {
+					afterCreate = recorded()
+					return nil
+				},
+			},
+			{
+				Config: vmSegmentListPlanTestConfig(server.URL, "vm-plan-segment-swap", vmPlanTestSegmentID2),
+				Check: func(*terraform.State) error {
+					update := recorded()[len(afterCreate):]
+					want := []string{"detach nic-2", "attach " + vmPlanTestSegmentID2}
+					if !slices.Equal(update, want) {
+						return fmt.Errorf("expected %v, got %v", want, update)
+					}
+					return nil
+				},
+			},
+			{
+				RefreshState: true,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "l2_segment_ids.#", "1"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "l2_segment_ids.0", vmPlanTestSegmentID2),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.#", "2"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.1.l2_segment_id", vmPlanTestSegmentID2),
+				),
+			},
+		},
+	})
 }

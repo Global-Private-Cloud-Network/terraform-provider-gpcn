@@ -532,6 +532,13 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		}
 	}
 
+	// Attach and detach the L2 segments if the list changed
+	segmentDiags := virtualmachines.UpdateL2SegmentsIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+	resp.Diagnostics.Append(segmentDiags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// Update public IP allocation if changed
 	publicIPDiags := virtualmachines.UpdatePublicIPIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
 	resp.Diagnostics.Append(publicIPDiags...)
