@@ -424,3 +424,39 @@ func TestVolumeResourcePlanImportsUnknownTypeName(t *testing.T) {
 		},
 	})
 }
+
+// A configuration spells a built-in storage class by its alias.
+// An import that writes the component code instead plans a replacement.
+func TestVolumeResourcePlanImportAliasPlansEmpty(t *testing.T) {
+	t.Parallel()
+	server, _, _ := startVolumePlanMockServer(t)
+
+	config := volPlanTestConfig(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type", volPlanTestVolumeType),
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type_code", volPlanTestComponent),
+				),
+			},
+			{
+				Config:            config,
+				ResourceName:      gpcnVolumeTest,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionNoop),
+					},
+				},
+			},
+		},
+	})
+}
