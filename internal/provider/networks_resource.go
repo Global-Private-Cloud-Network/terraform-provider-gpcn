@@ -27,6 +27,7 @@ var (
 	_ resource.Resource                = &networksResource{}
 	_ resource.ResourceWithConfigure   = &networksResource{}
 	_ resource.ResourceWithImportState = &networksResource{}
+	_ resource.ResourceWithModifyPlan  = &networksResource{}
 )
 
 // NewNetworksResource is a helper function to simplify the provider implementation.
@@ -346,4 +347,17 @@ func (r *networksResource) Delete(ctx context.Context, req resource.DeleteReques
 
 func (r *networksResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+// ModifyPlan refuses to plan a new network. The platform retired the legacy create verb, so
+// the request would fail against the API. The refusal is here and not on an attribute, because
+// an attribute validator also runs for a network that already exists, and those rows must keep
+// planning updates and deletes. A null prior state names a create; a null plan names a destroy.
+func (r *networksResource) ModifyPlan(_ context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.State.Raw.IsNull() && !req.Plan.Raw.IsNull() {
+		resp.Diagnostics.AddError(
+			networks.ErrSummaryNetworkCreateRetired,
+			networks.ErrDetailNetworkCreateRetired,
+		)
+	}
 }

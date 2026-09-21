@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"sync"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 const (
@@ -55,27 +57,23 @@ func networkPlanTestReadBody(name string) map[string]any {
 	}
 }
 
-// startNetworkPlanMockServer serves the network endpoints a rename needs. The handler
-// keeps the name from the last create or update. The read after an apply then matches the
-// configuration, so the refresh plan stays empty. The returned function renames the
-// network out of band, which is how a test creates drift.
-func startNetworkPlanMockServer(t *testing.T) (*httptest.Server, func(string)) {
+// startNetworkPlanMockServer serves the network endpoints a rename needs, starting from a
+// network that already exists: creation is retired, so a plan test reaches an existing row
+// through terraform import. The handler keeps the name from the last update, so the read
+// after an apply matches the configuration and the refresh plan stays empty. The returned
+// function renames the network out of band, which is how a test creates drift. There is no
+// create route, so a plan that tried to mint a network fails the test loudly.
+func startNetworkPlanMockServer(t *testing.T, initialName string) (*httptest.Server, func(string)) {
 	t.Helper()
 
 	var mu sync.Mutex
-	name := ""
+	name := initialName
 
 	networkPath := "/v1/resource/networks/" + networkPlanTestID
 	virtualMachinesPath := networkPath + "/virtual-machines"
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/networks/":
-			body := testutil.ReadRequestBody(r)
-			mu.Lock()
-			name, _ = body["name"].(string)
-			mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-1", "create issued")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", networkPlanTestID, true)
 		case r.Method == http.MethodPut && r.URL.Path == networkPath:
@@ -127,26 +125,53 @@ resource "gpcn_network" "test" {
 `, host, name, networkPlanTestDatacenterID, networkPlanTestCIDRBlock, networkPlanTestDHCPStart, networkPlanTestDHCPEnd, networkPlanTestDNSServer)
 }
 
-// TestNetworkResourcePlanRename pins the in-place rename path; it does not guard a fix.
-func TestNetworkResourcePlanRename(t *testing.T) {
+// TestNetworkResourcePlanRefusesCreate guards the create refusal. The platform retired the
+// legacy create verb, so a plan that would mint a network must fail before any request goes out.
+func TestNetworkResourcePlanRefusesCreate(t *testing.T) {
 	t.Parallel()
-	server, _ := startNetworkPlanMockServer(t)
+	server, _ := startNetworkPlanMockServer(t, "net-plan-new")
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: networkPlanTestConfig(server.URL, "net-plan-a"),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(gpcnNetworkTest, plancheck.ResourceActionCreate),
-					},
+				Config:      networkPlanTestConfig(server.URL, "net-plan-new"),
+				ExpectError: regexp.MustCompile("Network creation is no longer supported"),
+			},
+		},
+	})
+}
+
+// TestNetworkResourcePlanRename pins the in-place rename path of a grandfathered network.
+// The first step imports, because the create refusal closes the path this test used to take.
+func TestNetworkResourcePlanRename(t *testing.T) {
+	t.Parallel()
+	server, _ := startNetworkPlanMockServer(t, "net-plan-a")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:             networkPlanTestConfig(server.URL, "net-plan-a"),
+				ResourceName:       gpcnNetworkTest,
+				ImportState:        true,
+				ImportStateId:      networkPlanTestID,
+				ImportStatePersist: true,
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported state, got %d", len(states))
+					}
+					for attribute, want := range map[string]string{
+						"name":       "net-plan-a",
+						"gateway_ip": networkPlanTestGatewayIP,
+						"cidr_block": networkPlanTestCIDRBlock,
+					} {
+						if got := states[0].Attributes[attribute]; got != want {
+							return fmt.Errorf("imported %s = %q, want %q", attribute, got, want)
+						}
+					}
+					return nil
 				},
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "name", "net-plan-a"),
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "gateway_ip", networkPlanTestGatewayIP),
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "cidr_block", networkPlanTestCIDRBlock),
-				),
 			},
 			{
 				Config: networkPlanTestConfig(server.URL, "net-plan-b"),
@@ -157,6 +182,8 @@ func TestNetworkResourcePlanRename(t *testing.T) {
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnNetworkTest, "name", "net-plan-b"),
+					resource.TestCheckResourceAttr(gpcnNetworkTest, "gateway_ip", networkPlanTestGatewayIP),
+					resource.TestCheckResourceAttr(gpcnNetworkTest, "cidr_block", networkPlanTestCIDRBlock),
 				),
 			},
 		},
@@ -165,7 +192,7 @@ func TestNetworkResourcePlanRename(t *testing.T) {
 
 func TestNetworkResourcePlanDetectsOutOfBandRename(t *testing.T) {
 	t.Parallel()
-	server, setName := startNetworkPlanMockServer(t)
+	server, setName := startNetworkPlanMockServer(t, "net-plan-a")
 
 	config := networkPlanTestConfig(server.URL, "net-plan-a")
 
@@ -173,12 +200,11 @@ func TestNetworkResourcePlanDetectsOutOfBandRename(t *testing.T) {
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: config,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(gpcnNetworkTest, plancheck.ResourceActionCreate),
-					},
-				},
+				Config:             config,
+				ResourceName:       gpcnNetworkTest,
+				ImportState:        true,
+				ImportStateId:      networkPlanTestID,
+				ImportStatePersist: true,
 			},
 			{
 				PreConfig: func() { setName("renamed-out-of-band") },

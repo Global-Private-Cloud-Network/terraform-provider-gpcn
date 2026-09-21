@@ -9,6 +9,7 @@ const (
 	ErrSummaryUnableToGetNetwork      = "Unable to get GPCN Network"
 	ErrSummaryUnableToUpdateNetwork   = "Unable to update GPCN Network"
 	ErrSummaryUnableToDeleteNetwork   = "Unable to delete GPCN Network"
+	ErrSummaryNetworkCreateRetired    = "Network creation is no longer supported"
 )
 
 // Error detail message templates
@@ -25,6 +26,8 @@ const (
 	ErrDetailUnableToGetNetworkWithID     = "Unable to get GPCN Network with ID '%s'"
 	ErrDetailUnableToUpdateNetworkWithID  = "Unable to update GPCN Network with ID '%s'"
 	ErrDetailUnableToDeleteNetworkWithID  = "Unable to delete GPCN Network with ID '%s'"
+
+	ErrDetailNetworkCreateRetired = "GPCN has moved to VPC networking. Create a gpcn_vpc and a gpcn_vpc_subnet for routed networking, or a gpcn_l2_segment for a layer-2 network. Existing gpcn_network resources can still be read and destroyed."
 
 	ErrDetailNoCandidateNetworkInterface    = "the virtual machine has no candidate network interface to promote"
 	ErrDetailReplacePrimaryInterfaceFailed  = "error replacing primary interface: %w"
