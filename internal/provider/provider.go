@@ -312,6 +312,7 @@ func (p *gpcnProvider) DataSources(_ context.Context) []func() datasource.DataSo
 func (p *gpcnProvider) Resources(_ context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewGPUResource,
+		NewL2SegmentResource,
 		NewNetworksResource,
 		NewResourceGroupResource,
 		NewSSHKeyResource,
