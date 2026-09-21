@@ -1,11 +1,14 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"testing"
 
 	"terraform-provider-gpcn/internal/gpu"
+
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -17,6 +20,32 @@ var gpcnGPUTest = "gpcn_gpu.test"
 // gpuCreateRefusalError matches every diagnostic a create refusal can render:
 // the summary, and the two details CheckInventory returns.
 var gpuCreateRefusalError = regexp.MustCompile("(Unable to Create GPU|no GPU availability|is not offered)")
+
+// The data source describes its own filters, so it must not send the reader to
+// itself. The bytes are the release spec's.
+func TestGPUInventoryDataSourceFilterDescriptions(t *testing.T) {
+	t.Parallel()
+
+	var resp datasource.SchemaResponse
+	NewGPUInventoryDataSource().Schema(context.Background(), datasource.SchemaRequest{}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("Expected a schema, got %v", resp.Diagnostics)
+	}
+
+	want := map[string]string{
+		"series_code": "Filter by the series code as returned in this data source's series list.",
+		"series_name": "Filter by the series name as returned in this data source's series list.",
+	}
+	for name, description := range want {
+		attribute, ok := resp.Schema.Attributes[name]
+		if !ok {
+			t.Fatalf("Expected a %q attribute", name)
+		}
+		if got := attribute.GetDescription(); got != description {
+			t.Errorf("Expected %q description %q, got %q", name, description, got)
+		}
+	}
+}
 
 // The acceptance refusal regexp is worthless if it matches no string the code
 // emits. The unit test holds it to the constants.
