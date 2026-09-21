@@ -56,9 +56,9 @@ func (r *l2SegmentResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Description: "Human-readable name for the L2 segment. Must be 1-255 characters",
 				Required:    true,
 				Validators: []validator.String{
-					// The character rule is service-side and applies to a rename
-					// only. A schema-level rule would make an adopted segment,
-					// whose name came from a legacy network, unmanageable.
+					// GPCN applies its name regex on create and on a real rename.
+					// The update body schema checks length only, so an adopted legacy name round-trips unchanged.
+					// The provider adds no regex and surfaces the 422.
 					stringvalidator.LengthBetween(1, 255),
 					l2segments.NoOuterWhitespaceValidator{Attribute: "name"},
 				},
