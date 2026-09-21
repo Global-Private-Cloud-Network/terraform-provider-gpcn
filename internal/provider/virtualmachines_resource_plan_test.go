@@ -801,8 +801,9 @@ func TestVirtualMachineResourcePlanCreateWritesStateWhenASegmentAttachFails(t *t
 
 // startVirtualMachineSegmentHotplugMockServer accepts every call and records the order in
 // which they arrive. A test reads the order to learn whether the provider stopped the
-// machine around the post-create attach.
-func startVirtualMachineSegmentHotplugMockServer(t *testing.T, hotplug int) (*httptest.Server, func() []string) {
+// machine around the post-create attach. startSucceeds answers the start. A test then
+// also observes what the provider does with a machine it cannot start again.
+func startVirtualMachineSegmentHotplugMockServer(t *testing.T, hotplug int, startSucceeds bool) (*httptest.Server, func() []string) {
 	t.Helper()
 
 	var mu sync.Mutex
@@ -854,6 +855,11 @@ func startVirtualMachineSegmentHotplugMockServer(t *testing.T, hotplug int) (*ht
 			mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/start":
+			if !startSucceeds {
+				w.WriteHeader(http.StatusInternalServerError)
+				testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "start refused"})
+				return
+			}
 			mu.Lock()
 			status = virtualmachines.VMStatusRunning.String()
 			mu.Unlock()
@@ -914,7 +920,7 @@ func TestVirtualMachineResourcePlanCreateStopsForASegmentAttachWithoutHotplug(t 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			shortenVirtualMachinePolling(t)
-			server, recorded := startVirtualMachineSegmentHotplugMockServer(t, tc.hotplug)
+			server, recorded := startVirtualMachineSegmentHotplugMockServer(t, tc.hotplug, true)
 
 			resource.UnitTest(t, resource.TestCase{
 				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -1784,4 +1790,34 @@ func TestVirtualMachineResourcePlanRenameKeepsThePinnedInterfaceList(t *testing.
 			},
 		},
 	})
+}
+
+// The create stops the machine to attach the segment. A start that fails leaves the
+// machine stopped, and only an error tells the user so. The machine exists at the API,
+// so it stays in state, and the error taints it: the remedy has to say so.
+func TestVirtualMachineResourcePlanCreateReportsFailedRestart(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachineSegmentHotplugMockServer(t, 0, false)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      vmSegmentListPlanTestConfig(server.URL, "vm-plan-restart-create", vmPlanTestSegmentID),
+				ExpectError: regexp.MustCompile(`(?s)left\s+stopped.*did\s+not\s+start\s+again.*otherwise\s+the\s+next\s+apply\s+replaces\s+the\s+machine`),
+			},
+			{
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "l2_segment_ids.#", "1"),
+				),
+			},
+		},
+	})
+
+	if starts := lastIndexOfRequest(recorded(), "POST "+vmPlanTestPath+"/start"); starts < 0 {
+		t.Errorf("Expected a start, got %v", recorded())
+	}
 }
