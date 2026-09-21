@@ -30,7 +30,7 @@ func (v NoOuterWhitespaceValidator) ValidateString(_ context.Context, req valida
 	}
 
 	// GPCN trims the value before it validates and stores it. A padded value
-	// therefore comes back different and makes the plan never settle.
+	// comes back different and makes the plan never settle.
 	value := req.ConfigValue.ValueString()
 	if strings.TrimSpace(value) == value {
 		return

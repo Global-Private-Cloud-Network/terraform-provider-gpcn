@@ -88,7 +88,7 @@ type l2PlanTestServer struct {
 	segmentState  string
 	failureReason any
 	// nicCount is the live interface count the platform reports. attachedOnUpdate
-	// is an attach that lands while the apply runs, after the plan was made.
+	// is an attach that lands during the apply, after the plan is made.
 	nicCount         int64
 	attachedOnUpdate *int64
 	// refusalsLeft counts the deletes that answer with the in-use refusal. The
@@ -118,7 +118,7 @@ func (s *l2PlanTestServer) parkFailed(reason string) {
 }
 
 // attachNicDuringUpdate moves the count between the plan and the apply. Only the
-// update answer carries the new count, so the plan cannot have seen it.
+// update answer carries the new count, so the plan does not see it.
 func (s *l2PlanTestServer) attachNicDuringUpdate(count int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -280,8 +280,8 @@ func TestL2SegmentResourcePlanCreateRenameDestroy(t *testing.T) {
 	})
 }
 
-// GPCN trims a padded name before it stores one, so the configuration would
-// never settle. The plan refuses the value before any request leaves.
+// GPCN trims a padded name before it stores it. The configuration never
+// settles, so the plan refuses the value.
 func TestL2SegmentResourcePlanRefusesPaddedName(t *testing.T) {
 	t.Parallel()
 	server, _ := startL2SegmentPlanMockServer(t)
@@ -299,8 +299,8 @@ func TestL2SegmentResourcePlanRefusesPaddedName(t *testing.T) {
 	})
 }
 
-// The interface count is live. A NIC that lands between the plan and the apply
-// must not fail the apply, so the attribute plans unknown.
+// A NIC can land between the plan and the apply. The attribute therefore plans
+// unknown, and the apply writes what the API reports.
 func TestL2SegmentResourcePlanAcceptsNicCountMovedDuringApply(t *testing.T) {
 	t.Parallel()
 	server, state := startL2SegmentPlanMockServer(t)
