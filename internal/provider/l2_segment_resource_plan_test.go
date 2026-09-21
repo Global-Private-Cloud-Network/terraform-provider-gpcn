@@ -506,6 +506,18 @@ func TestL2SegmentReadWarnsOnFailedSegmentUnit(t *testing.T) {
 	if quiet := readyResponse.Diagnostics.Warnings(); len(quiet) != 0 {
 		t.Errorf("warnings on a ready segment = %v, want none", quiet)
 	}
+
+	// The platform can park a segment with no reason recorded. A guard on the
+	// reason instead of the state reads such a row in silence.
+	noReasonResponse := readInState(l2PlanTestFailedState, nil)
+	noReasonWarnings := noReasonResponse.Diagnostics.Warnings()
+	if len(noReasonWarnings) != 1 {
+		t.Fatalf("warnings on a failed segment with no reason = %v, want exactly one", noReasonWarnings)
+	}
+	wantNoReasonDetail := fmt.Sprintf(l2segments.WarnDetailL2SegmentFailedNoReason, l2PlanTestSegmentID)
+	if got := noReasonWarnings[0].Detail(); got != wantNoReasonDetail {
+		t.Errorf("detail = %q, want %q", got, wantNoReasonDetail)
+	}
 }
 
 // A segment is pinned to one datacenter. The platform has no verb that moves it,
