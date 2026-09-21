@@ -46,7 +46,7 @@ func StopVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, virt
 	}
 	defer response.Body.Close()
 
-	_, err = PollForVirtualMachineStatus(gpcnClient, ctx, virtualMachineId, []string{VMStatusShutoff.String()}, DEFAULT_NETWORK_TIMEOUT_SECONDS, 0)
+	_, err = PollForVirtualMachineStatus(gpcnClient, ctx, virtualMachineId, []string{VMStatusShutoff.String(), VMStatusStopped.String()}, DEFAULT_NETWORK_TIMEOUT_SECONDS, 0)
 	if err != nil {
 		return err
 	}

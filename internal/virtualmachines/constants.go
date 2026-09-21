@@ -21,9 +21,26 @@ type VMStatus string
 
 // Virtual Machine lifecycle statuses
 const (
-	VMStatusRunning VMStatus = "Running"
-	VMStatusShutoff VMStatus = "Shutoff"
+	VMStatusRunning      VMStatus = "Running"
+	VMStatusStopped      VMStatus = "Stopped"
+	VMStatusProvisioning VMStatus = "Provisioning"
+	VMStatusResizing     VMStatus = "Resizing"
+	VMStatusStarting     VMStatus = "Starting"
+	VMStatusStopping     VMStatus = "Stopping"
+	VMStatusDeleting     VMStatus = "Deleting"
+	VMStatusDestroyed    VMStatus = "Destroyed"
+	VMStatusShutoff      VMStatus = "Shutoff"
+	VMStatusRescue       VMStatus = "Rescue"
+	VMStatusRescuing     VMStatus = "Rescuing"
+	VMStatusUnrescuing   VMStatus = "Unrescuing"
+	VMStatusUnknown      VMStatus = "Unknown"
+	VMStatusError        VMStatus = "Error"
 )
+
+// A virtual machine in one of these statuses never reaches a different one.
+// The poller stops immediately instead of waiting for the timeout.
+// Unknown is absent, because that status can be transient.
+var VM_TERMINAL_FAILURE_STATUSES = []VMStatus{VMStatusError, VMStatusDestroyed}
 
 // String returns the string representation of VMStatus
 func (s VMStatus) String() string {

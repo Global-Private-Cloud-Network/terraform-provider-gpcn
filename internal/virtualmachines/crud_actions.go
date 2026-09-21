@@ -180,7 +180,7 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 	}
 
 	// Wait for the VM to actually be spun up before doing anything more
-	getVirtualMachineResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, resourceID, []string{VMStatusRunning.String(), VMStatusShutoff.String()}, DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS, DEFAULT_INITIAL_POLL_DELAY_SECONDS)
+	getVirtualMachineResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, resourceID, []string{VMStatusRunning.String(), VMStatusShutoff.String(), VMStatusStopped.String()}, DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS, DEFAULT_INITIAL_POLL_DELAY_SECONDS)
 	if err != nil {
 		return nil, err
 	}
@@ -242,6 +242,13 @@ func UpdateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, vi
 	return nil
 }
 
+// Reports whether the virtual machine holds a status that it never leaves.
+func isTerminalFailureStatus(status string) bool {
+	return slices.ContainsFunc(VM_TERMINAL_FAILURE_STATUSES, func(terminal VMStatus) bool {
+		return strings.EqualFold(status, terminal.String())
+	})
+}
+
 // Iteratively calls getVirtualMachine until the machine is in a target status, or it times out
 func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string, targetStatuses []string, timeoutMaxSec int, initialDelaySec int) (*ReadVirtualMachinesResponse, error) {
 	// Make all statuses lowercase for ease of comparison
@@ -276,6 +283,10 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 			// The API can report the target status before the change is complete.
 			// The extra wait lowers that risk.
 			time.Sleep(VM_STATUS_SETTLE_WAIT)
+			break
+		}
+		if isTerminalFailureStatus(getResp.Data.Status) {
+			pollErr = fmt.Errorf(ErrDetailVMTerminalStatus, virtualMachineId, getResp.Data.Status, strings.Join(targetStatuses, ", "))
 			break
 		}
 		time.Sleep(VM_STATUS_POLL_INTERVAL)
