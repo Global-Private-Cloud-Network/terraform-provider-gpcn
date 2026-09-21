@@ -44,6 +44,7 @@ type vpcMock struct {
 	mutex          sync.Mutex
 	name           string
 	description    string
+	nameservers    []string
 	createRefusal  string
 	deleteRefusals int
 	createBody     map[string]any
@@ -97,6 +98,7 @@ func (m *vpcMock) handleCreate(w http.ResponseWriter, r *http.Request) {
 		m.createBody = body
 		m.name, _ = body["name"].(string)
 		m.description, _ = body["description"].(string)
+		m.nameservers = requestedNameservers(body)
 	}
 	m.mutex.Unlock()
 
@@ -174,8 +176,33 @@ func (m *vpcMock) vpcBody() map[string]any {
 		"resourceGroupId": nil,
 		"createdAt":       vpcPlanTestTimestamp,
 		"updatedAt":       vpcPlanTestTimestamp,
-		"dnsNameservers":  []string{"8.8.8.8", "1.1.1.1"},
+		"dnsNameservers":  m.answeredNameservers(),
 	}
+}
+
+// The platform freezes the requested nameservers on the row, and resolves its
+// own only when the request omits them.
+func (m *vpcMock) answeredNameservers() []string {
+	if len(m.nameservers) > 0 {
+		return m.nameservers
+	}
+	return []string{"8.8.8.8", "1.1.1.1"}
+}
+
+func requestedNameservers(body map[string]any) []string {
+	requested, ok := body["dnsNameservers"].([]any)
+	if !ok {
+		return nil
+	}
+	nameservers := make([]string, 0, len(requested))
+	for _, entry := range requested {
+		nameserver, isString := entry.(string)
+		if !isString {
+			continue
+		}
+		nameservers = append(nameservers, nameserver)
+	}
+	return nameservers
 }
 
 func (m *vpcMock) detailBody() map[string]any {
@@ -268,6 +295,52 @@ func TestVpcResourcePlanCreatesRenamesAndDestroys(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVpcTest, "name", "vpc-plan-b"),
 					resource.TestCheckResourceAttr(gpcnVpcTest, "dns_nameservers.#", "2"),
+				),
+			},
+		},
+	})
+}
+
+// A provider applies DNS once, at creation, and discards a later change. The
+// plan therefore has to replace the VPC rather than report a change nobody
+// makes.
+func TestVpcResourcePlanReplacesOnDnsNameserverChange(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t)
+
+	withNameservers := fmt.Sprintf(`
+provider "gpcn" {
+  host    = %q
+  api_key = "test-key"
+}
+
+resource "gpcn_vpc" "test" {
+  name            = "vpc-dns"
+  datacenter_id   = %q
+  cidr            = %q
+  dns_nameservers = ["9.9.9.9"]
+}
+`, mock.url, vpcPlanTestDatacenterID, vpcPlanTestCidr)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vpcPlanTestConfig(mock.url, "vpc-dns"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcTest, "dns_nameservers.#", "2"),
+				),
+			},
+			{
+				Config: withNameservers,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcTest, plancheck.ResourceActionReplace),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcTest, "dns_nameservers.#", "1"),
+					resource.TestCheckResourceAttr(gpcnVpcTest, "dns_nameservers.0", "9.9.9.9"),
 				),
 			},
 		},
