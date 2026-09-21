@@ -127,7 +127,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				},
 			},
 			"allocate_public_ip": schema.BoolAttribute{
-				Description: "Whether to acquire a public IP address for the virtual machine and attach it to the primary interface",
+				Description: "Whether to acquire an elastic public IP on the VPC that holds the birth interface and attach it to that interface. Changing this value in place needs the vpc-public-ip:create, vpc-public-ip:update and vpc-public-ip:delete permissions. Destroying the virtual machine releases an address acquired this way",
 				Optional:    true,
 				Computed:    true,
 				Default:     booldefault.StaticBool(false),
@@ -140,7 +140,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				},
 			},
 			"public_ip_id": schema.StringAttribute{
-				Description: "ID of a held gpcn_vpc_public_ip to attach to the primary interface. Cannot be set together with allocate_public_ip",
+				Description: "ID of a held gpcn_vpc_public_ip to attach to the primary interface. Cannot be set together with allocate_public_ip. The address outlives the virtual machine, because the operator holds it",
 				Optional:    true,
 				Validators: []validator.String{
 					virtualmachines.PublicIpIdConflictsValidator{},
@@ -154,7 +154,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				},
 			},
 			"l2_segment_ids": schema.ListAttribute{
-				Description: "IDs of the L2 segments to attach to the virtual machine after it is created. Maximum of 4, because the birth subnet interface holds one of the five interfaces GPCN allows",
+				Description: "IDs of the L2 segments the virtual machine carries. They attach after the machine is created, and the machine is stopped for a change unless its image supports network hotplug. Maximum of 4, because the birth subnet interface holds one of the five interfaces GPCN allows",
 				ElementType: types.StringType,
 				Optional:    true,
 				Computed:    true,
