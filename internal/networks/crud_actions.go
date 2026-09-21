@@ -176,7 +176,6 @@ func UpdateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkId
 
 	// Create a new request from the model
 	updateNetworkRequestBody := map[string]any{
-		"cidrBlock":              model.CIDRBlock.ValueString(),
 		"defaultRoute":           defaultRoute,
 		"defaultRouteEnabled":    defaultRoute != "",
 		"description":            model.Description.ValueString(),
@@ -186,6 +185,12 @@ func UpdateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkId
 		"dnsServers":             dnsServersToString(model.DNSServers),
 		"name":                   model.Name.ValueString(),
 		"serveDNSServersEnabled": isStandardNetwork,
+	}
+
+	// Every custom network stores an empty cidrBlock. The update schema validates the key
+	// against a CIDR pattern. Sending the stored value back turns a rename into a 422.
+	if !model.CIDRBlock.IsNull() && !model.CIDRBlock.IsUnknown() && model.CIDRBlock.ValueString() != "" {
+		updateNetworkRequestBody["cidrBlock"] = model.CIDRBlock.ValueString()
 	}
 
 	jsonUpdateNetworkRequestBody, err := json.Marshal(updateNetworkRequestBody)

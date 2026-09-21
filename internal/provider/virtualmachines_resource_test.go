@@ -42,7 +42,6 @@ func TestVirtualMachinesResource(t *testing.T) {
 	rName := acctest.RandString(8)
 	sshKeyName := fmt.Sprintf("vm-basic-key-%s", rName)
 	networkStdName := fmt.Sprintf("vm-basic-net-std-%s", rName)
-	networkCustName := fmt.Sprintf("vm-basic-net-cust-%s", rName)
 	volumeName := fmt.Sprintf("vm-basic-vol-%s", rName)
 	vmName := fmt.Sprintf("vm-basic-%s", rName)
 	vmNameUpdated := fmt.Sprintf("vm-basic-updated-%s", rName)
@@ -72,12 +71,6 @@ func TestVirtualMachinesResource(t *testing.T) {
 				dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 
-			resource "gpcn_network" "vm_network_custom" {
-				name          = "%s"
-				network_type  = "custom"
-				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			}
-
 			resource "gpcn_volume" "vm_storage" {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
@@ -94,8 +87,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 
 				allocate_public_ip = false
 				network_ids = [
-					gpcn_network.vm_network.id,
-					gpcn_network.vm_network_custom.id
+					gpcn_network.vm_network.id
 				]
 
 				resource_group_id = gpcn_resource_group.vm_group.id
@@ -105,14 +97,13 @@ func TestVirtualMachinesResource(t *testing.T) {
 					username   = "testuser"
 				}
 			}
-			`, sshKeyName, networkStdName, networkCustName, volumeName, vmName),
+			`, sshKeyName, networkStdName, volumeName, vmName),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction("gpcn_resource_group.vm_group", plancheck.ResourceActionCreate),
 						plancheck.ExpectResourceAction("gpcn_ssh_key.vm_uploaded_key", plancheck.ResourceActionCreate),
 						plancheck.ExpectResourceAction("gpcn_volume.vm_storage", plancheck.ResourceActionCreate),
 						plancheck.ExpectResourceAction("gpcn_network.vm_network", plancheck.ResourceActionCreate),
-						plancheck.ExpectResourceAction("gpcn_network.vm_network_custom", plancheck.ResourceActionCreate),
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionCreate),
 					},
 				},
@@ -126,7 +117,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.cpu"),
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.ram"),
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.base_storage"),
-					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.#", "2"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.#", "1"),
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "network_interfaces.0.network_id"),
 				),
 			},
@@ -177,8 +168,6 @@ func TestVirtualMachinesResource(t *testing.T) {
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction("gpcn_resource_group.vm_group", plancheck.ResourceActionDestroy),
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
-						// network_ids changes, so network_interfaces must refresh after apply
-						plancheck.ExpectUnknownValue(gpcnVirtualMachineTest, tfjsonpath.New("network_interfaces")),
 					},
 				},
 				ConfigStateChecks: []statecheck.StateCheck{

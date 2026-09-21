@@ -27,6 +27,7 @@ var (
 	_ resource.Resource                = &networksResource{}
 	_ resource.ResourceWithConfigure   = &networksResource{}
 	_ resource.ResourceWithImportState = &networksResource{}
+	_ resource.ResourceWithModifyPlan  = &networksResource{}
 )
 
 // NewNetworksResource is a helper function to simplify the provider implementation.
@@ -44,10 +45,15 @@ func (r *networksResource) Metadata(_ context.Context, req resource.MetadataRequ
 	resp.TypeName = req.ProviderTypeName + "_network"
 }
 
+// The notice names the three replacements. A deprecation with no destination leaves the
+// reader to guess which resource to move to.
+const networkDeprecationMessage = "gpcn_network is deprecated: GPCN networking is VPC-based. Use gpcn_vpc, gpcn_vpc_subnet and gpcn_l2_segment. Existing networks can still be read and destroyed."
+
 // Schema defines the schema for the resource.
 func (r *networksResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a private network to connect virtual machines within the same datacenter",
+		Description:        "Manages a private network to connect virtual machines within the same datacenter",
+		DeprecationMessage: networkDeprecationMessage,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the network in UUID format",
@@ -254,6 +260,11 @@ func (r *networksResource) Read(ctx context.Context, req resource.ReadRequest, r
 	if err != nil {
 		// Resource was deleted outside of Terraform
 		if client.IsNotFound(err) {
+			// A custom network the platform adopted answers the same 404 as an unknown id.
+			// A silent removal therefore loses a carrier that live traffic uses.
+			if state.NetworkType.ValueString() == networks.NETWORK_TYPE_CUSTOM {
+				resp.Diagnostics.Append(networks.CustomNetworkGoneWarning(state.ID.ValueString()))
+			}
 			tflog.Info(ctx, networks.LogNetworkNotFoundRemovingFromState)
 			resp.State.RemoveResource(ctx)
 			return
@@ -341,4 +352,16 @@ func (r *networksResource) Delete(ctx context.Context, req resource.DeleteReques
 
 func (r *networksResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+// The platform retired the legacy create verb. An attribute validator is the wrong place
+// for the refusal. A validator also runs for a network that already exists, and those rows
+// must keep planning updates and deletes.
+func (r *networksResource) ModifyPlan(_ context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.State.Raw.IsNull() && !req.Plan.Raw.IsNull() {
+		resp.Diagnostics.AddError(
+			networks.ErrSummaryNetworkCreateRetired,
+			networks.ErrDetailNetworkCreateRetired,
+		)
+	}
 }

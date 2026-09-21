@@ -1,5 +1,11 @@
 package networks
 
+import (
+	"fmt"
+
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+)
+
 // Error summary constants
 const (
 	ErrSummaryMissingRequiredAttr     = "Missing required attribute"
@@ -9,6 +15,7 @@ const (
 	ErrSummaryUnableToGetNetwork      = "Unable to get GPCN Network"
 	ErrSummaryUnableToUpdateNetwork   = "Unable to update GPCN Network"
 	ErrSummaryUnableToDeleteNetwork   = "Unable to delete GPCN Network"
+	ErrSummaryNetworkCreateRetired    = "Network creation is no longer supported"
 )
 
 // Error detail message templates
@@ -26,7 +33,24 @@ const (
 	ErrDetailUnableToUpdateNetworkWithID  = "Unable to update GPCN Network with ID '%s'"
 	ErrDetailUnableToDeleteNetworkWithID  = "Unable to delete GPCN Network with ID '%s'"
 
+	ErrDetailNetworkCreateRetired = "GPCN has moved to VPC networking. Create a gpcn_vpc and a gpcn_vpc_subnet for routed networking, or a gpcn_l2_segment for a layer-2 network. Existing gpcn_network resources can still be read and destroyed."
+
 	ErrDetailNoCandidateNetworkInterface    = "the virtual machine has no candidate network interface to promote"
 	ErrDetailReplacePrimaryInterfaceFailed  = "error replacing primary interface: %w"
 	ErrDetailRefreshNetworkInterfacesFailed = "error refreshing the network interfaces of virtual machine ID '%s' before promoting a primary: %w"
 )
+
+// Warning strings for a custom network the platform adopted into an L2 segment
+const (
+	WarnSummaryNetworkRemovedFromState = "Network removed from state"
+	WarnDetailCustomNetworkGone        = "Network %s was not found. If it was adopted into an L2 segment by the platform, remove it from state and import the segment as gpcn_l2_segment: terraform state rm gpcn_network.<name> && terraform import gpcn_l2_segment.<name> <segment-id>."
+)
+
+// The platform answers the same 404 for an adopted network as for a typo. The message
+// therefore names both readings. It also names the state move that recovers the segment.
+func CustomNetworkGoneWarning(networkID string) diag.Diagnostic {
+	return diag.NewWarningDiagnostic(
+		WarnSummaryNetworkRemovedFromState,
+		fmt.Sprintf(WarnDetailCustomNetworkGone, networkID),
+	)
+}
