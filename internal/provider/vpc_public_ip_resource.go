@@ -3,10 +3,12 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/vpcpublicips"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
@@ -16,8 +18,9 @@ import (
 
 // Ensure the implementation satisfies the expected interfaces.
 var (
-	_ resource.Resource              = &vpcPublicIpResource{}
-	_ resource.ResourceWithConfigure = &vpcPublicIpResource{}
+	_ resource.Resource                = &vpcPublicIpResource{}
+	_ resource.ResourceWithConfigure   = &vpcPublicIpResource{}
+	_ resource.ResourceWithImportState = &vpcPublicIpResource{}
 )
 
 // NewVPCPublicIpResource is a helper function to simplify the provider implementation.
@@ -224,4 +227,20 @@ func (r *vpcPublicIpResource) Delete(ctx context.Context, req resource.DeleteReq
 	}
 
 	tflog.Info(ctx, vpcpublicips.LogSuccessfullyFinishedDeleteGPCNPublicIp)
+}
+
+// ImportState reads an address named by its VPC and its own id. The listing the
+// read walks belongs to one VPC, so an id alone names nothing.
+func (r *vpcPublicIpResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	vpcID, publicIpID, found := strings.Cut(req.ID, "/")
+	if !found || vpcID == "" || publicIpID == "" {
+		resp.Diagnostics.AddError(
+			vpcpublicips.ErrSummaryUnexpectedImportID,
+			fmt.Sprintf(vpcpublicips.ErrDetailPublicIpImportID, req.ID),
+		)
+		return
+	}
+
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("vpc_id"), vpcID)...)
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), publicIpID)...)
 }

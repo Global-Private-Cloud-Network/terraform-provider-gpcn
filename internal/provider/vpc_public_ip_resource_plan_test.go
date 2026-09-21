@@ -20,6 +20,10 @@ import (
 // diagnostic to the terminal width, so the pattern accepts a break at any space.
 var regexpPublicIpReleaseInProgress = regexp.MustCompile(`Public\s+IP\s+release\s+is\s+in\s+progress;\s+wait\s+for\s+it\s+to\s+finish`)
 
+// The import identifier names the VPC and the address. A bare address id is
+// refused with the form the resource expects.
+var regexpPublicIpImportIdentifier = regexp.MustCompile(`Expected\s+an\s+import\s+identifier\s+of\s+the\s+form\s+<vpc_id>/<public_ip_id>`)
+
 // A failed acquire names the address it left behind. The id is what the
 // operator needs to find the row.
 var regexpPublicIpAcquiredButJobFailed = regexp.MustCompile(`public\s+IP\s+` + vpcPublicIpPlanTestID + `\s+was\s+acquired\s+and\s+is\s+in\s+state`)
@@ -474,4 +478,51 @@ func checkPublicIpDestroyReleasedTheAddress(row *publicIpPlanTestRow) func(*terr
 		}
 		return nil
 	}
+}
+
+// An address is addressed by its VPC and its own id, so the import needs both.
+func TestVPCPublicIpResourcePlanImportsWithTheVpcId(t *testing.T) {
+	t.Parallel()
+	server, _ := startVPCPublicIpPlanMockServer(t)
+	config := vpcPublicIpPlanTestConfig(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+			},
+			{
+				Config:            config,
+				ResourceName:      gpcnVPCPublicIpTest,
+				ImportState:       true,
+				ImportStateId:     vpcPublicIpPlanTestVpcID + "/" + vpcPublicIpPlanTestID,
+				ImportStateVerify: true,
+			},
+		},
+	})
+}
+
+// An import identifier that names no VPC would read the wrong listing. The
+// resource refuses it instead of failing later with a not-found.
+func TestVPCPublicIpResourcePlanRefusesABareImportId(t *testing.T) {
+	t.Parallel()
+	server, _ := startVPCPublicIpPlanMockServer(t)
+	config := vpcPublicIpPlanTestConfig(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+			},
+			{
+				Config:        config,
+				ResourceName:  gpcnVPCPublicIpTest,
+				ImportState:   true,
+				ImportStateId: vpcPublicIpPlanTestID,
+				ExpectError:   regexpPublicIpImportIdentifier,
+			},
+		},
+	})
 }

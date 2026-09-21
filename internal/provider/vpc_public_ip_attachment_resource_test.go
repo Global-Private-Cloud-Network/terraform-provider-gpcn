@@ -1,9 +1,13 @@
 package provider
 
 import (
+	"context"
 	"os"
 	"testing"
 
+	"terraform-provider-gpcn/internal/vpcpublicips"
+
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
@@ -59,4 +63,36 @@ resource "gpcn_vpc_public_ip_attachment" "test" {
 			},
 		},
 	})
+}
+
+/*
+*
+----- Unit tests -----
+*
+*/
+
+// TestVPCPublicIpAttachmentResourceRefusesImportUnit pins the refusal byte for
+// byte. The listing names the machine an address serves and never the
+// interface, so an imported attachment could not know its nic_id.
+func TestVPCPublicIpAttachmentResourceRefusesImportUnit(t *testing.T) {
+	t.Parallel()
+
+	importResponse := &fwresource.ImportStateResponse{}
+	importer, ok := NewVPCPublicIpAttachmentResource().(fwresource.ResourceWithImportState)
+	if !ok {
+		t.Fatalf("Expected the attachment resource to implement ResourceWithImportState")
+	}
+	importer.ImportState(context.Background(), fwresource.ImportStateRequest{ID: "any-id"}, importResponse)
+
+	errors := importResponse.Diagnostics.Errors()
+	if len(errors) != 1 {
+		t.Fatalf("Expected exactly one error diagnostic, got %v", importResponse.Diagnostics)
+	}
+	if got := errors[0].Summary(); got != vpcpublicips.ErrSummaryPublicIpAttachmentImport {
+		t.Errorf("Summary = %q, want %q", got, vpcpublicips.ErrSummaryPublicIpAttachmentImport)
+	}
+	const wantDetail = "gpcn_vpc_public_ip_attachment cannot be imported: the API does not report which interface holds an address"
+	if got := errors[0].Detail(); got != wantDetail {
+		t.Errorf("Detail = %q, want %q", got, wantDetail)
+	}
 }

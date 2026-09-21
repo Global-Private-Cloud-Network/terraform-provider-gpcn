@@ -16,8 +16,9 @@ import (
 
 // Ensure the implementation satisfies the expected interfaces.
 var (
-	_ resource.Resource              = &vpcPublicIpAttachmentResource{}
-	_ resource.ResourceWithConfigure = &vpcPublicIpAttachmentResource{}
+	_ resource.Resource                = &vpcPublicIpAttachmentResource{}
+	_ resource.ResourceWithConfigure   = &vpcPublicIpAttachmentResource{}
+	_ resource.ResourceWithImportState = &vpcPublicIpAttachmentResource{}
 )
 
 // NewVPCPublicIpAttachmentResource is a helper function to simplify the provider implementation.
@@ -212,4 +213,13 @@ func (r *vpcPublicIpAttachmentResource) Delete(ctx context.Context, req resource
 	}
 
 	tflog.Info(ctx, vpcpublicips.LogSuccessfullyFinishedDeleteGPCNPublicIpAttachment)
+}
+
+// ImportState refuses every identifier. The listing names the machine an
+// address serves and never the interface, so nic_id cannot be recovered.
+func (r *vpcPublicIpAttachmentResource) ImportState(_ context.Context, _ resource.ImportStateRequest, resp *resource.ImportStateResponse) {
+	resp.Diagnostics.AddError(
+		vpcpublicips.ErrSummaryPublicIpAttachmentImport,
+		vpcpublicips.ErrDetailPublicIpAttachmentImport,
+	)
 }
