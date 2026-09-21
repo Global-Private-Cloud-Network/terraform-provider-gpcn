@@ -2,6 +2,7 @@ package vpcsubnets
 
 import (
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -49,6 +50,17 @@ func isUnset(value types.String) bool {
 	return value.IsNull() || value.IsUnknown()
 }
 
+// prefixFromCIDR reads the mask length of the block the allocator carved. The
+// API never reports the prefix, so the mask is the only place it survives.
+func prefixFromCIDR(cidr string) types.Int64 {
+	_, network, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return types.Int64Null()
+	}
+	ones, _ := network.Mask.Size()
+	return types.Int64Value(int64(ones))
+}
+
 // SubnetFailedWarning reports a carve the platform gave up on. The row reads
 // back cleanly, so the apply says nothing. The operator then holds a subnet
 // that carries no network.
@@ -90,6 +102,12 @@ func MapSubnetResponseToModel(response *ApiSubnet, model ResourceModel) Resource
 		} else {
 			model.Description = types.StringValue(*response.Description)
 		}
+	}
+	if model.Prefix.IsNull() && model.CIDR.IsNull() {
+		// A null CIDR names an import. Create leaves it unknown, and every
+		// other caller holds the value. A prefix written anywhere else would
+		// plan a replacement the configuration never asked for.
+		model.Prefix = prefixFromCIDR(response.CIDR)
 	}
 	if isUnset(model.CIDR) {
 		model.CIDR = types.StringValue(response.CIDR)

@@ -424,3 +424,28 @@ func TestRefreshSubnetModelFromResponseUpdatesDescriptionUnit(t *testing.T) {
 		t.Errorf("expected a cleared description to read as the empty string, got %q", got)
 	}
 }
+
+// The API never reports the prefix, so an import must read it from the carved
+// CIDR. Every other caller already holds the CIDR, and a prefix written there
+// would plan a replacement the configuration never asked for.
+func TestMapSubnetResponseToModelFillsPrefixOnImportUnit(t *testing.T) {
+	t.Parallel()
+
+	response := unitTestApiSubnet()
+	response.CIDR = "10.50.1.0/26"
+
+	imported := MapSubnetResponseToModel(response, ResourceModel{})
+	if got := imported.Prefix.ValueInt64(); got != 26 {
+		t.Errorf("expected the prefix 26 from the imported cidr, got %d", got)
+	}
+
+	created := MapSubnetResponseToModel(response, ResourceModel{CIDR: types.StringUnknown()})
+	if !created.Prefix.IsNull() {
+		t.Errorf("expected a create to leave the prefix null, got %v", created.Prefix)
+	}
+
+	read := MapSubnetResponseToModel(response, ResourceModel{CIDR: types.StringValue("10.50.1.0/26")})
+	if !read.Prefix.IsNull() {
+		t.Errorf("expected a read to leave the prefix null, got %v", read.Prefix)
+	}
+}

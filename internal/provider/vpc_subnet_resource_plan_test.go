@@ -35,6 +35,7 @@ type subnetPlanTestServerState struct {
 	nsgID       string
 	nsgName     string
 	nicCount    int64
+	cidr        string
 	rowState    string
 	// failureReason stands for the sentence GPCN files against a carve it gave
 	// up on. An empty value reads back as the API's null.
@@ -64,7 +65,7 @@ func (s *subnetPlanTestServerState) row() map[string]any {
 		"id":               subnetPlanTestID,
 		"name":             s.name,
 		"description":      description,
-		"cidr":             subnetPlanTestCIDR,
+		"cidr":             s.cidr,
 		"state":            s.rowState,
 		"nsgId":            s.nsgID,
 		"nsgName":          s.nsgName,
@@ -79,7 +80,7 @@ func (s *subnetPlanTestServerState) row() map[string]any {
 func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestServerState) {
 	t.Helper()
 
-	state := &subnetPlanTestServerState{nsgID: subnetPlanTestDefaultNsg, nsgName: "default", rowState: "ready"}
+	state := &subnetPlanTestServerState{nsgID: subnetPlanTestDefaultNsg, nsgName: "default", rowState: "ready", cidr: subnetPlanTestCIDR}
 
 	collection := "/v1/resource/vpcs/" + subnetPlanTestVpcID + "/subnets/"
 	subnetPath := collection + subnetPlanTestID
@@ -188,6 +189,13 @@ resource "gpcn_vpc_subnet" "test" {
   %s
 }
 `, host, subnetPlanTestVpcID, name, subnetPlanTestCIDR, extra)
+}
+
+// subnetPlanTestConfigWithoutCidr asks the allocator for a block rather than
+// naming one, which is the only way the prefix reaches the create body.
+func subnetPlanTestConfigWithoutCidr(host, name, extra string) string {
+	config := subnetPlanTestConfig(host, name, extra)
+	return strings.Replace(config, fmt.Sprintf("  cidr   = %q\n", subnetPlanTestCIDR), "", 1)
 }
 
 // The subnet is created with its CIDR, read back through the parent listing,
@@ -368,8 +376,7 @@ func TestVpcSubnetResourcePlanCarvesFromPrefix(t *testing.T) {
 	t.Parallel()
 	server, state := startSubnetPlanMockServer(t)
 
-	config := subnetPlanTestConfig(server.URL, "subnet-plan-a", "prefix = 26")
-	config = strings.Replace(config, fmt.Sprintf("  cidr   = %q\n", subnetPlanTestCIDR), "", 1)
+	config := subnetPlanTestConfigWithoutCidr(server.URL, "subnet-plan-a", "prefix = 26")
 
 	checkCreateBody := func(*terraform.State) error {
 		state.mu.Lock()
@@ -579,6 +586,44 @@ func TestVpcSubnetResourcePlanRefreshesDescription(t *testing.T) {
 					},
 				},
 				Check: resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "description", "web tier"),
+			},
+		},
+	})
+}
+
+// The API never reports the prefix, so an import leaves it null and a
+// configuration that names one plans a replacement. The carved CIDR's mask
+// length is the same number, so the import reads the prefix from it.
+func TestVpcSubnetResourcePlanImportFillsPrefixFromCidr(t *testing.T) {
+	t.Parallel()
+	server, state := startSubnetPlanMockServer(t)
+
+	state.mu.Lock()
+	state.cidr = "10.50.1.0/26"
+	state.mu.Unlock()
+
+	config := subnetPlanTestConfigWithoutCidr(server.URL, "subnet-plan-a", "prefix = 26")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "cidr", "10.50.1.0/26"),
+					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "prefix", "26"),
+				),
+			},
+			{
+				ResourceName:      gpcnVpcSubnetTest,
+				ImportState:       true,
+				ImportStateId:     subnetPlanTestVpcID + "/" + subnetPlanTestID,
+				ImportStateVerify: true,
+			},
+			{
+				Config:             config,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
 			},
 		},
 	})
