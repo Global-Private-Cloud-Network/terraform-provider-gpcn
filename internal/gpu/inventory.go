@@ -137,9 +137,9 @@ func getInventory(gpcnClient *client.GpcnClient, ctx context.Context, datacenter
 // resolveSeriesCodeFromInventory matches the requested series against the series
 // the response lists. A configured code must be one of them, and a configured
 // name resolves to that entry's code. The name comparison ignores case and
-// surrounding space, because the catalog name is prose. A response with no
-// series at all means the catalog is unreachable. The name map then answers,
-// and the caller reports the availability error.
+// surrounding space, because the catalog name is prose. An empty series list
+// means the datacenter offers no enabled series. The name map then answers, so
+// the caller reports the availability error instead of an unknown series.
 func resolveSeriesCodeFromInventory(invResp *inventoryResp, datacenterId, seriesCode, seriesName string) (string, error) {
 	if len(invResp.Data.Series) == 0 {
 		if seriesCode != "" {
@@ -170,6 +170,15 @@ func resolveSeriesCodeFromInventory(invResp *inventoryResp, datacenterId, series
 	return "", fmt.Errorf(ErrDetailUnknownGPUSeries, seriesName, datacenterId, offeredSeries(invResp))
 }
 
+// requestedSeries names the series the configuration asks for. The code wins
+// when the caller supplies both.
+func requestedSeries(seriesCode, seriesName string) string {
+	if seriesCode != "" {
+		return seriesCode
+	}
+	return seriesName
+}
+
 // offeredSeries renders the series in the response as "code (name)" pairs.
 func offeredSeries(invResp *inventoryResp) string {
 	pairs := make([]string, 0, len(invResp.Data.Series))
@@ -186,7 +195,9 @@ func CheckInventory(gpcnClient *client.GpcnClient, ctx context.Context, model Re
 	datacenterId := model.DatacenterId.ValueString()
 	gpuCount := model.GPUCount.ValueInt64()
 
-	tflog.Info(ctx, fmt.Sprintf(LogStartingCheckInventory, model.SeriesCode.ValueString(), datacenterId, gpuCount))
+	requested := requestedSeries(model.SeriesCode.ValueString(), model.SeriesName.ValueString())
+
+	tflog.Info(ctx, fmt.Sprintf(LogStartingCheckInventory, requested, datacenterId, gpuCount))
 
 	invResp, err := getInventory(gpcnClient, ctx, datacenterId)
 	if err != nil {
@@ -198,6 +209,12 @@ func CheckInventory(gpcnClient *client.GpcnClient, ctx context.Context, model Re
 	seriesCode, err := resolveSeriesCodeFromInventory(invResp, datacenterId, model.SeriesCode.ValueString(), model.SeriesName.ValueString())
 	if err != nil {
 		return nil, "", err
+	}
+
+	// An order must name one series. An empty code keeps every series in the
+	// filter, and CreateGPU then posts the series ID of an arbitrary SKU.
+	if seriesCode == "" && len(invResp.Data.Series) > 0 {
+		return nil, "", fmt.Errorf(ErrDetailUnknownGPUSeries, requested, datacenterId, offeredSeries(invResp))
 	}
 
 	inventory := flattenInventory(invResp, datacenterId, seriesCode, gpuCount)
@@ -213,7 +230,7 @@ func CheckInventory(gpcnClient *client.GpcnClient, ctx context.Context, model Re
 // optional series and GPU count. A series the datacenter does not offer is an
 // error. An offered series with nothing available is an empty result.
 func FetchInventory(gpcnClient *client.GpcnClient, ctx context.Context, datacenterId, seriesCode, seriesName string, gpuCount int64) ([]FlatInventory, error) {
-	tflog.Info(ctx, fmt.Sprintf(LogStartingFetchInventory, datacenterId, seriesCode, gpuCount))
+	tflog.Info(ctx, fmt.Sprintf(LogStartingFetchInventory, datacenterId, requestedSeries(seriesCode, seriesName), gpuCount))
 
 	invResp, err := getInventory(gpcnClient, ctx, datacenterId)
 	if err != nil {
@@ -227,6 +244,6 @@ func FetchInventory(gpcnClient *client.GpcnClient, ctx context.Context, datacent
 
 	inventory := flattenInventory(invResp, datacenterId, resolvedCode, gpuCount)
 
-	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyFetchedInventory, len(inventory), datacenterId))
+	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyFetchedInventory, len(inventory), resolvedCode, datacenterId))
 	return inventory, nil
 }

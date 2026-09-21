@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -1089,5 +1090,150 @@ func TestCheckInventoryReportsAvailabilityNotUnknownSeriesMockHTTP(t *testing.T)
 	want := fmt.Sprintf(ErrDetailNoInventoryAvailable, "nvidia-rtx_a6000-series", testDatacenterID, 4)
 	if err.Error() != want {
 		t.Errorf("Expected error %q, got %q", want, err.Error())
+	}
+}
+
+// Both series are available in the same datacenter at the same GPU count, so
+// the series filter is the only thing that decides which series ID an order
+// carries.
+const inventoryJSONTwoSeriesAvailable = `{
+  "data": {
+    "series": [
+      {
+        "id": "series-h200",
+        "name": "NVIDIA H200 Series",
+        "code": "nvidia-h200-series",
+        "availability": [
+          {
+            "datacenterId": "datacenter-123",
+            "datacenterName": "US-East-1",
+            "datacenterCode": "us-east-1",
+            "gpuCounts": [
+              {
+                "count": 2,
+                "specs": {"gpuDescription": "2x H200", "vcpu": 32, "memoryGiB": 256, "storageGB": 1000},
+                "availableSkus": [
+                  {"skuCode": "gpu_2x_h200", "description": "std", "specs": {"gpuDescription": "2x H200", "vcpu": 32, "memoryGiB": 256, "storageGB": 1000}}
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "series-a100",
+        "name": "NVIDIA A100 Series",
+        "code": "nvidia-a100-series",
+        "availability": [
+          {
+            "datacenterId": "datacenter-123",
+            "datacenterName": "US-East-1",
+            "datacenterCode": "us-east-1",
+            "gpuCounts": [
+              {
+                "count": 2,
+                "specs": {"gpuDescription": "2x A100", "vcpu": 24, "memoryGiB": 192, "storageGB": 512},
+                "availableSkus": [
+                  {"skuCode": "gpu_2x_a100", "description": "std", "specs": {"gpuDescription": "2x A100", "vcpu": 24, "memoryGiB": 192, "storageGB": 512}}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}`
+
+// newTwoSeriesInventoryClient answers every inventory GET with the two-series
+// fixture.
+func newTwoSeriesInventoryClient(t *testing.T) (*httptest.Server, *client.GpcnClient) {
+	t.Helper()
+	return testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/inventory") {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(inventoryJSONTwoSeriesAvailable))
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+}
+
+// CreateGPU posts the series ID of the first flattened SKU. The datacenter
+// offers two series at the requested count, so an unfiltered flatten orders the
+// wrong hardware.
+func TestCheckInventoryKeepsOnlyTheRequestedSeriesMockHTTP(t *testing.T) {
+	tests := []struct {
+		testName   string
+		seriesName string
+		seriesCode string
+	}{
+		{testName: "by code", seriesCode: "nvidia-a100-series"},
+		{testName: "by name", seriesName: "NVIDIA A100 Series"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.testName, func(t *testing.T) {
+			server, gpcnClient := newTwoSeriesInventoryClient(t)
+			defer server.Close()
+
+			model := createTestGPUModel("test-gpu", test.seriesName, test.seriesCode, testImageName, 2)
+
+			inventory, resolvedCode, err := CheckInventory(gpcnClient, context.Background(), model)
+			if err != nil {
+				t.Fatalf("CheckInventory failed: %v", err)
+			}
+			if resolvedCode != "nvidia-a100-series" {
+				t.Errorf("Expected resolved code 'nvidia-a100-series', got '%s'", resolvedCode)
+			}
+			if len(inventory) != 1 {
+				t.Fatalf("Expected 1 SKU for the requested series, got %d", len(inventory))
+			}
+			if inventory[0].SeriesID != "series-a100" {
+				t.Errorf("Expected series ID 'series-a100', got '%s'", inventory[0].SeriesID)
+			}
+			if inventory[0].SeriesCode != "nvidia-a100-series" {
+				t.Errorf("Expected series code 'nvidia-a100-series', got '%s'", inventory[0].SeriesCode)
+			}
+			if inventory[0].SkuCode != "gpu_2x_a100" {
+				t.Errorf("Expected SKU code 'gpu_2x_a100', got '%s'", inventory[0].SkuCode)
+			}
+		})
+	}
+}
+
+// ExactlyOneOf counts a known non-null value, so an empty string satisfies it.
+// An empty series must not reach the order as "no filter".
+func TestCheckInventoryRefusesAnEmptySeriesMockHTTP(t *testing.T) {
+	const available = "nvidia-h200-series (NVIDIA H200 Series), nvidia-a100-series (NVIDIA A100 Series)"
+
+	tests := []struct {
+		testName string
+		apply    func(model *ResourceModel)
+	}{
+		{testName: "empty code", apply: func(model *ResourceModel) { model.SeriesCode = types.StringValue("") }},
+		{testName: "empty name", apply: func(model *ResourceModel) { model.SeriesName = types.StringValue("") }},
+	}
+
+	for _, test := range tests {
+		t.Run(test.testName, func(t *testing.T) {
+			server, gpcnClient := newTwoSeriesInventoryClient(t)
+			defer server.Close()
+
+			model := createTestGPUModel("test-gpu", "", "", testImageName, 2)
+			test.apply(&model)
+
+			_, _, err := CheckInventory(gpcnClient, context.Background(), model)
+			if err == nil {
+				t.Fatal("Expected an error for an empty series, got nil")
+			}
+			want := fmt.Sprintf(ErrDetailUnknownGPUSeries, "", testDatacenterID, available)
+			if err.Error() != want {
+				t.Errorf("Expected error %q, got %q", want, err.Error())
+			}
+		})
 	}
 }

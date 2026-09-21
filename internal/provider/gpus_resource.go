@@ -83,6 +83,8 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					stringvalidator.ExactlyOneOf(path.Expressions{
 						path.MatchRoot("series_code"),
 					}...),
+					// ExactlyOneOf counts any non-null series_name, so it accepts "".
+					stringvalidator.LengthAtLeast(1),
 				},
 				PlanModifiers: []planmodifier.String{
 					// Changing the series_name requires us to destroy and create a new GPU
@@ -98,6 +100,8 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					stringvalidator.ExactlyOneOf(path.Expressions{
 						path.MatchRoot("series_name"),
 					}...),
+					// ExactlyOneOf counts any non-null series_code, so it accepts "".
+					stringvalidator.LengthAtLeast(1),
 				},
 				PlanModifiers: []planmodifier.String{
 					// Changing the series_code requires us to destroy and create a new GPU
