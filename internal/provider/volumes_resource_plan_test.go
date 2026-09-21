@@ -90,6 +90,8 @@ func startVolumePlanMockServer(t *testing.T) (*httptest.Server, func(string), fu
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+volPlanTestDatacenterID+"/volume-sizes":
 			testutil.WriteJSONResponse(w, volPlanTestSizesBody())
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/volumes/":
@@ -381,6 +383,8 @@ func startUnknownVolumeTypePlanMockServer(t *testing.T) *httptest.Server {
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+volPlanTestDatacenterID+"/volume-sizes":
 			testutil.WriteJSONResponse(w, sizesBody)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/volumes/":
@@ -445,8 +449,8 @@ func TestVolumeResourcePlanImportAliasPlansEmpty(t *testing.T) {
 			{
 				Config:            config,
 				ResourceName:      gpcnVolumeTest,
+				ImportStateKind:   resource.ImportBlockWithID,
 				ImportState:       true,
-				ImportStateVerify: true,
 			},
 			{
 				Config: config,

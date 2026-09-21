@@ -3,7 +3,7 @@ package gpu
 var BASE_URL_V1 string = "/v1/resource/gpu/"
 
 // The five enabled GPU series. The inventory response, not this list, decides
-// what a datacenter offers.
+// what a datacenter offers. A test pins the list against the seeded catalog.
 var GPUSeriesNames = []string{"NVIDIA H200 Series", "NVIDIA H100 Series", "NVIDIA A100 Series", "NVIDIA RTX PRO 6000 Blackwell", "NVIDIA RTX A6000 Series"}
 
 // The catalog code of each enabled series, in the order of GPUSeriesNames.

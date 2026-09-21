@@ -115,7 +115,6 @@ func canonicalVolumeType(name string) string {
 	return name
 }
 
-// A display name becomes its code, and a code is already one.
 func componentCodeForVolumeType(volumeType string) string {
 	if code, known := volumeTypeMapping[canonicalVolumeType(volumeType)]; known {
 		return code
