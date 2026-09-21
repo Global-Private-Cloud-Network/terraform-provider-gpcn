@@ -1,10 +1,15 @@
-package sshkeys
+package sshkeys_test
 
 import (
 	"context"
 	"strings"
 	"testing"
 
+	"terraform-provider-gpcn/internal/provider"
+	"terraform-provider-gpcn/internal/sshkeys"
+
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
@@ -12,6 +17,7 @@ import (
 func TestSSHKeyNameValidator(t *testing.T) {
 	t.Parallel()
 
+	const invalidSummary = "Invalid SSH key name"
 	const whitespaceDetail = "Name must not start or end with whitespace (GPCN trims it, which would make the stored name differ from the configuration)"
 	const requiredDetail = "Name is required"
 	const tooLongDetail = "Name must be at most 30 characters"
@@ -34,7 +40,7 @@ func TestSSHKeyNameValidator(t *testing.T) {
 		{name: "unicode_letter", input: "café", wantDetail: charactersDetail},
 	}
 
-	v := NameValidator{}
+	v := sshkeys.NameValidator{}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -55,6 +61,9 @@ func TestSSHKeyNameValidator(t *testing.T) {
 			if len(resp.Diagnostics) != 1 {
 				t.Fatalf("expected exactly one diagnostic for %q, got: %v", tc.input, resp.Diagnostics)
 			}
+			if got := resp.Diagnostics[0].Summary(); got != invalidSummary {
+				t.Errorf("summary mismatch for %q:\n got %q\nwant %q", tc.input, got, invalidSummary)
+			}
 			if got := resp.Diagnostics[0].Detail(); got != tc.wantDetail {
 				t.Errorf("detail mismatch for %q:\n got %q\nwant %q", tc.input, got, tc.wantDetail)
 			}
@@ -65,7 +74,7 @@ func TestSSHKeyNameValidator(t *testing.T) {
 func TestSSHKeyNameValidatorSkipsNullAndUnknown(t *testing.T) {
 	t.Parallel()
 
-	v := NameValidator{}
+	v := sshkeys.NameValidator{}
 	for _, value := range []types.String{types.StringNull(), types.StringUnknown()} {
 		var resp validator.StringResponse
 		v.ValidateString(context.Background(), validator.StringRequest{ConfigValue: value}, &resp)
@@ -73,4 +82,27 @@ func TestSSHKeyNameValidatorSkipsNullAndUnknown(t *testing.T) {
 			t.Errorf("expected %v to be skipped, got: %v", value, resp.Diagnostics)
 		}
 	}
+}
+
+// The validator changes nothing until the schema carries it. The attachment
+// therefore needs a guard of its own.
+func TestSSHKeyResourceSchemaAttachesNameValidator(t *testing.T) {
+	t.Parallel()
+
+	var resp resource.SchemaResponse
+	provider.NewSSHKeyResource().Schema(context.Background(), resource.SchemaRequest{}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("schema returned diagnostics: %v", resp.Diagnostics)
+	}
+
+	attribute, ok := resp.Schema.Attributes["name"].(schema.StringAttribute)
+	if !ok {
+		t.Fatalf("name is %T, want schema.StringAttribute", resp.Schema.Attributes["name"])
+	}
+	for _, v := range attribute.Validators {
+		if _, ok := v.(sshkeys.NameValidator); ok {
+			return
+		}
+	}
+	t.Errorf("name carries %d validators, none of them sshkeys.NameValidator", len(attribute.Validators))
 }
