@@ -13,7 +13,7 @@ provider "gpcn" {
   host = "https://api.gpcn.com"
 }
 
-# The VPC the address is acquired from. From 1.5.0 this is a gpcn_vpc resource.
+# The VPC the address is acquired from: a gpcn_vpc resource.
 variable "vpc_id" {
   type = string
 }
