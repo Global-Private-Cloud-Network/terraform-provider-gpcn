@@ -53,13 +53,13 @@ resource "gpcn_resource_group" "group_example" {
 resource "gpcn_vpc" "example" {
   name          = "terraform-demo-vpc"
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-  cidr          = "10.60.0.0/16"
+  cidr          = "10.112.0.0/16"
 }
 
 resource "gpcn_vpc_subnet" "example" {
   vpc_id = gpcn_vpc.example.id
   name   = "terraform-demo-subnet"
-  cidr   = "10.60.1.0/24"
+  cidr   = "10.112.1.0/24"
 }
 
 # Create storage volume for the VM
@@ -82,6 +82,12 @@ resource "gpcn_virtualmachine" "example" {
   # Networking
   allocate_public_ip = false
   subnet_id          = gpcn_vpc_subnet.example.id
+
+  # Carry L2 segments, each attached as an interface after the machine exists
+  # l2_segment_ids = [gpcn_l2_segment.example.id]
+
+  # Attach an address the operator holds, rather than acquire one with the machine
+  # public_ip_id   = gpcn_vpc_public_ip.example.id
 
   # Resource Group
   resource_group_id = gpcn_resource_group.group_example.id
