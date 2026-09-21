@@ -825,7 +825,7 @@ func TestVpcSubnetReadWarnsOnFailedSubnetUnit(t *testing.T) {
 	if got := warnings[0].Summary(); got != "GPCN VPC subnet is in the failed state" {
 		t.Errorf("summary = %q, want %q", got, "GPCN VPC subnet is in the failed state")
 	}
-	wantDetail := fmt.Sprintf(vpcsubnets.WarnDetailSubnetFailed, subnetPlanTestID, subnetPlanTestFailedReason)
+	wantDetail := "Subnet '22222222-2222-4222-8222-222222222222' is in the 'failed' state, so it carries no working network. GPCN gives this reason: the provider rejected the allocation. Delete the subnet and create it again, or contact GPCN support."
 	if got := warnings[0].Detail(); got != wantDetail {
 		t.Errorf("detail = %q, want %q", got, wantDetail)
 	}

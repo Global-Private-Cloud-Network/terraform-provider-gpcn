@@ -295,10 +295,11 @@ func TestSubnetFailedWarningUnit(t *testing.T) {
 		t.Fatalf("expected one warning, got %d", got)
 	}
 	warning := diags.Warnings()[0]
-	if got := warning.Summary(); got != WarnSummarySubnetFailed {
-		t.Errorf("expected the summary %q, got %q", WarnSummarySubnetFailed, got)
+	const wantSummary = "GPCN VPC subnet is in the failed state"
+	if got := warning.Summary(); got != wantSummary {
+		t.Errorf("expected the summary %q, got %q", wantSummary, got)
 	}
-	want := fmt.Sprintf(WarnDetailSubnetFailed, unitTestSubnetID, reason)
+	want := "Subnet 'subnet-1' is in the 'failed' state, so it carries no working network. GPCN gives this reason: the provider rejected the allocation. Delete the subnet and create it again, or contact GPCN support."
 	if got := warning.Detail(); got != want {
 		t.Errorf("expected the detail %q, got %q", want, got)
 	}
@@ -314,7 +315,7 @@ func TestSubnetFailedWarningWithoutReasonUnit(t *testing.T) {
 
 	diags := SubnetFailedWarning(response)
 
-	want := fmt.Sprintf(WarnDetailSubnetFailed, unitTestSubnetID, WarnDetailSubnetNoFailureReason)
+	want := "Subnet 'subnet-1' is in the 'failed' state, so it carries no working network. GPCN gives this reason: the API reported no reason. Delete the subnet and create it again, or contact GPCN support."
 	if got := diags.Warnings()[0].Detail(); got != want {
 		t.Errorf("expected the detail %q, got %q", want, got)
 	}
