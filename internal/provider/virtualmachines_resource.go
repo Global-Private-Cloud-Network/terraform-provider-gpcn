@@ -504,7 +504,6 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	// Add correlation ID for request tracing
 	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, virtualmachines.LogStartingUpdateGPCNVirtualMachine)
-	// Map both the plan and state to see what's changed
 	var plan virtualmachines.ResourceModel
 	diags := req.Plan.Get(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
@@ -526,7 +525,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	if detailErr != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryRetrievingVMInfoFailed,
-			fmt.Errorf("%s: %w", virtualmachines.ErrDetailVMInfoFailedCanImport, detailErr).Error(),
+			detailErr.Error(),
 		)
 		return
 	}

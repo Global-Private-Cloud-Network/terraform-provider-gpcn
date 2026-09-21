@@ -1560,7 +1560,7 @@ func TestVirtualMachineStopDecisionSkipsAMachineWithHotplug(t *testing.T) {
 	}
 }
 
-// DEV sends a null skuId for a machine whose SKU it cannot resolve, and the provider
+// DEV sends a null skuId for a machine whose SKU it cannot resolve. The provider
 // reads that null as an empty string. Live drift alone must never stop a machine. A
 // rename would otherwise stop and start such a machine on every apply.
 func TestVirtualMachineStopDecisionSkipsARenameOfAnUnresolvedSku(t *testing.T) {
@@ -1956,7 +1956,7 @@ const vmPlanTestReadsBeforeAnUpdate = 1
 
 // startVirtualMachineHoistedReadMockServer refuses one read of the update. The update
 // reads the machine and its interfaces before it decides on a stop. The returned
-// function arms the refusal between the steps, so the create never meets it, and the
+// function arms the refusal between the steps, so the create never meets it. The
 // refusal answers one read only. refuseInterfaces chooses which of the two reads answers
 // 500. The image takes no network hotplug, so a segment change stops a machine that
 // reads back.
