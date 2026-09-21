@@ -140,8 +140,8 @@ func newHTTPError(resp *http.Response, body []byte) *HTTPError {
 	return httpErr
 }
 
-// retryAfterHeader reads the seconds form of Retry-After. The HTTP-date form is
-// ignored, because the rate limiter only ever sends seconds.
+// retryAfterHeader reads the seconds form of Retry-After. It skips the
+// HTTP-date form, because the rate limiter only sends seconds.
 func retryAfterHeader(header http.Header) time.Duration {
 	seconds, err := strconv.Atoi(header.Get("Retry-After"))
 	if err != nil || seconds <= 0 {
@@ -284,7 +284,7 @@ func IsNotFound(err error) bool {
 
 // A 403 is a refusal the caller cannot retry away. The role lacks the
 // permission, or the tenant lacks the feature, or the operation is walled off.
-// Read implementations separate it from a 404, which removes state.
+// The predicate tells a 403 apart from a 404, which removes state instead.
 func IsForbidden(err error) bool {
 	return hasStatus(err, http.StatusForbidden)
 }
