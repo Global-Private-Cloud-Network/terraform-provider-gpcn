@@ -141,8 +141,8 @@ func TestVpcResourceSchemaAttachesWhitespaceValidators(t *testing.T) {
 	t.Parallel()
 
 	attributes := vpcResourceTestSchema(t).Attributes
-	assertWhitespaceValidator(t, attributes, "name", vpcs.ErrSummaryInvalidVpcAttribute)
-	assertWhitespaceValidator(t, attributes, "description", vpcs.ErrSummaryInvalidVpcAttribute)
+	assertWhitespaceValidator(t, attributes, "name", "Invalid VPC %s")
+	assertWhitespaceValidator(t, attributes, "description", "Invalid VPC %s")
 }
 
 // The create 202 carries the row, so a failed create job must still leave the

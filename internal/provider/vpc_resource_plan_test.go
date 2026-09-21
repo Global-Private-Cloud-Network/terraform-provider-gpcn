@@ -652,11 +652,11 @@ func TestVpcResourcePlanRefusesSurroundingWhitespace(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:      vpcPlanTestConfig(mock.url, " vpc"),
-				ExpectError: regexp.MustCompile(`name must not start or end with whitespace`),
+				ExpectError: whitespaceRefusal("Invalid VPC name", "name"),
 			},
 			{
 				Config:      vpcPlanTestConfigWith(mock.url, paddedDescription),
-				ExpectError: regexp.MustCompile(`description must not start or end with whitespace`),
+				ExpectError: whitespaceRefusal("Invalid VPC description", "description"),
 			},
 		},
 	})

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"terraform-provider-gpcn/internal/helpers"
-	"terraform-provider-gpcn/internal/l2segments"
 	"terraform-provider-gpcn/internal/provider"
 
 	"github.com/hashicorp/terraform-plugin-framework/resource"
@@ -31,7 +30,7 @@ func TestL2SegmentResourceSchemaAttachesWhitespaceValidators(t *testing.T) {
 		found := false
 		for _, v := range attribute.Validators {
 			whitespace, isWhitespace := v.(helpers.NoOuterWhitespaceValidator)
-			if isWhitespace && whitespace.Attribute == attributeName && whitespace.Summary == l2segments.ErrSummaryInvalidL2SegmentAttribute {
+			if isWhitespace && whitespace.Attribute == attributeName && whitespace.Summary == "Invalid L2 segment %s" {
 				found = true
 			}
 		}

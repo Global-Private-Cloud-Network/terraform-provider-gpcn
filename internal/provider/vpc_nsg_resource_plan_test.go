@@ -490,14 +490,14 @@ func TestVpcNsgResourceSchemaAttachesWhitespaceValidators(t *testing.T) {
 		t.Fatalf("Expected a schema, got %v", schemaResponse.Diagnostics)
 	}
 
-	assertWhitespaceValidator(t, schemaResponse.Schema.Attributes, "name", vpcnsgs.ErrSummaryInvalidNsgAttribute)
-	assertWhitespaceValidator(t, schemaResponse.Schema.Attributes, "description", vpcnsgs.ErrSummaryInvalidNsgAttribute)
+	assertWhitespaceValidator(t, schemaResponse.Schema.Attributes, "name", "Invalid security group %s")
+	assertWhitespaceValidator(t, schemaResponse.Schema.Attributes, "description", "Invalid security group %s")
 
 	ruleBlock, ok := schemaResponse.Schema.Blocks["rule"].(schema.SetNestedBlock)
 	if !ok {
 		t.Fatalf("rule is %T, want schema.SetNestedBlock", schemaResponse.Schema.Blocks["rule"])
 	}
-	assertWhitespaceValidator(t, ruleBlock.NestedObject.Attributes, "description", vpcnsgs.ErrSummaryInvalidNsgRuleAttribute)
+	assertWhitespaceValidator(t, ruleBlock.NestedObject.Attributes, "description", "Invalid security group rule %s")
 }
 
 // GPCN trims a name, so a configured value with outer whitespace comes back

@@ -543,8 +543,8 @@ func TestVpcSubnetResourceSchemaAttachesWhitespaceValidators(t *testing.T) {
 		t.Fatalf("Expected a schema, got %v", schemaResponse.Diagnostics)
 	}
 
-	assertWhitespaceValidator(t, schemaResponse.Schema.Attributes, "name", vpcsubnets.ErrSummaryInvalidSubnetAttribute)
-	assertWhitespaceValidator(t, schemaResponse.Schema.Attributes, "description", vpcsubnets.ErrSummaryInvalidSubnetAttribute)
+	assertWhitespaceValidator(t, schemaResponse.Schema.Attributes, "name", "Invalid VPC subnet %s")
+	assertWhitespaceValidator(t, schemaResponse.Schema.Attributes, "description", "Invalid VPC subnet %s")
 }
 
 func TestVpcSubnetResourcePlanRefusesOuterWhitespace(t *testing.T) {
