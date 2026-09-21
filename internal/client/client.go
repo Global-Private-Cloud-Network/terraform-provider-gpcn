@@ -1,6 +1,7 @@
 package client
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -59,10 +60,7 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		if readErr != nil {
 			return nil, fmt.Errorf("HTTP error %d, failed to read response body: %w", resp.StatusCode, readErr)
 		}
-		return nil, &HTTPError{
-			StatusCode: resp.StatusCode,
-			Body:       string(bodyBytes),
-		}
+		return nil, newHTTPError(resp, bodyBytes)
 	}
 
 	return resp, nil
@@ -72,13 +70,88 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 type HTTPError struct {
 	StatusCode int
 	Body       string
+	Code       string
+	Message    string
+	Details    map[string]any
+	RetryAfter time.Duration
 }
 
 func (e *HTTPError) Error() string {
+	if e.Message != "" {
+		if e.Code != "" {
+			return fmt.Sprintf("HTTP %d (%s): %s", e.StatusCode, e.Code, e.Message)
+		}
+		return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Message)
+	}
 	if e.Body != "" {
 		return fmt.Sprintf("HTTP error %d: %s", e.StatusCode, e.Body)
 	}
 	return "HTTP error " + strconv.Itoa(e.StatusCode)
+}
+
+// errorEnvelope covers the error bodies the GPCN API can answer with. Every
+// field is a pointer, because presence is what tells the shapes apart: the
+// dominant shape puts the sentence at the top level, and the rate limiter puts
+// it inside "error" with no top-level message at all.
+type errorEnvelope struct {
+	Message *string `json:"message"`
+	Error   *struct {
+		Code       *string        `json:"code"`
+		Message    *string        `json:"message"`
+		RetryAfter *int           `json:"retryAfter"`
+		Details    map[string]any `json:"details"`
+	} `json:"error"`
+}
+
+// newHTTPError parses the response body once, where it is read. A body that
+// matches no known shape keeps Code and Message empty, so Error() falls back to
+// the raw form.
+func newHTTPError(resp *http.Response, body []byte) *HTTPError {
+	httpErr := &HTTPError{
+		StatusCode: resp.StatusCode,
+		Body:       string(body),
+	}
+
+	var envelope errorEnvelope
+	if err := json.Unmarshal(body, &envelope); err == nil {
+		switch {
+		case envelope.Message != nil && envelope.Error != nil:
+			httpErr.Message = *envelope.Message
+			httpErr.Code = derefString(envelope.Error.Code)
+			httpErr.Details = envelope.Error.Details
+		case envelope.Error != nil && envelope.Error.Message != nil:
+			httpErr.Message = *envelope.Error.Message
+			httpErr.Code = derefString(envelope.Error.Code)
+			if envelope.Error.RetryAfter != nil {
+				httpErr.RetryAfter = time.Duration(*envelope.Error.RetryAfter) * time.Second
+			}
+		case envelope.Message != nil:
+			httpErr.Message = *envelope.Message
+		}
+	}
+
+	if httpErr.RetryAfter == 0 {
+		httpErr.RetryAfter = retryAfterHeader(resp.Header)
+	}
+
+	return httpErr
+}
+
+// retryAfterHeader reads the seconds form of Retry-After. The HTTP-date form is
+// ignored, because the rate limiter only ever sends seconds.
+func retryAfterHeader(header http.Header) time.Duration {
+	seconds, err := strconv.Atoi(header.Get("Retry-After"))
+	if err != nil || seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 // IsRetryable returns true if the error is a transient failure that can be retried
