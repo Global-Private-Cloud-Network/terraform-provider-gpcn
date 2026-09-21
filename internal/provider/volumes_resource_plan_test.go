@@ -260,3 +260,124 @@ func TestVolumeResourcePlanIgnoresOutOfBandGrow(t *testing.T) {
 		},
 	})
 }
+
+const (
+	volPlanTestUnknownComponent = "vol-add-ultra"
+	volPlanTestUnknownName      = "Unknown"
+)
+
+// startUnknownVolumeTypePlanMockServer answers with a storage class the provider has
+// no display name for. The API calls it "Unknown", which the schema refuses, so an
+// import has to fall back to the component code.
+func startUnknownVolumeTypePlanMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	volumePath := "/v1/resource/volumes/" + volPlanTestID
+
+	readBody := map[string]any{
+		"success": true,
+		"message": "ok",
+		"data": map[string]any{
+			"id":     volPlanTestID,
+			"name":   volPlanTestName,
+			"sizeGb": volPlanTestSizeGb,
+			"volumeType": map[string]any{
+				"code":        volPlanTestUnknownComponent,
+				"name":        volPlanTestUnknownName,
+				"description": "",
+			},
+			"datacenter": map[string]any{
+				"id":          volPlanTestDatacenterID,
+				"name":        "Kansas",
+				"region":      "central",
+				"countryAbbr": "US",
+				"country":     "United States",
+			},
+			"virtualMachineId": "",
+			"createdAt":        volPlanTestTimestamp,
+			"updatedAt":        volPlanTestTimestamp,
+		},
+	}
+
+	sizesBody := map[string]any{
+		"success": true,
+		"message": "ok",
+		"data": map[string]any{
+			"datacenterId": volPlanTestDatacenterID,
+			"volumeTypes": []map[string]any{{
+				"componentCode": volPlanTestUnknownComponent,
+				"name":          volPlanTestUnknownName,
+				"description":   nil,
+				"availableSizes": []map[string]any{
+					{"skuId": "sku-ultra-256", "sizeGb": volPlanTestSizeGb, "displayName": "Ultra 256 GB"},
+				},
+			}},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+volPlanTestDatacenterID+"/volume-sizes":
+			testutil.WriteJSONResponse(w, sizesBody)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/volumes/":
+			testutil.HandleCreateJobResponse(w, "job-1", "create issued")
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", volPlanTestID, true)
+		case r.Method == http.MethodGet && r.URL.Path == volumePath:
+			testutil.WriteJSONResponse(w, readBody)
+		case r.Method == http.MethodDelete && r.URL.Path == volumePath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	return server
+}
+
+func TestVolumeResourcePlanImportsUnknownTypeName(t *testing.T) {
+	t.Parallel()
+	server := startUnknownVolumeTypePlanMockServer(t)
+
+	config := fmt.Sprintf(`
+provider "gpcn" {
+  host    = %q
+  api_key = "test-key"
+}
+
+resource "gpcn_volume" "test" {
+  name          = %q
+  datacenter_id = %q
+  volume_type   = %q
+  size_gb       = %d
+}
+`, server.URL, volPlanTestName, volPlanTestDatacenterID, volPlanTestUnknownComponent, volPlanTestSizeGb)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type", volPlanTestUnknownComponent),
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type_code", volPlanTestUnknownComponent),
+					resource.TestCheckNoResourceAttr(gpcnVolumeTest, "volume_type_id"),
+				),
+			},
+			{
+				ResourceName:      gpcnVolumeTest,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionNoop),
+					},
+				},
+			},
+		},
+	})
+}

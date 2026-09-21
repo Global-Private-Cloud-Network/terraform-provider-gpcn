@@ -74,10 +74,13 @@ func (r *volumesResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"volume_type": schema.StringAttribute{
-				Description: "Type of storage: either 'SSD' or 'NVMe'. Changing this value requires replacing the volume. Note that not all volume types are available for every datacenter",
+				Description: "Type of storage: 'SSD', 'NVMe', or a storage component code such as 'vol-add-nvme'. Changing this value requires replacing the volume. Note that not all volume types are available for every datacenter",
 				Required:    true,
 				Validators: []validator.String{
-					stringvalidator.OneOf("SSD", "NVMe"),
+					stringvalidator.Any(
+						stringvalidator.OneOfCaseInsensitive(volumes.VolumeTypeAliases()...),
+						stringvalidator.RegexMatches(volumes.VolumeTypeCodePattern, "must be a storage component code such as 'vol-add-nvme'"),
+					),
 				},
 				PlanModifiers: []planmodifier.String{
 					// Changing the volume_type requires us to destroy and create a new volume

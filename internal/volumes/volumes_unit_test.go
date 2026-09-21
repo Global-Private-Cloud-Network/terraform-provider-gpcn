@@ -387,6 +387,7 @@ func TestMapVolumeResponseToModelImportCanonicalisesVolumeTypeUnit(t *testing.T)
 func TestMapVolumeResponseToModelImportUnknownVolumeTypeUnit(t *testing.T) {
 	response := newVolumeResponse("volume-123", "imported-volume", 256, "sku-uuid-10")
 	response.Data.VolumeType.Name = "Ultra-NVMe"
+	response.Data.VolumeType.Code = ""
 
 	result := MapVolumeResponseToModel(context.Background(), response, ResourceModel{})
 
@@ -395,9 +396,60 @@ func TestMapVolumeResponseToModelImportUnknownVolumeTypeUnit(t *testing.T) {
 	}
 }
 
+// The schema accepts the two display names and any component code, so the mapping
+// must answer for both spellings and an import must never produce a rejected value.
+func TestCanonicalVolumeTypeAcceptsCodesAndNamesUnit(t *testing.T) {
+	t.Run("names_and_codes", func(t *testing.T) {
+		cases := []struct {
+			value     string
+			canonical string
+			code      string
+		}{
+			{value: "SSD", canonical: "SSD", code: "vol-add-ssd"},
+			{value: "nvme", canonical: "NVMe", code: "vol-add-nvme"},
+			{value: "vol-add-ssd", canonical: "vol-add-ssd", code: "vol-add-ssd"},
+			{value: "vol-add-ultra", canonical: "vol-add-ultra", code: "vol-add-ultra"},
+		}
+		for _, testCase := range cases {
+			if got := canonicalVolumeType(testCase.value); got != testCase.canonical {
+				t.Errorf("canonicalVolumeType(%q) = %q, want %q", testCase.value, got, testCase.canonical)
+			}
+			if got := componentCodeForVolumeType(testCase.value); got != testCase.code {
+				t.Errorf("componentCodeForVolumeType(%q) = %q, want %q", testCase.value, got, testCase.code)
+			}
+		}
+	})
+
+	t.Run("import_prefers_a_known_name_then_the_code", func(t *testing.T) {
+		cases := []struct {
+			name     string
+			code     string
+			expected string
+		}{
+			{name: "SSD", code: "vol-add-ssd", expected: "SSD"},
+			{name: "nvme", code: "vol-add-nvme", expected: "NVMe"},
+			{name: "Unknown", code: "vol-add-ultra", expected: "vol-add-ultra"},
+			{name: "ULTRA", code: "vol-add-ultra", expected: "vol-add-ultra"},
+			{name: "Ultra-NVMe", code: "", expected: "Ultra-NVMe"},
+		}
+		for _, testCase := range cases {
+			response := newVolumeResponse("volume-123", "imported-volume", 256, "sku-uuid-10")
+			response.Data.VolumeType.Name = testCase.name
+			response.Data.VolumeType.Code = testCase.code
+
+			result := MapVolumeResponseToModel(context.Background(), response, ResourceModel{})
+
+			if result.VolumeType.ValueString() != testCase.expected {
+				t.Errorf("name %q code %q: expected VolumeType %q, got %q", testCase.name, testCase.code, testCase.expected, result.VolumeType.ValueString())
+			}
+		}
+	})
+}
+
 func TestMapVolumeResponseToModelImportKeepsNullOnEmptyUnit(t *testing.T) {
 	response := newVolumeResponse("volume-123", "", 0, "sku-uuid-10")
 	response.Data.VolumeType.Name = ""
+	response.Data.VolumeType.Code = ""
 
 	result := MapVolumeResponseToModel(context.Background(), response, ResourceModel{})
 

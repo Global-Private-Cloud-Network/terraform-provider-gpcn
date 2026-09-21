@@ -77,19 +77,51 @@ func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel
 	if model.SizeGb.IsNull() && response.Data.SizeGb != 0 {
 		model.SizeGb = types.Int64Value(response.Data.SizeGb)
 	}
-	// The API can send the volume type in a different case. The canonical key keeps
-	// the configured value from planning a replacement.
-	if model.VolumeType.IsNull() && response.Data.VolumeType.Name != "" {
-		model.VolumeType = types.StringValue(canonicalVolumeType(response.Data.VolumeType.Name))
+	if model.VolumeType.IsNull() {
+		model.VolumeType = importedVolumeType(response.Data.VolumeType)
 	}
 	return model
 }
 
+// The schema accepts a display name only for the aliases it knows. The API names
+// every other storage class after its code, and calls a degraded one "Unknown", so
+// the component code is the only import value the schema always accepts.
+func importedVolumeType(volumeType volumeTypeResponse) types.String {
+	if alias, known := volumeTypeAlias(volumeType.Name); known {
+		return types.StringValue(alias)
+	}
+	if volumeType.Code != "" {
+		return types.StringValue(volumeType.Code)
+	}
+	if volumeType.Name != "" {
+		return types.StringValue(volumeType.Name)
+	}
+	return types.StringNull()
+}
+
+// The API can send the volume type in a different case. The canonical key keeps
+// the configured value from planning a replacement.
 func canonicalVolumeType(name string) string {
-	for key := range volumeTypeMapping {
-		if strings.EqualFold(key, name) {
-			return key
-		}
+	if alias, known := volumeTypeAlias(name); known {
+		return alias
 	}
 	return name
+}
+
+// componentCodeForVolumeType answers with the code the API expects. A display name
+// becomes its code, and a code is already one.
+func componentCodeForVolumeType(volumeType string) string {
+	if alias, known := volumeTypeAlias(volumeType); known {
+		return volumeTypeMapping[alias]
+	}
+	return volumeType
+}
+
+func volumeTypeAlias(name string) (string, bool) {
+	for alias := range volumeTypeMapping {
+		if strings.EqualFold(alias, name) {
+			return alias, true
+		}
+	}
+	return "", false
 }
