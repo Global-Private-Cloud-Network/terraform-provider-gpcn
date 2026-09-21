@@ -554,15 +554,15 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
 
 	if startErr != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryVMLeftStopped,
 			fmt.Sprintf(virtualmachines.ErrDetailVMLeftStopped, state.ID.ValueString(), startErr.Error()),
 		)
+	}
+
+	if resp.Diagnostics.HasError() {
 		return
 	}
 
