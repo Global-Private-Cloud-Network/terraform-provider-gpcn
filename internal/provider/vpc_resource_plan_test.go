@@ -60,6 +60,7 @@ type vpcMock struct {
 	createRefusal  string
 	deleteRefusals int
 	deleteNotFound bool
+	getNotFound    bool
 	createBody     map[string]any
 	requests       []string
 }
@@ -94,7 +95,7 @@ func startVpcPlanMockServer(t *testing.T, refusals vpcMockRefusals) *vpcMock {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, vpcPlanTestCreateJobID, vpcPlanTestID, true)
 		case r.Method == http.MethodGet && r.URL.Path == vpcPath:
-			testutil.WriteJSONResponse(w, mock.detailBody())
+			mock.handleGet(w)
 		case r.Method == http.MethodPut && r.URL.Path == vpcPath:
 			mock.handleUpdate(w, r)
 		case r.Method == http.MethodDelete && r.URL.Path == vpcPath:
@@ -115,12 +116,14 @@ func (m *vpcMock) record(r *http.Request) {
 	m.requests = append(m.requests, r.Method+" "+r.URL.Path)
 }
 
+// A create puts the row back, so a GET after one answers again.
 func (m *vpcMock) handleCreate(w http.ResponseWriter, r *http.Request) {
 	body := testutil.ReadRequestBody(r)
 
 	m.mutex.Lock()
 	refusal := m.createRefusal
 	if refusal == "" {
+		m.getNotFound = false
 		m.createBody = body
 		m.name, _ = body["name"].(string)
 		m.description, _ = body["description"].(string)
@@ -145,6 +148,18 @@ func (m *vpcMock) handleCreate(w http.ResponseWriter, r *http.Request) {
 		"meta":    nil,
 		"data":    map[string]any{"jobId": vpcPlanTestCreateJobID, "vpc": created},
 	})
+}
+
+func (m *vpcMock) handleGet(w http.ResponseWriter) {
+	m.mutex.Lock()
+	notFound := m.getNotFound
+	m.mutex.Unlock()
+
+	if notFound {
+		writeVpcRefusal(w, http.StatusNotFound, vpcNotFoundBody)
+		return
+	}
+	testutil.WriteJSONResponse(w, m.detailBody())
 }
 
 func (m *vpcMock) handleUpdate(w http.ResponseWriter, r *http.Request) {
@@ -262,6 +277,14 @@ func (m *vpcMock) setName(name string) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.name = name
+}
+
+// setGetNotFound deletes the VPC behind the provider's back. The mutex orders
+// the write against the handler goroutine that reads the field.
+func (m *vpcMock) setGetNotFound(notFound bool) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.getNotFound = notFound
 }
 
 func (m *vpcMock) requestCount(request string) int {
@@ -657,6 +680,38 @@ func TestVpcResourcePlanRefusesACidrThatIsNotANetworkAddress(t *testing.T) {
 			{
 				Config:      vpcPlanTestConfigWith(mock.url, hostAddress),
 				ExpectError: regexp.MustCompile(`must be a valid IPv4 CIDR whose address is the`),
+			},
+		},
+	})
+}
+
+// A VPC deleted outside Terraform has to leave state, or every later plan
+// fails on the read instead of offering to create the VPC again.
+func TestVpcResourcePlanRemovesAVanishedVpcFromState(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vpcPlanTestConfig(mock.url, "vpc-vanished"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcTest, "id", vpcPlanTestID),
+				),
+			},
+			{
+				PreConfig: func() { mock.setGetNotFound(true) },
+				Config:    vpcPlanTestConfig(mock.url, "vpc-vanished"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcTest, plancheck.ResourceActionCreate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcTest, "id", vpcPlanTestID),
+					resource.TestCheckResourceAttr(gpcnVpcTest, "name", "vpc-vanished"),
+				),
 			},
 		},
 	})
