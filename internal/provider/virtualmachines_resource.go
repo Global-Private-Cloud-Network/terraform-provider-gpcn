@@ -539,6 +539,12 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 		// Already deleted outside of Terraform
 		tflog.Info(ctx, virtualmachines.LogVirtualMachineAlreadyDeleted)
 		return
+	} else if virtualmachines.IsTerminalStatusError(err) {
+		// The platform writes Destroyed and Deleting from its own lifecycle, so the
+		// machine never stops and there is nothing left to delete.
+		tflog.Info(ctx, fmt.Sprintf(virtualmachines.LogVirtualMachineTerminalRemovingFromState, err.Error()))
+		resp.State.RemoveResource(ctx)
+		return
 	} else if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToDeleteVM,

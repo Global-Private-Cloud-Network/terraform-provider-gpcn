@@ -473,3 +473,87 @@ func TestVirtualMachineResourcePlanCreateWritesStateWhenAttachFails(t *testing.T
 		},
 	})
 }
+
+// startVirtualMachineDestroyMockServer refuses to delete. A test that reaches the delete
+// endpoint has not treated the machine as gone.
+func startVirtualMachineDestroyMockServer(t *testing.T) (*httptest.Server, func()) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	birthNetworkID := ""
+	status := virtualmachines.VMStatusRunning.String()
+
+	vmPath := "/v1/resource/virtual-machines/" + vmPlanTestID
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			birthNetworkID, _ = body["networkId"].(string)
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodGet && r.URL.Path == vmPath+"/network-interfaces":
+			mu.Lock()
+			currentNetwork := birthNetworkID
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestNetworkInterfacesBody(currentNetwork))
+		case r.Method == http.MethodPost && r.URL.Path == vmPath+"/stop":
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, vmPlanTestSizeID))
+		case r.Method == http.MethodDelete && r.URL.Path == vmPath:
+			t.Error("Expected no delete call for a machine the platform already removed")
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	setDeleting := func() {
+		mu.Lock()
+		status = virtualmachines.VMStatusDeleting.String()
+		mu.Unlock()
+	}
+
+	return server, setDeleting
+}
+
+// A machine the platform is already removing never reaches a stopped status, so the
+// pre-delete stop times out on a status it never leaves. That is the same outcome as a
+// 404: the machine is gone and leaves state without an error.
+func TestVirtualMachineResourcePlanDestroyTreatsDeletingAsGone(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, setDeleting := startVirtualMachineDestroyMockServer(t)
+
+	config := vmPlanTestConfig(server.URL, "vm-plan-destroy")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
+				),
+			},
+			{
+				PreConfig: setDeleting,
+				Config:    config,
+				Destroy:   true,
+			},
+		},
+	})
+}

@@ -70,4 +70,5 @@ const (
 const (
 	LogVirtualMachineNotFoundRemovingFromState = "GPCN Virtual Machine no longer exists (deleted outside of Terraform) - removing it from state"
 	LogVirtualMachineAlreadyDeleted            = "GPCN Virtual Machine was already deleted"
+	LogVirtualMachineTerminalRemovingFromState = "The GPCN platform already removed the Virtual Machine - removing it from state: %s"
 )
