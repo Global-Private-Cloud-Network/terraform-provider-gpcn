@@ -361,8 +361,8 @@ func (d *datacenterDataSource) addNoMatchError(ctx context.Context, state datace
 	)
 }
 
-// The page loop stops at this many pages, because the provider must not read an
-// unbounded list.
+// The provider must not read an unbounded list. The page size keeps each
+// request small, and the page cap bounds the whole read.
 const (
 	datacenterPageLimit = 100
 	datacenterPageCap   = 100

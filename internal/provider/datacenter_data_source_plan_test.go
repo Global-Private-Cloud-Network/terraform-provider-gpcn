@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -403,5 +405,54 @@ func TestDatacentersDataSourceCapsPagination(t *testing.T) {
 	}
 	if highest != 100 {
 		t.Errorf("the highest page the data source asked for is %d, want 100", highest)
+	}
+}
+
+func TestDatacentersGetDatacentersFlagsTruncation(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name       string
+		totalPages int
+		want       bool
+	}{
+		{name: "at the cap", totalPages: datacenterPageCap, want: false},
+		{name: "past the cap", totalPages: datacenterPageCap + 1, want: true},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				page, err := strconv.Atoi(r.URL.Query().Get("page"))
+				if err != nil {
+					t.Errorf("the request carries no page number: %q", r.URL.RawQuery)
+					page = 1
+				}
+				testutil.WriteJSONResponse(w, datacenterPlanTestBody([]map[string]any{
+					datacenterPlanTestRow(fmt.Sprintf("dc-%d", page), "Chicago", datacenterPlanTestRegionAlpha, true),
+				}, page, testCase.totalPages))
+			}))
+			t.Cleanup(server.Close)
+
+			gpcnClient, err := client.NewGpcnClient(client.DefaultConfig(server.URL, "test-key"))
+			if err != nil {
+				t.Fatalf("the client does not build: %v", err)
+			}
+
+			dataSource := &datacenterDataSource{client: gpcnClient}
+			rows, truncated, err := dataSource.getDatacenters(context.Background(), "")
+			if err != nil {
+				t.Fatalf("getDatacenters returned an error: %v", err)
+			}
+
+			if truncated != testCase.want {
+				t.Errorf("truncated is %t, want %t", truncated, testCase.want)
+			}
+			if len(rows) != datacenterPageCap {
+				t.Errorf("the list holds %d rows, want %d", len(rows), datacenterPageCap)
+			}
+		})
 	}
 }
