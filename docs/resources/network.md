@@ -117,7 +117,7 @@ terraform import gpcn_network.existing "c13808d9-3b7d-42c5-a21d-f0961308a38a"
 
 ## Migrating an adopted custom network
 
-The platform adopts custom networks into L2 segments. After the adoption the network answers 404 and this resource then drops the row from state and emits a warning, because the segment is a new object with a new id and Terraform cannot make the move itself.
+The platform adopts custom networks into L2 segments. After the adoption the network answers 404. A refresh warns and drops the row from state. A plan alone does not persist that drop. The segment is a new object with a new id, and Terraform cannot make the move itself.
 
 Find the segment id by the first route that works:
 
