@@ -1196,14 +1196,18 @@ var vmPlanTestLeftStoppedPattern = regexp.MustCompile(`(?s)Virtual\s+machine\s+l
 
 // The update stops the machine and the segment attach then fails. The provider starts
 // the machine again, so the user reads the attach error alone. The step sets no
-// ExpectError, because ErrorCheck never runs for a step that sets one.
+// ExpectError, because ErrorCheck never runs for a step that sets one. A flag records
+// that the check ran: an apply that stops failing would otherwise assert nothing.
 func TestVirtualMachineResourcePlanStartsAgainWhenAnUpdateStepFailsAfterTheStop(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server, startCount := startVirtualMachineSegmentRefusedMockServer(t, true, 0, false)
 
+	errorCheckRan := false
+
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		ErrorCheck: func(err error) error {
+			errorCheckRan = true
 			if !vmPlanTestAttachErrorPattern.MatchString(err.Error()) {
 				t.Errorf("Expected the attach error, got '%s'", err.Error())
 			}
@@ -1225,13 +1229,17 @@ func TestVirtualMachineResourcePlanStartsAgainWhenAnUpdateStepFailsAfterTheStop(
 		},
 	})
 
+	if !errorCheckRan {
+		t.Error("Expected the apply to fail and ErrorCheck to run")
+	}
 	if starts := startCount(); starts != 1 {
 		t.Errorf("Expected exactly 1 start, got %d", starts)
 	}
 }
 
 // The update stops the machine, the attach fails, and the start fails too. The user
-// reads both errors, so the machine that stays stopped is never a silent one.
+// reads both errors, so the machine that stays stopped is never a silent one. The
+// refresh step proves the mid-update path records nothing, so the next apply retries.
 func TestVirtualMachineResourcePlanReportsLeftStoppedWhenTheStartAlsoFails(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server, startCount := startVirtualMachineSegmentRefusedMockServer(t, false, 0, false)
@@ -1248,6 +1256,13 @@ func TestVirtualMachineResourcePlanReportsLeftStoppedWhenTheStartAlsoFails(t *te
 			{
 				Config:      vmSegmentListPlanTestConfig(server.URL, "vm-plan-left-stopped-update", vmPlanTestSegmentID),
 				ExpectError: regexp.MustCompile(`(?s)Error\s+updating\s+network\s+interfaces.*Virtual\s+machine\s+left\s+stopped.*did\s+not\s+start\s+again.*the\s+change\s+was\s+not\s+recorded,\s+so\s+the\s+next\s+apply\s+retries\s+it\.`),
+			},
+			{
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "l2_segment_ids.#", "0"),
+				),
 			},
 		},
 	})
