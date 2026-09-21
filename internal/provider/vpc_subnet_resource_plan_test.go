@@ -533,6 +533,10 @@ func TestVpcSubnetResourcePlanRefusesOuterWhitespace(t *testing.T) {
 				Config:      subnetPlanTestConfig(server.URL, " subnet-plan-a", ""),
 				ExpectError: whitespaceRefusal("Invalid VPC subnet name", "name"),
 			},
+			{
+				Config:      subnetPlanTestConfig(server.URL, "subnet-plan-a", `description = " web tier"`),
+				ExpectError: whitespaceRefusal("Invalid VPC subnet description", "description"),
+			},
 		},
 	})
 }

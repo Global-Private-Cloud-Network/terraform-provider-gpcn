@@ -488,6 +488,10 @@ func TestVpcNsgResourcePlanRefusesOuterWhitespace(t *testing.T) {
 				ExpectError: whitespaceRefusal("Invalid security group name", "name"),
 			},
 			{
+				Config:      nsgPlanTestConfigWithDescription(server.URL, "nsg-plan-a", " web tier", nsgPlanTestRuleHTTPS),
+				ExpectError: whitespaceRefusal("Invalid security group description", "description"),
+			},
+			{
 				Config:      nsgPlanTestConfig(server.URL, "nsg-plan-a", whitespaceRule),
 				ExpectError: whitespaceRefusal("Invalid security group rule description", "description"),
 			},
