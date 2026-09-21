@@ -18,8 +18,9 @@ var gpcnVirtualMachineTest = "gpcn_virtualmachine.test"
 // vpcAndSubnet returns the VPC and the subnet a virtual machine is born on. A machine
 // lives in exactly one VPC, so every case that creates one creates these two first.
 // GPCN checks a CIDR for overlap across the whole entity, and the repository has no
-// sweepers. Each case therefore takes its own name and its own block. One fixed block
-// would fail every run after the first.
+// sweepers. Each case therefore takes its own name and its own block, and the octet
+// draws from the window at base 112. One fixed block would fail every run after the
+// first.
 func vpcAndSubnet(suffix string, octet int) string {
 	return fmt.Sprintf(`
 resource "gpcn_vpc" "vm_vpc" {
@@ -36,10 +37,11 @@ resource "gpcn_vpc_subnet" "vm_subnet" {
 `, suffix, octet)
 }
 
-// vpcTestOctet draws the second octet of a case's own /16 out of the private range the
-// platform leaves to tenants.
+// vpcTestOctet draws the second octet of a case's own /16 out of the 16-wide window this
+// file owns. Each resource file draws from a different window, so parallel cases in
+// different files never collide.
 func vpcTestOctet() int {
-	return 64 + acctest.RandIntRange(0, 64)
+	return 112 + acctest.RandIntRange(0, 16)
 }
 
 // dataCenterImagesAndSize returns the common datacenter, image, and size datasource lookup blocks for Chicago.
