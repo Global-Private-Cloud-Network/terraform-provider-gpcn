@@ -29,17 +29,16 @@ const (
 // subnetPlanTestServerState is the row the mock keeps between requests. A read
 // after an apply must agree with the configuration, or every step plans a diff.
 type subnetPlanTestServerState struct {
-	mu            sync.Mutex
-	name          string
-	description   string
-	nsgID         string
-	nsgName       string
-	nicCount      int64
-	deleted       bool
-	refuseDelete  bool
-	createBody    map[string]any
-	rebindBody    map[string]any
-	deleteRequest int
+	mu           sync.Mutex
+	name         string
+	description  string
+	nsgID        string
+	nsgName      string
+	nicCount     int64
+	deleted      bool
+	refuseDelete bool
+	createBody   map[string]any
+	rebindBody   map[string]any
 }
 
 func (s *subnetPlanTestServerState) row() map[string]any {
@@ -120,7 +119,6 @@ func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestS
 			testutil.HandleCreateJobResponse(w, "job-rebind", "Operation initiated successfully")
 		case r.Method == http.MethodDelete && r.URL.Path == subnetPath:
 			state.mu.Lock()
-			state.deleteRequest++
 			refuse := state.refuseDelete
 			count := state.nicCount
 			if refuse {
@@ -297,6 +295,81 @@ func TestVpcSubnetResourcePlanSurfacesDeleteRefusal(t *testing.T) {
 				Config:      subnetPlanTestConfig(server.URL, "subnet-plan-a", ""),
 				Destroy:     true,
 				ExpectError: regexp.MustCompile(strings.ReplaceAll(`Cannot delete a subnet with 2 attached network interface\(s\). Detach or delete`, " ", `\s+`)),
+			},
+		},
+	})
+}
+
+// A subnet missing from its VPC's listing was deleted outside Terraform. Read
+// drops it from state, so the next plan proposes a create rather than an
+// update against a row that is gone.
+func TestVpcSubnetResourcePlanRecreatesWhenAbsentFromListing(t *testing.T) {
+	t.Parallel()
+	server, state := startSubnetPlanMockServer(t)
+
+	config := subnetPlanTestConfig(server.URL, "subnet-plan-a", "")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+			},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					state.deleted = true
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcSubnetTest, plancheck.ResourceActionCreate),
+					},
+				},
+			},
+		},
+	})
+}
+
+// A subnet that asks for a size rather than a block gets its CIDR from the
+// allocator. That CIDR must come out of state on the next plan: an unknown one
+// would plan a replacement of a live subnet on every apply. The test pins the
+// carve path. It does not guard a fix.
+func TestVpcSubnetResourcePlanCarvesFromPrefix(t *testing.T) {
+	t.Parallel()
+	server, state := startSubnetPlanMockServer(t)
+
+	config := subnetPlanTestConfig(server.URL, "subnet-plan-a", "prefix = 26")
+	config = strings.Replace(config, fmt.Sprintf("  cidr   = %q\n", subnetPlanTestCIDR), "", 1)
+
+	checkCreateBody := func(*terraform.State) error {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		if got, _ := state.createBody["prefix"].(float64); got != 26 {
+			return fmt.Errorf("expected the create body prefix 26, got %v", state.createBody["prefix"])
+		}
+		if _, present := state.createBody["cidr"]; present {
+			return fmt.Errorf("expected no cidr key in the create body, got %v", state.createBody["cidr"])
+		}
+		return nil
+	}
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "cidr", subnetPlanTestCIDR),
+					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "prefix", "26"),
+					checkCreateBody,
+				),
+			},
+			{
+				Config:             config,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
 			},
 		},
 	})
