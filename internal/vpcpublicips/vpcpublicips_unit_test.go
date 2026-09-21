@@ -564,3 +564,78 @@ func TestAcquirePublicIpReturnsTheIdWhenTheJobFailsMockHTTP(t *testing.T) {
 		t.Fatalf("Expected the failed acquire to still report ID %q, got %q", testPublicIpID, publicIpID)
 	}
 }
+
+// Create writes the id to state before it polls, so the row is never orphaned
+// outside Terraform. Nothing about the address is read yet. A computed
+// attribute left unknown fails the apply with a missing value.
+func TestMapAcquiredIdToModelNullsEveryComputedAttributeUnit(t *testing.T) {
+	t.Parallel()
+
+	// A plan carries Unknown, not null, in every Computed attribute. State.Set
+	// refuses an unknown value, so the mapper has to null each one.
+	model := MapAcquiredIdToModel(testPublicIpID, ResourceModel{
+		VpcID:            types.StringValue(testVpcID),
+		IPAddress:        types.StringUnknown(),
+		State:            types.StringUnknown(),
+		Held:             types.BoolUnknown(),
+		VirtualMachineID: types.StringUnknown(),
+		FailureReason:    types.StringUnknown(),
+		CreatedTime:      types.StringUnknown(),
+		LastUpdated:      types.StringUnknown(),
+	})
+
+	if got := model.ID.ValueString(); got != testPublicIpID {
+		t.Errorf("expected the id %q, got %q", testPublicIpID, got)
+	}
+	if got := model.VpcID.ValueString(); got != testVpcID {
+		t.Errorf("expected the configured VPC %q, got %q", testVpcID, got)
+	}
+
+	nulls := map[string]bool{
+		"ip_address":         model.IPAddress.IsNull(),
+		"state":              model.State.IsNull(),
+		"held":               model.Held.IsNull(),
+		"virtual_machine_id": model.VirtualMachineID.IsNull(),
+		"failure_reason":     model.FailureReason.IsNull(),
+		"created_time":       model.CreatedTime.IsNull(),
+		"last_updated":       model.LastUpdated.IsNull(),
+	}
+	for attribute, isNull := range nulls {
+		if !isNull {
+			t.Errorf("expected %s to be null", attribute)
+		}
+	}
+}
+
+// The attach writes the binding to state before the read-back, so a failed
+// read-back leaves an attachment Terraform owns. The address itself is not
+// read yet, so the machine it serves stays null.
+func TestMapAttachedIdToAttachmentModelNullsEveryComputedAttributeUnit(t *testing.T) {
+	t.Parallel()
+
+	// A plan carries Unknown, not null, in every Computed attribute. State.Set
+	// refuses an unknown value, so the mapper has to null each one.
+	model := MapAttachedIdToAttachmentModel(AttachmentResourceModel{
+		ID:               types.StringUnknown(),
+		VpcID:            types.StringValue(testVpcID),
+		PublicIpID:       types.StringValue(testPublicIpID),
+		NicID:            types.StringValue(testNicID),
+		VirtualMachineID: types.StringUnknown(),
+	})
+
+	if got := model.ID.ValueString(); got != testPublicIpID {
+		t.Errorf("expected the id %q, got %q", testPublicIpID, got)
+	}
+	if got := model.VpcID.ValueString(); got != testVpcID {
+		t.Errorf("expected the configured VPC %q, got %q", testVpcID, got)
+	}
+	if got := model.PublicIpID.ValueString(); got != testPublicIpID {
+		t.Errorf("expected the configured address %q, got %q", testPublicIpID, got)
+	}
+	if got := model.NicID.ValueString(); got != testNicID {
+		t.Errorf("expected the configured interface %q, got %q", testNicID, got)
+	}
+	if !model.VirtualMachineID.IsNull() {
+		t.Errorf("expected virtual_machine_id to be null, got %q", model.VirtualMachineID.ValueString())
+	}
+}
