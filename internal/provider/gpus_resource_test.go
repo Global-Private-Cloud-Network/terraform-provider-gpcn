@@ -5,12 +5,36 @@ import (
 	"regexp"
 	"testing"
 
+	"terraform-provider-gpcn/internal/gpu"
+
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
 var gpcnGPUTest = "gpcn_gpu.test"
+
+// gpuCreateRefusalError matches every diagnostic a create refusal can render:
+// the summary, and the two details CheckInventory returns.
+var gpuCreateRefusalError = regexp.MustCompile("(Unable to Create GPU|no GPU availability|is not offered)")
+
+// The acceptance refusal regexp is worthless if it matches no string the code
+// emits. The unit test holds it to the constants.
+func TestGPUCreateRefusalRegexpMatchesEmittedDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	emitted := []string{
+		gpu.ErrSummaryUnableToCreateGPU,
+		fmt.Sprintf(gpu.ErrDetailNoInventoryAvailable, "nvidia-a100-series", "dc-1", 4),
+		fmt.Sprintf(gpu.ErrDetailUnknownGPUSeries, "nvidia-a100-series", "dc-1", "nvidia-h200-series (NVIDIA H200 Series)"),
+	}
+
+	for _, diagnostic := range emitted {
+		if !gpuCreateRefusalError.MatchString(diagnostic) {
+			t.Errorf("Expected %q to match %q", gpuCreateRefusalError.String(), diagnostic)
+		}
+	}
+}
 
 func TestGPUResource(t *testing.T) {
 	t.Parallel()
@@ -230,7 +254,7 @@ func TestGPUResourceNoAvailability(t *testing.T) {
 				}
 			}
 			`, sshKeyName, gpuName),
-				ExpectError: regexp.MustCompile("(no GPU availability|No GPU Inventory Available|Unable to create GPCN GPU)"),
+				ExpectError: gpuCreateRefusalError,
 			},
 		},
 	})
