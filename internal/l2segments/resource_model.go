@@ -30,7 +30,7 @@ func nullableString(raw *string) types.String {
 }
 
 // descriptionValue normalizes an absent description. The schema defaults the
-// attribute to the empty string, and an adopted segment stores null, so a plan
+// attribute to the empty string, and an adopted segment stores null. A plan
 // after an import would otherwise show null -> "" on every such segment.
 func descriptionValue(raw *string) types.String {
 	if raw == nil {
@@ -48,9 +48,9 @@ func formatTimestamp(raw string) types.String {
 	return types.StringValue(parsed.Format(time.RFC850))
 }
 
-// MapL2SegmentResponseToModel writes the computed attributes and fills the
-// configurable ones only when they are null, which is the state an import starts
-// from. Create and Update keep the planned values.
+// MapL2SegmentResponseToModel writes the computed attributes. It fills the
+// configurable ones only when they are null. An import starts from that state,
+// and Create and Update keep the planned values.
 func MapL2SegmentResponseToModel(response *readL2SegmentResponse, model ResourceModel) ResourceModel {
 	model.ID = types.StringValue(response.Data.ID)
 	model.State = types.StringValue(response.Data.State)
@@ -76,8 +76,8 @@ func MapL2SegmentResponseToModel(response *readL2SegmentResponse, model Resource
 
 // RefreshL2SegmentModelFromResponse shows an out-of-band edit. The name and the
 // description are the only attributes the platform reconciles in place, through
-// the update verb. The datacenter has no update verb, so refreshing a drifted
-// value there would plan a replacement of a carrier live traffic uses.
+// the update verb. The datacenter has no update verb. A refreshed drift there
+// would plan a replacement of a carrier that live traffic uses.
 func RefreshL2SegmentModelFromResponse(response *readL2SegmentResponse, model ResourceModel) ResourceModel {
 	model.Name = types.StringValue(response.Data.Name)
 	model.Description = descriptionValue(response.Data.Description)
