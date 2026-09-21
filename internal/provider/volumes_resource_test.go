@@ -54,7 +54,7 @@ func TestVolumesResource(t *testing.T) {
 					resource.TestCheckResourceAttrSet(gpcnVolumeTest, "location.country"),
 					resource.TestCheckResourceAttrSet(gpcnVolumeTest, "location.datacenter"),
 					resource.TestCheckResourceAttrSet(gpcnVolumeTest, "location.region"),
-					resource.TestCheckResourceAttrSet(gpcnVolumeTest, "volume_type_id"),
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type_code", "vol-add-ssd"),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{

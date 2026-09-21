@@ -84,9 +84,14 @@ func (r *volumesResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"volume_type_id": schema.Int64Attribute{
-				Description: "Internal identifier for the volume type",
+			"volume_type_code": schema.StringAttribute{
+				Description: "Component code of the storage class, for example 'vol-add-ssd'. This is the identifier the API uses for a volume type",
 				Computed:    true,
+			},
+			"volume_type_id": schema.Int64Attribute{
+				Description:        "Always null. The API identifies a volume type by code",
+				Computed:           true,
+				DeprecationMessage: "volume_type_id is deprecated and always null: the API identifies a volume type by code. Use volume_type_code.",
 				PlanModifiers: []planmodifier.Int64{
 					int64planmodifier.UseStateForUnknown(),
 				},

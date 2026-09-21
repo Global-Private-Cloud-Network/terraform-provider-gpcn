@@ -54,7 +54,7 @@ func volPlanTestReadBody(name string, sizeGb int64) map[string]any {
 			"name":   name,
 			"sizeGb": sizeGb,
 			"volumeType": map[string]any{
-				"id":          1,
+				"code":        volPlanTestComponent,
 				"name":        volPlanTestVolumeType,
 				"description": "Solid state drive",
 			},

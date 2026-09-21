@@ -25,7 +25,7 @@ type readVolumesResponse struct {
 			SkuId string `json:"skuId"`
 		} `json:"configuration"`
 		VolumeType struct {
-			ID          int64  `json:"id"`
+			Code        string `json:"code"`
 			Name        string `json:"name"`
 			Description string `json:"description"`
 		} `json:"volumeType"`

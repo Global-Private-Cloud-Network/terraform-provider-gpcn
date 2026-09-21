@@ -31,7 +31,7 @@ func newVolumeResponse(id, name string, sizeGb int64, skuId string) *readVolumes
 	resp.Data.ID = id
 	resp.Data.Name = name
 	resp.Data.SizeGb = sizeGb
-	resp.Data.VolumeType.ID = 1
+	resp.Data.VolumeType.Code = "vol-add-ssd"
 	resp.Data.VolumeType.Name = "SSD"
 	resp.Data.VolumeType.Description = "Solid State Drive"
 	resp.Data.Configuration.SkuId = skuId
@@ -69,9 +69,6 @@ func TestMapVolumeResponseToModelUnit(t *testing.T) {
 	if result.ID.ValueString() != "volume-123" {
 		t.Errorf("Expected ID 'volume-123', got '%s'", result.ID.ValueString())
 	}
-	if result.VolumeTypeId.ValueInt64() != 1 {
-		t.Errorf("Expected VolumeTypeId 1, got %d", result.VolumeTypeId.ValueInt64())
-	}
 	if result.CreatedTime.IsNull() || result.CreatedTime.ValueString() == "unknown" {
 		t.Errorf("Expected CreatedTime to be set, got '%s'", result.CreatedTime.ValueString())
 	}
@@ -80,6 +77,38 @@ func TestMapVolumeResponseToModelUnit(t *testing.T) {
 	}
 	if result.Location.IsNull() {
 		t.Error("Expected Location to be set")
+	}
+}
+
+// The API has never sent a volume type id. The attribute stays in the schema for
+// state compatibility, so the mapper must write null instead of a phantom zero.
+func TestVolumeTypeIdIsNullUnit(t *testing.T) {
+	response := newVolumeResponse("volume-123", "test-volume", 256, "sku-uuid-10")
+	model := createTestVolumeModel("test-volume", "SSD", 256)
+
+	result := MapVolumeResponseToModel(context.Background(), response, model)
+
+	if !result.VolumeTypeId.IsNull() {
+		t.Errorf("Expected VolumeTypeId to be null, got %d", result.VolumeTypeId.ValueInt64())
+	}
+}
+
+func TestMapVolumeResponseToModelSetsTypeCodeUnit(t *testing.T) {
+	response := newVolumeResponse("volume-123", "test-volume", 256, "sku-uuid-10")
+	model := createTestVolumeModel("test-volume", "SSD", 256)
+
+	result := MapVolumeResponseToModel(context.Background(), response, model)
+
+	if result.VolumeTypeCode.ValueString() != "vol-add-ssd" {
+		t.Errorf("Expected VolumeTypeCode 'vol-add-ssd', got '%s'", result.VolumeTypeCode.ValueString())
+	}
+
+	response.Data.VolumeType.Code = ""
+
+	degraded := MapVolumeResponseToModel(context.Background(), response, model)
+
+	if !degraded.VolumeTypeCode.IsNull() {
+		t.Errorf("Expected VolumeTypeCode to be null, got '%s'", degraded.VolumeTypeCode.ValueString())
 	}
 }
 

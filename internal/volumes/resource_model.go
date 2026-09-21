@@ -10,22 +10,29 @@ import (
 )
 
 type ResourceModel struct {
-	ID           types.String `tfsdk:"id"`
-	Name         types.String `tfsdk:"name"`
-	DatacenterId types.String `tfsdk:"datacenter_id"`
-	VolumeType   types.String `tfsdk:"volume_type"`
-	VolumeTypeId types.Int64  `tfsdk:"volume_type_id"`
-	SizeGb       types.Int64  `tfsdk:"size_gb"`
-	CreatedTime  types.String `tfsdk:"created_time"`
-	LastUpdated  types.String `tfsdk:"last_updated"`
-	Location     types.Map    `tfsdk:"location"`
+	ID             types.String `tfsdk:"id"`
+	Name           types.String `tfsdk:"name"`
+	DatacenterId   types.String `tfsdk:"datacenter_id"`
+	VolumeType     types.String `tfsdk:"volume_type"`
+	VolumeTypeCode types.String `tfsdk:"volume_type_code"`
+	VolumeTypeId   types.Int64  `tfsdk:"volume_type_id"`
+	SizeGb         types.Int64  `tfsdk:"size_gb"`
+	CreatedTime    types.String `tfsdk:"created_time"`
+	LastUpdated    types.String `tfsdk:"last_updated"`
+	Location       types.Map    `tfsdk:"location"`
 }
 
 // Update the plan or state with new values from the GET response
 func MapVolumeResponseToModel(ctx context.Context, response *readVolumesResponse, model ResourceModel) ResourceModel {
 	// Construct most of the data object
 	model.ID = types.StringValue(response.Data.ID)
-	model.VolumeTypeId = types.Int64Value(response.Data.VolumeType.ID)
+	// The API identifies a volume type by code and has never sent an id.
+	model.VolumeTypeId = types.Int64Null()
+	if response.Data.VolumeType.Code == "" {
+		model.VolumeTypeCode = types.StringNull()
+	} else {
+		model.VolumeTypeCode = types.StringValue(response.Data.VolumeType.Code)
+	}
 
 	// Construct time entries
 	createdTime, err := time.Parse(time.RFC3339, response.Data.CreatedAt)
