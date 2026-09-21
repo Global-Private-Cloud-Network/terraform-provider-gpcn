@@ -1,8 +1,8 @@
 # Example: A network security group for a GPCN VPC
 #
-# The rules live inline. GPCN replaces the whole rule set on every change and
-# identifies a rule by its direction, protocol, port range and remote CIDR, so a
-# rule has no identity of its own to manage separately.
+# The rules live inline. GPCN replaces the whole rule set on every change.
+# GPCN identifies a rule by its direction, protocol, port range and remote
+# CIDR. A rule therefore has no identity of its own to manage separately.
 
 terraform {
   required_providers {

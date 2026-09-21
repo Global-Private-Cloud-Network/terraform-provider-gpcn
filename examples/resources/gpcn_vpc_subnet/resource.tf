@@ -1,8 +1,8 @@
 # Example: Carving subnets out of a GPCN VPC
 #
 # A subnet takes its datacenter and its address space from its VPC. Give it a
-# CIDR inside the VPC super-CIDR, or a prefix length and let GPCN carve a free
-# block of that size.
+# CIDR inside the VPC super-CIDR. You can instead give a prefix length and let
+# GPCN carve a free block of that size.
 
 terraform {
   required_providers {

@@ -701,8 +701,8 @@ func TestVpcSubnetResourcePlanFillsPrefixWithoutEitherKey(t *testing.T) {
 }
 
 // A prefix that differs from the mask of the block GPCN carved asks for
-// another block. GPCN cannot re-carve one in place, so the plan replaces the
-// subnet rather than proposing an update the API would refuse.
+// another block. GPCN cannot re-carve one in place. The plan therefore
+// replaces the subnet rather than proposing an update the API refuses.
 func TestVpcSubnetResourcePlanReplacesOnChangedPrefix(t *testing.T) {
 	t.Parallel()
 	server, state := startSubnetPlanMockServer(t)
