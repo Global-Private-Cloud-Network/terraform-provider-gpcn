@@ -22,6 +22,7 @@ const (
 	ErrSummaryUnableToDetermineSizeChange         = "Unable to determine whether size_id change requires replacement"
 	ErrSummaryNoPrimaryNetworkInterface           = "No primary network interface"
 	ErrSummaryVMCreatedAttachFailed               = "Virtual machine created but a network interface attach failed"
+	ErrSummaryVMLeftStopped                       = "Virtual machine left stopped"
 )
 
 // Warning summary constants
@@ -46,6 +47,7 @@ const (
 	ErrDetailFetchUpgradeSizesFailed   = "The provider could not fetch the valid upgrade targets for this Virtual Machine, so it cannot tell whether the size_id change is an in-place upgrade. This error is often transient. Re-run the plan. Underlying error: %s"
 	ErrDetailNoPrimaryNetworkInterface = "No network interface on virtual machine with ID %s is marked primary, so the public IP cannot be changed"
 	ErrDetailVMCreatedAttachFailed     = "virtual machine %s was created and is in state, but attaching %s failed: %s. Terraform has marked the machine tainted: run terraform untaint on it and apply again to attach the remaining networks, or let the next apply replace it."
+	ErrDetailVMLeftStopped             = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal or run terraform apply again."
 )
 
 // Warning detail message templates

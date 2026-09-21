@@ -353,11 +353,12 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 			}
 		}
 
-		// A machine the provider stopped must run again, even after a refused attach.
+		// The provider stopped the machine for the attach, so it starts the machine
+		// again. A start that fails leaves the machine stopped, and the user learns
+		// that from the diagnostic below the state write.
+		var startErr error
 		if stopped {
-			if startErr := virtualmachines.StartVirtualMachine(r.client, ctx, plan.ID.ValueString()); startErr != nil {
-				tflog.Debug(ctx, fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStartingVM, plan.ID.ValueString()), startErr).Error())
-			}
+			startErr = virtualmachines.StartVirtualMachine(r.client, ctx, plan.ID.ValueString())
 		}
 
 		plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
@@ -373,6 +374,13 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 
 		diags = resp.State.Set(ctx, plan)
 		resp.Diagnostics.Append(diags...)
+
+		if startErr != nil {
+			resp.Diagnostics.AddError(
+				virtualmachines.ErrSummaryVMLeftStopped,
+				fmt.Sprintf(virtualmachines.ErrDetailVMLeftStopped, plan.ID.ValueString(), startErr.Error()),
+			)
+		}
 
 		if attachErr != nil {
 			resp.Diagnostics.AddError(
@@ -534,12 +542,12 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
 	resp.Diagnostics.Append(mapDiags...)
 
-	// Once finished, conditionally start the virtual machine again
+	// Once finished, conditionally start the virtual machine again. A start that fails
+	// leaves the machine stopped, and the user learns that from the diagnostic below the
+	// state write.
+	var startErr error
 	if needStopVM {
-		err = virtualmachines.StartVirtualMachine(r.client, ctx, state.ID.ValueString())
-		if err != nil {
-			tflog.Debug(ctx, fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStartingVM, state.ID.ValueString()), err).Error())
-		}
+		startErr = virtualmachines.StartVirtualMachine(r.client, ctx, state.ID.ValueString())
 	}
 	tflog.Debug(ctx, fmt.Sprintf(virtualmachines.LogSuccessfullyUpdatedVMMayNotBeRunning, state.ID.ValueString()))
 
@@ -547,6 +555,14 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if startErr != nil {
+		resp.Diagnostics.AddError(
+			virtualmachines.ErrSummaryVMLeftStopped,
+			fmt.Sprintf(virtualmachines.ErrDetailVMLeftStopped, state.ID.ValueString(), startErr.Error()),
+		)
 		return
 	}
 
