@@ -280,6 +280,25 @@ func TestL2SegmentResourcePlanCreateRenameDestroy(t *testing.T) {
 	})
 }
 
+// GPCN trims a padded name before it stores one, so the configuration would
+// never settle. The plan refuses the value before any request leaves.
+func TestL2SegmentResourcePlanRefusesPaddedName(t *testing.T) {
+	t.Parallel()
+	server, _ := startL2SegmentPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: l2PlanTestConfig(server.URL, " seg"),
+				// Terraform wraps a diagnostic, so the pattern tolerates a line
+				// break inside the sentence.
+				ExpectError: regexp.MustCompile(`(?s)Invalid L2 segment name.*name must not start or end with\s+whitespace`),
+			},
+		},
+	})
+}
+
 // The interface count is live. A NIC that lands between the plan and the apply
 // must not fail the apply, so the attribute plans unknown.
 func TestL2SegmentResourcePlanAcceptsNicCountMovedDuringApply(t *testing.T) {

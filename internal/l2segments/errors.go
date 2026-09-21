@@ -33,6 +33,13 @@ const (
 	ErrDetailNoSegmentIDInJob = "the create job reported no segment ID"
 )
 
+// Validation strings. The attribute name fills both templates, so the sentence
+// names the value the user must fix.
+const (
+	ErrSummaryInvalidL2SegmentAttribute = "Invalid L2 segment %s"
+	ErrDetailL2SegmentOuterWhitespace   = "%s must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"
+)
+
 // Warning strings for a segment the platform parked in the failed state
 const (
 	WarnSummaryL2SegmentFailed        = "L2 segment is in the failed state"

@@ -60,6 +60,7 @@ func (r *l2SegmentResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 					// only. A schema-level rule would make an adopted segment,
 					// whose name came from a legacy network, unmanageable.
 					stringvalidator.LengthBetween(1, 255),
+					l2segments.NoOuterWhitespaceValidator{Attribute: "name"},
 				},
 			},
 			"datacenter_id": schema.StringAttribute{
@@ -75,6 +76,7 @@ func (r *l2SegmentResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Computed:    true,
 				Validators: []validator.String{
 					stringvalidator.LengthAtMost(500),
+					l2segments.NoOuterWhitespaceValidator{Attribute: "description"},
 				},
 				Default: stringdefault.StaticString(""),
 			},
