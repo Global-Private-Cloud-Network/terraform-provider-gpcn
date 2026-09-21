@@ -64,10 +64,9 @@ resource "gpcn_volume_attachment" "primary_storage" {
   volume_id          = gpcn_volume.vm_storage_primary.id
 }
 
-# When attaching multiple volumes to a VM with network_hotplug=false,
-# use depends_on to serialize the operations and avoid concurrent stop/start races
+# GPCN attaches to a running virtual machine and serializes volume changes per
+# machine, so attachments to the same VM need no depends_on.
 resource "gpcn_volume_attachment" "secondary_storage" {
   virtual_machine_id = gpcn_virtualmachine.example.id
   volume_id          = gpcn_volume.vm_storage_secondary.id
-  depends_on         = [gpcn_volume_attachment.primary_storage]
 }
