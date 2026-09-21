@@ -20,8 +20,8 @@ var (
 	ErrMaxRetriesExceeded = errors.New("maximum retry attempts exceeded")
 )
 
-// Polling error formats. Each renders the whole sentence, because the job id
-// and the action are what tell one stopped job from another.
+// Each polling format renders the whole sentence. The job id and the action
+// tell one stopped job from another.
 const (
 	//nolint:misspell // The platform spells the cancelled stage this way, and the sentence quotes it.
 	ErrJobCancelled  = "job %s for action %q was cancelled by the platform"

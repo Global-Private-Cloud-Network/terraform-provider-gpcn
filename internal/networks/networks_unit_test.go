@@ -546,8 +546,8 @@ func TestMapNetworkResponseToModelKeepsPlanValuesUnit(t *testing.T) {
 	}
 }
 
-// requestRecorder collects the requests that matter to an assertion. The mock server
-// serves each request on its own goroutine, so the mutex guards the slice.
+// The mock server serves each request on its own goroutine, so the mutex
+// guards the slice.
 type requestRecorder struct {
 	mu       sync.Mutex
 	requests []string
@@ -706,7 +706,7 @@ func TestUpdateNetworkInterfacesRemovesLastInterfaceUnit(t *testing.T) {
 	}
 }
 
-// singlePutRequest returns the one PUT that the recorder saw. A promotion issues one PUT.
+// A promotion issues exactly one PUT.
 func singlePutRequest(t *testing.T, recorded []string) string {
 	t.Helper()
 	var puts []string

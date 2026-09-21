@@ -315,8 +315,8 @@ func TestUpdateVolumeMockHTTP(t *testing.T) {
 }
 
 // A resize looks the size up by component code. A datacenter that offers only a
-// raw code rejects the display name, so a volume configured by code cannot grow
-// unless the lookup receives the code the API published.
+// raw code rejects the display name. A volume configured by code then cannot
+// grow, unless the lookup receives the code the API published.
 func TestUpdateVolumeLooksUpSkuByComponentCodeMockHTTP(t *testing.T) {
 	const (
 		componentCode = "vol-add-ultra"

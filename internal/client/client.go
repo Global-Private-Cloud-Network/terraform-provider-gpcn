@@ -15,7 +15,7 @@ import (
 type GpcnClient struct {
 	httpClient *http.Client
 	config     *Config
-	// Reported by AuthCheck at configure time. Both stay zero until then.
+	// AuthCheck fills both at configure time. They stay zero until then.
 	entityID    string
 	permissions []string
 }
@@ -285,33 +285,26 @@ func IsNotFound(err error) bool {
 	return hasStatus(err, http.StatusNotFound)
 }
 
-// IsForbidden reports whether err was caused by an HTTP 403 response.
-//
-// A 403 is a refusal the caller cannot retry away: the role lacks the
-// permission, the tenant lacks the feature, or the operation is walled off.
+// A 403 is a refusal the caller cannot retry away. The role lacks the
+// permission, or the tenant lacks the feature, or the operation is walled off.
 // Read implementations separate it from a 404, which removes state.
 func IsForbidden(err error) bool {
 	return hasStatus(err, http.StatusForbidden)
 }
 
-// IsConflict reports whether err was caused by an HTTP 409 response.
-//
 // The API answers 409 when the request fights live state. An example is a name
 // already taken, or a container that still holds children.
 func IsConflict(err error) bool {
 	return hasStatus(err, http.StatusConflict)
 }
 
-// IsUnauthorized reports whether err was caused by an HTTP 401 response.
-//
-// Every credential failure answers the same 401. This means the API key no
+// Every credential failure answers the same 401. It means the API key no
 // longer authenticates. It never means the key lacks a permission.
 func IsUnauthorized(err error) bool {
 	return hasStatus(err, http.StatusUnauthorized)
 }
 
-// ErrorCode returns the machine-readable code the API sent, or "" when err is
-// not an HTTPError or carried an unparseable body.
+// The code is "" when err is not an HTTPError, or when its body did not parse.
 func ErrorCode(err error) string {
 	var httpErr *HTTPError
 	if ok := isHTTPError(err, &httpErr); ok {
@@ -320,7 +313,6 @@ func ErrorCode(err error) string {
 	return ""
 }
 
-// HasErrorCode reports whether err carries exactly the given API error code.
 // An empty code never matches, so a transport failure cannot answer yes.
 func HasErrorCode(err error, code string) bool {
 	if code == "" {
@@ -337,8 +329,8 @@ func hasStatus(err error, status int) bool {
 	return false
 }
 
-// unwrapURLError strips the *url.Error that net/http wraps around a transport
-// error, so a diagnostic reads the API's words and not the request line.
+// net/http wraps a transport error in *url.Error. The unwrapped error keeps the
+// request line out of the diagnostic, so the operator reads the API words.
 func unwrapURLError(err error) error {
 	var urlErr *url.Error
 	if !errors.As(err, &urlErr) {

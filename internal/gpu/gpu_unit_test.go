@@ -919,8 +919,7 @@ func TestGPUSeriesCodesMatchCatalog(t *testing.T) {
 	}
 }
 
-// inventoryFromJSON decodes a wire body into the inventory response. The nested
-// anonymous structs are impractical to build by hand.
+// The nested anonymous structs are impractical to build by hand.
 func inventoryFromJSON(t *testing.T, body string) *inventoryResp {
 	t.Helper()
 	var resp inventoryResp
@@ -1143,8 +1142,6 @@ const inventoryJSONTwoSeriesAvailable = `{
   }
 }`
 
-// newTwoSeriesInventoryClient answers every inventory GET with the two-series
-// fixture.
 func newTwoSeriesInventoryClient(t *testing.T) (*httptest.Server, *client.GpcnClient) {
 	t.Helper()
 	return testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{

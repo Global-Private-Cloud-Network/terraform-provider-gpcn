@@ -327,9 +327,8 @@ func TestNetworksResourceDNSServersValidator(t *testing.T) {
 	})
 }
 
-// networkReadTestState builds a prior state for the Read cases below. Read needs a state
-// that the resource schema accepts, and only the id and the network type decide the path
-// under test.
+// Read needs a state that the resource schema accepts. Only the id and the
+// network type decide the path under test.
 func networkReadTestState(t *testing.T, networkID string, networkType string) tfsdk.State {
 	t.Helper()
 

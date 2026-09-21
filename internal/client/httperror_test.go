@@ -10,8 +10,8 @@ import (
 	"terraform-provider-gpcn/internal/client"
 )
 
-// errorFromStatusBody drives a single failing response through the real client
-// stack, so the assertions cover the parse where it happens: authTransport.
+// The helper drives a single failing response through the real client stack.
+// The assertions then cover the parse where it happens, in authTransport.
 func errorFromStatusBody(t *testing.T, status int, body string, headers map[string]string) error {
 	t.Helper()
 

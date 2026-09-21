@@ -571,8 +571,6 @@ func TestVirtualMachineResourcePlanDestroyTreatsDeletingAsGone(t *testing.T) {
 
 const vmPlanTestPath = "/v1/resource/virtual-machines/" + vmPlanTestID
 
-// vmPlanTestReadBodyWithHotplug reports whether the image carries network hotplug. GPCN
-// refuses an add-NIC on a running machine whose image lacks it.
 func vmPlanTestReadBodyWithHotplug(name, status string, hotplug int) map[string]any {
 	body := vmPlanTestReadBody(name, status, vmPlanTestSizeID)
 	body["data"].(map[string]any)["networkHotplug"] = hotplug
@@ -670,8 +668,6 @@ func lastIndexOfRequest(sequence []string, request string) int {
 	return -1
 }
 
-// GPCN refuses an add-NIC on a running machine whose image lacks network hotplug. The
-// post-create attach therefore takes the same gate the update path takes.
 func TestVirtualMachineResourcePlanCreateStopsForAttachWithoutHotplug(t *testing.T) {
 	tests := []struct {
 		name          string

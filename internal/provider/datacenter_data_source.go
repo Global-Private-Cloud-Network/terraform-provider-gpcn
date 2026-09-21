@@ -299,8 +299,8 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 	}
 }
 
-// addNoMatchError explains an empty result. The API serves no region route and
-// no country route, so the suggestion comes from one unfiltered list call.
+// The API serves no region route and no country route, so the suggestion comes
+// from one unfiltered list call.
 func (d *datacenterDataSource) addNoMatchError(ctx context.Context, state datacenterDataSourceModel, otherFilters string, resp *datasource.ReadResponse) {
 	// The suggestion ends in an error, so a truncated list needs no warning.
 	rows, _, err := d.getDatacenters(ctx, "")
@@ -368,8 +368,8 @@ const (
 	datacenterPageCap   = 100
 )
 
-// datacenterTruncationWarning tells the operator that the page cap truncates the
-// list. A datacenter beyond the cap is absent.
+// A datacenter beyond the page cap is absent from the list, so the operator
+// needs the warning.
 func datacenterTruncationWarning() diag.Diagnostic {
 	return diag.NewWarningDiagnostic(
 		datacenters.WarnSummaryDatacenterListTruncated,

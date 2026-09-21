@@ -65,8 +65,8 @@ func MapVolumeResponseToModel(ctx context.Context, response *readVolumesResponse
 	return model
 }
 
-// A refresh of name or size_gb from the API can destroy the volume, so this fills only null
-// values. A drifted name and a drifted grow both reconcile by replacement.
+// A drifted name and a drifted grow both reconcile by replacement. A refresh of
+// either value can therefore destroy the volume, so this fills only null values.
 func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel) ResourceModel {
 	if model.DatacenterId.IsNull() {
 		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
