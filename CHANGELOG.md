@@ -1,3 +1,32 @@
+## 1.4.0 (Unreleased)
+
+This release targets the GPCN API deployed with the VPC networking rollout. It does not work against the previous API: the virtual machine create body changed and the API refuses the old keys.
+
+BREAKING CHANGES:
+
+- **Network**: `gpcn_network` is deprecated. Creating one is refused at plan time: GPCN networking is VPC-based, and 1.5.0 adds `gpcn_vpc`, `gpcn_vpc_subnet` and `gpcn_l2_segment`. Existing networks can still be read, renamed and destroyed. A custom network the platform adopted into an L2 segment leaves state with a warning that names the import command.
+- **Virtual Machine**: the create request sends `acquirePublicIp` and a single `networkId`; additional `network_ids` entries attach after the machine exists. A failed attach leaves the machine in state and reports which network did not attach.
+- **Volume**: `volume_type_id` is deprecated and always null; the API identifies a storage class by code. Use the new computed `volume_type_code`. `volume_type` accepts `SSD`, `NVMe`, or any storage component code the datacenter offers.
+- **GPU**: `series_name` and `series_code` are validated against the datacenter's live inventory instead of a fixed list. The H100 and A100 series codes are `nvidia-h100-series` and `nvidia-a100-series`; the previous codes never matched the catalog. The disabled `NVIDIA L40 Series` is no longer advertised.
+- **SSH Key**: `name` is validated at plan time with GPCN's rule (1 to 30 characters, letters, numbers, spaces, periods, hyphens and `_ ( ) ' #`, beginning and ending with a letter or number). A name with leading or trailing whitespace is refused, because GPCN trims it.
+
+FEATURES:
+
+- **Provider**: the provider checks the API key when it configures (`GET /v1/auth/check`). A revoked, expired or unbound key fails once with a clear message; a key expiring within seven days warns.
+- **Data Source `gpcn_datacenters`**: new `code`, `continent_code` and `continent_name` per datacenter; `gpu_enabled` is filtered by the API; the list is paged to completion.
+
+ENHANCEMENTS:
+
+- **Errors**: API refusals render as `HTTP <status> (<code>): <message>` instead of a raw JSON body.
+- **Jobs**: a job the platform cancels fails immediately instead of after the polling timeout; a failed job reports the worker's own error message.
+- **Virtual Machine**: the status poller accepts `Stopped` and fails fast when a machine is `Deleting` or `Destroyed`.
+- **Volume Attachment**: attach and detach no longer stop and restart the virtual machine; GPCN attaches to a running machine and refuses with its own message otherwise.
+
+BUG FIXES:
+
+- **Network**: renaming or re-describing a custom network no longer fails on an empty `cidrBlock`.
+- **Data Source `gpcn_datacenters`**: the empty-result suggestion no longer calls two routes the API never had.
+
 ## 1.3.0 (September 11, 2026)
 
 FEATURES:

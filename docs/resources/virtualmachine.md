@@ -15,21 +15,25 @@ Manages a virtual machine instance with configurable compute resources, networki
 ```terraform
 # Example: Creating GPCN Virtual Machines
 #
-# This example demonstrates creating a virtual machine with networks and volumes.
-# It shows how to create the required dependencies (networks and volumes) and
-# attach them to a virtual machine instance.
+# This example demonstrates creating a virtual machine on an existing network,
+# with a volume attached. From 1.5.0 networks are created as gpcn_vpc_subnet resources.
 
 terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>1.3.0"
+      version = "~>1.4.0"
     }
   }
 }
 
 provider "gpcn" {
   host = "https://api.gpcn.com"
+}
+
+# The network the virtual machine is born on
+variable "network_id" {
+  type = string
 }
 
 # Lookup datacenter in Central US region
@@ -64,34 +68,6 @@ resource "gpcn_resource_group" "group_example" {
   name = "terraform-demo-group"
 }
 
-# Create a standard network for the VM
-resource "gpcn_network" "vm_network" {
-  name          = "vm-network-standard"
-  network_type  = "standard"
-  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-
-  description = "Standard network for virtual machine connectivity"
-
-  # Network configuration
-  cidr_block = "10.0.0.0/24"
-
-  # DHCP range
-  dhcp_start_address = "10.0.0.10"
-  dhcp_end_address   = "10.0.0.254"
-
-  # DNS servers
-  dns_servers = ["8.8.8.8", "8.8.4.4"]
-}
-
-# Create a custom network for additional connectivity
-resource "gpcn_network" "vm_network_custom" {
-  name          = "vm-network-custom"
-  network_type  = "custom"
-  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-
-  description = "Custom network for advanced networking configuration"
-}
-
 # Create storage volume for the VM
 resource "gpcn_volume" "vm_storage" {
   name          = "vm-storage-primary"
@@ -112,8 +88,7 @@ resource "gpcn_virtualmachine" "example" {
   # Networking
   allocate_public_ip = false
   network_ids = [
-    gpcn_network.vm_network.id,
-    gpcn_network.vm_network_custom.id
+    var.network_id
   ]
 
   # Resource Group
