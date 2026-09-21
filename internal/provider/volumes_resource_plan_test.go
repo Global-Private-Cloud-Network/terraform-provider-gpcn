@@ -5,6 +5,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"slices"
 	"sync"
 	"testing"
@@ -141,6 +142,14 @@ func volPlanTestConfig(host string) string {
 }
 
 func volPlanTestConfigWithSize(host string, sizeGb int64) string {
+	return volPlanTestConfigFor(host, volPlanTestVolumeType, sizeGb)
+}
+
+func volPlanTestConfigWithType(host, volumeType string) string {
+	return volPlanTestConfigFor(host, volumeType, volPlanTestSizeGb)
+}
+
+func volPlanTestConfigFor(host, volumeType string, sizeGb int64) string {
 	return fmt.Sprintf(`
 provider "gpcn" {
   host    = %q
@@ -153,7 +162,28 @@ resource "gpcn_volume" "test" {
   volume_type   = %q
   size_gb       = %d
 }
-`, host, volPlanTestName, volPlanTestDatacenterID, volPlanTestVolumeType, sizeGb)
+`, host, volPlanTestName, volPlanTestDatacenterID, volumeType, sizeGb)
+}
+
+// The schema no longer rules on the spelling of a volume type. The datacenter
+// catalog is the gate, and its refusal names the codes the datacenter offers.
+func TestVolumeResourcePlanRefusesUnknownTypeAtLookup(t *testing.T) {
+	t.Parallel()
+	server, _, _ := startVolumePlanMockServer(t)
+
+	for _, volumeType := range []string{"vol-add-ultra", "vm-root-disk-ssd"} {
+		t.Run(volumeType, func(t *testing.T) {
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config:      volPlanTestConfigWithType(server.URL, volumeType),
+						ExpectError: regexp.MustCompile("not available for this datacenter"),
+					},
+				},
+			})
+		})
+	}
 }
 
 // Read keeps the configured name and size_gb instead of refreshing them.

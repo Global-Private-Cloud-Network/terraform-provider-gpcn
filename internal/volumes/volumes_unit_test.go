@@ -482,6 +482,8 @@ func TestCanonicalVolumeTypeAcceptsCodesAndNamesUnit(t *testing.T) {
 			{value: "nvme", canonical: "NVMe", code: "vol-add-nvme"},
 			{value: "vol-add-ssd", canonical: "vol-add-ssd", code: "vol-add-ssd"},
 			{value: "vol-add-ultra", canonical: "vol-add-ultra", code: "vol-add-ultra"},
+			{value: "vm-root-disk-ssd", canonical: "vm-root-disk-ssd", code: "vm-root-disk-ssd"},
+			{value: "Unknown", canonical: "Unknown", code: "Unknown"},
 		}
 		for _, testCase := range cases {
 			if got := canonicalVolumeType(testCase.value); got != testCase.canonical {
