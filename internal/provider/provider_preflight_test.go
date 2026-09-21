@@ -223,10 +223,10 @@ func TestConfigurePreflightWarningBytes(t *testing.T) {
 	}
 }
 
-// TestConfigurePreflightNamesHostOnRouteNotFound proves a wrong host is named as
-// such. A host that points at something else answers the bare route-not-found
-// body, never a 401. A key diagnostic would then send the user to the wrong
-// setting.
+// TestConfigurePreflightNamesHostOnRouteNotFound proves the provider names a
+// wrong host. A host that points at something else answers the bare
+// route-not-found body, never a 401. A key diagnostic then sends the user to
+// the wrong setting.
 func TestConfigurePreflightNamesHostOnRouteNotFound(t *testing.T) {
 	server, _ := startPreflightServer(t, func(w http.ResponseWriter) {
 		w.WriteHeader(http.StatusNotFound)

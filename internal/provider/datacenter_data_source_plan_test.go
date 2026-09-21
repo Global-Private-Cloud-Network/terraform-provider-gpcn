@@ -255,9 +255,9 @@ func TestDatacentersDataSourceNamesGpuEnabledWhenNoRowMatches(t *testing.T) {
 	datacenterPlanTestAssertOnlyListPath(t, rec)
 }
 
-// The gpu_enabled refusal needs three reads when another filter is set: the
-// filtered read that matched none, the unfiltered read that proves the key sees
-// datacenters, and the read without gpuEnabled that isolates the cause.
+// The gpu_enabled refusal needs three reads when another filter is set. The
+// filtered read matches none. The unfiltered read proves the key sees
+// datacenters. The read without gpuEnabled isolates the cause.
 func TestDatacentersDataSourceNamesGpuEnabledBesideAnotherFilter(t *testing.T) {
 	t.Parallel()
 
