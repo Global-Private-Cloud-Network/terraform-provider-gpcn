@@ -83,27 +83,31 @@ func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel
 	return model
 }
 
-// The schema accepts a display name only for the aliases it knows. The API names
-// every other storage class after its code, and calls a degraded one "Unknown", so
-// the component code is the only import value the schema always accepts.
+// The schema accepts a display name only for the aliases the provider knows. The
+// API names every other storage class after its code, and calls a degraded one
+// "Unknown", so the code is the only import value the schema always accepts.
 func importedVolumeType(volumeType volumeTypeResponse) types.String {
-	if alias, known := volumeTypeAlias(volumeType.Name); known {
-		return types.StringValue(alias)
+	canonical := canonicalVolumeType(volumeType.Name)
+	if _, known := volumeTypeMapping[canonical]; known {
+		return types.StringValue(canonical)
 	}
 	if volumeType.Code != "" {
 		return types.StringValue(volumeType.Code)
 	}
-	if volumeType.Name != "" {
-		return types.StringValue(volumeType.Name)
+	if canonical != "" {
+		return types.StringValue(canonical)
 	}
 	return types.StringNull()
 }
 
 // The API can send the volume type in a different case. The canonical key keeps
-// the configured value from planning a replacement.
+// the configured value from planning a replacement. A component code is already
+// canonical, because the API and the schema spell it the same way.
 func canonicalVolumeType(name string) string {
-	if alias, known := volumeTypeAlias(name); known {
-		return alias
+	for alias := range volumeTypeMapping {
+		if strings.EqualFold(alias, name) {
+			return alias
+		}
 	}
 	return name
 }
@@ -111,17 +115,8 @@ func canonicalVolumeType(name string) string {
 // componentCodeForVolumeType answers with the code the API expects. A display name
 // becomes its code, and a code is already one.
 func componentCodeForVolumeType(volumeType string) string {
-	if alias, known := volumeTypeAlias(volumeType); known {
-		return volumeTypeMapping[alias]
+	if code, known := volumeTypeMapping[canonicalVolumeType(volumeType)]; known {
+		return code
 	}
 	return volumeType
-}
-
-func volumeTypeAlias(name string) (string, bool) {
-	for alias := range volumeTypeMapping {
-		if strings.EqualFold(alias, name) {
-			return alias, true
-		}
-	}
-	return "", false
 }
