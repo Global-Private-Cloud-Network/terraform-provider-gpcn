@@ -237,7 +237,7 @@ func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 
 		// Don't sleep after the last attempt
 		if attempt < c.config.MaxRetries {
-			time.Sleep(delay)
+			time.Sleep(c.retryWait(delay, httpErr))
 			// Exponential backoff with cap
 			delay *= 2
 			if delay > c.config.MaxRetryDelay {
@@ -247,6 +247,20 @@ func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 	}
 
 	return nil, fmt.Errorf("%w: %w", ErrMaxRetriesExceeded, lastErr)
+}
+
+// retryWait returns how long to wait before the next attempt. An API that says
+// when to come back is obeyed in place of the computed backoff, but the
+// configured maximum still bounds the wait: a rate limiter can ask for
+// fourteen minutes, which no apply should sit through.
+func (c *GpcnClient) retryWait(backoff time.Duration, httpErr *HTTPError) time.Duration {
+	if httpErr == nil || httpErr.RetryAfter <= 0 {
+		return backoff
+	}
+	if c.config.MaxRetryDelay > 0 && httpErr.RetryAfter > c.config.MaxRetryDelay {
+		return c.config.MaxRetryDelay
+	}
+	return httpErr.RetryAfter
 }
 
 // isHTTPError checks if the error is an HTTPError and assigns it to target
