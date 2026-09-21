@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 
@@ -35,6 +36,16 @@ const vpcNotEmptyRefusalBody = `{"success":false,` +
 	`"error":{"code":"VPC_NOT_EMPTY","statusCode":409,` +
 	`"details":{"blockers":{"subnets":1,"publicIps":0,"nsgs":0},"inFlight":{"subnets":0,"publicIps":0,"nsgs":0}}}}`
 
+// The API refuses an update body that carries no updatable key
+// (src/components/vpc/vpc.validation.ts:68-81).
+const vpcEmptyUpdateRefusalBody = `{"success":false,` +
+	`"message":"Invalid Parameters: At least one of name, description or resourceGroupId must be provided",` +
+	`"error":{"code":"VALIDATION_ERROR","statusCode":422,` +
+	`"details":{"issues":[{"path":"","message":"At least one of name, description or resourceGroupId must be provided"}]}}}`
+
+const vpcNotFoundBody = `{"success":false,"message":"VPC not found",` +
+	`"error":{"code":"NOT_FOUND","statusCode":404,"details":null}}`
+
 // vpcMock serves the VPC endpoints an apply walks. It keeps the name the last
 // create or update sent. The read after an apply then agrees with the
 // configuration, and the refresh plan stays empty.
@@ -44,17 +55,32 @@ type vpcMock struct {
 	mutex          sync.Mutex
 	name           string
 	description    string
+	cidr           string
 	nameservers    []string
 	createRefusal  string
 	deleteRefusals int
+	deleteNotFound bool
 	createBody     map[string]any
 	requests       []string
 }
 
-func startVpcPlanMockServer(t *testing.T) *vpcMock {
+// vpcMockRefusals seeds the answers the mock refuses with. A test states them
+// before the server starts, because the handler goroutine reads them.
+type vpcMockRefusals struct {
+	create         string
+	deletes        int
+	deleteNotFound bool
+}
+
+func startVpcPlanMockServer(t *testing.T, refusals vpcMockRefusals) *vpcMock {
 	t.Helper()
 
-	mock := &vpcMock{}
+	mock := &vpcMock{
+		cidr:           vpcPlanTestCidr,
+		createRefusal:  refusals.create,
+		deleteRefusals: refusals.deletes,
+		deleteNotFound: refusals.deleteNotFound,
+	}
 	vpcPath := "/v1/resource/vpcs/" + vpcPlanTestID
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -98,14 +124,15 @@ func (m *vpcMock) handleCreate(w http.ResponseWriter, r *http.Request) {
 		m.createBody = body
 		m.name, _ = body["name"].(string)
 		m.description, _ = body["description"].(string)
+		if cidr, ok := body["cidr"].(string); ok {
+			m.cidr = cidr
+		}
 		m.nameservers = requestedNameservers(body)
 	}
 	m.mutex.Unlock()
 
 	if refusal != "" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		_, _ = w.Write([]byte(refusal))
+		writeVpcRefusal(w, http.StatusConflict, refusal)
 		return
 	}
 
@@ -122,6 +149,13 @@ func (m *vpcMock) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 func (m *vpcMock) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	body := testutil.ReadRequestBody(r)
+
+	_, hasName := body["name"]
+	_, hasDescription := body["description"]
+	if !hasName && !hasDescription {
+		writeVpcRefusal(w, http.StatusUnprocessableEntity, vpcEmptyUpdateRefusalBody)
+		return
+	}
 
 	m.mutex.Lock()
 	if name, ok := body["name"].(string); ok {
@@ -141,12 +175,15 @@ func (m *vpcMock) handleDelete(w http.ResponseWriter) {
 	if refuse {
 		m.deleteRefusals--
 	}
+	notFound := m.deleteNotFound
 	m.mutex.Unlock()
 
 	if refuse {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusConflict)
-		_, _ = w.Write([]byte(vpcNotEmptyRefusalBody))
+		writeVpcRefusal(w, http.StatusConflict, vpcNotEmptyRefusalBody)
+		return
+	}
+	if notFound {
+		writeVpcRefusal(w, http.StatusNotFound, vpcNotFoundBody)
 		return
 	}
 
@@ -167,7 +204,7 @@ func (m *vpcMock) vpcBody() map[string]any {
 		"id":              vpcPlanTestID,
 		"name":            m.name,
 		"description":     m.description,
-		"cidr":            vpcPlanTestCidr,
+		"cidr":            m.cidr,
 		"datacenter":      map[string]any{"id": vpcPlanTestDatacenterID, "code": "kansas", "name": "Kansas"},
 		"status":          "active",
 		"failureReason":   nil,
@@ -219,19 +256,52 @@ func (m *vpcMock) lastCreateBody() map[string]any {
 	return m.createBody
 }
 
+// setName renames the VPC behind the provider's back. The mutex orders the
+// write against the handler goroutine that reads the field.
+func (m *vpcMock) setName(name string) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.name = name
+}
+
+func (m *vpcMock) requestCount(request string) int {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	count := 0
+	for _, recorded := range m.requests {
+		if recorded == request {
+			count++
+		}
+	}
+	return count
+}
+
+func writeVpcRefusal(w http.ResponseWriter, status int, body string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_, _ = w.Write([]byte(body))
+}
+
 func vpcPlanTestConfig(host, name string) string {
+	return vpcPlanTestConfigWith(host, fmt.Sprintf(`
+  name          = %q
+  datacenter_id = %q
+  cidr          = %q
+`, name, vpcPlanTestDatacenterID, vpcPlanTestCidr))
+}
+
+// vpcPlanTestConfigWith lets a step write the resource body itself, so one
+// attribute at a time can change.
+func vpcPlanTestConfigWith(host, body string) string {
 	return fmt.Sprintf(`
 provider "gpcn" {
   host    = %q
   api_key = "test-key"
 }
 
-resource "gpcn_vpc" "test" {
-  name          = %q
-  datacenter_id = %q
-  cidr          = %q
-}
-`, host, name, vpcPlanTestDatacenterID, vpcPlanTestCidr)
+resource "gpcn_vpc" "test" {%s}
+`, host, body)
 }
 
 // The platform answers an omitted nameserver list with its own, and the create
@@ -239,7 +309,7 @@ resource "gpcn_vpc" "test" {
 // the rename step pins an in-place update.
 func TestVpcResourcePlanCreatesRenamesAndDestroys(t *testing.T) {
 	t.Parallel()
-	mock := startVpcPlanMockServer(t)
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
 
 	checkCreateBody := func(*terraform.State) error {
 		body := mock.lastCreateBody()
@@ -306,7 +376,7 @@ func TestVpcResourcePlanCreatesRenamesAndDestroys(t *testing.T) {
 // makes.
 func TestVpcResourcePlanReplacesOnDnsNameserverChange(t *testing.T) {
 	t.Parallel()
-	mock := startVpcPlanMockServer(t)
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
 
 	withNameservers := fmt.Sprintf(`
 provider "gpcn" {
@@ -351,8 +421,7 @@ resource "gpcn_vpc" "test" {
 // clears it. The provider never acknowledges the overlap by itself.
 func TestVpcResourcePlanSurfacesOverlapRefusal(t *testing.T) {
 	t.Parallel()
-	mock := startVpcPlanMockServer(t)
-	mock.createRefusal = vpcOverlapRefusalBody
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{create: vpcOverlapRefusalBody})
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -369,8 +438,7 @@ func TestVpcResourcePlanSurfacesOverlapRefusal(t *testing.T) {
 // so the destroy fails with the census the API sent.
 func TestVpcResourcePlanRefusesDeleteNotEmpty(t *testing.T) {
 	t.Parallel()
-	mock := startVpcPlanMockServer(t)
-	mock.deleteRefusals = 1
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{deletes: 1})
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -382,6 +450,162 @@ func TestVpcResourcePlanRefusesDeleteNotEmpty(t *testing.T) {
 				Config:      vpcPlanTestConfig(mock.url, "vpc-not-empty"),
 				Destroy:     true,
 				ExpectError: regexp.MustCompile(`Blockers`),
+			},
+		},
+	})
+}
+
+// A rename outside Terraform is the one drift the provider reconciles in
+// place. The read has to show it, or the plan reports nothing to correct.
+func TestVpcResourcePlanDetectsOutOfBandRename(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vpcPlanTestConfig(mock.url, "vpc-named"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcTest, "name", "vpc-named"),
+				),
+			},
+			{
+				PreConfig: func() { mock.setName("vpc-renamed-elsewhere") },
+				Config:    vpcPlanTestConfig(mock.url, "vpc-named"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcTest, "name", "vpc-named"),
+				),
+			},
+		},
+	})
+}
+
+// The platform allocates subnets out of the super-CIDR, and a VPC lives in one
+// data center. Both are fixed for the life of the VPC.
+func TestVpcResourcePlanReplacesOnImmutableAttributeChange(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	movedCidr := fmt.Sprintf(`
+  name          = "vpc-cidr"
+  datacenter_id = %q
+  cidr          = "10.60.0.0/16"
+`, vpcPlanTestDatacenterID)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vpcPlanTestConfig(mock.url, "vpc-cidr"),
+			},
+			{
+				Config: vpcPlanTestConfigWith(mock.url, movedCidr),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcTest, plancheck.ResourceActionReplace),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcTest, "cidr", "10.60.0.0/16"),
+				),
+			},
+			{
+				Config: vpcPlanTestConfigWith(mock.url, `
+  name          = "vpc-cidr"
+  datacenter_id = "dc-2"
+  cidr          = "10.60.0.0/16"
+`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcTest, plancheck.ResourceActionReplace),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcTest, "datacenter_id", "dc-2"),
+				),
+			},
+		},
+	})
+}
+
+// The API measures the submitted name at 64 characters. A plan that accepts a
+// longer one teaches the rule one failed apply at a time.
+func TestVpcResourcePlanRefusesATooLongName(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      vpcPlanTestConfig(mock.url, strings.Repeat("v", 65)),
+				ExpectError: regexp.MustCompile(`string length must be between 1 and 64`),
+			},
+		},
+	})
+}
+
+// A change to a request-only attribute plans an update the API has no body
+// for. The API refuses an update body that carries no updatable key, so the
+// provider must send no request at all.
+func TestVpcResourcePlanSendsNoEmptyUpdateBody(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	acknowledged := fmt.Sprintf(`
+  name                = "vpc-ack"
+  datacenter_id       = %q
+  cidr                = %q
+  acknowledge_overlap = true
+`, vpcPlanTestDatacenterID, vpcPlanTestCidr)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vpcPlanTestConfig(mock.url, "vpc-ack"),
+			},
+			{
+				Config: vpcPlanTestConfigWith(mock.url, acknowledged),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcTest, "acknowledge_overlap", "true"),
+					func(*terraform.State) error {
+						if count := mock.requestCount("PUT /v1/resource/vpcs/" + vpcPlanTestID); count != 0 {
+							return fmt.Errorf("expected no update request, got %d", count)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+// A VPC the platform has already removed is the state the destroy wanted.
+func TestVpcResourcePlanTreatsDeleteNotFoundAsDone(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{deleteNotFound: true})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vpcPlanTestConfig(mock.url, "vpc-gone"),
+			},
+			{
+				Config:  vpcPlanTestConfig(mock.url, "vpc-gone"),
+				Destroy: true,
 			},
 		},
 	})
