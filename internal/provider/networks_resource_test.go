@@ -46,7 +46,7 @@ func TestNetworksResource(t *testing.T) {
 			resource "gpcn_network" "test" {
 				name          = "imported-network"
 				datacenter_id = "imported-datacenter"
-				network_type  = "custom"
+				network_type  = "standard"
 			}
 			`,
 				ResourceName:  gpcnNetworkTest,
