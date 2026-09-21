@@ -633,3 +633,33 @@ func TestVpcSubnetResourcePlanImportFillsPrefixFromCidr(t *testing.T) {
 		},
 	})
 }
+
+// A subnet that names neither a CIDR nor a prefix takes the allocator's
+// default. The prefix must stay null through the create and the rename. A
+// prefix written there plans a replacement the configuration never asked for.
+func TestVpcSubnetResourcePlanKeepsPrefixNullWithoutEitherKey(t *testing.T) {
+	t.Parallel()
+	server, _ := startSubnetPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: subnetPlanTestConfigWithoutCidr(server.URL, "subnet-plan-a", ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "cidr", subnetPlanTestCIDR),
+					resource.TestCheckNoResourceAttr(gpcnVpcSubnetTest, "prefix"),
+				),
+			},
+			{
+				Config: subnetPlanTestConfigWithoutCidr(server.URL, "subnet-plan-b", ""),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcSubnetTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.TestCheckNoResourceAttr(gpcnVpcSubnetTest, "prefix"),
+			},
+		},
+	})
+}
