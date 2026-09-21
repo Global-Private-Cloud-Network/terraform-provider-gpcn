@@ -110,7 +110,7 @@ func vpcResourceTestSchema(t *testing.T) schema.Schema {
 	t.Helper()
 
 	schemaResponse := &fwresource.SchemaResponse{}
-	NewVpcResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
+	NewVPCResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
 	if schemaResponse.Diagnostics.HasError() {
 		t.Fatalf("Expected a schema, got %v", schemaResponse.Diagnostics)
 	}

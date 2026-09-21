@@ -29,8 +29,8 @@ var (
 	_ resource.ResourceWithImportState = &vpcResource{}
 )
 
-// NewVpcResource is a helper function to simplify the provider implementation.
-func NewVpcResource() resource.Resource {
+// NewVPCResource is a helper function to simplify the provider implementation.
+func NewVPCResource() resource.Resource {
 	return &vpcResource{}
 }
 

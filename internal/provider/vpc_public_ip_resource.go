@@ -23,8 +23,8 @@ var (
 	_ resource.ResourceWithImportState = &vpcPublicIpResource{}
 )
 
-// NewVPCPublicIpResource is a helper function to simplify the provider implementation.
-func NewVPCPublicIpResource() resource.Resource {
+// NewVPCPublicIPResource is a helper function to simplify the provider implementation.
+func NewVPCPublicIPResource() resource.Resource {
 	return &vpcPublicIpResource{}
 }
 

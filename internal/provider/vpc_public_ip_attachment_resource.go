@@ -21,8 +21,8 @@ var (
 	_ resource.ResourceWithImportState = &vpcPublicIpAttachmentResource{}
 )
 
-// NewVPCPublicIpAttachmentResource is a helper function to simplify the provider implementation.
-func NewVPCPublicIpAttachmentResource() resource.Resource {
+// NewVPCPublicIPAttachmentResource is a helper function to simplify the provider implementation.
+func NewVPCPublicIPAttachmentResource() resource.Resource {
 	return &vpcPublicIpAttachmentResource{}
 }
 

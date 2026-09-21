@@ -28,8 +28,8 @@ var (
 	_ resource.ResourceWithModifyPlan  = &vpcNsgResource{}
 )
 
-// NewVpcNsgResource is a helper function to simplify the provider implementation.
-func NewVpcNsgResource() resource.Resource {
+// NewVPCNSGResource is a helper function to simplify the provider implementation.
+func NewVPCNSGResource() resource.Resource {
 	return &vpcNsgResource{}
 }
 

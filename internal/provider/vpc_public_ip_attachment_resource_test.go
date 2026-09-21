@@ -78,7 +78,7 @@ func TestVPCPublicIpAttachmentResourceRefusesImportUnit(t *testing.T) {
 	t.Parallel()
 
 	importResponse := &fwresource.ImportStateResponse{}
-	importer, ok := NewVPCPublicIpAttachmentResource().(fwresource.ResourceWithImportState)
+	importer, ok := NewVPCPublicIPAttachmentResource().(fwresource.ResourceWithImportState)
 	if !ok {
 		t.Fatalf("Expected the attachment resource to implement ResourceWithImportState")
 	}

@@ -30,8 +30,8 @@ var (
 	_ resource.ResourceWithImportState = &vpcSubnetResource{}
 )
 
-// NewVpcSubnetResource is a helper function to simplify the provider implementation.
-func NewVpcSubnetResource() resource.Resource {
+// NewVPCSubnetResource is a helper function to simplify the provider implementation.
+func NewVPCSubnetResource() resource.Resource {
 	return &vpcSubnetResource{}
 }
 

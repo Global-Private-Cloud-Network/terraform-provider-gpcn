@@ -69,7 +69,7 @@ func TestVPCPublicIpResourceSchemaWarnsAboutReleasingAnAttachedAddress(t *testin
 	t.Parallel()
 
 	schemaResponse := &fwresource.SchemaResponse{}
-	NewVPCPublicIpResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
+	NewVPCPublicIPResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
 
 	const want = "GPCN releases an attached address as readily as a held one, so destroying this resource while the address serves a machine takes that machine's connectivity away."
 	if got := schemaResponse.Schema.Description; !strings.Contains(got, want) {
