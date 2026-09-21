@@ -12,3 +12,13 @@ const (
 	ErrDetailDatacenterNoGPUEnabled   = "No datacenters matching the specified filters have gpu_enabled = %t. Datacenters were found, but none matched that value."
 	ErrDetailDatacenterNoCustomImages = "No datacenters matching the specified filters have custom_images = %t. Datacenters were found, but none matched that value."
 )
+
+// Warning summary constants
+const (
+	WarnSummaryDatacenterListTruncated = "Datacenter list truncated"
+)
+
+// Warning detail message templates
+const (
+	WarnDetailDatacenterListTruncated = "Datacenter list truncated at %d rows"
+)

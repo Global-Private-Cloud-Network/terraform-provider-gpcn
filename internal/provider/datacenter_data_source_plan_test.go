@@ -4,13 +4,16 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
 	"terraform-provider-gpcn/internal/testutil"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
@@ -329,4 +332,76 @@ func TestDatacentersDataSourceSuggestsEachPairOnce(t *testing.T) {
 	}
 
 	datacenterPlanTestAssertOnlyListPath(t, rec)
+}
+
+func TestDatacentersDataSourceTruncationWarningBytes(t *testing.T) {
+	t.Parallel()
+
+	warning := datacenterTruncationWarning()
+
+	if warning.Severity() != diag.SeverityWarning {
+		t.Errorf("severity is %v, want %v", warning.Severity(), diag.SeverityWarning)
+	}
+	if got, want := warning.Summary(), "Datacenter list truncated"; got != want {
+		t.Errorf("summary is %q, want %q", got, want)
+	}
+	if got, want := warning.Detail(), "Datacenter list truncated at 10000 rows"; got != want {
+		t.Errorf("detail is %q, want %q", got, want)
+	}
+}
+
+func TestDatacentersDataSourceCapsPagination(t *testing.T) {
+	t.Parallel()
+
+	server, rec := startDatacenterPlanMockServer(t, func(r *http.Request) map[string]any {
+		page, err := strconv.Atoi(r.URL.Query().Get("page"))
+		if err != nil {
+			t.Errorf("the request carries no page number: %q", r.URL.RawQuery)
+			page = 1
+		}
+		return datacenterPlanTestBody([]map[string]any{
+			datacenterPlanTestRow(fmt.Sprintf("dc-%d", page), "Chicago", datacenterPlanTestRegionAlpha, true),
+		}, page, 101)
+	})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: datacenterPlanTestConfig(server.URL, ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.#", "100"),
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.99.id", "dc-100"),
+				),
+			},
+		},
+	})
+
+	datacenterPlanTestAssertOnlyListPath(t, rec)
+
+	// The harness reads the data source once per plan, apply and refresh. The
+	// distinct page numbers are therefore the pages of one read.
+	_, queries := rec.snapshot()
+	pages := make(map[string]struct{}, len(queries))
+	highest := 0
+	for _, query := range queries {
+		values, err := url.ParseQuery(query)
+		if err != nil {
+			t.Fatalf("the query %q does not parse: %v", query, err)
+		}
+		page, err := strconv.Atoi(values.Get("page"))
+		if err != nil {
+			t.Fatalf("the query %q carries no page number: %v", query, err)
+		}
+		pages[values.Get("page")] = struct{}{}
+		if page > highest {
+			highest = page
+		}
+	}
+	if len(pages) != 100 {
+		t.Errorf("the data source asked for %d pages, want 100", len(pages))
+	}
+	if highest != 100 {
+		t.Errorf("the highest page the data source asked for is %d, want 100", highest)
+	}
 }

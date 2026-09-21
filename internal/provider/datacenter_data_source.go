@@ -228,7 +228,7 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		query += "&gpuEnabled=" + strconv.FormatBool(state.GPUEnabled.ValueBool())
 	}
 
-	rows, err := d.getDatacenters(ctx, query)
+	rows, truncated, err := d.getDatacenters(ctx, query)
 	if err != nil {
 		// Big failure, no helpful error message
 		resp.Diagnostics.AddError(
@@ -236,6 +236,9 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 			err.Error(),
 		)
 		return
+	}
+	if truncated {
+		resp.Diagnostics.Append(datacenterTruncationWarning())
 	}
 
 	// The list endpoint has no filter for custom images, so the filter stays here.
@@ -299,7 +302,8 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 // addNoMatchError explains an empty result. The API serves no region route and
 // no country route, so the suggestion comes from one unfiltered list call.
 func (d *datacenterDataSource) addNoMatchError(ctx context.Context, state datacenterDataSourceModel, otherFilters string, resp *datasource.ReadResponse) {
-	rows, err := d.getDatacenters(ctx, "")
+	// The suggestion ends in an error, so a truncated list needs no warning.
+	rows, _, err := d.getDatacenters(ctx, "")
 	if err != nil {
 		resp.Diagnostics.AddError(
 			datacenters.ErrSummaryUnableGetDatacenters,
@@ -321,7 +325,7 @@ func (d *datacenterDataSource) addNoMatchError(ctx context.Context, state datace
 		// two causes. Rows here mean gpu_enabled is the one value that matches none.
 		matched := rows
 		if otherFilters != "" {
-			matched, err = d.getDatacenters(ctx, otherFilters)
+			matched, _, err = d.getDatacenters(ctx, otherFilters)
 			if err != nil {
 				resp.Diagnostics.AddError(
 					datacenters.ErrSummaryUnableGetDatacenters,
@@ -357,29 +361,51 @@ func (d *datacenterDataSource) addNoMatchError(ctx context.Context, state datace
 	)
 }
 
+// The page loop stops at this many pages, because the provider must not read an
+// unbounded list.
+const (
+	datacenterPageLimit = 100
+	datacenterPageCap   = 100
+)
+
+// datacenterTruncationWarning tells the operator that the page cap truncates the
+// list. A datacenter beyond the cap is absent.
+func datacenterTruncationWarning() diag.Diagnostic {
+	return diag.NewWarningDiagnostic(
+		datacenters.WarnSummaryDatacenterListTruncated,
+		fmt.Sprintf(datacenters.WarnDetailDatacenterListTruncated, datacenterPageCap*datacenterPageLimit),
+	)
+}
+
 // One page holds at most 100 rows, so a filter that matches more than one page
-// needs every page.
-func (d *datacenterDataSource) getDatacenters(ctx context.Context, queryString string) ([]datacenterRow, error) {
+// needs every page. The second return value reports a list that the cap
+// truncates.
+func (d *datacenterDataSource) getDatacenters(ctx context.Context, queryString string) ([]datacenterRow, bool, error) {
 	var rows []datacenterRow
+	truncated := false
 
 	for page, totalPages := 1, 1; page <= totalPages; page++ {
 		response, err := d.getDatacenterPage(ctx, page, queryString)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 
 		rows = append(rows, response.Data...)
 		// The first answer bounds the loop. A later page cannot extend it.
 		if page == 1 && response.Meta.TotalPages > totalPages {
 			totalPages = response.Meta.TotalPages
+			if totalPages > datacenterPageCap {
+				totalPages = datacenterPageCap
+				truncated = true
+			}
 		}
 	}
 
-	return rows, nil
+	return rows, truncated, nil
 }
 
 func (d *datacenterDataSource) getDatacenterPage(ctx context.Context, page int, queryString string) (*datacenterResponse, error) {
-	datacenterUrl := fmt.Sprintf("%s?page=%d&limit=100", datacenters.BASE_URL_V1, page)
+	datacenterUrl := fmt.Sprintf("%s?page=%d&limit=%d", datacenters.BASE_URL_V1, page, datacenterPageLimit)
 	request, err := http.NewRequestWithContext(ctx, "GET", datacenterUrl+queryString, nil)
 	if err != nil {
 		return nil, err
