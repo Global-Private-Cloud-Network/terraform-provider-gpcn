@@ -830,10 +830,10 @@ func TestPollForVirtualMachineStatusAcceptsStopped(t *testing.T) {
 	}
 }
 
-func TestPollForVirtualMachineStatusFailsFastOnError(t *testing.T) {
+func TestPollForVirtualMachineStatusKeepsPollingOnError(t *testing.T) {
 	useFastVMStatusPollInterval(t)
 	const vmID = "vm-error-123"
-	const timeoutMaxSec = 3
+	const timeoutMaxSec = 1
 	pollCount := 0
 
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
@@ -857,23 +857,53 @@ func TestPollForVirtualMachineStatusFailsFastOnError(t *testing.T) {
 	elapsed := time.Since(start)
 
 	if err == nil {
-		t.Fatal("Expected a terminal status error, got nil")
+		t.Fatal("Expected a timeout error, got nil")
 	}
 	if response != nil {
-		t.Errorf("Expected no response on a terminal status, got '%v'", response)
+		t.Errorf("Expected no response on timeout, got '%v'", response)
 	}
-	expectedMessage := fmt.Sprintf(ErrDetailVMTerminalStatus, vmID, VMStatusError.String(), VMStatusRunning.String())
+	expectedMessage := fmt.Sprintf(ErrVirtualMachineStatusTimeoutTemplate, timeoutMaxSec)
 	if err.Error() != expectedMessage {
 		t.Errorf("Expected error '%s', got '%s'", expectedMessage, err.Error())
 	}
-	if !strings.Contains(err.Error(), `reached status "Error"`) {
+	if pollCount < 2 {
+		t.Errorf("Expected the poller to keep polling past an Error status, got %d poll(s)", pollCount)
+	}
+	if elapsed < 900*time.Millisecond {
+		t.Errorf("Expected the poller to wait about %d second(s), it gave up after %v", timeoutMaxSec, elapsed)
+	}
+}
+
+func TestPollForVirtualMachineStatusFailsFastOnDeleting(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	const vmID = "vm-deleting-123"
+	pollCount := 0
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID) {
+				pollCount++
+				resp := newVMResponse(vmID, "test-vm")
+				resp.Data.Status = VMStatusDeleting.String()
+				testutil.WriteJSONResponse(w, resp)
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	targets := []string{VMStatusRunning.String()}
+	_, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, targets, 3, 0)
+	if err == nil {
+		t.Fatal("Expected a terminal status error, got nil")
+	}
+	if !strings.Contains(err.Error(), `reached status "Deleting"`) {
 		t.Errorf("Expected the error to name the observed status, got '%s'", err.Error())
 	}
 	if pollCount != 1 {
 		t.Errorf("Expected exactly 1 GET before the poller gave up, got %d", pollCount)
-	}
-	if elapsed > time.Second {
-		t.Errorf("Expected the poller to fail well inside %d second(s), it ran for %v", timeoutMaxSec, elapsed)
 	}
 }
 

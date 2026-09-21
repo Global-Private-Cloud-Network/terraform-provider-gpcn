@@ -38,9 +38,11 @@ const (
 )
 
 // A virtual machine in one of these statuses never reaches a different one.
+// The platform writes both of them from its own delete path.
 // The poller stops immediately instead of waiting for the timeout.
+// Error is absent, because the provider mapper returns it for every status it does not know.
 // Unknown is absent, because that status can be transient.
-var vmTerminalFailureStatuses = []VMStatus{VMStatusError, VMStatusDestroyed}
+var vmTerminalFailureStatuses = []VMStatus{VMStatusDestroyed, VMStatusDeleting}
 
 // String returns the string representation of VMStatus
 func (s VMStatus) String() string {
