@@ -585,9 +585,17 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	}
 
 	tflog.Info(ctx, virtualmachines.LogRetrievedLatestVMInfoMappingToModel)
+	// The plan modifier pins the interface list to state when no network input changed,
+	// and Terraform refuses a state that differs from that plan. The platform can fill a
+	// late column, such as a MAC address, inside this apply, so the read-back is kept
+	// only where the plan asked for a fresh list. The next refresh records the rest.
+	plannedNetworkInterfaces := plan.NetworkInterfaces
 	var mapDiags diag.Diagnostics
 	plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
 	resp.Diagnostics.Append(mapDiags...)
+	if !plannedNetworkInterfaces.IsUnknown() {
+		plan.NetworkInterfaces = plannedNetworkInterfaces
+	}
 
 	// Once finished, conditionally start the virtual machine again. The diagnostic below
 	// the state write reports a failed start.

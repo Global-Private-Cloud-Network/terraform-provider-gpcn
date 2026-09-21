@@ -1678,3 +1678,109 @@ func TestVirtualMachineResourcePlanDestroyReleasesAcquiredIp(t *testing.T) {
 		})
 	}
 }
+
+const vmPlanTestLateMac = "fa:16:3e:00:00:01"
+
+// vmLateMacPlanTestInterfacesBody reports the birth interface with or without its MAC.
+// GPCN leaves the column null until the port materializes.
+func vmLateMacPlanTestInterfacesBody(withMac bool) map[string]any {
+	body := vmSegmentPlanTestNetworkInterfacesBody(vmPlanTestSubnetID, nil)
+	if !withMac {
+		body["data"].([]map[string]any)[0]["macAddress"] = nil
+	}
+	return body
+}
+
+// startVirtualMachineLateMacMockServer materializes the MAC of the birth interface at
+// the rename, which is after the plan and inside the apply. A test then drives the one
+// window where the interface list moves under a plan that pinned it.
+func startVirtualMachineLateMacMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	status := virtualmachines.VMStatusRunning.String()
+	renamed := false
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mu.Lock()
+			withMac := renamed
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmLateMacPlanTestInterfacesBody(withMac))
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, vmPlanTestSizeID))
+		case r.Method == http.MethodPut && r.URL.Path == vmPlanTestPath:
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			if updated, ok := body["name"].(string); ok {
+				name = updated
+			}
+			renamed = true
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	return server
+}
+
+// A rename changes no network input, so the plan pins network_interfaces to state.
+// Terraform refuses a state that differs from that plan, and the platform can fill a
+// late column in the same apply. The update writes the pinned list, and the next refresh
+// records the column.
+func TestVirtualMachineResourcePlanRenameKeepsThePinnedInterfaceList(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server := startVirtualMachineLateMacMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmPlanTestConfig(server.URL, "vm-plan-late-mac"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr(gpcnVirtualMachineTest, "network_interfaces.0.mac_address"),
+				),
+			},
+			{
+				Config: vmPlanTestConfig(server.URL, "vm-plan-late-mac-renamed"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "name", "vm-plan-late-mac-renamed"),
+				),
+			},
+			{
+				RefreshState: true,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.0.mac_address", vmPlanTestLateMac),
+				),
+			},
+		},
+	})
+}
