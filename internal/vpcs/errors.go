@@ -12,7 +12,7 @@ import (
 
 // Error summary constants
 const (
-	ErrSummaryUnexpectedConfigureType = "Unexpected Data Source Configure Type"
+	ErrSummaryUnexpectedConfigureType = "Unexpected Resource Configure Type"
 	ErrSummaryUnableToCreateVpc       = "Unable to create GPCN VPC"
 	ErrSummaryUnableToGetVpc          = "Unable to get GPCN VPC"
 	ErrSummaryUnableToUpdateVpc       = "Unable to update GPCN VPC"

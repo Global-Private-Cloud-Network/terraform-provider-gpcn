@@ -290,3 +290,28 @@ func TestVpcResourceReadWarnsWhenVpcFailed(t *testing.T) {
 		t.Errorf("Detail = %q, want %q", got, want)
 	}
 }
+
+// gpcn_vpc is a resource, so its Configure refusal must say so. The other five
+// Release B resources say Resource, and a reader matches the two sentences.
+func TestVpcResourceConfigureRefusesAnotherProviderData(t *testing.T) {
+	t.Parallel()
+
+	response := &fwresource.ConfigureResponse{}
+	(&vpcResource{}).Configure(
+		context.Background(),
+		fwresource.ConfigureRequest{ProviderData: "not a client"},
+		response,
+	)
+
+	errors := response.Diagnostics.Errors()
+	if len(errors) != 1 {
+		t.Fatalf("Diagnostics = %v, want exactly one error", response.Diagnostics)
+	}
+	if got := errors[0].Summary(); got != "Unexpected Resource Configure Type" {
+		t.Errorf("Summary = %q, want %q", got, "Unexpected Resource Configure Type")
+	}
+	want := "Expected *client.GpcnClient, got: string. Please report this issue to the provider developers."
+	if got := errors[0].Detail(); got != want {
+		t.Errorf("Detail = %q, want %q", got, want)
+	}
+}
