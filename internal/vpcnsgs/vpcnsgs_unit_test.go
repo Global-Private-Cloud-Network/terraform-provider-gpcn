@@ -10,6 +10,7 @@ import (
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
@@ -369,5 +370,53 @@ func TestDefaultNsgRulesWarningSilentForOrdinaryGroupUnit(t *testing.T) {
 
 	if got := DefaultNsgRulesWarning(false, unitTestNsgID).WarningsCount(); got != 0 {
 		t.Errorf("expected no warning for an ordinary group, got %d", got)
+	}
+}
+
+// GPCN trims a name before it stores one. A configuration that holds outer
+// whitespace therefore never settles, so the plan must refuse it.
+func TestNoOuterWhitespaceValidatorUnit(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		attribute string
+		value     types.String
+		valid     bool
+	}{
+		{name: "a leading space", attribute: "name", value: types.StringValue(" nsg-a"), valid: false},
+		{name: "a trailing newline", attribute: "description", value: types.StringValue("web tier\n"), valid: false},
+		{name: "inner whitespace", attribute: "name", value: types.StringValue("nsg a"), valid: true},
+		{name: "an empty value", attribute: "description", value: types.StringValue(""), valid: true},
+		{name: "a null value", attribute: "description", value: types.StringNull(), valid: true},
+		{name: "an unknown value", attribute: "name", value: types.StringUnknown(), valid: true},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			request := validator.StringRequest{Path: path.Root(testCase.attribute), ConfigValue: testCase.value}
+			response := &validator.StringResponse{}
+			NoOuterWhitespaceValidator{Attribute: testCase.attribute}.ValidateString(context.Background(), request, response)
+
+			if testCase.valid {
+				if response.Diagnostics.HasError() {
+					t.Fatalf("expected no error, got %v", response.Diagnostics)
+				}
+				return
+			}
+			if !response.Diagnostics.HasError() {
+				t.Fatalf("expected an error, got none")
+			}
+			failure := response.Diagnostics.Errors()[0]
+			if got := failure.Summary(); got != ErrSummaryInvalidNsgAttribute {
+				t.Errorf("expected the summary %q, got %q", ErrSummaryInvalidNsgAttribute, got)
+			}
+			want := fmt.Sprintf(ErrDetailOuterWhitespace, testCase.attribute)
+			if got := failure.Detail(); got != want {
+				t.Errorf("expected the detail %q, got %q", want, got)
+			}
+		})
 	}
 }

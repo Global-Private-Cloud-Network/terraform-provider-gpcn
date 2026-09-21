@@ -66,12 +66,18 @@ func (r *vpcSubnetResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			"name": schema.StringAttribute{
 				Description: "Human-readable name for the subnet. It must be unique within the VPC",
 				Required:    true,
+				Validators: []validator.String{
+					vpcsubnets.NoOuterWhitespaceValidator{Attribute: "name"},
+				},
 			},
 			"description": schema.StringAttribute{
 				Description: "Additional information about the subnet to provide context for its purpose",
 				Optional:    true,
 				Computed:    true,
 				Default:     stringdefault.StaticString(""),
+				Validators: []validator.String{
+					vpcsubnets.NoOuterWhitespaceValidator{Attribute: "description"},
+				},
 			},
 			"cidr": schema.StringAttribute{
 				Description: "CIDR block for the subnet, which must lie inside the VPC super-CIDR (e.g., 10.50.1.0/24). If omitted, GPCN carves a free block of the requested prefix length. Changing this value requires replacing the subnet",

@@ -485,3 +485,20 @@ func TestVpcSubnetResourcePlanSendsChosenNsgOnCreate(t *testing.T) {
 		},
 	})
 }
+
+// GPCN trims a name, so a configured value with outer whitespace comes back
+// different and the plan never settles. The refusal arrives before the request.
+func TestVpcSubnetResourcePlanRefusesOuterWhitespace(t *testing.T) {
+	t.Parallel()
+	server, _ := startSubnetPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      subnetPlanTestConfig(server.URL, " subnet-plan-a", ""),
+				ExpectError: regexp.MustCompile(strings.ReplaceAll(regexp.QuoteMeta("name must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"), " ", `\s+`)),
+			},
+		},
+	})
+}

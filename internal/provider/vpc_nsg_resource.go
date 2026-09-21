@@ -63,12 +63,18 @@ func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 			"name": schema.StringAttribute{
 				Description: "Human-readable name for the security group. It must be unique within the VPC",
 				Required:    true,
+				Validators: []validator.String{
+					vpcnsgs.NoOuterWhitespaceValidator{Attribute: "name"},
+				},
 			},
 			"description": schema.StringAttribute{
 				Description: "Additional information about the security group to provide context for its purpose",
 				Optional:    true,
 				Computed:    true,
 				Default:     stringdefault.StaticString(""),
+				Validators: []validator.String{
+					vpcnsgs.NoOuterWhitespaceValidator{Attribute: "description"},
+				},
 			},
 			"is_default": schema.BoolAttribute{
 				Description: "Whether this is the VPC's own default security group. GPCN creates that group with the VPC and refuses to delete it",
@@ -136,6 +142,9 @@ func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 						"description": schema.StringAttribute{
 							Description: "Additional information about the rule. GPCN edits it in place, because it is not part of the rule's identity",
 							Optional:    true,
+							Validators: []validator.String{
+								vpcnsgs.NoOuterWhitespaceValidator{Attribute: "description"},
+							},
 						},
 					},
 					Validators: []validator.Object{
