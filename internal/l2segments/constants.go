@@ -17,3 +17,7 @@ const (
 	ActionCreateL2Segment = "Create GPCN L2 Segment"
 	ActionDeleteL2Segment = "Delete GPCN L2 Segment"
 )
+
+// StateFailed is the state a parked segment carries. The row stays live and
+// tenant-visible, so Read keeps it in state rather than removing it.
+const StateFailed = "failed"

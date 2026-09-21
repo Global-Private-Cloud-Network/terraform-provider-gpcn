@@ -6,6 +6,8 @@ import (
 	"fmt"
 
 	"terraform-provider-gpcn/internal/client"
+
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 )
 
 // Error summary constants
@@ -30,6 +32,29 @@ const (
 
 	ErrDetailNoSegmentIDInJob = "the create job reported no segment ID"
 )
+
+// Warning strings for a segment the platform parked in the failed state
+const (
+	WarnSummaryL2SegmentFailed        = "L2 segment is in the failed state"
+	WarnDetailL2SegmentFailed         = "L2 segment %s is in the failed state: %s. Destroy the segment and create it again."
+	WarnDetailL2SegmentFailedNoReason = "L2 segment %s is in the failed state. Destroy the segment and create it again."
+)
+
+// FailedSegmentWarning explains a parked segment. The platform can park a row
+// with no reason recorded, and a sentence with an empty clause in it reads as a
+// provider bug.
+func FailedSegmentWarning(segmentID, failureReason string) diag.Diagnostic {
+	if failureReason == "" {
+		return diag.NewWarningDiagnostic(
+			WarnSummaryL2SegmentFailed,
+			fmt.Sprintf(WarnDetailL2SegmentFailedNoReason, segmentID),
+		)
+	}
+	return diag.NewWarningDiagnostic(
+		WarnSummaryL2SegmentFailed,
+		fmt.Sprintf(WarnDetailL2SegmentFailed, segmentID, failureReason),
+	)
+}
 
 // DeleteRefusalDetail renders a refused delete. Only the in-use refusal carries a
 // count, and only that refusal is one the user can act on.

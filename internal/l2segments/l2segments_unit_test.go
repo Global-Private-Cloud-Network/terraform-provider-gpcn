@@ -7,6 +7,7 @@ import (
 
 	"terraform-provider-gpcn/internal/testutil"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -302,5 +303,39 @@ func TestL2SegmentDeleteRefusalDetailForwardsOtherConflictsUnit(t *testing.T) {
 	want := "HTTP 409 (Duplicate Resource): Segment creation is in progress; wait for it to finish"
 	if detail != want {
 		t.Errorf("detail = %q, want %q", detail, want)
+	}
+}
+
+// A failed segment is live and tenant-visible, so Read keeps it in state and says
+// why it failed. The plan harness cannot observe a warning, so the bytes are
+// pinned here.
+func TestL2SegmentFailedWarningUnit(t *testing.T) {
+	t.Parallel()
+
+	warning := FailedSegmentWarning(unitTestSegmentID, "Segment creation failed; delete the segment and try again")
+
+	wantSummary := "L2 segment is in the failed state"
+	wantDetail := "L2 segment " + unitTestSegmentID + " is in the failed state: Segment creation failed; delete the segment and try again. Destroy the segment and create it again."
+	if got := warning.Summary(); got != wantSummary {
+		t.Errorf("summary = %q, want %q", got, wantSummary)
+	}
+	if got := warning.Detail(); got != wantDetail {
+		t.Errorf("detail = %q, want %q", got, wantDetail)
+	}
+	if warning.Severity() != diag.SeverityWarning {
+		t.Errorf("severity = %v, want a warning", warning.Severity())
+	}
+}
+
+// The platform can park a row failed with no reason recorded, and a sentence with
+// an empty clause in it reads as a provider bug.
+func TestL2SegmentFailedWarningWithoutReasonUnit(t *testing.T) {
+	t.Parallel()
+
+	warning := FailedSegmentWarning(unitTestSegmentID, "")
+
+	wantDetail := "L2 segment " + unitTestSegmentID + " is in the failed state. Destroy the segment and create it again."
+	if got := warning.Detail(); got != wantDetail {
+		t.Errorf("detail = %q, want %q", got, wantDetail)
 	}
 }
