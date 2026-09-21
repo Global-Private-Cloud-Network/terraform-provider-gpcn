@@ -552,8 +552,8 @@ func TestVirtualMachineResourcePlanSizeRetryStopsNothing(t *testing.T) {
 }
 
 // An image without network hotplug takes a resize only on a stopped machine. The live
-// SKU still differs from the plan here, so the provider stops the machine, resizes it,
-// and starts it again.
+// SKU still differs from the plan here. The provider stops the machine, resizes it, and
+// starts it again.
 func TestVirtualMachineResourcePlanResizeStopsTheMachine(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server, _, recorded := startVirtualMachineSizeMockServer(t, 0)
@@ -1208,8 +1208,8 @@ func TestVirtualMachineResourcePlanCreateStopsForASegmentAttachWithoutHotplug(t 
 // startVirtualMachineSegmentUpdateMockServer keeps one interface row per attached
 // segment and gives each a stable id. It records the segment verbs in the order they
 // arrive. A test then reads what the provider changed and what it left alone. The
-// second returned function attaches a segment without recording a verb, which stands
-// for work the platform took before a failed read-back.
+// second returned function attaches a segment and records no verb. It stands for work
+// the platform completes before a read-back fails.
 func startVirtualMachineSegmentUpdateMockServer(t *testing.T, hotplug int) (*httptest.Server, func(string), func() []string) {
 	t.Helper()
 
@@ -1386,8 +1386,8 @@ func TestVirtualMachineResourcePlanReorderedSegmentsChangeNothing(t *testing.T) 
 	})
 }
 
-// A read-back that failed after an attach leaves state behind the machine. The next
-// apply asks for a segment the machine already carries. The stop decision reads the live
+// A failed read-back after an attach leaves state behind the machine. The next apply
+// asks for a segment the machine already carries. The stop decision reads the live
 // interfaces, so that retry costs the user no downtime.
 func TestVirtualMachineResourcePlanSegmentRetryStopsNothing(t *testing.T) {
 	shortenVirtualMachinePolling(t)
@@ -1420,8 +1420,8 @@ func TestVirtualMachineResourcePlanSegmentRetryStopsNothing(t *testing.T) {
 }
 
 // An image without network hotplug takes a new interface only on a stopped machine. The
-// live interfaces still lack the segment here, so the provider stops the machine,
-// attaches it, and starts the machine again.
+// live interfaces still lack the segment here. The provider stops the machine, attaches
+// it, and starts the machine again.
 func TestVirtualMachineResourcePlanSegmentChangeStopsTheMachine(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server, _, recorded := startVirtualMachineSegmentUpdateMockServer(t, 0)
@@ -1496,7 +1496,7 @@ func vmStopDecisionInterfaces(segmentIds ...string) []networks.ReadVirtualMachin
 }
 
 // The machine already carries the planned segments, so the change is done. A stop for
-// work the platform took costs the user the whole downtime.
+// finished work costs the user the whole downtime.
 func TestDetermineIfVMNeedsStoppedSkipsAnAppliedSegmentChange(t *testing.T) {
 	state := vmStopDecisionModel(false, vmPlanTestSizeID, vmPlanTestSegmentID)
 	plan := vmStopDecisionModel(false, vmPlanTestSizeID, vmPlanTestSegmentID, vmPlanTestSegmentID2)

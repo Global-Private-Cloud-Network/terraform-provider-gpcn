@@ -201,7 +201,7 @@ func publicIpFailure(diags diag.Diagnostics, err error) diag.Diagnostics {
 }
 
 // UpdateSizeIfChanged handles VM size updates during VM update. The caller passes the
-// live detail it already read.
+// live detail.
 // Returns diagnostics if any errors occurred.
 func UpdateSizeIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, state, plan ResourceModel, live *ReadVirtualMachinesResponse) diag.Diagnostics {
 	var diags diag.Diagnostics

@@ -521,7 +521,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 
 	// The stop decision and the steps after it read the machine once here. State can lag
 	// the platform after a failed read-back. A retry then asks for work the machine
-	// already carries, and a stop for that work costs the user the whole downtime.
+	// already carries. A stop for finished work costs the user the whole downtime.
 	liveDetail, detailErr := virtualmachines.GetVirtualMachine(r.client, ctx, state.ID.ValueString())
 	if detailErr != nil {
 		resp.Diagnostics.AddError(
@@ -844,11 +844,11 @@ func (r *virtualMachinesResource) ModifyPlan(ctx context.Context, req resource.M
 }
 
 /*
-Some actions can be done without stopping the VM. Since it's a heavy time investment to start and stop, determine that and use it for the rest of the update logic.
-Cases where VM needs to be stopped:
-  - NetworkHotplug is disabled AND one of the below
-  - the l2_segment_ids set changes
-  - size_id changes
+A stop and a start cost the user real time. The provider takes them only where GPCN
+needs them. The machine needs a stop when the image takes no network hotplug and one
+of the following is true:
+  - the live segment set differs from the planned one
+  - the live SKU differs from the planned size_id
 */
 func determineIfVMNeedsStopped(state, plan virtualmachines.ResourceModel, live *virtualmachines.ReadVirtualMachinesResponse, liveInterfaces []networks.ReadVirtualMachineNetworkDataResponseTF) bool {
 	// If network hotplug is enabled, the VM does not need to be stopped
