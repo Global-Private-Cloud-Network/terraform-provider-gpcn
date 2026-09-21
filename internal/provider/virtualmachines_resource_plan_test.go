@@ -1857,6 +1857,118 @@ func TestVirtualMachineResourcePlanRenameKeepsThePinnedInterfaceList(t *testing.
 	})
 }
 
+const (
+	vmPlanTestBirthAddress = "203.0.113.30"
+	vmPlanTestMovedAddress = "203.0.113.31"
+)
+
+// vmMovedAddressPlanTestInterfacesBody reports the birth interface with the address it
+// carries now. A VPC interface reports the address row id beside the address.
+func vmMovedAddressPlanTestInterfacesBody(address string) map[string]any {
+	body := vmSegmentPlanTestNetworkInterfacesBody(vmPlanTestSubnetID, nil)
+	row := body["data"].([]map[string]any)[0]
+	row["publicIp"] = address
+	row["publicIpId"] = vmPlanTestAcquiredIpID
+	return body
+}
+
+// startVirtualMachineMovedAddressMockServer moves the address of the birth interface at
+// the rename, which is after the plan and inside the apply. A test then drives the one
+// window where the address moves under a plan that pinned it.
+func startVirtualMachineMovedAddressMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	status := virtualmachines.VMStatusRunning.String()
+	renamed := false
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mu.Lock()
+			address := vmPlanTestBirthAddress
+			if renamed {
+				address = vmPlanTestMovedAddress
+			}
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmMovedAddressPlanTestInterfacesBody(address))
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, vmPlanTestSizeID))
+		case r.Method == http.MethodPut && r.URL.Path == vmPlanTestPath:
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			if updated, ok := body["name"].(string); ok {
+				name = updated
+			}
+			renamed = true
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	return server
+}
+
+// A rename asks for no address, so the plan pins public_ip to state. Terraform refuses a
+// state that differs from that plan. GPCN can move the address inside the same apply.
+// The update writes the pinned address, and the next refresh records the new one.
+func TestVirtualMachineResourcePlanRenameKeepsThePinnedPublicIp(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server := startVirtualMachineMovedAddressMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmPlanTestConfig(server.URL, "vm-plan-moved-address"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "public_ip", vmPlanTestBirthAddress),
+				),
+			},
+			{
+				Config: vmPlanTestConfig(server.URL, "vm-plan-moved-address-renamed"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "name", "vm-plan-moved-address-renamed"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "public_ip", vmPlanTestBirthAddress),
+				),
+			},
+			{
+				RefreshState: true,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "public_ip", vmPlanTestMovedAddress),
+				),
+			},
+		},
+	})
+}
+
 // The create stops the machine to attach the segment. A start that fails leaves the
 // machine stopped, and only an error tells the user so. The machine exists at the API,
 // so it stays in state, and the error taints it: the remedy has to say so.
