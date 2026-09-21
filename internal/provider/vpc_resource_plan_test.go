@@ -638,3 +638,26 @@ func TestVpcResourcePlanRefusesSurroundingWhitespace(t *testing.T) {
 		},
 	})
 }
+
+// The super-CIDR rules live in a validator the schema has to carry. A plan
+// that accepts a host address teaches the rule one failed apply at a time.
+func TestVpcResourcePlanRefusesACidrThatIsNotANetworkAddress(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	hostAddress := fmt.Sprintf(`
+  name          = "vpc-host-address"
+  datacenter_id = %q
+  cidr          = "10.50.0.1/16"
+`, vpcPlanTestDatacenterID)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      vpcPlanTestConfigWith(mock.url, hostAddress),
+				ExpectError: regexp.MustCompile(`must be a valid IPv4 CIDR whose address is the`),
+			},
+		},
+	})
+}
