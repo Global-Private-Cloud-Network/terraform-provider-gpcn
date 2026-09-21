@@ -349,18 +349,9 @@ func TestGPUResourceInvalidSeries(t *testing.T) {
 		imageName   string
 		wantErr     string
 	}{
-		{
-			name:        "invalid_series_code",
-			seriesField: `series_code = "invalid_series_code"`,
-			gpuCount:    "1", imageName: "ubuntu-22.04",
-			wantErr: "Attribute series_code value must be one of",
-		},
-		{
-			name:        "invalid_series_name",
-			seriesField: `series_name = "Invalid GPU Series"`,
-			gpuCount:    "1", imageName: "ubuntu-22.04",
-			wantErr: "Attribute series_name value must be one of",
-		},
+		// An unknown series is no longer a configuration error. The inventory
+		// response decides which series a datacenter offers, so the refusal
+		// arrives during apply.
 		{
 			name:        "both_code_and_name",
 			seriesField: `series_name = "NVIDIA RTX A6000 Series"` + "\n" + `		  series_code = "nvidia-rtx_a6000-series"`,
