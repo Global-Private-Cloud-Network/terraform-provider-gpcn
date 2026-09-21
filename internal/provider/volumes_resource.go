@@ -74,6 +74,7 @@ func (r *volumesResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"volume_type": schema.StringAttribute{
+				CustomType:  volumes.VolumeTypeType{},
 				Description: "Type of storage: 'SSD', 'NVMe', or a storage component code such as 'vol-add-nvme'. The datacenter decides which codes it offers, and a code it does not offer is refused with the list of codes it does offer. Changing this value requires replacing the volume. A volume whose SKU the platform cannot resolve reads \"Unknown\" and cannot be resized until the platform repairs it.",
 				Required:    true,
 				Validators: []validator.String{

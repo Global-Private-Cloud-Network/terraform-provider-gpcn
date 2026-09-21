@@ -2,24 +2,28 @@ package volumes
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 )
 
 type ResourceModel struct {
-	ID             types.String `tfsdk:"id"`
-	Name           types.String `tfsdk:"name"`
-	DatacenterId   types.String `tfsdk:"datacenter_id"`
-	VolumeType     types.String `tfsdk:"volume_type"`
-	VolumeTypeCode types.String `tfsdk:"volume_type_code"`
-	VolumeTypeId   types.Int64  `tfsdk:"volume_type_id"`
-	SizeGb         types.Int64  `tfsdk:"size_gb"`
-	CreatedTime    types.String `tfsdk:"created_time"`
-	LastUpdated    types.String `tfsdk:"last_updated"`
-	Location       types.Map    `tfsdk:"location"`
+	ID             types.String    `tfsdk:"id"`
+	Name           types.String    `tfsdk:"name"`
+	DatacenterId   types.String    `tfsdk:"datacenter_id"`
+	VolumeType     VolumeTypeValue `tfsdk:"volume_type"`
+	VolumeTypeCode types.String    `tfsdk:"volume_type_code"`
+	VolumeTypeId   types.Int64     `tfsdk:"volume_type_id"`
+	SizeGb         types.Int64     `tfsdk:"size_gb"`
+	CreatedTime    types.String    `tfsdk:"created_time"`
+	LastUpdated    types.String    `tfsdk:"last_updated"`
+	Location       types.Map       `tfsdk:"location"`
 }
 
 // Update the plan or state with new values from the GET response
@@ -85,14 +89,14 @@ func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel
 
 // The code is the value the catalog lookup takes, so an import writes it.
 // A volume whose SKU the platform cannot resolve has no code and is named "Unknown".
-func importedVolumeType(volumeType volumeTypeResponse) types.String {
+func importedVolumeType(volumeType volumeTypeResponse) VolumeTypeValue {
 	if volumeType.Code != "" {
-		return types.StringValue(volumeType.Code)
+		return NewVolumeTypeValue(volumeType.Code)
 	}
 	if volumeType.Name != "" {
-		return types.StringValue(volumeType.Name)
+		return NewVolumeTypeValue(volumeType.Name)
 	}
-	return types.StringNull()
+	return NewVolumeTypeNull()
 }
 
 // The API can send the volume type in a different case. The canonical key keeps
@@ -113,4 +117,92 @@ func componentCodeForVolumeType(volumeType string) string {
 		return code
 	}
 	return volumeType
+}
+
+var (
+	_ basetypes.StringTypable                    = VolumeTypeType{}
+	_ basetypes.StringValuableWithSemanticEquals = VolumeTypeValue{}
+)
+
+// VolumeTypeType is the framework type of the volume_type attribute. Its values
+// compare by storage class, so the configured alias and the code the API returns
+// are one value.
+type VolumeTypeType struct {
+	basetypes.StringType
+}
+
+func (t VolumeTypeType) Equal(other attr.Type) bool {
+	_, ok := other.(VolumeTypeType)
+	return ok
+}
+
+func (t VolumeTypeType) String() string {
+	return "volumes.VolumeTypeType"
+}
+
+func (t VolumeTypeType) ValueFromString(_ context.Context, in basetypes.StringValue) (basetypes.StringValuable, diag.Diagnostics) {
+	return VolumeTypeValue{StringValue: in}, nil
+}
+
+func (t VolumeTypeType) ValueFromTerraform(ctx context.Context, in tftypes.Value) (attr.Value, error) {
+	value, err := t.StringType.ValueFromTerraform(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+
+	stringValue, ok := value.(basetypes.StringValue)
+	if !ok {
+		return nil, fmt.Errorf(ErrDetailUnexpectedStringValue, value)
+	}
+
+	volumeTypeValue, diags := t.ValueFromString(ctx, stringValue)
+	if diags.HasError() {
+		return nil, fmt.Errorf(ErrDetailVolumeTypeConversion, diags)
+	}
+
+	return volumeTypeValue, nil
+}
+
+func (t VolumeTypeType) ValueType(_ context.Context) attr.Value {
+	return VolumeTypeValue{}
+}
+
+// VolumeTypeValue is the value type of the volume_type attribute.
+type VolumeTypeValue struct {
+	basetypes.StringValue
+}
+
+// NewVolumeTypeValue makes a known volume_type value.
+func NewVolumeTypeValue(value string) VolumeTypeValue {
+	return VolumeTypeValue{StringValue: types.StringValue(value)}
+}
+
+// NewVolumeTypeNull makes a null volume_type value.
+func NewVolumeTypeNull() VolumeTypeValue {
+	return VolumeTypeValue{StringValue: types.StringNull()}
+}
+
+func (v VolumeTypeValue) Type(_ context.Context) attr.Type {
+	return VolumeTypeType{}
+}
+
+func (v VolumeTypeValue) Equal(other attr.Value) bool {
+	otherValue, ok := other.(VolumeTypeValue)
+	if !ok {
+		return false
+	}
+	return v.StringValue.Equal(otherValue.StringValue)
+}
+
+// StringSemanticEquals reports whether both values name the same storage class.
+func (v VolumeTypeValue) StringSemanticEquals(_ context.Context, newValuable basetypes.StringValuable) (bool, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
+	newValue, ok := newValuable.(VolumeTypeValue)
+	if !ok {
+		diags.AddError(ErrSummaryUnexpectedVolumeTypeValue, fmt.Sprintf(ErrDetailUnexpectedVolumeTypeValue, newValuable))
+		return false, diags
+	}
+
+	return componentCodeForVolumeType(v.ValueString()) == componentCodeForVolumeType(newValue.ValueString()), diags
 }

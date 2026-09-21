@@ -21,7 +21,7 @@ func createTestVolumeModel(name, volumeType string, sizeGb int64) ResourceModel 
 	return ResourceModel{
 		Name:         types.StringValue(name),
 		DatacenterId: types.StringValue(testDatacenterID),
-		VolumeType:   types.StringValue(volumeType),
+		VolumeType:   NewVolumeTypeValue(volumeType),
 		SizeGb:       types.Int64Value(sizeGb),
 	}
 }
@@ -571,5 +571,36 @@ func TestMapVolumeResponseToModelKeepsPlanValuesUnit(t *testing.T) {
 	}
 	if result.VolumeType.ValueString() != "SSD" {
 		t.Errorf("Expected VolumeType 'SSD', got '%s'", result.VolumeType.ValueString())
+	}
+}
+
+// The framework asks the value type whether a refreshed spelling is a change.
+// An alias and its component code name one storage class, so they are equal.
+func TestVolumeTypeValueSemanticEqualsUnit(t *testing.T) {
+	cases := []struct {
+		prior    string
+		refresh  string
+		expected bool
+	}{
+		{prior: "SSD", refresh: "vol-add-ssd", expected: true},
+		{prior: "ssd", refresh: "vol-add-ssd", expected: true},
+		{prior: "NVMe", refresh: "vol-add-nvme", expected: true},
+		{prior: "SSD", refresh: "vol-add-nvme", expected: false},
+		{prior: "vol-add-ultra", refresh: "vol-add-ultra", expected: true},
+		{prior: "vol-add-ultra", refresh: "Unknown", expected: false},
+	}
+	for _, testCase := range cases {
+		equal, diags := NewVolumeTypeValue(testCase.refresh).StringSemanticEquals(context.Background(), NewVolumeTypeValue(testCase.prior))
+		if diags.HasError() {
+			t.Fatalf("prior %q refresh %q: unexpected diagnostics %v", testCase.prior, testCase.refresh, diags)
+		}
+		if equal != testCase.expected {
+			t.Errorf("prior %q refresh %q: expected %t, got %t", testCase.prior, testCase.refresh, testCase.expected, equal)
+		}
+	}
+
+	equal, diags := NewVolumeTypeValue("SSD").StringSemanticEquals(context.Background(), types.StringValue("SSD"))
+	if !diags.HasError() {
+		t.Errorf("expected diagnostics for a foreign value type, got equal=%t", equal)
 	}
 }
