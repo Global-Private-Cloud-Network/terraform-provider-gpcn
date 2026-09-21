@@ -45,6 +45,7 @@ const (
 	ErrDetailPublicIpIdConflictsWithAllocate = "public_ip_id and allocate_public_ip are mutually exclusive"
 	ErrDetailFetchUpgradeSizesFailed         = "The provider could not fetch the valid upgrade targets for this Virtual Machine, so it cannot tell whether the size_id change is an in-place upgrade. This error is often transient. Re-run the plan. Underlying error: %s"
 	ErrDetailNoPrimaryNetworkInterface       = "No network interface on virtual machine with ID %s is marked primary, so the public IP cannot be changed"
+	ErrDetailPrimaryInterfaceNotOnAVpc       = "the primary network interface of virtual machine %s is not on a VPC subnet, and a public IP attaches to a VPC interface only"
 	ErrDetailVMCreatedAttachFailed           = "virtual machine %s was created and is in state, but attaching %s failed: %s. Terraform has marked the machine tainted: run terraform untaint on it and apply again to attach the remaining networks, or let the next apply replace it."
 )
 

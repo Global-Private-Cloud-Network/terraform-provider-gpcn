@@ -23,27 +23,35 @@ var testPlanModifierSchema = schema.Schema{
 	Attributes: map[string]schema.Attribute{
 		"allocate_public_ip": schema.BoolAttribute{Required: true},
 		"public_ip":          schema.StringAttribute{Computed: true},
+		"public_ip_id":       schema.StringAttribute{Optional: true},
 	},
 }
 
-func createRawValue(allocatePublicIp bool, publicIp string) tftypes.Value {
+func createRawValue(allocatePublicIp bool, publicIp, publicIpId string) tftypes.Value {
+	heldAddress := tftypes.NewValue(tftypes.String, nil)
+	if publicIpId != "" {
+		heldAddress = tftypes.NewValue(tftypes.String, publicIpId)
+	}
+
 	return tftypes.NewValue(tftypes.Object{
 		AttributeTypes: map[string]tftypes.Type{
 			"allocate_public_ip": tftypes.Bool,
 			"public_ip":          tftypes.String,
+			"public_ip_id":       tftypes.String,
 		},
 	}, map[string]tftypes.Value{
 		"allocate_public_ip": tftypes.NewValue(tftypes.Bool, allocatePublicIp),
 		"public_ip":          tftypes.NewValue(tftypes.String, publicIp),
+		"public_ip_id":       heldAddress,
 	})
 }
 
-func createTestState(allocatePublicIp bool, publicIp string) tfsdk.State {
-	return tfsdk.State{Raw: createRawValue(allocatePublicIp, publicIp), Schema: testPlanModifierSchema}
+func createTestState(allocatePublicIp bool, publicIp, publicIpId string) tfsdk.State {
+	return tfsdk.State{Raw: createRawValue(allocatePublicIp, publicIp, publicIpId), Schema: testPlanModifierSchema}
 }
 
-func createTestPlan(allocatePublicIp bool, publicIp string) tfsdk.Plan {
-	return tfsdk.Plan{Raw: createRawValue(allocatePublicIp, publicIp), Schema: testPlanModifierSchema}
+func createTestPlan(allocatePublicIp bool, publicIp, publicIpId string) tfsdk.Plan {
+	return tfsdk.Plan{Raw: createRawValue(allocatePublicIp, publicIp, publicIpId), Schema: testPlanModifierSchema}
 }
 
 type publicIPTestCase struct {
@@ -52,6 +60,8 @@ type publicIPTestCase struct {
 	planValue     types.String
 	stateAllocate bool
 	planAllocate  bool
+	stateHeldID   string
+	planHeldID    string
 	stateIP       string
 	expectUnknown bool
 	expectedValue string
@@ -66,8 +76,8 @@ func (tc publicIPTestCase) run(t *testing.T) {
 	}
 
 	if !tc.stateValue.IsNull() {
-		req.State = createTestState(tc.stateAllocate, tc.stateIP)
-		req.Plan = createTestPlan(tc.planAllocate, tc.stateIP)
+		req.State = createTestState(tc.stateAllocate, tc.stateIP, tc.stateHeldID)
+		req.Plan = createTestPlan(tc.planAllocate, tc.stateIP, tc.planHeldID)
 	}
 
 	resp := &planmodifier.StringResponse{PlanValue: tc.planValue}
@@ -103,6 +113,21 @@ func TestPublicIpPlanModifier(t *testing.T) {
 			planValue:     types.StringValue(testIPRelease),
 			stateAllocate: true,
 			planAllocate:  false,
+			stateIP:       testIPRelease,
+			expectUnknown: true,
+		},
+		{
+			name:          "public_ip_id changes from unset",
+			stateValue:    types.StringValue(""),
+			planValue:     types.StringValue(""),
+			planHeldID:    "address-1",
+			expectUnknown: true,
+		},
+		{
+			name:          "public_ip_id changes to unset",
+			stateValue:    types.StringValue(testIPRelease),
+			planValue:     types.StringValue(testIPRelease),
+			stateHeldID:   "address-1",
 			stateIP:       testIPRelease,
 			expectUnknown: true,
 		},

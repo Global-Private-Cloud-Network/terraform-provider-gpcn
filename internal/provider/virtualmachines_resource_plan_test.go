@@ -1303,3 +1303,260 @@ func TestVirtualMachineResourcePlanStartsAgainWhenTheReadBackFails(t *testing.T)
 		t.Errorf("Expected exactly 1 start, got %d", starts)
 	}
 }
+
+const (
+	vmPlanTestAcquiredIpID      = "acquired-ip-1"
+	vmPlanTestAcquiredIpAddress = "203.0.113.10"
+	vmPlanTestHeldIpID          = "held-ip-1"
+	vmPlanTestHeldIpAddress     = "203.0.113.20"
+)
+
+// vmPublicIpPlanTestInterfacesBody reports the birth interface with whatever address is
+// bound to it. On a VPC interface publicIpId is the address row id, not a provider id.
+func vmPublicIpPlanTestInterfacesBody(addressID, address string) map[string]any {
+	body := vmSegmentPlanTestNetworkInterfacesBody(vmPlanTestSubnetID, nil)
+	row := body["data"].([]map[string]any)[0]
+	if addressID == "" {
+		return body
+	}
+	row["publicIp"] = address
+	row["publicIpId"] = addressID
+	return body
+}
+
+// startVirtualMachinePublicIpMockServer serves the VPC address verbs and records them in
+// order. The legacy per-NIC routes answer nothing but a test failure: GPCN refuses them
+// on a VPC interface, so the provider must never reach for one.
+func startVirtualMachinePublicIpMockServer(t *testing.T) (*httptest.Server, func() []string) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	status := virtualmachines.VMStatusRunning.String()
+	boundID := ""
+	boundAddress := ""
+	var events []string
+
+	addressesPath := "/v1/resource/vpcs/" + vmPlanTestVpcID + "/public-ips"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == addressesPath:
+			mu.Lock()
+			events = append(events, "acquire")
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{
+				"success": true,
+				"message": "Operation initiated successfully",
+				"data":    map[string]any{"publicIpId": vmPlanTestAcquiredIpID, "jobId": "job-ip"},
+			})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/attach") && strings.HasPrefix(r.URL.Path, addressesPath+"/"):
+			addressID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, addressesPath+"/"), "/attach")
+			nicID, _ := testutil.ReadRequestBody(r)["nicId"].(string)
+			mu.Lock()
+			events = append(events, "attach "+addressID+" "+nicID)
+			boundID = addressID
+			boundAddress = vmPlanTestAcquiredIpAddress
+			if addressID == vmPlanTestHeldIpID {
+				boundAddress = vmPlanTestHeldIpAddress
+			}
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-ip", "attach issued")
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/detach") && strings.HasPrefix(r.URL.Path, addressesPath+"/"):
+			addressID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, addressesPath+"/"), "/detach")
+			mu.Lock()
+			events = append(events, "detach "+addressID)
+			boundID = ""
+			boundAddress = ""
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-ip", "detach issued")
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, addressesPath+"/"):
+			mu.Lock()
+			events = append(events, "release "+strings.TrimPrefix(r.URL.Path, addressesPath+"/"))
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-ip", "release issued")
+		case strings.HasSuffix(r.URL.Path, "/public-ip") && strings.HasPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/"):
+			mu.Lock()
+			events = append(events, "legacy "+r.Method)
+			mu.Unlock()
+			t.Errorf("Expected no legacy per-interface public IP call, got %s %s", r.Method, r.URL.Path)
+			testutil.HandleCreateJobResponse(w, "job-legacy", "legacy issued")
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mu.Lock()
+			currentID, currentAddress := boundID, boundAddress
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPublicIpPlanTestInterfacesBody(currentID, currentAddress))
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, vmPlanTestSizeID))
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	recorded := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), events...)
+	}
+
+	return server, recorded
+}
+
+// vmPublicIpPlanTestConfig writes the address attributes a test toggles. An empty
+// publicIpID leaves public_ip_id out of the configuration altogether.
+func vmPublicIpPlanTestConfig(host, name string, allocate bool, publicIpID string) string {
+	held := ""
+	if publicIpID != "" {
+		held = fmt.Sprintf("\n  public_ip_id       = %q", publicIpID)
+	}
+
+	return fmt.Sprintf(`
+provider "gpcn" {
+  host        = %q
+  api_key     = "test-key"
+  max_retries = 0
+}
+
+resource "gpcn_virtualmachine" "test" {
+  name               = %q
+  datacenter_id      = %q
+  size_id            = %q
+  image_id           = %q
+  subnet_id          = %q
+  allocate_public_ip = %t%s
+  initial_auth = {
+    ssh_key_id = %q
+    username   = %q
+  }
+}
+`, host, name, vmPlanTestDatacenterID, vmPlanTestSizeID, vmPlanTestImageID, vmPlanTestSubnetID, allocate, held, vmPlanTestSshKeyID, vmPlanTestUsername)
+}
+
+// GPCN answers 409 when the legacy per-interface allocate addresses a VPC interface, so
+// an address the machine asks for is acquired on the VPC and attached to the interface.
+// Giving it up detaches it and then releases it, because Terraform acquired it.
+func TestVirtualMachineResourcePlanTogglesPublicIpViaVpcVerbs(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachinePublicIpMockServer(t)
+
+	var afterCreate, afterAcquire int
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-address", false, ""),
+				Check: func(*terraform.State) error {
+					afterCreate = len(recorded())
+					return nil
+				},
+			},
+			{
+				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-address", true, ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "public_ip", vmPlanTestAcquiredIpAddress),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.0.public_ip_id", vmPlanTestAcquiredIpID),
+					func(*terraform.State) error {
+						afterAcquire = len(recorded())
+						acquire := recorded()[afterCreate:]
+						want := []string{"acquire", "attach " + vmPlanTestAcquiredIpID + " nic-1"}
+						if !slices.Equal(acquire, want) {
+							return fmt.Errorf("expected %v, got %v", want, acquire)
+						}
+						return nil
+					},
+				),
+			},
+			{
+				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-address", false, ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr(gpcnVirtualMachineTest, "public_ip"),
+					func(*terraform.State) error {
+						release := recorded()[afterAcquire:]
+						want := []string{"detach " + vmPlanTestAcquiredIpID, "release " + vmPlanTestAcquiredIpID}
+						if !slices.Equal(release, want) {
+							return fmt.Errorf("expected %v, got %v", want, release)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+// A held address belongs to the operator, not to the machine. Naming one attaches it,
+// and dropping the name detaches it. Terraform never releases an address it did not
+// acquire.
+func TestVirtualMachineResourcePlanAttachesAndDetachesAHeldAddress(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachinePublicIpMockServer(t)
+
+	var afterCreate, afterAttach int
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-held-address", false, ""),
+				Check: func(*terraform.State) error {
+					afterCreate = len(recorded())
+					return nil
+				},
+			},
+			{
+				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-held-address", false, vmPlanTestHeldIpID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "public_ip", vmPlanTestHeldIpAddress),
+					func(*terraform.State) error {
+						afterAttach = len(recorded())
+						attach := recorded()[afterCreate:]
+						want := []string{"attach " + vmPlanTestHeldIpID + " nic-1"}
+						if !slices.Equal(attach, want) {
+							return fmt.Errorf("expected %v, got %v", want, attach)
+						}
+						return nil
+					},
+				),
+			},
+			{
+				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-held-address", false, ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr(gpcnVirtualMachineTest, "public_ip"),
+					func(*terraform.State) error {
+						detach := recorded()[afterAttach:]
+						want := []string{"detach " + vmPlanTestHeldIpID}
+						if !slices.Equal(detach, want) {
+							return fmt.Errorf("expected %v, got %v", want, detach)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}

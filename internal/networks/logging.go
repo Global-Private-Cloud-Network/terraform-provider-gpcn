@@ -18,14 +18,6 @@ const (
 	LogStartingGetVirtualMachinesAttachedToNetworks           = "Starting GetVirtualMachinesAttachedToNetworks for network ID %s"
 	LogSuccessfullyRetrievedVirtualMachinesAttachedToNetworks = "Successfully retrieved virtual machines attached to network with ID %s"
 
-	// AllocatePublicIp messages
-	LogStartingAllocatePublicIp      = "Starting AllocatePublicIp for virtualmachine ID %s and network interface ID %s"
-	LogSuccessfullyAllocatedPublicIp = "Successfully allocated a public IP address for virtualmachine ID %s and network interface ID %s"
-
-	// ReleasePublicIp messages
-	LogStartingReleasePublicIp      = "Starting ReleasePublicIp for virtualmachine ID %s and network interface ID %s"
-	LogSuccessfullyReleasedPublicIp = "Successfully released the public IP address for virtualmachine ID %s and network interface ID %s"
-
 	// UpdateNetwork messages
 	LogStartingUpdateNetworkWithID         = "Starting UpdateNetwork for network ID %s"
 	LogConstructedUpdateNetworkRequestBody = "Constructed Update GPCN Network request body successfully"

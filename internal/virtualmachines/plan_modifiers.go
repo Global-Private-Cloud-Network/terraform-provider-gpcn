@@ -10,15 +10,19 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// publicIpPlanModifier marks public_ip as unknown when allocate_public_ip changes
+// PublicIpPlanModifier marks public_ip as unknown when the machine is about to take on
+// or give up an address. Each of the two ways to ask for one changes the address the
+// birth interface carries, and only the apply learns what it becomes.
 type PublicIpPlanModifier struct{}
 
+const publicIpPlanModifierDescription = "Marks public_ip as unknown when allocate_public_ip or public_ip_id changes"
+
 func (m PublicIpPlanModifier) Description(_ context.Context) string {
-	return "Marks public_ip as unknown when allocate_public_ip changes"
+	return publicIpPlanModifierDescription
 }
 
 func (m PublicIpPlanModifier) MarkdownDescription(_ context.Context) string {
-	return "Marks public_ip as unknown when allocate_public_ip changes"
+	return publicIpPlanModifierDescription
 }
 
 func (m PublicIpPlanModifier) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
@@ -32,8 +36,12 @@ func (m PublicIpPlanModifier) PlanModifyString(ctx context.Context, req planmodi
 	req.State.GetAttribute(ctx, path.Root("allocate_public_ip"), &stateAllocatePublicIp)
 	req.Plan.GetAttribute(ctx, path.Root("allocate_public_ip"), &planAllocatePublicIp)
 
-	// If allocate_public_ip is changing, mark public_ip as unknown
-	if !stateAllocatePublicIp.Equal(planAllocatePublicIp) {
+	var statePublicIpId, planPublicIpId types.String
+	req.State.GetAttribute(ctx, path.Root("public_ip_id"), &statePublicIpId)
+	req.Plan.GetAttribute(ctx, path.Root("public_ip_id"), &planPublicIpId)
+
+	// If either way of asking for an address is changing, mark public_ip as unknown
+	if !stateAllocatePublicIp.Equal(planAllocatePublicIp) || !statePublicIpId.Equal(planPublicIpId) {
 		resp.PlanValue = types.StringUnknown()
 		return
 	}

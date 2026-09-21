@@ -7,6 +7,7 @@ import (
 
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/networks"
+	"terraform-provider-gpcn/internal/vpcpublicips"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -103,22 +104,22 @@ func UpdateL2SegmentsIfChanged(gpcnClient *client.GpcnClient, ctx context.Contex
 	return diags
 }
 
-// UpdatePublicIPIfChanged handles public IP allocation/release during VM update.
+// UpdatePublicIPIfChanged binds and unbinds the address on the birth interface through
+// the VPC verbs. The legacy per-interface routes answer 409 on a VPC interface, so they
+// have no part here. An address Terraform acquired is released when the machine gives it
+// up; a held address only detaches, because the operator owns it.
+// The interfaces are read here rather than passed in, because an earlier step may have
+// changed the list and with it the interface ids.
 // Returns diagnostics if any errors occurred.
-//
-// NOTE: This function always fetches fresh network interfaces rather than accepting
-// them as a parameter. This is intentional because UpdateNetworkInterfacesIfChanged
-// may have modified the interfaces (added/removed), potentially changing interface IDs.
-// The slight overhead of an extra API call is acceptable to ensure correctness.
 func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, state, plan ResourceModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	if plan.AllocatePublicIp == state.AllocatePublicIp {
+	acquireChanged := !plan.AllocatePublicIp.Equal(state.AllocatePublicIp)
+	heldChanged := !plan.PublicIpId.Equal(state.PublicIpId)
+	if !acquireChanged && !heldChanged {
 		return diags
 	}
 
-	// Fetch fresh network interfaces - required because UpdateNetworkInterfacesIfChanged
-	// may have modified the interface list
 	networkInterfaces, err := networks.GetNetworkInterfaces(gpcnClient, ctx, vmID)
 	if err != nil {
 		diags.AddError(
@@ -142,22 +143,63 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 		return diags
 	}
 
-	primaryNetworkInterfaceId := networkInterfaces[interfaceIdx].ID.ValueString()
-
-	if plan.AllocatePublicIp.ValueBool() {
-		err = networks.AllocatePublicIp(gpcnClient, ctx, vmID, primaryNetworkInterfaceId)
-	} else {
-		err = networks.ReleasePublicIp(gpcnClient, ctx, vmID, primaryNetworkInterfaceId)
-	}
-
-	if err != nil {
+	primary := networkInterfaces[interfaceIdx]
+	// The VM detail projection carries no VPC, so the interface row is the only place
+	// that names the VPC the address is acquired on.
+	if primary.World.ValueString() != networks.NicWorldVpc || primary.VpcID.IsNull() {
 		diags.AddError(
 			ErrSummaryUnableToUpdatePublicIPConfiguration,
-			err.Error(),
+			fmt.Sprintf(ErrDetailPrimaryInterfaceNotOnAVpc, vmID),
 		)
 		return diags
 	}
+	vpcID := primary.VpcID.ValueString()
+	primaryNetworkInterfaceId := primary.ID.ValueString()
 
+	// The machine gives up what it no longer asks for before it takes anything on: one
+	// machine carries one address, so an exchange has to free the interface first.
+	if acquireChanged && state.AllocatePublicIp.ValueBool() && !primary.PublicIPID.IsNull() {
+		acquiredID := primary.PublicIPID.ValueString()
+		if err := vpcpublicips.DetachPublicIp(gpcnClient, ctx, vpcID, acquiredID); err != nil {
+			return publicIpFailure(diags, err)
+		}
+		if err := vpcpublicips.ReleasePublicIp(gpcnClient, ctx, vpcID, acquiredID); err != nil {
+			return publicIpFailure(diags, err)
+		}
+	}
+	if heldChanged && !state.PublicIpId.IsNull() {
+		if err := vpcpublicips.DetachPublicIp(gpcnClient, ctx, vpcID, state.PublicIpId.ValueString()); err != nil {
+			return publicIpFailure(diags, err)
+		}
+	}
+
+	if acquireChanged && plan.AllocatePublicIp.ValueBool() {
+		// The API inserts the address row before it dispatches the job, so the id comes
+		// back even from a failed acquisition.
+		acquiredID, err := vpcpublicips.AcquirePublicIp(gpcnClient, ctx, vpcID)
+		if err != nil {
+			return publicIpFailure(diags, err)
+		}
+		if err := vpcpublicips.AttachPublicIp(gpcnClient, ctx, vpcID, acquiredID, primaryNetworkInterfaceId); err != nil {
+			return publicIpFailure(diags, err)
+		}
+	}
+	if heldChanged && !plan.PublicIpId.IsNull() {
+		if err := vpcpublicips.AttachPublicIp(gpcnClient, ctx, vpcID, plan.PublicIpId.ValueString(), primaryNetworkInterfaceId); err != nil {
+			return publicIpFailure(diags, err)
+		}
+	}
+
+	return diags
+}
+
+// publicIpFailure frames every refusal of an address verb under one summary, because
+// each one leaves the machine's address exactly as the last successful verb left it.
+func publicIpFailure(diags diag.Diagnostics, err error) diag.Diagnostics {
+	diags.AddError(
+		ErrSummaryUnableToUpdatePublicIPConfiguration,
+		err.Error(),
+	)
 	return diags
 }
 
