@@ -61,6 +61,24 @@ func vmPlanTestSizesBody() map[string]any {
 	}
 }
 
+// An import has no image_id, so the mapper resolves it from the image name the detail
+// projection reports.
+func vmPlanTestImagesBody() map[string]any {
+	return map[string]any{
+		"success": true,
+		"message": "ok",
+		"data": []map[string]any{{
+			"id":        1,
+			"name":      "Linux",
+			"sortOrder": 1,
+			"images": []map[string]any{{
+				"id":   vmPlanTestImageID,
+				"name": vmPlanTestImageName,
+			}},
+		}},
+	}
+}
+
 func vmPlanTestReadBody(name, status, skuId string) map[string]any {
 	return map[string]any{
 		"success": true,
@@ -166,6 +184,8 @@ func startVirtualMachinePlanMockServer(t *testing.T) (*httptest.Server, func(str
 			testutil.WriteJSONResponse(w, vmPlanTestNetworkInterfacesBody(currentSubnet))
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
 			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-images":
+			testutil.WriteJSONResponse(w, vmPlanTestImagesBody())
 		case r.Method == http.MethodGet && r.URL.Path == vmPath:
 			mu.Lock()
 			currentName, currentStatus, currentSku := name, status, skuId
@@ -413,6 +433,40 @@ resource "gpcn_virtualmachine" "test" {
 			{
 				Config:      config,
 				ExpectError: regexp.MustCompile(`public_ip_id and allocate_public_ip are mutually exclusive`),
+			},
+		},
+	})
+}
+
+// An import reads the machine and its interfaces, and nothing else. subnet_id,
+// l2_segment_ids, allocate_public_ip and public_ip live only on the interface list, so an
+// import that misses it would hand back a state a plan cannot reconcile.
+func TestVirtualMachineResourcePlanImportsVpcIdentity(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, _, _ := startVirtualMachinePlanMockServer(t)
+
+	config := vmPlanTestConfig(server.URL, "vm-plan-import")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "subnet_id", vmPlanTestSubnetID),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "l2_segment_ids.#", "0"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "allocate_public_ip", "false"),
+					resource.TestCheckNoResourceAttr(gpcnVirtualMachineTest, "public_ip"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.0.world", "vpc"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.0.vpc_subnet_id", vmPlanTestSubnetID),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.0.vpc_id", vmPlanTestVpcID),
+					resource.TestCheckNoResourceAttr(gpcnVirtualMachineTest, "network_interfaces.0.network_id"),
+				),
+			},
+			{
+				ResourceName:      gpcnVirtualMachineTest,
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 		},
 	})
