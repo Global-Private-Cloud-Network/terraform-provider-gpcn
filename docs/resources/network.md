@@ -117,7 +117,7 @@ terraform import gpcn_network.existing "c13808d9-3b7d-42c5-a21d-f0961308a38a"
 
 ## Migrating an adopted custom network
 
-The platform adopts custom networks into L2 segments. After the adoption the network answers 404. A refresh warns and drops the row from state. A plan alone does not persist that drop. The segment is a new object with a new id, and Terraform cannot make the move itself.
+The platform adopts custom networks into L2 segments. After the adoption the network answers 404, so this resource cannot manage it. The segment is a new object with a new id, and Terraform cannot make the move itself. Follow the steps below in order.
 
 Find the segment id by the first route that works:
 
@@ -134,8 +134,8 @@ terraform state rm gpcn_network.<name>
 terraform import gpcn_l2_segment.<name> <segment-id>
 ```
 
-Re-point every `gpcn_network.<name>.id` reference in outputs and modules. In a `gpcn_virtualmachine` block, move the id from `network_ids` to `l2_segment_ids`, which is where a segment attaches.
+Then run `terraform apply`. The plan is empty when the imported segment matches the block. Never destroy the old row: the segment carries live traffic, and a destroy tears the carrier down.
 
-The row stays in state after the adoption. A plan warns and proposes a create, which the provider refuses, so nothing persists. Remove the row with `terraform state rm`, not with a destroy. The segment carries live traffic, and a destroy tears the carrier down.
+Re-point every `gpcn_network.<name>.id` reference in outputs and modules. In a `gpcn_virtualmachine` block, move the id from `network_ids` to `l2_segment_ids`, which is where a segment attaches.
 
 The adoption deduplicates a segment name that your account already uses in that datacenter, by appending `-2`, `-3` and so on. If the name of your network was deduplicated, write the deduplicated name (`<name>-2`) into the `gpcn_l2_segment` block. Otherwise the first apply plans a rename that you did not ask for.
