@@ -198,7 +198,8 @@ func TestVolumeResourceVolumeTypeDescription(t *testing.T) {
 		"Use \"SSD\" or \"NVMe\" for the built-in storage classes and the component code for any other class. " +
 		"The datacenter decides which codes it offers, and a code it does not offer is refused with the list of codes it does offer. " +
 		"Changing this value requires replacing the volume. " +
-		"A volume whose SKU the platform cannot resolve reads \"Unknown\"; after the platform repairs it, remove the volume from state and import it again so the code is recorded."
+		"A volume whose SKU the platform cannot resolve reads \"Unknown\"; after the platform repairs it, remove the volume from state and import it again so the code is recorded. " +
+		"The built-in codes vol-add-ssd and vol-add-nvme are refused at plan time; write SSD or NVMe instead."
 
 	attribute, ok := resp.Schema.Attributes["volume_type"]
 	if !ok {
