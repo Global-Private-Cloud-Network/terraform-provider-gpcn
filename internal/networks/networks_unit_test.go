@@ -265,6 +265,92 @@ func TestGetNetworkInterfacesSortsByInterfaceIndex(t *testing.T) {
 	}
 }
 
+// A VPC interface leaves every legacy column null, and an unfinished reservation leaves
+// the MAC and the addresses null too. The provider must keep those nulls, because an
+// empty string reads as a value the platform never sent.
+func TestGetNetworkInterfacesKeepsNullsNullUnit(t *testing.T) {
+	const vmID = "vm-vpc-nulls"
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces") {
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true, "message": "Network interfaces retrieved",
+					"data": []map[string]any{{
+						"id":               "interface-vpc",
+						"networkInterface": 1,
+						"isPrimary":        1,
+						"macAddress":       nil,
+						"publicIp":         nil,
+						"publicIpId":       nil,
+						"privateIp":        "10.20.0.7",
+						"world":            "vpc",
+						"networkName":      nil,
+						"networkId":        nil,
+						"cidrBlock":        "10.20.0.0/24",
+						"gatewayIp":        nil,
+						"networkType":      nil,
+						"vpcSubnetId":      "subnet-1",
+						"subnetName":       "web",
+						"vpcId":            "vpc-1",
+						"vpcName":          "prod",
+						"l2SegmentId":      nil,
+						"l2SegmentName":    nil,
+					}},
+				})
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	interfaces, err := GetNetworkInterfaces(gpcnClient, context.Background(), vmID)
+	if err != nil {
+		t.Fatalf("GetNetworkInterfaces failed: %v", err)
+	}
+	if len(interfaces) != 1 {
+		t.Fatalf("Expected 1 interface, got %d", len(interfaces))
+	}
+	got := interfaces[0]
+
+	nullFields := map[string]types.String{
+		"mac_address":     got.MacAddress,
+		"public_ip":       got.PublicIP,
+		"public_ip_id":    got.PublicIPID,
+		"network_name":    got.NetworkName,
+		"network_id":      got.NetworkID,
+		"gateway_ip":      got.GatewayIP,
+		"network_type":    got.NetworkType,
+		"l2_segment_id":   got.L2SegmentID,
+		"l2_segment_name": got.L2SegmentName,
+	}
+	for name, value := range nullFields {
+		if !value.IsNull() {
+			t.Errorf("Expected %s to stay null, got '%s'", name, value.ValueString())
+		}
+	}
+
+	setFields := map[string][2]string{
+		"private_ip":    {got.PrivateIP.ValueString(), "10.20.0.7"},
+		"world":         {got.World.ValueString(), "vpc"},
+		"cidr_block":    {got.CIDRBlock.ValueString(), "10.20.0.0/24"},
+		"vpc_subnet_id": {got.VpcSubnetID.ValueString(), "subnet-1"},
+		"subnet_name":   {got.SubnetName.ValueString(), "web"},
+		"vpc_id":        {got.VpcID.ValueString(), "vpc-1"},
+		"vpc_name":      {got.VpcName.ValueString(), "prod"},
+	}
+	for name, pair := range setFields {
+		if pair[0] != pair[1] {
+			t.Errorf("Expected %s to be '%s', got '%s'", name, pair[1], pair[0])
+		}
+	}
+	if !got.IsPrimary.ValueBool() {
+		t.Error("Expected is_primary to be true for the integer 1")
+	}
+}
+
 func TestUpdateNetworkMockHTTP(t *testing.T) {
 	const networkID = "network-update-123"
 

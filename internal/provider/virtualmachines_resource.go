@@ -173,36 +173,68 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 							Description: "Whether this is the primary interface",
 							Computed:    true,
 						},
+						"mac_address": schema.StringAttribute{
+							Description: "The MAC address of the interface. Null while the platform has not materialized the port",
+							Computed:    true,
+						},
 						"public_ip": schema.StringAttribute{
 							Description: "The public IP address on the interface, if one is allocated",
 							Computed:    true,
 						},
 						"public_ip_id": schema.StringAttribute{
-							Description: "The ID of the allocated public IP address, if one is allocated",
+							Description: "The ID of the allocated public IP address, if one is allocated. On a 'vpc' interface this is a gpcn_vpc_public_ip ID",
 							Computed:    true,
 						},
 						"private_ip": schema.StringAttribute{
-							Description: "The private IP address on the interface",
+							Description: "The private IP address on the interface. Null when world is 'l2', because a segment has no subnet to draw an address from",
+							Computed:    true,
+						},
+						"world": schema.StringAttribute{
+							Description: "The kind of network the interface attaches to: 'legacy', 'vpc' or 'l2'. The identity attributes below are per world",
 							Computed:    true,
 						},
 						"network_name": schema.StringAttribute{
-							Description: "The name of the attached network",
+							Description: "The name of the attached legacy network. Null unless world is 'legacy'",
 							Computed:    true,
 						},
 						"network_id": schema.StringAttribute{
-							Description: "The ID of the attached network",
+							Description: "The ID of the attached legacy network. Null unless world is 'legacy'",
 							Computed:    true,
 						},
 						"cidr_block": schema.StringAttribute{
-							Description: "The CIDR block of the attached network",
+							Description: "The CIDR block of the attached legacy network or VPC subnet. Null when world is 'l2'",
 							Computed:    true,
 						},
 						"gateway_ip": schema.StringAttribute{
-							Description: "The gateway IP address of the attached network",
+							Description: "The gateway IP address of the attached legacy network. Null unless world is 'legacy'",
 							Computed:    true,
 						},
 						"network_type": schema.StringAttribute{
-							Description: "The type of the attached network",
+							Description: "The type of the attached legacy network. Null unless world is 'legacy'",
+							Computed:    true,
+						},
+						"vpc_subnet_id": schema.StringAttribute{
+							Description: "The ID of the VPC subnet the interface attaches to. Null unless world is 'vpc'",
+							Computed:    true,
+						},
+						"subnet_name": schema.StringAttribute{
+							Description: "The name of the VPC subnet the interface attaches to. Null unless world is 'vpc'",
+							Computed:    true,
+						},
+						"vpc_id": schema.StringAttribute{
+							Description: "The ID of the VPC that holds the subnet. Null unless world is 'vpc'",
+							Computed:    true,
+						},
+						"vpc_name": schema.StringAttribute{
+							Description: "The name of the VPC that holds the subnet. Null unless world is 'vpc'",
+							Computed:    true,
+						},
+						"l2_segment_id": schema.StringAttribute{
+							Description: "The ID of the L2 segment the interface attaches to. Null unless world is 'l2'",
+							Computed:    true,
+						},
+						"l2_segment_name": schema.StringAttribute{
+							Description: "The name of the L2 segment the interface attaches to. Null unless world is 'l2'",
 							Computed:    true,
 						},
 					},
