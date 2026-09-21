@@ -76,7 +76,7 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"series_name": schema.StringAttribute{
-				Description: "Human-readable name of the GPU series. Exactly one of series_name or series_code must be specified",
+				Description: "Human-readable name of the GPU series. Exactly one of series_name or series_code must be specified. Use the gpcn_gpu_inventory data source to list the series offered in a datacenter.",
 				Optional:    true,
 				Computed:    true,
 				Validators: []validator.String{
@@ -91,7 +91,7 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"series_code": schema.StringAttribute{
-				Description: "Short code of the GPU series. Exactly one of series_name or series_code must be specified",
+				Description: "Short code of the GPU series. Exactly one of series_name or series_code must be specified. Use the gpcn_gpu_inventory data source to list the series offered in a datacenter.",
 				Optional:    true,
 				Computed:    true,
 				Validators: []validator.String{

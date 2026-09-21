@@ -70,14 +70,14 @@ func (d *gpuInventoryDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 			},
 			"series_name": schema.StringAttribute{
 				Optional:    true,
-				Description: "Filter by human-readable GPU series name. Conflicts with series_code",
+				Description: "Filter by human-readable GPU series name. Conflicts with series_code. Use the gpcn_gpu_inventory data source to list the series offered in a datacenter.",
 				Validators: []validator.String{
 					stringvalidator.ConflictsWith(path.MatchRoot("series_code")),
 				},
 			},
 			"series_code": schema.StringAttribute{
 				Optional:    true,
-				Description: "Filter by short GPU series code. Conflicts with series_name",
+				Description: "Filter by short GPU series code. Conflicts with series_name. Use the gpcn_gpu_inventory data source to list the series offered in a datacenter.",
 				Validators: []validator.String{
 					stringvalidator.ConflictsWith(path.MatchRoot("series_name")),
 				},
