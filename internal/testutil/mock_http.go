@@ -133,3 +133,30 @@ func SetupMockServerWithRealTransport(config MockServerConfig) (*httptest.Server
 
 	return server, gpcnClient
 }
+
+// HandleAuthCheck writes the canonical auth-check body. Provider Configure
+// calls this endpoint before any resource work, so every mock server a
+// provider test drives needs an arm for it.
+func HandleAuthCheck(w http.ResponseWriter) {
+	WriteJSONResponse(w, map[string]any{
+		"success": true,
+		"message": "",
+		"data": map[string]any{
+			"authenticated": true,
+			"credential": map[string]any{
+				"kind":      "api_key",
+				"id":        "key-1",
+				"name":      "terraform",
+				"keyStart":  "gpcn_test",
+				"entityId":  "entity-1",
+				"expiresAt": nil,
+			},
+			"grants": map[string]any{
+				"source":      "api_key_role",
+				"entityId":    "entity-1",
+				"permissions": []string{},
+			},
+		},
+		"meta": nil,
+	})
+}

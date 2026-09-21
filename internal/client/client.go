@@ -15,6 +15,9 @@ import (
 type GpcnClient struct {
 	httpClient *http.Client
 	config     *Config
+	// Reported by AuthCheck at configure time. Both stay zero until then.
+	entityID    string
+	permissions []string
 }
 
 type authTransport struct {
