@@ -29,31 +29,45 @@ const (
 	gpuPlanTestTimestamp    = "2026-01-02T15:04:05Z"
 )
 
+const (
+	gpuCatalogTestSeriesID   = "series-a100"
+	gpuCatalogTestSeriesName = "NVIDIA A100 Series"
+	gpuCatalogTestSeriesCode = "nvidia-a100-series"
+	gpuCatalogTestSkuCode    = "gpu_1x_a100"
+)
+
+// gpuPlanTestInventoryBody offers both test series in the same datacenter at the
+// same GPU count. The series a configuration names is then the only thing that
+// decides which series ID an order carries.
 func gpuPlanTestInventoryBody() map[string]any {
 	return map[string]any{
 		"success": true,
 		"message": "ok",
 		"data": map[string]any{
-			"series": []map[string]any{{
-				"id":   gpuPlanTestSeriesID,
-				"name": gpuPlanTestSeriesName,
-				"code": gpuPlanTestSeriesCode,
-				"availability": []map[string]any{{
-					"datacenterId":   gpuPlanTestDatacenterID,
-					"datacenterName": "Kansas",
-					"datacenterCode": "kansas",
-					"gpuCounts": []map[string]any{{
-						"count": 1,
-						"specs": map[string]any{"gpuDescription": "1x A6000", "vcpu": 6, "memoryGiB": 48, "storageGB": 256},
-						"availableSkus": []map[string]any{{
-							"skuCode":     gpuPlanTestSkuCode,
-							"description": "std",
-							"specs":       map[string]any{"gpuDescription": "1x A6000", "vcpu": 6, "memoryGiB": 48, "storageGB": 256},
-						}},
-					}},
-				}},
-			}},
+			"series": []map[string]any{
+				gpuPlanTestSeriesEntry(gpuPlanTestSeriesID, gpuPlanTestSeriesName, gpuPlanTestSeriesCode, gpuPlanTestSkuCode, "1x A6000", 6, 48, 256),
+				gpuPlanTestSeriesEntry(gpuCatalogTestSeriesID, gpuCatalogTestSeriesName, gpuCatalogTestSeriesCode, gpuCatalogTestSkuCode, "1x A100", 8, 80, 512),
+			},
 		},
+	}
+}
+
+func gpuPlanTestSeriesEntry(id, name, code, skuCode, gpuDescription string, vcpu, memoryGiB, storageGB int64) map[string]any {
+	specs := map[string]any{"gpuDescription": gpuDescription, "vcpu": vcpu, "memoryGiB": memoryGiB, "storageGB": storageGB}
+	return map[string]any{
+		"id":   id,
+		"name": name,
+		"code": code,
+		"availability": []map[string]any{{
+			"datacenterId":   gpuPlanTestDatacenterID,
+			"datacenterName": "Kansas",
+			"datacenterCode": "kansas",
+			"gpuCounts": []map[string]any{{
+				"count":         1,
+				"specs":         specs,
+				"availableSkus": []map[string]any{{"skuCode": skuCode, "description": "std", "specs": specs}},
+			}},
+		}},
 	}
 }
 
@@ -88,15 +102,17 @@ func gpuPlanTestReadBody(name string) map[string]any {
 	}
 }
 
-// startGPUPlanMockServer serves the GPU endpoints a rename needs. The handler keeps
-// the name from the last create or update. The read after an apply then agrees with
-// the configuration and leaves the refresh plan empty. The returned function renames
-// the GPU out of band, which is how a test creates drift.
-func startGPUPlanMockServer(t *testing.T) (*httptest.Server, func(string)) {
+// startGPUPlanMockServer serves the GPU endpoints a rename needs. The handler
+// keeps the name from the last create or update. The read after an apply then
+// agrees with the configuration and leaves the refresh plan empty. The first
+// returned function renames the GPU out of band, which is how a test creates
+// drift. The second returns the body of the last create POST.
+func startGPUPlanMockServer(t *testing.T) (*httptest.Server, func(string), func() map[string]any) {
 	t.Helper()
 
 	var mu sync.Mutex
 	name := ""
+	var createBody map[string]any
 
 	gpuPath := "/v1/resource/gpu/" + gpuPlanTestID
 
@@ -107,6 +123,7 @@ func startGPUPlanMockServer(t *testing.T) (*httptest.Server, func(string)) {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/gpu/":
 			body := testutil.ReadRequestBody(r)
 			mu.Lock()
+			createBody = body
 			name, _ = body["name"].(string)
 			mu.Unlock()
 			testutil.HandleJobResponse(w, "job-1", gpuPlanTestID, true)
@@ -122,7 +139,7 @@ func startGPUPlanMockServer(t *testing.T) (*httptest.Server, func(string)) {
 			mu.Lock()
 			current := name
 			mu.Unlock()
-			testutil.WriteJSONResponse(w, gpuPlanTestReadBody(current))
+			testutil.WriteJSONResponse(w, gpuCatalogTestReadBody(current))
 		case r.Method == http.MethodDelete && r.URL.Path == gpuPath:
 			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
 		default:
@@ -137,7 +154,13 @@ func startGPUPlanMockServer(t *testing.T) (*httptest.Server, func(string)) {
 		mu.Unlock()
 	}
 
-	return server, setName
+	lastCreateBody := func() map[string]any {
+		mu.Lock()
+		defer mu.Unlock()
+		return createBody
+	}
+
+	return server, setName, lastCreateBody
 }
 
 func gpuPlanTestConfig(host, seriesField, name string) string {
@@ -162,7 +185,7 @@ resource "gpcn_gpu" "test" {
 
 func TestGPUResourcePlanRenameWithSeriesCode(t *testing.T) {
 	t.Parallel()
-	server, _ := startGPUPlanMockServer(t)
+	server, _, _ := startGPUPlanMockServer(t)
 
 	seriesField := fmt.Sprintf("series_code = %q\n  sku_code    = %q", gpuPlanTestSeriesCode, gpuPlanTestSkuCode)
 
@@ -200,7 +223,7 @@ func TestGPUResourcePlanRenameWithSeriesCode(t *testing.T) {
 // The test pins the in-place rename path. It does not guard a fix.
 func TestGPUResourcePlanRenameWithSeriesName(t *testing.T) {
 	t.Parallel()
-	server, _ := startGPUPlanMockServer(t)
+	server, _, _ := startGPUPlanMockServer(t)
 
 	seriesField := fmt.Sprintf("series_name = %q", gpuPlanTestSeriesName)
 
@@ -237,7 +260,7 @@ func TestGPUResourcePlanRenameWithSeriesName(t *testing.T) {
 
 func TestGPUResourcePlanDetectsOutOfBandRename(t *testing.T) {
 	t.Parallel()
-	server, setName := startGPUPlanMockServer(t)
+	server, setName, _ := startGPUPlanMockServer(t)
 
 	seriesField := fmt.Sprintf("series_code = %q\n  sku_code    = %q", gpuPlanTestSeriesCode, gpuPlanTestSkuCode)
 	config := gpuPlanTestConfig(server.URL, seriesField, "gpu-plan-a")
@@ -269,41 +292,6 @@ func TestGPUResourcePlanDetectsOutOfBandRename(t *testing.T) {
 	})
 }
 
-const (
-	gpuCatalogTestSeriesID   = "series-a100"
-	gpuCatalogTestSeriesName = "NVIDIA A100 Series"
-	gpuCatalogTestSeriesCode = "nvidia-a100-series"
-	gpuCatalogTestSkuCode    = "gpu_1x_a100"
-)
-
-func gpuCatalogTestInventoryBody() map[string]any {
-	return map[string]any{
-		"success": true,
-		"message": "ok",
-		"data": map[string]any{
-			"series": []map[string]any{{
-				"id":   gpuCatalogTestSeriesID,
-				"name": gpuCatalogTestSeriesName,
-				"code": gpuCatalogTestSeriesCode,
-				"availability": []map[string]any{{
-					"datacenterId":   gpuPlanTestDatacenterID,
-					"datacenterName": "Kansas",
-					"datacenterCode": "kansas",
-					"gpuCounts": []map[string]any{{
-						"count": 1,
-						"specs": map[string]any{"gpuDescription": "1x A100", "vcpu": 8, "memoryGiB": 80, "storageGB": 512},
-						"availableSkus": []map[string]any{{
-							"skuCode":     gpuCatalogTestSkuCode,
-							"description": "std",
-							"specs":       map[string]any{"gpuDescription": "1x A100", "vcpu": 8, "memoryGiB": 80, "storageGB": 512},
-						}},
-					}},
-				}},
-			}},
-		},
-	}
-}
-
 // gpuCatalogTestReadBody answers with the sentinel series the API returns when
 // its own series lookup misses. The state must still carry the code the
 // inventory resolved, so the read echo cannot be the source of that code.
@@ -322,59 +310,12 @@ func gpuCatalogTestReadBody(name string) map[string]any {
 	return body
 }
 
-// startGPUCatalogSeriesMockServer serves an inventory holding the A100 series
-// only. The returned function hands back the body of the create POST, so a test
-// can read the series the provider resolved from the inventory.
-func startGPUCatalogSeriesMockServer(t *testing.T) (*httptest.Server, func() map[string]any) {
-	t.Helper()
-
-	var mu sync.Mutex
-	name := ""
-	var createBody map[string]any
-
-	gpuPath := "/v1/resource/gpu/" + gpuPlanTestID
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/gpu/inventory":
-			testutil.WriteJSONResponse(w, gpuCatalogTestInventoryBody())
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/gpu/":
-			body := testutil.ReadRequestBody(r)
-			mu.Lock()
-			createBody = body
-			name, _ = body["name"].(string)
-			mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", gpuPlanTestID, true)
-		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
-			testutil.HandleJobResponse(w, "job-1", gpuPlanTestID, true)
-		case r.Method == http.MethodGet && r.URL.Path == gpuPath:
-			mu.Lock()
-			current := name
-			mu.Unlock()
-			testutil.WriteJSONResponse(w, gpuCatalogTestReadBody(current))
-		case r.Method == http.MethodDelete && r.URL.Path == gpuPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
-		default:
-			testutil.LogUnexpectedRequest(t, w, r)
-		}
-	}))
-	t.Cleanup(server.Close)
-
-	lastCreateBody := func() map[string]any {
-		mu.Lock()
-		defer mu.Unlock()
-		return createBody
-	}
-
-	return server, lastCreateBody
-}
-
 // A configuration that names a catalog series must reach the API as the series
 // the inventory resolved. The create POST carries the series ID, and the state
 // carries the code, so the test pins both.
 func TestGPUResourcePlanAcceptsCatalogSeriesCode(t *testing.T) {
 	t.Parallel()
-	server, lastCreateBody := startGPUCatalogSeriesMockServer(t)
+	server, _, lastCreateBody := startGPUPlanMockServer(t)
 
 	seriesField := fmt.Sprintf("series_name = %q", gpuCatalogTestSeriesName)
 
