@@ -399,8 +399,10 @@ func TestValidatePublicIpValueMockHTTP(t *testing.T) {
 				t.Errorf("Expected no error but got: %v", err)
 			}
 			if tc.expectError && err != nil {
-				if !strings.Contains(err.Error(), "allocate_public_ip") && !strings.Contains(err.Error(), "allocatePublicIp") {
-					t.Errorf("Expected error to contain validation message, got '%s'", err.Error())
+				// The detail names the schema attribute, not the retired wire key.
+				const expected = "the prospective primary network (first in the list) is of type custom. allocate_public_ip can only be true when the primary network's network_type is standard"
+				if err.Error() != expected {
+					t.Errorf("Expected error '%s', got '%s'", expected, err.Error())
 				}
 			}
 		})

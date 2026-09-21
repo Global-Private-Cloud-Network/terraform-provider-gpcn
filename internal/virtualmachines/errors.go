@@ -42,7 +42,7 @@ const (
 	ErrDetailStoppingVM                = "Error stopping virtual machine with ID %s"
 	ErrDetailStartingVM                = "Error starting virtual machine with ID %s"
 	ErrDetailCannotRemoveLastNetwork   = "unable to remove the last Network attached to a virtual machine"
-	ErrDetailNetworkTypeMustBeStandard = "the prospective primary network (first in the list) is of type custom. The value for allocatePublicIp can only be set to true if the primary network's network_type is standard"
+	ErrDetailNetworkTypeMustBeStandard = "the prospective primary network (first in the list) is of type custom. allocate_public_ip can only be true when the primary network's network_type is standard"
 	ErrDetailFetchUpgradeSizesFailed   = "The provider could not fetch the valid upgrade targets for this Virtual Machine, so it cannot tell whether the size_id change is an in-place upgrade. This error is often transient. Re-run the plan. Underlying error: %s"
 	ErrDetailNoPrimaryNetworkInterface = "No network interface on virtual machine with ID %s is marked primary, so the public IP cannot be changed"
 	ErrDetailVMCreatedAttachFailed     = "virtual machine %s was created and is in state, but attaching %s failed: %s. Terraform has marked the machine tainted: run terraform untaint on it and apply again to attach the remaining networks, or let the next apply replace it."
