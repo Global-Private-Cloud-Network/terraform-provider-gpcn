@@ -28,7 +28,9 @@ func readSegmentIds(ctx context.Context, list types.List) ([]string, diag.Diagno
 // UpdateL2SegmentsIfChanged makes the machine carry the configured segments. It detaches
 // first, because GPCN caps a machine at five interfaces. A swap would otherwise need a
 // free slot the machine does not have. The birth subnet interface is the primary one and
-// is never a candidate: GPCN refuses to detach a primary interface.
+// is never a candidate: GPCN refuses to detach a primary interface. Both halves of the
+// change read the live interface list. State can lag the platform after a failed
+// read-back, and GPCN refuses a second interface on one segment.
 // Returns diagnostics if any errors occurred.
 func UpdateL2SegmentsIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, state, plan ResourceModel) diag.Diagnostics {
 	var diags diag.Diagnostics
@@ -91,6 +93,12 @@ func UpdateL2SegmentsIfChanged(gpcnClient *client.GpcnClient, ctx context.Contex
 	}
 
 	for _, segmentId := range added {
+		if slices.ContainsFunc(networkInterfaces, func(inter networks.ReadVirtualMachineNetworkDataResponseTF) bool {
+			return inter.World.ValueString() == networks.NicWorldL2 &&
+				inter.L2SegmentID.ValueString() == segmentId
+		}) {
+			continue
+		}
 		err = networks.AddL2SegmentInterface(gpcnClient, ctx, vmID, segmentId)
 		if err != nil {
 			diags.AddError(

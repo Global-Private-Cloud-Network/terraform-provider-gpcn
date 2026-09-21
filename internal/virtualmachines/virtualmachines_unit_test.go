@@ -16,6 +16,7 @@ import (
 	"terraform-provider-gpcn/internal/networks"
 	"terraform-provider-gpcn/internal/testutil"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
@@ -1163,6 +1164,103 @@ func TestUpdatePublicIPIfChangedRefusesAnL2PrimaryInterface(t *testing.T) {
 	expectedDetail := fmt.Sprintf(ErrDetailPrimaryInterfaceNotOnAVpc, vmID)
 	if detail != expectedDetail {
 		t.Errorf("Expected the detail '%s', got '%s'", expectedDetail, detail)
+	}
+}
+
+// segmentModelWithIds builds a model that carries the given segment list.
+func segmentModelWithIds(segmentIds ...string) ResourceModel {
+	model := createTestVMModel("test-vm", testVMImage, false)
+	elements := make([]attr.Value, 0, len(segmentIds))
+	for _, segmentId := range segmentIds {
+		elements = append(elements, types.StringValue(segmentId))
+	}
+	model.L2SegmentIds = types.ListValueMust(types.StringType, elements)
+	return model
+}
+
+// l2SegmentNicRows renders a primary VPC interface plus one L2 interface per segment.
+func l2SegmentNicRows(segmentIds ...string) []map[string]any {
+	rows := []map[string]any{{
+		"id": "nic-primary", "networkInterface": 1, "isPrimary": 1,
+		"world": "vpc", "vpcId": "vpc-1", "vpcSubnetId": "subnet-uuid-test",
+	}}
+	for index, segmentId := range segmentIds {
+		rows = append(rows, map[string]any{
+			"id": fmt.Sprintf("nic-%s", segmentId), "networkInterface": index + 2, "isPrimary": 0,
+			"world": "l2", "l2SegmentId": segmentId,
+		})
+	}
+	return rows
+}
+
+// segmentUpdateMockServer answers the interface list with the given rows and records
+// every attach body.
+func segmentUpdateMockServer(t *testing.T, vmID string, rows []map[string]any) (*httptest.Server, *client.GpcnClient, *[]string) {
+	t.Helper()
+
+	attached := []string{}
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/network-interfaces"):
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true, "message": "Network interfaces retrieved", "data": rows,
+				})
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/network-interfaces"):
+				body := testutil.ReadRequestBody(r)
+				segmentId, _ := body["l2SegmentId"].(string)
+				attached = append(attached, segmentId)
+				testutil.HandleCreateJobResponse(w, "job-1", "attach issued")
+			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+				testutil.HandleJobResponse(w, "job-1", "", true)
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+
+	return server, gpcnClient, &attached
+}
+
+// A read-back failure can leave state behind a change the platform already made. The
+// next apply then asks for a segment the machine already carries. GPCN refuses a
+// duplicate interface, so the adds come from the live list and not from state.
+func TestUpdateL2SegmentsIfChangedSkipsASegmentTheMachineCarries(t *testing.T) {
+	const vmID = "vm-live-segments-123"
+
+	server, gpcnClient, attached := segmentUpdateMockServer(t, vmID, l2SegmentNicRows("segment-a", "segment-b"))
+	defer server.Close()
+
+	state := segmentModelWithIds("segment-a")
+	plan := segmentModelWithIds("segment-a", "segment-b")
+
+	diags := UpdateL2SegmentsIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if diags.HasError() {
+		t.Fatalf("Expected no error diagnostic, got %v", diags.Errors())
+	}
+	if len(*attached) != 0 {
+		t.Errorf("Expected no attach call, got %v", *attached)
+	}
+}
+
+// The live list is the only input the adds come from, so a segment the machine lacks
+// must still reach the attach route.
+func TestUpdateL2SegmentsIfChangedAttachesASegmentTheMachineLacks(t *testing.T) {
+	const vmID = "vm-missing-segment-123"
+
+	server, gpcnClient, attached := segmentUpdateMockServer(t, vmID, l2SegmentNicRows("segment-a"))
+	defer server.Close()
+
+	state := segmentModelWithIds("segment-a")
+	plan := segmentModelWithIds("segment-a", "segment-b")
+
+	diags := UpdateL2SegmentsIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if diags.HasError() {
+		t.Fatalf("Expected no error diagnostic, got %v", diags.Errors())
+	}
+	if !slices.Equal(*attached, []string{"segment-b"}) {
+		t.Errorf("Expected exactly one attach of 'segment-b', got %v", *attached)
 	}
 }
 
