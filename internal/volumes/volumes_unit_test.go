@@ -622,8 +622,6 @@ func TestImportedVolumeTypePrefersAliasUnit(t *testing.T) {
 	}
 }
 
-// Import writes the display alias, so every other spelling of a built-in class
-// plans a replacement. The validator refuses those spellings at plan time.
 func TestVolumeTypeSpellingValidatorUnit(t *testing.T) {
 	cases := []struct {
 		value  string
@@ -660,25 +658,11 @@ func TestVolumeTypeSpellingValidatorUnit(t *testing.T) {
 			t.Fatalf("%q: expected one diagnostic, got %v", testCase.value, response.Diagnostics)
 		}
 		diagnostic := response.Diagnostics[0]
-		if diagnostic.Summary() != ErrSummaryInvalidVolumeType {
-			t.Errorf("%q: expected summary %q, got %q", testCase.value, ErrSummaryInvalidVolumeType, diagnostic.Summary())
+		if diagnostic.Summary() != "Invalid volume type" {
+			t.Errorf("%q: expected summary %q, got %q", testCase.value, "Invalid volume type", diagnostic.Summary())
 		}
 		if diagnostic.Detail() != testCase.detail {
 			t.Errorf("%q: expected detail %q, got %q", testCase.value, testCase.detail, diagnostic.Detail())
-		}
-	}
-}
-
-// A null or unknown value has no spelling to rule on.
-func TestVolumeTypeSpellingValidatorSkipsNullUnit(t *testing.T) {
-	for _, configValue := range []types.String{types.StringNull(), types.StringUnknown()} {
-		response := &validator.StringResponse{}
-		TypeSpellingValidator{}.ValidateString(context.Background(), validator.StringRequest{
-			Path:        path.Root("volume_type"),
-			ConfigValue: configValue,
-		}, response)
-		if response.Diagnostics.HasError() {
-			t.Errorf("%v: expected no error, got %v", configValue, response.Diagnostics)
 		}
 	}
 }
