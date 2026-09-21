@@ -1,8 +1,10 @@
 package vpcpublicips
 
 import (
+	"fmt"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -42,6 +44,24 @@ func timestamp(raw string) types.String {
 		return types.StringValue("unknown")
 	}
 	return types.StringValue(parsed.Format(time.RFC850))
+}
+
+// FailedPublicIpWarning reports an address the platform gave up on. The row
+// reads back cleanly, so nothing else in a plan says the address is dead.
+func FailedPublicIpWarning(publicIp *PublicIp) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if publicIp.State != PUBLIC_IP_STATE_FAILED {
+		return diags
+	}
+
+	// The platform can park a row with no reason recorded. A sentence with an
+	// empty clause in it reads as a provider bug.
+	if publicIp.FailureReason == nil || *publicIp.FailureReason == "" {
+		diags.AddWarning(WarnSummaryPublicIpFailed, fmt.Sprintf(WarnDetailPublicIpFailedNoReason, publicIp.Id))
+		return diags
+	}
+	diags.AddWarning(WarnSummaryPublicIpFailed, fmt.Sprintf(WarnDetailPublicIpFailed, publicIp.Id, *publicIp.FailureReason))
+	return diags
 }
 
 // MapPublicIpResponseToModel fills every computed attribute from the listing

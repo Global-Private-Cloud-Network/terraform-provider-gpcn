@@ -29,3 +29,10 @@ const (
 	ErrDetailPublicIpNotFound              = "Public IP not found"
 	ErrDetailPublicIpListingTruncated      = "the public IP listing of VPC '%[2]s' still reported more rows after %[1]d pages, so the address could not be found or ruled out"
 )
+
+// Warning strings for an address the platform parked in the failed state.
+const (
+	WarnSummaryPublicIpFailed        = "Public IP is in the failed state"
+	WarnDetailPublicIpFailed         = "Public IP %s is in the failed state: %s. Release the address and acquire another."
+	WarnDetailPublicIpFailedNoReason = "Public IP %s is in the failed state. Release the address and acquire another."
+)

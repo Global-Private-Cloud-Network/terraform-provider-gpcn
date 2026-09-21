@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +10,11 @@ import (
 	"testing"
 
 	"terraform-provider-gpcn/internal/testutil"
+	"terraform-provider-gpcn/internal/vpcpublicips"
 
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -43,6 +48,10 @@ const (
 	vpcPublicIpPlanTestTimestamp = "2026-01-02T15:04:05Z"
 	// The acquire job carries its own id, so one test can fail it alone.
 	vpcPublicIpPlanTestAcquireJob = "job-acquire"
+	// The provider renders a timestamp in RFC850. The fixture is the rendered
+	// form of vpcPublicIpPlanTestTimestamp.
+	vpcPublicIpPlanTestRFC850        = "Friday, 02-Jan-26 15:04:05 UTC"
+	vpcPublicIpPlanTestFailureReason = "the platform could not reserve an address"
 )
 
 // publicIpPlanTestRow is the mock's copy of the one address row. The tests
@@ -526,6 +535,99 @@ func TestVPCPublicIpResourcePlanKeepsTheIdWhenTheAcquireJobFails(t *testing.T) {
 // checkPublicIpDestroyReleasedTheAddress proves the failed create wrote the id
 // to state. The mock routes the release by that id. A create that keeps the id
 // to itself leaves the destroy nothing to release.
+// The plan harness carries no warning assertion, so Read is driven directly.
+// A warning reaches the operator from the call site only.
+func TestVpcPublicIpReadWarnsOnFailedAddressUnit(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	readInState := func(addressState string, failureReason any) fwresource.ReadResponse {
+		t.Helper()
+
+		_, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+			T: t,
+			Handler: func(w http.ResponseWriter, _ *http.Request) {
+				testutil.WriteJSONResponse(w, publicIpPlanTestListBody([]map[string]any{{
+					"id":                 vpcPublicIpPlanTestID,
+					"ipAddress":          vpcPublicIpPlanTestAddress,
+					"state":              addressState,
+					"failureReason":      failureReason,
+					"virtualMachineId":   nil,
+					"virtualMachineName": nil,
+					"held":               true,
+					"activeJobId":        nil,
+					"createdAt":          vpcPublicIpPlanTestTimestamp,
+					"updatedAt":          vpcPublicIpPlanTestTimestamp,
+				}}))
+			},
+		})
+
+		addressResource := &vpcPublicIpResource{client: gpcnClient}
+
+		var schemaResponse fwresource.SchemaResponse
+		addressResource.Schema(ctx, fwresource.SchemaRequest{}, &schemaResponse)
+
+		priorState := tfsdk.State{Schema: schemaResponse.Schema}
+		diags := priorState.Set(ctx, vpcpublicips.ResourceModel{
+			ID:               types.StringValue(vpcPublicIpPlanTestID),
+			VpcID:            types.StringValue(vpcPublicIpPlanTestVpcID),
+			IPAddress:        types.StringValue(vpcPublicIpPlanTestAddress),
+			State:            types.StringValue("ready"),
+			Held:             types.BoolValue(true),
+			VirtualMachineID: types.StringNull(),
+			FailureReason:    types.StringNull(),
+			CreatedTime:      types.StringValue(vpcPublicIpPlanTestRFC850),
+			LastUpdated:      types.StringValue(vpcPublicIpPlanTestRFC850),
+		})
+		if diags.HasError() {
+			t.Fatalf("failed to build the prior state: %v", diags)
+		}
+
+		readResponse := fwresource.ReadResponse{
+			State: tfsdk.State{Schema: schemaResponse.Schema, Raw: priorState.Raw},
+		}
+		addressResource.Read(ctx, fwresource.ReadRequest{State: priorState}, &readResponse)
+
+		if readResponse.Diagnostics.HasError() {
+			t.Fatalf("Read reported errors: %v", readResponse.Diagnostics.Errors())
+		}
+		return readResponse
+	}
+
+	failed := readInState(vpcpublicips.PUBLIC_IP_STATE_FAILED, vpcPublicIpPlanTestFailureReason)
+	warnings := failed.Diagnostics.Warnings()
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %v, want exactly one", warnings)
+	}
+	if got := warnings[0].Summary(); got != "Public IP is in the failed state" {
+		t.Errorf("summary = %q, want %q", got, "Public IP is in the failed state")
+	}
+	wantDetail := fmt.Sprintf("Public IP %s is in the failed state: %s. Release the address and acquire another.", vpcPublicIpPlanTestID, vpcPublicIpPlanTestFailureReason)
+	if got := warnings[0].Detail(); got != wantDetail {
+		t.Errorf("detail = %q, want %q", got, wantDetail)
+	}
+
+	// The platform can park an address with no reason recorded. A sentence with
+	// an empty clause in it reads as a provider bug.
+	noReason := readInState(vpcpublicips.PUBLIC_IP_STATE_FAILED, nil)
+	noReasonWarnings := noReason.Diagnostics.Warnings()
+	if len(noReasonWarnings) != 1 {
+		t.Fatalf("warnings with no reason = %v, want exactly one", noReasonWarnings)
+	}
+	wantNoReasonDetail := fmt.Sprintf("Public IP %s is in the failed state. Release the address and acquire another.", vpcPublicIpPlanTestID)
+	if got := noReasonWarnings[0].Detail(); got != wantNoReasonDetail {
+		t.Errorf("detail = %q, want %q", got, wantNoReasonDetail)
+	}
+
+	// A ready address must stay silent. Without this drive an unconditional
+	// warning passes every assertion above.
+	ready := readInState(vpcpublicips.PUBLIC_IP_STATE_READY, nil)
+	if quiet := ready.Diagnostics.Warnings(); len(quiet) != 0 {
+		t.Errorf("warnings on a ready address = %v, want none", quiet)
+	}
+}
+
 func checkPublicIpDestroyReleasedTheAddress(row *publicIpPlanTestRow) func(*terraform.State) error {
 	return func(*terraform.State) error {
 		if row.releaseCallCount() == 0 {

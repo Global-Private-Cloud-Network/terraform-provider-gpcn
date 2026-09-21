@@ -192,6 +192,7 @@ func (r *vpcPublicIpResource) Read(ctx context.Context, req resource.ReadRequest
 	}
 
 	state = vpcpublicips.MapPublicIpResponseToModel(publicIp, state)
+	resp.Diagnostics.Append(vpcpublicips.FailedPublicIpWarning(publicIp)...)
 
 	diags = resp.State.Set(ctx, state)
 	resp.Diagnostics.Append(diags...)
