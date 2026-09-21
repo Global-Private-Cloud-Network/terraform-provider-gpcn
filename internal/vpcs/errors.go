@@ -19,6 +19,8 @@ const (
 	ErrSummaryUnableToDeleteVpc       = "Unable to delete GPCN VPC"
 	ErrSummaryInvalidVpcCidr          = "Invalid VPC CIDR"
 	ErrSummaryVpcCidrOverlap          = "VPC CIDR overlaps an existing VPC"
+
+	ErrSummaryInvalidVpcAttribute = "Invalid VPC %s"
 )
 
 // Error detail message templates
@@ -46,6 +48,11 @@ const (
 	ErrDetailVpcCidrPrefixBand = "prefix must be between /16 and /24"
 	ErrDetailVpcCidrNotRfc1918 = "must lie inside an RFC1918 private range (10/8, 172.16/12, 192.168/16)"
 )
+
+// GPCN trims a name and a description before it stores either. A trimmed value
+// never matches the configuration, and the plan never settles. The provider
+// therefore refuses the value instead of trimming it too.
+const ErrDetailVpcSurroundingWhitespace = "%s must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"
 
 // A failed VPC still exists, and destroy is its only exit.
 const (

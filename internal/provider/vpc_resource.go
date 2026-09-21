@@ -56,10 +56,11 @@ func (r *vpcResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"name": schema.StringAttribute{
-				Description: "Human-readable name for the VPC. Must be 1-64 characters and unique within the datacenter",
+				Description: "Human-readable name for the VPC. Must be 1-64 characters with no leading or trailing whitespace, and unique within the datacenter",
 				Required:    true,
 				Validators: []validator.String{
 					stringvalidator.LengthBetween(1, 64),
+					vpcs.NoSurroundingWhitespaceValidator{Attribute: "name"},
 				},
 			},
 			"datacenter_id": schema.StringAttribute{
@@ -80,10 +81,13 @@ func (r *vpcResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"description": schema.StringAttribute{
-				Description: "Additional information about the VPC to provide context for its purpose",
+				Description: "Additional information about the VPC to provide context for its purpose. The value must not start or end with whitespace",
 				Optional:    true,
 				Computed:    true,
 				Default:     stringdefault.StaticString(""),
+				Validators: []validator.String{
+					vpcs.NoSurroundingWhitespaceValidator{Attribute: "description"},
+				},
 			},
 			"dns_nameservers": schema.ListAttribute{
 				Description: "One or two IPv4 DNS servers the guests in the VPC receive. The platform chooses them when the list is omitted. The provider applies them once, at creation, because a provider discards a later change. Changing this value requires replacing the VPC",

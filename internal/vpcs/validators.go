@@ -2,8 +2,10 @@ package vpcs
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
@@ -112,4 +114,36 @@ func isRfc1918(subject cidrRange) bool {
 		}
 	}
 	return false
+}
+
+// NoSurroundingWhitespaceValidator refuses a value GPCN would trim. Attribute
+// names the schema attribute, because the diagnostic has to say which one.
+type NoSurroundingWhitespaceValidator struct {
+	Attribute string
+}
+
+var _ validator.String = NoSurroundingWhitespaceValidator{}
+
+func (v NoSurroundingWhitespaceValidator) Description(_ context.Context) string {
+	return fmt.Sprintf("%s must not start or end with whitespace", v.Attribute)
+}
+
+func (v NoSurroundingWhitespaceValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (v NoSurroundingWhitespaceValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+
+	value := req.ConfigValue.ValueString()
+	if strings.TrimSpace(value) == value {
+		return
+	}
+	resp.Diagnostics.AddAttributeError(
+		req.Path,
+		fmt.Sprintf(ErrSummaryInvalidVpcAttribute, v.Attribute),
+		fmt.Sprintf(ErrDetailVpcSurroundingWhitespace, v.Attribute),
+	)
 }

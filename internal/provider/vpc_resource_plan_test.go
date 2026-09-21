@@ -610,3 +610,31 @@ func TestVpcResourcePlanTreatsDeleteNotFoundAsDone(t *testing.T) {
 		},
 	})
 }
+
+// GPCN trims a name and a description. A value the API would trim comes back
+// different, and the plan never settles, so the plan refuses it first.
+func TestVpcResourcePlanRefusesSurroundingWhitespace(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	paddedDescription := fmt.Sprintf(`
+  name          = "vpc-padded"
+  datacenter_id = %q
+  cidr          = %q
+  description   = "shared "
+`, vpcPlanTestDatacenterID, vpcPlanTestCidr)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      vpcPlanTestConfig(mock.url, " vpc"),
+				ExpectError: regexp.MustCompile(`name must not start or end with whitespace`),
+			},
+			{
+				Config:      vpcPlanTestConfigWith(mock.url, paddedDescription),
+				ExpectError: regexp.MustCompile(`description must not start or end with whitespace`),
+			},
+		},
+	})
+}

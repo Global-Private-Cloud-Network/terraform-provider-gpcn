@@ -2,6 +2,7 @@ package vpcs
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -81,6 +82,80 @@ func TestVpcSuperCidrValidatorSkipsNullAndUnknown(t *testing.T) {
 			SuperCidrValidator{}.ValidateString(
 				context.Background(),
 				validator.StringRequest{Path: path.Root("cidr"), ConfigValue: value},
+				response,
+			)
+			if count := len(response.Diagnostics); count != 0 {
+				t.Fatalf("Expected no diagnostics, got %d: %v", count, response.Diagnostics)
+			}
+		})
+	}
+}
+
+// GPCN trims a name and a description. The validator refuses what GPCN would
+// trim, so the stored value always matches the configuration.
+func TestVpcNoSurroundingWhitespaceValidator(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		attribute string
+		value     string
+		wantError bool
+	}{
+		{name: "clean_name", attribute: "name", value: "vpc-a"},
+		{name: "interior_space", attribute: "name", value: "vpc a"},
+		{name: "empty", attribute: "description", value: ""},
+		{name: "leading_space", attribute: "name", value: " vpc-a", wantError: true},
+		{name: "trailing_space", attribute: "name", value: "vpc-a ", wantError: true},
+		{name: "leading_tab", attribute: "description", value: "\tshared", wantError: true},
+		{name: "trailing_newline", attribute: "description", value: "shared\n", wantError: true},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			response := &validator.StringResponse{}
+			NoSurroundingWhitespaceValidator{Attribute: testCase.attribute}.ValidateString(
+				context.Background(),
+				validator.StringRequest{Path: path.Root(testCase.attribute), ConfigValue: types.StringValue(testCase.value)},
+				response,
+			)
+
+			if !testCase.wantError {
+				if response.Diagnostics.HasError() {
+					t.Fatalf("Expected %q to validate, got %v", testCase.value, response.Diagnostics)
+				}
+				return
+			}
+
+			if count := len(response.Diagnostics); count != 1 {
+				t.Fatalf("Expected 1 diagnostic for %q, got %d: %v", testCase.value, count, response.Diagnostics)
+			}
+			wantSummary := fmt.Sprintf(ErrSummaryInvalidVpcAttribute, testCase.attribute)
+			if got := response.Diagnostics[0].Summary(); got != wantSummary {
+				t.Errorf("Summary = %q, want %q", got, wantSummary)
+			}
+			wantDetail := testCase.attribute + " must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"
+			if got := response.Diagnostics[0].Detail(); got != wantDetail {
+				t.Errorf("Detail = %q, want %q", got, wantDetail)
+			}
+		})
+	}
+}
+
+// A null or unknown value belongs to the framework, not to the API rules.
+func TestVpcNoSurroundingWhitespaceValidatorSkipsNullAndUnknown(t *testing.T) {
+	t.Parallel()
+
+	for name, value := range map[string]types.String{"null": types.StringNull(), "unknown": types.StringUnknown()} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			response := &validator.StringResponse{}
+			NoSurroundingWhitespaceValidator{Attribute: "name"}.ValidateString(
+				context.Background(),
+				validator.StringRequest{Path: path.Root("name"), ConfigValue: value},
 				response,
 			)
 			if count := len(response.Diagnostics); count != 0 {
