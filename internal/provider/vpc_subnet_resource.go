@@ -114,9 +114,6 @@ func (r *vpcSubnetResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 			"attached_nic_count": schema.Int64Attribute{
 				Description: "The number of live network interfaces attached to this subnet. GPCN refuses to delete a subnet while this count is above zero",
 				Computed:    true,
-				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.UseStateForUnknown(),
-				},
 			},
 			"failure_reason": schema.StringAttribute{
 				Description: "Why the last operation on the subnet failed, or null when none has",

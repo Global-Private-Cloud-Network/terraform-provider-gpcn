@@ -53,6 +53,7 @@ type nsgPlanTestServerState struct {
 	lastRulesPut map[string]any
 	rulesPuts    int
 	renamePuts   int
+	subnetCount  int64
 	refuseDelete bool
 	// missingOnDelete answers the DELETE with a 404. A group another operator
 	// already removed gives that answer.
@@ -84,7 +85,7 @@ func (s *nsgPlanTestServerState) detail() map[string]any {
 			"state":         "ready",
 			"failureReason": nil,
 			"ruleCount":     len(s.rules),
-			"subnetCount":   0,
+			"subnetCount":   s.subnetCount,
 			"activeJobId":   nil,
 			"createdAt":     nsgPlanTestTimestamp,
 			"updatedAt":     nsgPlanTestTimestamp,
@@ -420,6 +421,35 @@ func TestVpcNsgResourcePlanTreatsMissingNsgAsDeleted(t *testing.T) {
 				},
 				Config:  config,
 				Destroy: true,
+			},
+		},
+	})
+}
+
+// A subnet can bind to the group between the refresh and the apply. The bound
+// census is a live counter, so the apply writes the fresher number.
+func TestVpcNsgResourcePlanAcceptsMovedSubnetCount(t *testing.T) {
+	t.Parallel()
+	server, state := startNsgPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: nsgPlanTestConfig(server.URL, "nsg-plan-a", nsgPlanTestRuleHTTPS),
+				Check:  resource.TestCheckResourceAttr(gpcnVpcNsgTest, "subnet_count", "0"),
+			},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					state.subnetCount = 3
+				},
+				Config: nsgPlanTestConfig(server.URL, "nsg-plan-b", nsgPlanTestRuleHTTPS),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "name", "nsg-plan-b"),
+					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "subnet_count", "3"),
+				),
 			},
 		},
 	})

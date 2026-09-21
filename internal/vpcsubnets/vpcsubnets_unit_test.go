@@ -329,10 +329,9 @@ func TestSubnetFailedWarningSilentWhenReadyUnit(t *testing.T) {
 	}
 }
 
-// The plan pins attached_nic_count to the prior state. An Update that wrote a
-// fresher census would end the apply with an inconsistent result. The mapper
-// must leave a count the caller already holds.
-func TestMapSubnetResponseToModelKeepsPlannedNicCountUnit(t *testing.T) {
+// The NIC census is a live counter. Read and Update both write what the API
+// reports, because the attribute carries no plan modifier and plans unknown.
+func TestMapSubnetResponseToModelWritesFreshNicCountUnit(t *testing.T) {
 	t.Parallel()
 
 	response := unitTestApiSubnet()
@@ -346,23 +345,7 @@ func TestMapSubnetResponseToModelKeepsPlannedNicCountUnit(t *testing.T) {
 		AttachedNicCount: types.Int64Value(0),
 	})
 
-	if got := model.AttachedNicCount.ValueInt64(); got != 0 {
-		t.Errorf("expected the planned attached_nic_count 0 to survive the mapper, got %d", got)
-	}
-}
-
-// Read is where a fresher census belongs. A reconciled count destroys nothing.
-func TestRefreshSubnetModelFromResponseUpdatesNicCountUnit(t *testing.T) {
-	t.Parallel()
-
-	response := unitTestApiSubnet()
-	response.AttachedNicCount = 7
-
-	model := RefreshSubnetModelFromResponse(response, ResourceModel{
-		AttachedNicCount: types.Int64Value(0),
-	})
-
 	if got := model.AttachedNicCount.ValueInt64(); got != 7 {
-		t.Errorf("expected the refreshed attached_nic_count 7, got %d", got)
+		t.Errorf("expected the fresh attached_nic_count 7, got %d", got)
 	}
 }

@@ -49,10 +49,6 @@ func isUnset(value types.String) bool {
 	return value.IsNull() || value.IsUnknown()
 }
 
-func isUnsetInt64(value types.Int64) bool {
-	return value.IsNull() || value.IsUnknown()
-}
-
 // SubnetFailedWarning reports a carve the platform gave up on. The row reads
 // back cleanly, so the apply says nothing. The operator then holds a subnet
 // that carries no network.
@@ -72,13 +68,12 @@ func SubnetFailedWarning(response *ApiSubnet) diag.Diagnostics {
 
 // MapSubnetResponseToModel writes the Computed attributes and fills the
 // configurable ones only when the caller chose no value, which is what an
-// import and a Create both leave behind. A configured CIDR must survive:
-// reconciling a drifted one would destroy a subnet that can hold live
-// interfaces. The NIC census is held the same way. Its plan value comes from
-// the prior state, so an Update that wrote a fresher count breaks the apply.
+// import and a Create both leave behind. A configured CIDR must survive.
+// Reconciling a drifted one destroys a subnet that can hold live interfaces.
 func MapSubnetResponseToModel(response *ApiSubnet, model ResourceModel) ResourceModel {
 	model.ID = types.StringValue(response.ID)
 	model.State = types.StringValue(response.State)
+	model.AttachedNicCount = types.Int64Value(response.AttachedNicCount)
 	model.NsgName = optionalString(response.NsgName)
 	model.FailureReason = optionalString(response.FailureReason)
 	model.CreatedTime = formatTimestamp(response.CreatedAt)
@@ -102,18 +97,14 @@ func MapSubnetResponseToModel(response *ApiSubnet, model ResourceModel) Resource
 	if isUnset(model.NsgID) {
 		model.NsgID = types.StringValue(response.NsgID)
 	}
-	if isUnsetInt64(model.AttachedNicCount) {
-		model.AttachedNicCount = types.Int64Value(response.AttachedNicCount)
-	}
 
 	return model
 }
 
 // RefreshSubnetModelFromResponse shows the changes Terraform reconciles in
-// place: a rename, a rebind to another group, and the NIC census. The CIDR is
-// the allocator's reservation and the prefix is request-only, so neither
-// refreshes. Read calls this after the mapper; Create and Update keep the
-// planned values.
+// place: a rename and a rebind to another group. The CIDR is the allocator's
+// reservation and the prefix is request-only, so neither refreshes. Read calls
+// this after the mapper. Create and Update keep the planned values.
 func RefreshSubnetModelFromResponse(response *ApiSubnet, model ResourceModel) ResourceModel {
 	if response.Name != "" {
 		model.Name = types.StringValue(response.Name)
@@ -121,6 +112,5 @@ func RefreshSubnetModelFromResponse(response *ApiSubnet, model ResourceModel) Re
 	if response.NsgID != "" {
 		model.NsgID = types.StringValue(response.NsgID)
 	}
-	model.AttachedNicCount = types.Int64Value(response.AttachedNicCount)
 	return model
 }

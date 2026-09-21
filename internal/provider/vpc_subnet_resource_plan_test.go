@@ -391,10 +391,10 @@ func TestVpcSubnetResourcePlanCarvesFromPrefix(t *testing.T) {
 	})
 }
 
-// A NIC can attach between the refresh and the apply. The plan pins the census
-// to the value the refresh saw. An Update that wrote the fresher count would
-// end the apply with a result the plan does not allow.
-func TestVpcSubnetResourcePlanKeepsNicCountThroughRename(t *testing.T) {
+// A NIC can attach between the refresh and the apply. The census is a live
+// counter, so the apply writes the fresher number. A plan that pinned the old
+// one would end the apply with a result the plan does not allow.
+func TestVpcSubnetResourcePlanAcceptsMovedNicCount(t *testing.T) {
 	t.Parallel()
 	server, state := startSubnetPlanMockServer(t)
 
@@ -414,12 +414,13 @@ func TestVpcSubnetResourcePlanKeepsNicCountThroughRename(t *testing.T) {
 				Config: subnetPlanTestConfig(server.URL, "subnet-plan-b", ""),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "name", "subnet-plan-b"),
-					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "attached_nic_count", "0"),
+					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "attached_nic_count", "7"),
 				),
 			},
 			{
-				Config: subnetPlanTestConfig(server.URL, "subnet-plan-b", ""),
-				Check:  resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "attached_nic_count", "7"),
+				Config:             subnetPlanTestConfig(server.URL, "subnet-plan-b", ""),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
 			},
 		},
 	})
