@@ -47,13 +47,17 @@ func newVolumeResponse(id, name string, sizeGb int64, skuId string) *readVolumes
 }
 
 func newVolumeSizesResponse(datacenterID string, sizes []volumeSizesDataVolumeTypesAvailableSizesResponse) volumeSizesResponse {
+	return newVolumeSizesResponseForCode(datacenterID, "vol-add-ssd", sizes)
+}
+
+func newVolumeSizesResponseForCode(datacenterID, componentCode string, sizes []volumeSizesDataVolumeTypesAvailableSizesResponse) volumeSizesResponse {
 	return volumeSizesResponse{
 		Success: true,
 		Message: "Volume sizes retrieved",
 		Data: volumeSizesDataResponse{
 			DatacenterId: datacenterID,
 			VolumeTypes: []volumeSizesDataVolumeTypesResponse{{
-				ComponentCode:  "vol-add-ssd",
+				ComponentCode:  componentCode,
 				AvailableSizes: sizes,
 			}},
 		},
@@ -310,6 +314,75 @@ func TestUpdateVolumeMockHTTP(t *testing.T) {
 	}
 }
 
+// A resize looks the size up by component code. A datacenter that offers only a
+// raw code rejects the display name, so a volume configured by code cannot grow
+// unless the lookup receives the code the API published.
+func TestUpdateVolumeLooksUpSkuByComponentCodeMockHTTP(t *testing.T) {
+	const (
+		componentCode = "vol-add-ultra"
+		volumeID      = "volume-update-ultra"
+		newSizeGb     = int64(512)
+		skuId         = "sku-ultra-512"
+	)
+
+	var volumeSizesCalled, updateCalled bool
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/data-centers/") && strings.HasSuffix(r.URL.Path, "/volume-sizes"):
+				volumeSizesCalled = true
+				testutil.WriteJSONResponse(w, newVolumeSizesResponseForCode(testDatacenterID, componentCode, []volumeSizesDataVolumeTypesAvailableSizesResponse{
+					{SkuId: skuId, SizeGb: newSizeGb},
+				}))
+
+			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+volumeID+"/resize"):
+				updateCalled = true
+				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
+					Success: true,
+					Message: "Volume resize job started",
+					Data:    client.JobResponse{JobID: "job-ultra"},
+				})
+
+			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, "job-ultra", volumeID, true)
+
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID):
+				response := newVolumeResponse(volumeID, "ultra-volume", newSizeGb, skuId)
+				response.Data.VolumeType.Code = componentCode
+				response.Data.VolumeType.Name = "ULTRA"
+				testutil.WriteJSONResponse(w, response)
+
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	model := createTestVolumeModel("ultra-volume", componentCode, newSizeGb)
+	model.ID = types.StringValue(volumeID)
+
+	response, err := UpdateVolume(gpcnClient, context.Background(), volumeID, model)
+	if err != nil {
+		t.Fatalf("UpdateVolume failed: %v", err)
+	}
+	if response == nil {
+		t.Fatal("Expected response, got nil")
+		return
+	}
+	if response.Data.VolumeType.Code != componentCode {
+		t.Errorf("Expected VolumeType.Code '%s', got '%s'", componentCode, response.Data.VolumeType.Code)
+	}
+	if !volumeSizesCalled {
+		t.Error("Expected volume sizes endpoint to be called")
+	}
+	if !updateCalled {
+		t.Error("Expected resize endpoint to be called")
+	}
+}
+
 func TestGetVolumeSkuIdMockHTTP(t *testing.T) {
 	const (
 		componentCode = "vol-add-ssd"
@@ -420,6 +493,8 @@ func TestCanonicalVolumeTypeAcceptsCodesAndNamesUnit(t *testing.T) {
 		}
 	})
 
+	// An empty code always arrives with the name "Unknown", so the last case is the
+	// degraded volume. Its import value is one the schema refuses.
 	t.Run("import_prefers_a_known_name_then_the_code", func(t *testing.T) {
 		cases := []struct {
 			name     string
@@ -430,7 +505,7 @@ func TestCanonicalVolumeTypeAcceptsCodesAndNamesUnit(t *testing.T) {
 			{name: "nvme", code: "vol-add-nvme", expected: "NVMe"},
 			{name: "Unknown", code: "vol-add-ultra", expected: "vol-add-ultra"},
 			{name: "ULTRA", code: "vol-add-ultra", expected: "vol-add-ultra"},
-			{name: "Ultra-NVMe", code: "", expected: "Ultra-NVMe"},
+			{name: "Unknown", code: "", expected: "Unknown"},
 		}
 		for _, testCase := range cases {
 			response := newVolumeResponse("volume-123", "imported-volume", 256, "sku-uuid-10")
