@@ -24,6 +24,7 @@ var (
 	_ resource.Resource                = &vpcNsgResource{}
 	_ resource.ResourceWithConfigure   = &vpcNsgResource{}
 	_ resource.ResourceWithImportState = &vpcNsgResource{}
+	_ resource.ResourceWithModifyPlan  = &vpcNsgResource{}
 )
 
 // NewVpcNsgResource is a helper function to simplify the provider implementation.
@@ -300,7 +301,6 @@ func (r *vpcNsgResource) Update(ctx context.Context, req resource.UpdateRequest,
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		resp.Diagnostics.Append(vpcnsgs.DefaultNsgRulesWarning(state.IsDefault.ValueBool(), nsgID)...)
 		if err := vpcnsgs.ReplaceNsgRules(r.client, ctx, vpcID, nsgID, rules); err != nil {
 			resp.Diagnostics.AddError(
 				vpcnsgs.ErrSummaryUnableToUpdateNsg,
@@ -374,4 +374,31 @@ func (r *vpcNsgResource) ImportState(ctx context.Context, req resource.ImportSta
 
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("vpc_id"), parts[0])...)
 	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), parts[1])...)
+}
+
+// ModifyPlan warns before the operator approves a rules replace against the
+// VPC's own default group. After the apply is approved the warning is a record
+// rather than a chance to stop.
+func (r *vpcNsgResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	// A create carries no prior state, and a destroy carries no plan. Neither
+	// replaces a rule set.
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var state vpcnsgs.ResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	var plan vpcnsgs.ResourceModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if !plan.Rules.Equal(state.Rules) {
+		resp.Diagnostics.Append(vpcnsgs.DefaultNsgRulesWarning(state.IsDefault.ValueBool(), state.ID.ValueString())...)
+	}
 }

@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,11 @@ import (
 	"testing"
 
 	"terraform-provider-gpcn/internal/testutil"
+	"terraform-provider-gpcn/internal/vpcnsgs"
+
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
@@ -583,4 +589,95 @@ func TestVpcNsgResourcePlanRefreshesDescription(t *testing.T) {
 			},
 		},
 	})
+}
+
+// The plan harness carries no warning assertion, so ModifyPlan is driven
+// directly. The warning tells the operator what a replace costs while the plan
+// can still be refused.
+func TestVpcNsgModifyPlanWarnsBeforeReplacingDefaultRulesUnit(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	groupResource := &vpcNsgResource{}
+
+	var schemaResponse fwresource.SchemaResponse
+	groupResource.Schema(ctx, fwresource.SchemaRequest{}, &schemaResponse)
+
+	ruleSet := func(remoteCidr string) types.Set {
+		set, diags := types.SetValueFrom(ctx, vpcnsgs.RuleObjectType(), []vpcnsgs.RuleModel{{
+			Direction:    types.StringValue("ingress"),
+			Protocol:     types.StringValue("tcp"),
+			PortRangeMin: types.Int64Value(443),
+			PortRangeMax: types.Int64Value(443),
+			RemoteCidr:   types.StringValue(remoteCidr),
+			Description:  types.StringNull(),
+		}})
+		if diags.HasError() {
+			t.Fatalf("failed to build the rule set: %v", diags)
+		}
+		return set
+	}
+
+	model := func(isDefault bool, rules types.Set) vpcnsgs.ResourceModel {
+		return vpcnsgs.ResourceModel{
+			ID:            types.StringValue(nsgPlanTestID),
+			VpcID:         types.StringValue(nsgPlanTestVpcID),
+			Name:          types.StringValue("nsg-plan-a"),
+			Description:   types.StringValue(""),
+			Rules:         rules,
+			IsDefault:     types.BoolValue(isDefault),
+			State:         types.StringValue("ready"),
+			FailureReason: types.StringNull(),
+			RuleCount:     types.Int64Value(1),
+			SubnetCount:   types.Int64Value(0),
+			CreatedTime:   types.StringValue("Friday, 02-Jan-26 15:04:05 UTC"),
+			LastUpdated:   types.StringValue("Friday, 02-Jan-26 15:04:05 UTC"),
+		}
+	}
+
+	modifyPlan := func(isDefault bool, stateRules, planRules types.Set) fwresource.ModifyPlanResponse {
+		t.Helper()
+
+		priorState := tfsdk.State{Schema: schemaResponse.Schema}
+		diags := priorState.Set(ctx, model(isDefault, stateRules))
+		if diags.HasError() {
+			t.Fatalf("failed to build the prior state: %v", diags)
+		}
+
+		plan := tfsdk.Plan{Schema: schemaResponse.Schema}
+		diags = plan.Set(ctx, model(isDefault, planRules))
+		if diags.HasError() {
+			t.Fatalf("failed to build the plan: %v", diags)
+		}
+
+		response := fwresource.ModifyPlanResponse{Plan: plan}
+		groupResource.ModifyPlan(ctx, fwresource.ModifyPlanRequest{State: priorState, Plan: plan}, &response)
+		if response.Diagnostics.HasError() {
+			t.Fatalf("ModifyPlan reported errors: %v", response.Diagnostics.Errors())
+		}
+		return response
+	}
+
+	changed := modifyPlan(true, ruleSet("0.0.0.0/0"), ruleSet("10.60.0.0/16"))
+	warnings := changed.Diagnostics.Warnings()
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %v, want exactly one", warnings)
+	}
+	if got := warnings[0].Summary(); got != "Replacing the rules of the VPC default security group" {
+		t.Errorf("summary = %q, want %q", got, "Replacing the rules of the VPC default security group")
+	}
+	wantDetail := fmt.Sprintf(vpcnsgs.WarnDetailDefaultNsgRulesReplaced, nsgPlanTestID)
+	if got := warnings[0].Detail(); got != wantDetail {
+		t.Errorf("detail = %q, want %q", got, wantDetail)
+	}
+
+	unchanged := modifyPlan(true, ruleSet("0.0.0.0/0"), ruleSet("0.0.0.0/0"))
+	if got := unchanged.Diagnostics.WarningsCount(); got != 0 {
+		t.Errorf("warnings for an unchanged default group = %d, want 0", got)
+	}
+
+	ordinary := modifyPlan(false, ruleSet("0.0.0.0/0"), ruleSet("10.60.0.0/16"))
+	if got := ordinary.Diagnostics.WarningsCount(); got != 0 {
+		t.Errorf("warnings for an ordinary group = %d, want 0", got)
+	}
 }
