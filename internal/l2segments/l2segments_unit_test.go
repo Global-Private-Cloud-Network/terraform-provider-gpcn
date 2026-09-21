@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -337,5 +338,38 @@ func TestL2SegmentFailedWarningWithoutReasonUnit(t *testing.T) {
 	wantDetail := "L2 segment " + unitTestSegmentID + " is in the failed state. Destroy the segment and create it again."
 	if got := warning.Detail(); got != wantDetail {
 		t.Errorf("detail = %q, want %q", got, wantDetail)
+	}
+}
+
+// A completed job that names no segment leaves nothing to read back. The GET
+// would then ask for the collection and map a listing over one segment.
+func TestCreateL2SegmentRejectsJobWithoutSegmentIDUnit(t *testing.T) {
+	t.Parallel()
+
+	_, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && r.URL.Path == BASE_URL_V1:
+				testutil.HandleCreateJobResponse(w, "job-create", "Operation initiated successfully")
+			case r.Method == http.MethodPost && r.URL.Path == client.JOBS_BASE_URL_V1:
+				testutil.HandleJobResponse(w, "job-create", "", true)
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			}
+		},
+	})
+
+	_, err := CreateL2Segment(gpcnClient, context.Background(), ResourceModel{
+		Name:         types.StringValue("segment-a"),
+		DatacenterId: types.StringValue(unitTestDatacenterID),
+		Description:  types.StringValue(""),
+	})
+
+	if err == nil {
+		t.Fatalf("expected an error, got none")
+	}
+	if err.Error() != ErrDetailNoSegmentIDInJob {
+		t.Errorf("error = %q, want %q", err.Error(), ErrDetailNoSegmentIDInJob)
 	}
 }

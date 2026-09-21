@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -8,7 +9,12 @@ import (
 	"sync"
 	"testing"
 
+	"terraform-provider-gpcn/internal/l2segments"
 	"terraform-provider-gpcn/internal/testutil"
+
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
@@ -19,6 +25,7 @@ const (
 	gpcnL2SegmentTest      = "gpcn_l2_segment.test"
 	l2PlanTestSegmentID    = "seg-1"
 	l2PlanTestDatacenterID = "dc-1"
+	l2PlanTestOtherDCID    = "dc-2"
 	l2PlanTestTimestamp    = "2026-01-02T15:04:05Z"
 	l2PlanTestRFC850       = "Friday, 02-Jan-26 15:04:05 UTC"
 	l2PlanTestName         = "segment-plan-a"
@@ -177,6 +184,10 @@ func startL2SegmentPlanMockServer(t *testing.T) (*httptest.Server, *l2PlanTestSe
 }
 
 func l2PlanTestConfig(host, name string) string {
+	return l2PlanTestConfigInDatacenter(host, name, l2PlanTestDatacenterID)
+}
+
+func l2PlanTestConfigInDatacenter(host, name, datacenterID string) string {
 	return fmt.Sprintf(`
 provider "gpcn" {
   host    = %q
@@ -187,7 +198,7 @@ resource "gpcn_l2_segment" "test" {
   name          = %q
   datacenter_id = %q
 }
-`, host, name, l2PlanTestDatacenterID)
+`, host, name, datacenterID)
 }
 
 // The segment is created from a job that names it only once it completes, read
@@ -349,6 +360,98 @@ func TestL2SegmentResourcePlanKeepsFailedSegmentInState(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnL2SegmentTest, "state", l2PlanTestFailedState),
 					resource.TestCheckResourceAttr(gpcnL2SegmentTest, "failure_reason", l2PlanTestFailedReason),
+				),
+			},
+		},
+	})
+}
+
+// The plan harness carries no warning assertion, so Read is driven directly. A
+// test on the constructor alone leaves the call site unguarded.
+func TestL2SegmentReadWarnsOnFailedSegmentUnit(t *testing.T) {
+	t.Parallel()
+
+	_, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, _ *http.Request) {
+			testutil.WriteJSONResponse(w, l2PlanTestDetailBodyInState(
+				l2PlanTestName, nil, l2PlanTestFailedState, l2PlanTestFailedReason,
+			))
+		},
+	})
+
+	ctx := context.Background()
+	segmentResource := &l2SegmentResource{client: gpcnClient}
+
+	var schemaResponse fwresource.SchemaResponse
+	segmentResource.Schema(ctx, fwresource.SchemaRequest{}, &schemaResponse)
+
+	priorState := tfsdk.State{Schema: schemaResponse.Schema}
+	diags := priorState.Set(ctx, l2segments.ResourceModel{
+		ID:               types.StringValue(l2PlanTestSegmentID),
+		Name:             types.StringValue(l2PlanTestName),
+		DatacenterId:     types.StringValue(l2PlanTestDatacenterID),
+		Description:      types.StringValue(""),
+		State:            types.StringValue("ready"),
+		Offering:         types.StringValue("plain"),
+		FailureReason:    types.StringNull(),
+		DatacenterName:   types.StringNull(),
+		AttachedNicCount: types.Int64Value(0),
+		CreatedTime:      types.StringValue(l2PlanTestRFC850),
+		LastUpdated:      types.StringValue(l2PlanTestRFC850),
+	})
+	if diags.HasError() {
+		t.Fatalf("failed to build the prior state: %v", diags)
+	}
+
+	readResponse := fwresource.ReadResponse{
+		State: tfsdk.State{Schema: schemaResponse.Schema, Raw: priorState.Raw},
+	}
+	segmentResource.Read(ctx, fwresource.ReadRequest{State: priorState}, &readResponse)
+
+	if readResponse.Diagnostics.HasError() {
+		t.Fatalf("Read reported errors: %v", readResponse.Diagnostics.Errors())
+	}
+
+	warnings := readResponse.Diagnostics.Warnings()
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %v, want exactly one", warnings)
+	}
+	if got := warnings[0].Summary(); got != l2segments.WarnSummaryL2SegmentFailed {
+		t.Errorf("summary = %q, want %q", got, l2segments.WarnSummaryL2SegmentFailed)
+	}
+	wantDetail := fmt.Sprintf(l2segments.WarnDetailL2SegmentFailed, l2PlanTestSegmentID, l2PlanTestFailedReason)
+	if got := warnings[0].Detail(); got != wantDetail {
+		t.Errorf("detail = %q, want %q", got, wantDetail)
+	}
+}
+
+// A segment is pinned to one datacenter. The platform has no verb that moves it,
+// so a new datacenter is a new segment.
+func TestL2SegmentResourcePlanReplacesOnDatacenterChange(t *testing.T) {
+	t.Parallel()
+	server, _ := startL2SegmentPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: l2PlanTestConfigInDatacenter(server.URL, l2PlanTestName, l2PlanTestDatacenterID),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnL2SegmentTest, plancheck.ResourceActionCreate),
+					},
+				},
+			},
+			{
+				Config: l2PlanTestConfigInDatacenter(server.URL, l2PlanTestName, l2PlanTestOtherDCID),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnL2SegmentTest, plancheck.ResourceActionDestroyBeforeCreate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnL2SegmentTest, "datacenter_id", l2PlanTestOtherDCID),
 				),
 			},
 		},
