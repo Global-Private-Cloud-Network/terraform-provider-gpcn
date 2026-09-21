@@ -716,3 +716,33 @@ func TestVpcResourcePlanRemovesAVanishedVpcFromState(t *testing.T) {
 		},
 	})
 }
+
+// The API takes one or two distinct resolvers. A plan that accepts a third,
+// or a repeat, teaches the rule one failed apply at a time.
+func TestVpcResourcePlanRefusesAnIllegalNameserverList(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	withNameservers := func(nameservers string) string {
+		return vpcPlanTestConfigWith(mock.url, fmt.Sprintf(`
+  name            = "vpc-dns-rules"
+  datacenter_id   = %q
+  cidr            = %q
+  dns_nameservers = %s
+`, vpcPlanTestDatacenterID, vpcPlanTestCidr, nameservers))
+	}
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      withNameservers(`["9.9.9.9", "8.8.8.8", "1.1.1.1"]`),
+				ExpectError: regexp.MustCompile(`at most 2\s+elements`),
+			},
+			{
+				Config:      withNameservers(`["9.9.9.9", "9.9.9.9"]`),
+				ExpectError: regexp.MustCompile(`contains duplicate values of`),
+			},
+		},
+	})
+}
