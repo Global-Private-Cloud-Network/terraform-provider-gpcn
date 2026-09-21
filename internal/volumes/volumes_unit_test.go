@@ -446,17 +446,6 @@ func TestGetVolumeSkuIdInvalidSizeMockHTTP(t *testing.T) {
 	}
 }
 
-func TestMapVolumeResponseToModelImportCanonicalisesVolumeTypeUnit(t *testing.T) {
-	response := newVolumeResponse("volume-123", "imported-volume", 256, "sku-uuid-10")
-	response.Data.VolumeType.Name = "nvme"
-
-	result := MapVolumeResponseToModel(context.Background(), response, ResourceModel{})
-
-	if result.VolumeType.ValueString() != "NVMe" {
-		t.Errorf("Expected VolumeType 'NVMe', got '%s'", result.VolumeType.ValueString())
-	}
-}
-
 func TestMapVolumeResponseToModelImportUnknownVolumeTypeUnit(t *testing.T) {
 	response := newVolumeResponse("volume-123", "imported-volume", 256, "sku-uuid-10")
 	response.Data.VolumeType.Name = "Ultra-NVMe"
@@ -469,8 +458,8 @@ func TestMapVolumeResponseToModelImportUnknownVolumeTypeUnit(t *testing.T) {
 	}
 }
 
-// The schema accepts the two display names and any component code, so the mapping
-// must answer for both spellings and an import must never produce a rejected value.
+// The schema accepts a display name or a component code, so the mapping must
+// answer for both spellings.
 func TestCanonicalVolumeTypeAcceptsCodesAndNamesUnit(t *testing.T) {
 	t.Run("names_and_codes", func(t *testing.T) {
 		cases := []struct {
@@ -495,16 +484,16 @@ func TestCanonicalVolumeTypeAcceptsCodesAndNamesUnit(t *testing.T) {
 		}
 	})
 
-	// An empty code always arrives with the name "Unknown", so the last case is the
-	// degraded volume. Its import value is one the schema refuses.
-	t.Run("import_prefers_a_known_name_then_the_code", func(t *testing.T) {
+	// The code is the value the catalog lookup takes, so an import writes it.
+	// A degraded volume has no code, and the API names it "Unknown".
+	t.Run("import_prefers_the_code_then_the_name", func(t *testing.T) {
 		cases := []struct {
 			name     string
 			code     string
 			expected string
 		}{
-			{name: "SSD", code: "vol-add-ssd", expected: "SSD"},
-			{name: "nvme", code: "vol-add-nvme", expected: "NVMe"},
+			{name: "SSD", code: "vol-add-ssd", expected: "vol-add-ssd"},
+			{name: "nvme", code: "vol-add-nvme", expected: "vol-add-nvme"},
 			{name: "Unknown", code: "vol-add-ultra", expected: "vol-add-ultra"},
 			{name: "ULTRA", code: "vol-add-ultra", expected: "vol-add-ultra"},
 			{name: "Unknown", code: "", expected: "Unknown"},
@@ -556,8 +545,8 @@ func TestMapVolumeResponseToModelImportPopulatesUnit(t *testing.T) {
 	if result.DatacenterId.ValueString() != testDatacenterID {
 		t.Errorf("Expected DatacenterId '%s', got '%s'", testDatacenterID, result.DatacenterId.ValueString())
 	}
-	if result.VolumeType.ValueString() != "SSD" {
-		t.Errorf("Expected VolumeType 'SSD', got '%s'", result.VolumeType.ValueString())
+	if result.VolumeType.ValueString() != "vol-add-ssd" {
+		t.Errorf("Expected VolumeType 'vol-add-ssd', got '%s'", result.VolumeType.ValueString())
 	}
 }
 

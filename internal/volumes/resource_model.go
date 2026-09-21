@@ -83,19 +83,14 @@ func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel
 	return model
 }
 
-// The schema accepts a display name only for the aliases the provider knows.
-// The API names every other storage class after its code.
-// A degraded volume has no code, and the name "Unknown" is a value the schema refuses.
+// The code is the value the catalog lookup takes, so an import writes it.
+// A volume whose SKU the platform cannot resolve has no code and is named "Unknown".
 func importedVolumeType(volumeType volumeTypeResponse) types.String {
-	canonical := canonicalVolumeType(volumeType.Name)
-	if _, known := volumeTypeMapping[canonical]; known {
-		return types.StringValue(canonical)
-	}
 	if volumeType.Code != "" {
 		return types.StringValue(volumeType.Code)
 	}
-	if canonical != "" {
-		return types.StringValue(canonical)
+	if volumeType.Name != "" {
+		return types.StringValue(volumeType.Name)
 	}
 	return types.StringNull()
 }

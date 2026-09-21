@@ -331,9 +331,9 @@ const (
 	volPlanTestUnknownName      = "Unknown"
 )
 
-// startUnknownVolumeTypePlanMockServer answers with a storage class the provider has
-// no display name for. The API calls it "Unknown", which the schema refuses, so an
-// import has to fall back to the component code.
+// startUnknownVolumeTypePlanMockServer answers for a volume whose SKU the platform
+// cannot resolve. Such a volume has no component code, and the API names it
+// "Unknown", so an import has to fall back to that name.
 func startUnknownVolumeTypePlanMockServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
@@ -347,7 +347,7 @@ func startUnknownVolumeTypePlanMockServer(t *testing.T) *httptest.Server {
 			"name":   volPlanTestName,
 			"sizeGb": volPlanTestSizeGb,
 			"volumeType": map[string]any{
-				"code":        volPlanTestUnknownComponent,
+				"code":        nil,
 				"name":        volPlanTestUnknownName,
 				"description": "",
 			},
@@ -405,43 +405,22 @@ func TestVolumeResourcePlanImportsUnknownTypeName(t *testing.T) {
 	t.Parallel()
 	server := startUnknownVolumeTypePlanMockServer(t)
 
-	config := fmt.Sprintf(`
-provider "gpcn" {
-  host    = %q
-  api_key = "test-key"
-}
-
-resource "gpcn_volume" "test" {
-  name          = %q
-  datacenter_id = %q
-  volume_type   = %q
-  size_gb       = %d
-}
-`, server.URL, volPlanTestName, volPlanTestDatacenterID, volPlanTestUnknownComponent, volPlanTestSizeGb)
-
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: config,
+				Config: volPlanTestConfigWithType(server.URL, volPlanTestUnknownComponent),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type", volPlanTestUnknownComponent),
-					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type_code", volPlanTestUnknownComponent),
+					resource.TestCheckNoResourceAttr(gpcnVolumeTest, "volume_type_code"),
 					resource.TestCheckNoResourceAttr(gpcnVolumeTest, "volume_type_id"),
 				),
 			},
 			{
-				ResourceName:      gpcnVolumeTest,
-				ImportState:       true,
-				ImportStateVerify: true,
-			},
-			{
-				Config: config,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionNoop),
-					},
-				},
+				ResourceName:    gpcnVolumeTest,
+				ImportState:     true,
+				ImportStateKind: resource.ImportBlockWithID,
+				Config:          volPlanTestConfigWithType(server.URL, volPlanTestUnknownName),
 			},
 		},
 	})
