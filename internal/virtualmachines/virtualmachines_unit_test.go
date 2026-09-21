@@ -181,6 +181,9 @@ func TestCreateVirtualMachineMockHTTP(t *testing.T) {
 				if req["imageId"].(string) != imageID {
 					t.Errorf("Expected imageId %s, got '%v'", imageID, req["imageId"])
 				}
+				if _, present := req["networkId"]; present {
+					t.Error("Expected networkId to be absent when the model names no network")
+				}
 
 				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
 					Success: true,
