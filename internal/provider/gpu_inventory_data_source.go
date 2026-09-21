@@ -70,7 +70,7 @@ func (d *gpuInventoryDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 			},
 			"series_name": schema.StringAttribute{
 				Optional:    true,
-				Description: "Filter by the series name as returned in this data source's series list.",
+				Description: "Filter by the series name as returned in this data source's series list. Conflicts with series_code.",
 				Validators: []validator.String{
 					stringvalidator.ConflictsWith(path.MatchRoot("series_code")),
 					stringvalidator.LengthAtLeast(1),
@@ -78,7 +78,7 @@ func (d *gpuInventoryDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 			},
 			"series_code": schema.StringAttribute{
 				Optional:    true,
-				Description: "Filter by the series code as returned in this data source's series list.",
+				Description: "Filter by the series code as returned in this data source's series list. Conflicts with series_name.",
 				Validators: []validator.String{
 					stringvalidator.ConflictsWith(path.MatchRoot("series_name")),
 					stringvalidator.LengthAtLeast(1),

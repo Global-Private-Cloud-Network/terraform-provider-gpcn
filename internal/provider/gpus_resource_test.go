@@ -33,8 +33,8 @@ func TestGPUInventoryDataSourceFilterDescriptions(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"series_code": "Filter by the series code as returned in this data source's series list.",
-		"series_name": "Filter by the series name as returned in this data source's series list.",
+		"series_code": "Filter by the series code as returned in this data source's series list. Conflicts with series_name.",
+		"series_name": "Filter by the series name as returned in this data source's series list. Conflicts with series_code.",
 	}
 	for name, description := range want {
 		attribute, ok := resp.Schema.Attributes[name]
