@@ -463,3 +463,32 @@ func TestVolumeResourcePlanImportAliasPlansEmpty(t *testing.T) {
 		},
 	})
 }
+
+// Import writes the display alias of a built-in storage class. The schema
+// refuses every other spelling of that class, so no plan reaches a replacement.
+func TestVolumeResourcePlanRefusesDivergentSpelling(t *testing.T) {
+	t.Parallel()
+	server, _, _ := startVolumePlanMockServer(t)
+
+	cases := map[string]string{
+		"ssd":          "SSD",
+		"vol-add-ssd":  "SSD",
+		"Nvme":         "NVMe",
+		"vol-add-nvme": "NVMe",
+	}
+	for volumeType, alias := range cases {
+		t.Run(volumeType, func(t *testing.T) {
+			// Terraform wraps a diagnostic, so the suggestion can start a line.
+			expected := regexp.MustCompile(`use\s+` + regexp.QuoteMeta(`"`+alias+`"`))
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config:      volPlanTestConfigWithType(server.URL, volumeType),
+						ExpectError: expected,
+					},
+				},
+			})
+		})
+	}
+}

@@ -78,6 +78,7 @@ func (r *volumesResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Required:    true,
 				Validators: []validator.String{
 					stringvalidator.LengthAtLeast(1),
+					volumes.TypeSpellingValidator{},
 				},
 				PlanModifiers: []planmodifier.String{
 					// Changing the volume_type requires us to destroy and create a new volume
