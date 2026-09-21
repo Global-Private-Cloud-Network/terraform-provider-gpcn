@@ -498,10 +498,28 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		}
 	}
 
+	// The stop is the provider's doing, so a step that fails afterwards must not leave
+	// the machine stopped. A start that fails as well is the only report the user gets.
+	// It follows the diagnostics of the step that failed.
+	startAgainAfterFailure := func() {
+		if !needStopVM {
+			return
+		}
+
+		startErr := virtualmachines.StartVirtualMachine(r.client, ctx, state.ID.ValueString())
+		if startErr != nil {
+			resp.Diagnostics.AddError(
+				virtualmachines.ErrSummaryVMLeftStopped,
+				fmt.Sprintf(virtualmachines.ErrDetailVMLeftStoppedUpdate, state.ID.ValueString(), startErr.Error()),
+			)
+		}
+	}
+
 	// Update network interfaces if changed
 	networkDiags := virtualmachines.UpdateNetworkInterfacesIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
 	resp.Diagnostics.Append(networkDiags...)
 	if resp.Diagnostics.HasError() {
+		startAgainAfterFailure()
 		return
 	}
 
@@ -509,6 +527,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	publicIPDiags := virtualmachines.UpdatePublicIPIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
 	resp.Diagnostics.Append(publicIPDiags...)
 	if resp.Diagnostics.HasError() {
+		startAgainAfterFailure()
 		return
 	}
 
@@ -516,6 +535,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	sizeDiags := virtualmachines.UpdateSizeIfChanged(r.client, ctx, plan.ID.ValueString(), state, plan)
 	resp.Diagnostics.Append(sizeDiags...)
 	if resp.Diagnostics.HasError() {
+		startAgainAfterFailure()
 		return
 	}
 
@@ -523,6 +543,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	nameDiags := virtualmachines.UpdateChangeableAttributesIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
 	resp.Diagnostics.Append(nameDiags...)
 	if resp.Diagnostics.HasError() {
+		startAgainAfterFailure()
 		return
 	}
 

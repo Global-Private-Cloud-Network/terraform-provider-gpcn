@@ -866,3 +866,148 @@ func TestVirtualMachineResourcePlanUpdateReportsFailedRestart(t *testing.T) {
 		},
 	})
 }
+
+// startVirtualMachineAttachRefusedMockServer refuses every attach and counts the starts.
+// The machine it reports has no network hotplug, so an update that changes the networks
+// stops it first. A test then observes what the provider does with the stopped machine
+// after the change fails. The startSucceeds argument decides the answer to the start.
+func startVirtualMachineAttachRefusedMockServer(t *testing.T, startSucceeds bool) (*httptest.Server, func() int) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	birthNetworkID := ""
+	status := virtualmachines.VMStatusRunning.String()
+	startCount := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			birthNetworkID, _ = body["networkId"].(string)
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			w.WriteHeader(http.StatusInternalServerError)
+			testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "attach refused"})
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mu.Lock()
+			currentBirth := birthNetworkID
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmAttachPlanTestNetworkInterfacesBody(currentBirth, nil))
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/start":
+			mu.Lock()
+			startCount++
+			if startSucceeds {
+				status = virtualmachines.VMStatusRunning.String()
+			}
+			mu.Unlock()
+			if !startSucceeds {
+				w.WriteHeader(http.StatusInternalServerError)
+				testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "start refused"})
+				return
+			}
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, 0))
+		case r.Method == http.MethodPut && r.URL.Path == vmPlanTestPath:
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			if updated, ok := body["name"].(string); ok {
+				name = updated
+			}
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	starts := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return startCount
+	}
+
+	return server, starts
+}
+
+// The update stops the machine and the attach then fails. The provider starts the
+// machine again, so the user reads the attach error alone.
+func TestVirtualMachineResourcePlanStartsAgainWhenAnUpdateStepFailsAfterTheStop(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, startCount := startVirtualMachineAttachRefusedMockServer(t, true)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		ErrorCheck: func(err error) error {
+			if strings.Contains(err.Error(), virtualmachines.ErrSummaryVMLeftStopped) {
+				t.Errorf("Expected no '%s' diagnostic, got '%s'", virtualmachines.ErrSummaryVMLeftStopped, err.Error())
+			}
+			return err
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: vmNetworkListPlanTestConfig(server.URL, "vm-plan-restart-after-failure", vmPlanTestNetworkID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
+				),
+			},
+			{
+				Config:      vmNetworkListPlanTestConfig(server.URL, "vm-plan-restart-after-failure", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
+				ExpectError: regexp.MustCompile(`(?s)Error\s+updating\s+network\s+interfaces`),
+			},
+		},
+	})
+
+	if starts := startCount(); starts != 1 {
+		t.Errorf("Expected exactly 1 start, got %d", starts)
+	}
+}
+
+// The update stops the machine, the attach fails, and the start fails too. The user
+// reads both errors, so the machine that stays stopped is never a silent one.
+func TestVirtualMachineResourcePlanReportsLeftStoppedWhenTheStartAlsoFails(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, startCount := startVirtualMachineAttachRefusedMockServer(t, false)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmNetworkListPlanTestConfig(server.URL, "vm-plan-left-stopped-update", vmPlanTestNetworkID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
+				),
+			},
+			{
+				Config:      vmNetworkListPlanTestConfig(server.URL, "vm-plan-left-stopped-update", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
+				ExpectError: regexp.MustCompile(`(?s)Error\s+updating\s+network\s+interfaces.*Virtual\s+machine\s+left\s+stopped.*did not start again.*Start\s+it\s+in\s+the\s+portal\.`),
+			},
+		},
+	})
+
+	if starts := startCount(); starts != 1 {
+		t.Errorf("Expected exactly 1 start, got %d", starts)
+	}
+}
