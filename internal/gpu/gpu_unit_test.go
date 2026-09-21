@@ -967,6 +967,12 @@ func TestResolveGPUSeriesFromInventoryUnit(t *testing.T) {
 			seriesName: "NVIDIA L40 Series",
 			wantErr:    fmt.Sprintf(ErrDetailUnknownGPUSeries, "NVIDIA L40 Series", testDatacenterID, available),
 		},
+		{
+			testName:   "a code matches exactly, never by case",
+			body:       inventoryJSONTwoSeries,
+			seriesCode: "NVIDIA-A100-Series",
+			wantErr:    fmt.Sprintf(ErrDetailUnknownGPUSeries, "NVIDIA-A100-Series", testDatacenterID, available),
+		},
 		{testName: "no series falls back to the name map", body: inventoryJSONNoSeries, seriesName: "NVIDIA H100 Series", wantCode: "nvidia-h100-series"},
 		{testName: "no series keeps the requested code", body: inventoryJSONNoSeries, seriesCode: "nvidia-h100-series", wantCode: "nvidia-h100-series"},
 		{testName: "nothing requested resolves to no filter", body: inventoryJSONTwoSeries, wantCode: ""},
@@ -1233,9 +1239,9 @@ func TestCheckInventoryRefusesAnEmptySeriesMockHTTP(t *testing.T) {
 	}
 }
 
-// An outage empties the series list, and the fallback resolves no code for a
-// series the provider no longer lists. The refusal must still name the series
-// the configuration asks for.
+// A datacenter that offers no enabled series answers an empty series list, and
+// the fallback then resolves no code. The refusal must still name the series
+// the configuration asks for, and must not call a name a code.
 func TestCheckInventoryEmptySeriesNamesTheConfiguredSeriesMockHTTP(t *testing.T) {
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
@@ -1256,7 +1262,34 @@ func TestCheckInventoryEmptySeriesNamesTheConfiguredSeriesMockHTTP(t *testing.T)
 	if err == nil {
 		t.Fatal("Expected an error for an empty inventory, got nil")
 	}
-	want := fmt.Sprintf(ErrDetailNoInventoryAvailable, "NVIDIA L40 Series", testDatacenterID, 1)
+	const want = "no GPU availability for series NVIDIA L40 Series in datacenter datacenter-123 with GPU count 1"
+	if err.Error() != want {
+		t.Errorf("Expected error %q, got %q", want, err.Error())
+	}
+}
+
+// A configured series_code keeps the code word, because the value is a code.
+func TestCheckInventoryEmptySeriesKeepsTheCodeWordMockHTTP(t *testing.T) {
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/inventory") {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(inventoryJSONNoSeries))
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	model := createTestGPUModel("test-gpu", "", "nvidia-l40-series", testImageName, 1)
+
+	_, _, err := CheckInventory(gpcnClient, context.Background(), model)
+	if err == nil {
+		t.Fatal("Expected an error for an empty inventory, got nil")
+	}
+	const want = "no GPU availability for series code nvidia-l40-series in datacenter datacenter-123 with GPU count 1"
 	if err.Error() != want {
 		t.Errorf("Expected error %q, got %q", want, err.Error())
 	}

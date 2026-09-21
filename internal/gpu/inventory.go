@@ -180,7 +180,8 @@ func offeredSeries(invResp *inventoryResp) string {
 	return strings.Join(pairs, ", ")
 }
 
-// Every returned SKU carries the series ID the caller needs.
+// Every returned SKU carries the series ID the caller needs. The second return
+// is the series code the inventory resolved.
 func CheckInventory(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) ([]FlatInventory, string, error) {
 	datacenterId := model.DatacenterId.ValueString()
 	gpuCount := model.GPUCount.ValueInt64()
@@ -211,10 +212,16 @@ func CheckInventory(gpcnClient *client.GpcnClient, ctx context.Context, model Re
 	if len(inventory) == 0 {
 		// An empty series list leaves the resolved code empty or unreliable.
 		reported := seriesCode
+		detail := ErrDetailNoInventoryAvailable
 		if len(invResp.Data.Series) == 0 {
 			reported = requested
+			if model.SeriesCode.ValueString() == "" {
+				// The reported value is then the configured name. The sentence
+				// must not call a name a code.
+				detail = strings.Replace(detail, "series code %s", "series %s", 1)
+			}
 		}
-		return nil, "", fmt.Errorf(ErrDetailNoInventoryAvailable, reported, datacenterId, gpuCount)
+		return nil, "", fmt.Errorf(detail, reported, datacenterId, gpuCount)
 	}
 
 	tflog.Info(ctx, fmt.Sprintf(LogInventoryAvailable, seriesCode, datacenterId, gpuCount))
