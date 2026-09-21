@@ -13,11 +13,10 @@ var volumeTypeMapping = map[string]string{
 	"NVMe": "vol-add-nvme",
 }
 
-// VolumeTypeCodePattern matches a storage component code. The datacenter decides
-// which codes it offers, so a new storage class must not need a provider release.
+// The datacenter decides which codes it offers, so a new storage class must not
+// need a provider release.
 var VolumeTypeCodePattern = regexp.MustCompile(`^vol-add-[a-z0-9-]+$`)
 
-// VolumeTypeAliases returns the display names the schema accepts beside a code.
 func VolumeTypeAliases() []string {
 	return slices.Sorted(maps.Keys(volumeTypeMapping))
 }
