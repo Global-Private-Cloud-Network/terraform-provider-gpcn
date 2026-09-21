@@ -867,11 +867,12 @@ func TestVirtualMachineResourcePlanUpdateReportsFailedRestart(t *testing.T) {
 	})
 }
 
-// startVirtualMachineAttachRefusedMockServer refuses every attach and counts the starts.
-// The machine it reports has no network hotplug, so an update that changes the networks
-// stops it first. A test then observes what the provider does with the stopped machine
-// after the change fails. The startSucceeds argument decides the answer to the start.
-func startVirtualMachineAttachRefusedMockServer(t *testing.T, startSucceeds bool) (*httptest.Server, func() int) {
+// startVirtualMachineAttachRefusedMockServer counts the starts the provider issues.
+// The machine reports the given network hotplug value, so a test chooses whether an
+// update stops it first. The attach is refused unless getFailsAfterStop is set, because
+// the read-back is only reachable past a successful attach. That flag then makes the
+// first GET after the attach answer 500. startSucceeds answers the start.
+func startVirtualMachineAttachRefusedMockServer(t *testing.T, startSucceeds bool, hotplug int, getFailsAfterStop bool) (*httptest.Server, func() int) {
 	t.Helper()
 
 	var mu sync.Mutex
@@ -879,6 +880,8 @@ func startVirtualMachineAttachRefusedMockServer(t *testing.T, startSucceeds bool
 	birthNetworkID := ""
 	status := virtualmachines.VMStatusRunning.String()
 	startCount := 0
+	attachDone := false
+	readBackFailed := false
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -895,6 +898,13 @@ func startVirtualMachineAttachRefusedMockServer(t *testing.T, startSucceeds bool
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			if getFailsAfterStop {
+				mu.Lock()
+				attachDone = true
+				mu.Unlock()
+				testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+				return
+			}
 			w.WriteHeader(http.StatusInternalServerError)
 			testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "attach refused"})
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
@@ -925,8 +935,15 @@ func startVirtualMachineAttachRefusedMockServer(t *testing.T, startSucceeds bool
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
 			mu.Lock()
 			currentName, currentStatus := name, status
+			refuseReadBack := attachDone && !readBackFailed
+			readBackFailed = readBackFailed || refuseReadBack
 			mu.Unlock()
-			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, 0))
+			if refuseReadBack {
+				w.WriteHeader(http.StatusInternalServerError)
+				testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "read-back refused"})
+				return
+			}
+			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, hotplug))
 		case r.Method == http.MethodPut && r.URL.Path == vmPlanTestPath:
 			body := testutil.ReadRequestBody(r)
 			mu.Lock()
@@ -952,19 +969,29 @@ func startVirtualMachineAttachRefusedMockServer(t *testing.T, startSucceeds bool
 	return server, starts
 }
 
+// vmPlanTestAttachErrorPattern matches the attach refusal after Terraform wraps it.
+var vmPlanTestAttachErrorPattern = regexp.MustCompile(`(?s)Error\s+updating\s+network\s+interfaces`)
+
+// vmPlanTestLeftStoppedPattern matches the left-stopped summary after Terraform wraps it.
+var vmPlanTestLeftStoppedPattern = regexp.MustCompile(`(?s)Virtual\s+machine\s+left\s+stopped`)
+
 // The update stops the machine and the attach then fails. The provider starts the
-// machine again, so the user reads the attach error alone.
+// machine again, so the user reads the attach error alone. The step sets no
+// ExpectError, because ErrorCheck never runs for a step that sets one.
 func TestVirtualMachineResourcePlanStartsAgainWhenAnUpdateStepFailsAfterTheStop(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	server, startCount := startVirtualMachineAttachRefusedMockServer(t, true)
+	server, startCount := startVirtualMachineAttachRefusedMockServer(t, true, 0, false)
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		ErrorCheck: func(err error) error {
-			if strings.Contains(err.Error(), virtualmachines.ErrSummaryVMLeftStopped) {
+			if !vmPlanTestAttachErrorPattern.MatchString(err.Error()) {
+				t.Errorf("Expected the attach error, got '%s'", err.Error())
+			}
+			if vmPlanTestLeftStoppedPattern.MatchString(err.Error()) {
 				t.Errorf("Expected no '%s' diagnostic, got '%s'", virtualmachines.ErrSummaryVMLeftStopped, err.Error())
 			}
-			return err
+			return nil
 		},
 		Steps: []resource.TestStep{
 			{
@@ -974,8 +1001,7 @@ func TestVirtualMachineResourcePlanStartsAgainWhenAnUpdateStepFailsAfterTheStop(
 				),
 			},
 			{
-				Config:      vmNetworkListPlanTestConfig(server.URL, "vm-plan-restart-after-failure", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
-				ExpectError: regexp.MustCompile(`(?s)Error\s+updating\s+network\s+interfaces`),
+				Config: vmNetworkListPlanTestConfig(server.URL, "vm-plan-restart-after-failure", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
 			},
 		},
 	})
@@ -989,7 +1015,7 @@ func TestVirtualMachineResourcePlanStartsAgainWhenAnUpdateStepFailsAfterTheStop(
 // reads both errors, so the machine that stays stopped is never a silent one.
 func TestVirtualMachineResourcePlanReportsLeftStoppedWhenTheStartAlsoFails(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	server, startCount := startVirtualMachineAttachRefusedMockServer(t, false)
+	server, startCount := startVirtualMachineAttachRefusedMockServer(t, false, 0, false)
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -1002,7 +1028,61 @@ func TestVirtualMachineResourcePlanReportsLeftStoppedWhenTheStartAlsoFails(t *te
 			},
 			{
 				Config:      vmNetworkListPlanTestConfig(server.URL, "vm-plan-left-stopped-update", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
-				ExpectError: regexp.MustCompile(`(?s)Error\s+updating\s+network\s+interfaces.*Virtual\s+machine\s+left\s+stopped.*did not start again.*Start\s+it\s+in\s+the\s+portal\.`),
+				ExpectError: regexp.MustCompile(`(?s)Error\s+updating\s+network\s+interfaces.*Virtual\s+machine\s+left\s+stopped.*did\s+not\s+start\s+again.*the\s+change\s+was\s+not\s+recorded,\s+so\s+the\s+next\s+apply\s+retries\s+it\.`),
+			},
+		},
+	})
+
+	if starts := startCount(); starts != 1 {
+		t.Errorf("Expected exactly 1 start, got %d", starts)
+	}
+}
+
+// Network hotplug keeps the machine running through the attach. A failed attach leaves
+// nothing to start. A start would then reboot a machine the provider never stopped.
+func TestVirtualMachineResourcePlanDoesNotStartAMachineItNeverStopped(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, startCount := startVirtualMachineAttachRefusedMockServer(t, true, 1, false)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmNetworkListPlanTestConfig(server.URL, "vm-plan-never-stopped", vmPlanTestNetworkID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
+				),
+			},
+			{
+				Config:      vmNetworkListPlanTestConfig(server.URL, "vm-plan-never-stopped", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
+				ExpectError: regexp.MustCompile(`(?s)Error\s+updating\s+network\s+interfaces`),
+			},
+		},
+	})
+
+	if starts := startCount(); starts != 0 {
+		t.Errorf("Expected no start, got %d", starts)
+	}
+}
+
+// The read-back after the update is the last step that can fail before the start.
+// It runs inside the runner, so a refused GET also starts the machine again.
+func TestVirtualMachineResourcePlanStartsAgainWhenTheReadBackFails(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, startCount := startVirtualMachineAttachRefusedMockServer(t, true, 0, true)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmNetworkListPlanTestConfig(server.URL, "vm-plan-read-back-fails", vmPlanTestNetworkID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
+				),
+			},
+			{
+				Config:      vmNetworkListPlanTestConfig(server.URL, "vm-plan-read-back-fails", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
+				ExpectError: regexp.MustCompile(`(?s)Retrieving\s+information\s+about\s+the\s+Virtual\s+Machine\s+failed`),
 			},
 		},
 	})
