@@ -12,6 +12,8 @@ import (
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
 
+	"github.com/hashicorp/terraform-plugin-framework/path"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -616,6 +618,51 @@ func TestImportedVolumeTypePrefersAliasUnit(t *testing.T) {
 		got := importedVolumeType(volumeTypeResponse{Name: testCase.name, Code: testCase.code})
 		if got.ValueString() != testCase.expected {
 			t.Errorf("name %q code %q: expected %q, got %q", testCase.name, testCase.code, testCase.expected, got.ValueString())
+		}
+	}
+}
+
+func TestVolumeTypeSpellingValidatorUnit(t *testing.T) {
+	cases := []struct {
+		value  string
+		detail string
+	}{
+		{value: "SSD"},
+		{value: "NVMe"},
+		{value: "vol-add-ultra"},
+		{value: "vm-root-disk-ssd"},
+		{value: "Unknown"},
+		{value: "ssd", detail: `volume_type "ssd" is spelled differently from what GPCN reports; use "SSD"`},
+		{value: "Ssd", detail: `volume_type "Ssd" is spelled differently from what GPCN reports; use "SSD"`},
+		{value: "vol-add-ssd", detail: `volume_type "vol-add-ssd" is spelled differently from what GPCN reports; use "SSD"`},
+		{value: "nvme", detail: `volume_type "nvme" is spelled differently from what GPCN reports; use "NVMe"`},
+		{value: "Nvme", detail: `volume_type "Nvme" is spelled differently from what GPCN reports; use "NVMe"`},
+		{value: "NVME", detail: `volume_type "NVME" is spelled differently from what GPCN reports; use "NVMe"`},
+		{value: "vol-add-nvme", detail: `volume_type "vol-add-nvme" is spelled differently from what GPCN reports; use "NVMe"`},
+	}
+	for _, testCase := range cases {
+		request := validator.StringRequest{
+			Path:        path.Root("volume_type"),
+			ConfigValue: types.StringValue(testCase.value),
+		}
+		response := &validator.StringResponse{}
+		TypeSpellingValidator{}.ValidateString(context.Background(), request, response)
+
+		if testCase.detail == "" {
+			if response.Diagnostics.HasError() {
+				t.Errorf("%q: expected no error, got %v", testCase.value, response.Diagnostics)
+			}
+			continue
+		}
+		if len(response.Diagnostics) != 1 {
+			t.Fatalf("%q: expected one diagnostic, got %v", testCase.value, response.Diagnostics)
+		}
+		diagnostic := response.Diagnostics[0]
+		if diagnostic.Summary() != "Invalid volume type" {
+			t.Errorf("%q: expected summary %q, got %q", testCase.value, "Invalid volume type", diagnostic.Summary())
+		}
+		if diagnostic.Detail() != testCase.detail {
+			t.Errorf("%q: expected detail %q, got %q", testCase.value, testCase.detail, diagnostic.Detail())
 		}
 	}
 }
