@@ -322,10 +322,11 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 			return
 		}
 	}
-	// GPCN creates the machine on one birth network. The state above already holds the
-	// machine, so a refused attach below reports a repairable failure instead of leaking
-	// a machine Terraform does not know about.
+	// GPCN creates the machine on one birth network, then the loop attaches the rest.
+	// State holds the machine and the networks that attached, so a refused attach leaves
+	// no machine outside Terraform.
 	if len(networkIds) > 1 {
+		attached := []string{networkIds[0]}
 		var attachErr error
 		failedNetworkId := ""
 		for _, networkId := range networkIds[1:] {
@@ -334,10 +335,20 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 				failedNetworkId = networkId
 				break
 			}
+			attached = append(attached, networkId)
 		}
 
 		plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
 		resp.Diagnostics.Append(mapDiags...)
+
+		// network_ids names the networks the machine really holds. A configured list that
+		// outruns the attach loop leaves a later plan no difference to act on.
+		attachedIds, attachedDiags := types.ListValueFrom(ctx, types.StringType, attached)
+		resp.Diagnostics.Append(attachedDiags...)
+		if !attachedDiags.HasError() {
+			plan.NetworkIds = attachedIds
+		}
+
 		diags = resp.State.Set(ctx, plan)
 		resp.Diagnostics.Append(diags...)
 

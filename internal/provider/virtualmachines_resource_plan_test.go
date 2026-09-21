@@ -438,10 +438,10 @@ resource "gpcn_virtualmachine" "test" {
 }
 
 // A failed attach must not orphan the machine: it exists at the API, so it belongs in
-// state. Terraform taints a resource whose create returned an error, so the second step
-// plans a replacement. A machine absent from state would plan a bare create instead, with
-// nothing to destroy. The second step also proves the attach loop attaches every network
-// after the birth one.
+// state. State must also name only the networks that attached, or no later plan can
+// attach the rest. Terraform taints a resource whose create returned an error, so the
+// last step plans a replacement. A machine absent from state would plan a bare create
+// instead, with nothing to destroy.
 func TestVirtualMachineResourcePlanCreateWritesStateWhenAttachFails(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server, heal := startVirtualMachineAttachMockServer(t)
@@ -454,6 +454,15 @@ func TestVirtualMachineResourcePlanCreateWritesStateWhenAttachFails(t *testing.T
 			{
 				Config:      config,
 				ExpectError: regexp.MustCompile(`attaching .* failed`),
+			},
+			{
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_ids.#", "1"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_ids.0", vmPlanTestNetworkID),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.#", "1"),
+				),
 			},
 			{
 				PreConfig: heal,
