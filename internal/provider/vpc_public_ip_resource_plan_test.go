@@ -34,8 +34,11 @@ var regexpPublicIpImportIdentifier = regexp.MustCompile(`Expected\s+an\s+import\
 var regexpPublicIpAcquiredButJobFailed = regexp.MustCompile(`public\s+IP\s+` + vpcPublicIpPlanTestID + `\s+was\s+acquired\s+and\s+is\s+in\s+state`)
 
 // A read-back that fails names the address the acquire left behind. The
-// operator needs that id to find the row.
-var regexpPublicIpAcquiredButReadBackFailed = regexp.MustCompile(`public\s+IP\s+` + vpcPublicIpPlanTestID + `\s+was\s+acquired\s+and\s+is\s+in\s+state,\s+but\s+reading\s+it\s+back\s+failed`)
+// operator needs that id to find the row, and the tail tells them what the
+// next apply does. Terraform wraps a diagnostic, so words break on \s+.
+var regexpPublicIpAcquiredButReadBackFailed = regexp.MustCompile(`(?s)public\s+IP\s+` + vpcPublicIpPlanTestID +
+	`\s+was\s+acquired\s+and\s+is\s+in\s+state,\s+but\s+reading\s+it\s+back\s+failed:.*` +
+	`Terraform\s+has\s+marked\s+the\s+address\s+tainted,\s+so\s+the\s+next\s+apply\s+releases\s+it\s+and\s+acquires\s+another\.`)
 
 const (
 	vpcPublicIpPlanTestVpcID     = "11111111-1111-1111-1111-111111111111"
@@ -643,7 +646,7 @@ func checkPublicIpDestroyReleasedTheAddress(row *publicIpPlanTestRow) func(*terr
 // The acquire writes the row before it dispatches the job, so an address
 // exists even when the read-back fails. The id must reach state. A destroy
 // then releases the address instead of leaving a billable row behind.
-func TestVpcPublicIpResourcePlanKeepsAcquiredAddressWhenReadBackFails(t *testing.T) {
+func TestVPCPublicIpResourcePlanKeepsAcquiredAddressWhenReadBackFails(t *testing.T) {
 	t.Parallel()
 	server, row := startVPCPublicIpPlanMockServer(t)
 	row.failListingGets()

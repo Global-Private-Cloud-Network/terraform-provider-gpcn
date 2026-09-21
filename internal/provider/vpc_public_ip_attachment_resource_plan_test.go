@@ -17,7 +17,10 @@ var regexpPublicIpsAttachToVPCInterfacesOnly = regexp.MustCompile(`Public\s+IPs\
 
 // A read-back that fails names both the address and the interface it bound.
 // The operator needs both to undo the binding by hand.
-var regexpPublicIpAttachedButReadBackFailed = regexp.MustCompile(`public\s+IP\s+` + vpcPublicIpPlanTestID + `\s+was\s+attached\s+to\s+network\s+interface\s+` + vpcPublicIpPlanTestNicID + `\s+and\s+is\s+in\s+state`)
+var regexpPublicIpAttachedButReadBackFailed = regexp.MustCompile(`(?s)public\s+IP\s+` + vpcPublicIpPlanTestID +
+	`\s+was\s+attached\s+to\s+network\s+interface\s+` + vpcPublicIpPlanTestNicID +
+	`\s+and\s+is\s+in\s+state,\s+but\s+reading\s+it\s+back\s+failed:.*` +
+	`Terraform\s+has\s+marked\s+the\s+attachment\s+tainted,\s+so\s+the\s+next\s+apply\s+detaches\s+it\s+and\s+attaches\s+again\.`)
 
 func vpcPublicIpAttachmentPlanTestConfig(host string) string {
 	return vpcPublicIpAttachmentPlanTestConfigForNic(host, vpcPublicIpPlanTestNicID)
@@ -214,7 +217,7 @@ func TestVPCPublicIpAttachmentResourcePlanSurfacesAttachRefusal(t *testing.T) {
 // DEV refuses a second attach until the address detaches. A binding the
 // read-back could not confirm must still reach state. The destroy then
 // detaches it instead of wedging every later apply.
-func TestVpcPublicIpAttachmentResourcePlanKeepsBindingWhenReadBackFails(t *testing.T) {
+func TestVPCPublicIpAttachmentResourcePlanKeepsBindingWhenReadBackFails(t *testing.T) {
 	t.Parallel()
 	server, row := startVPCPublicIpPlanMockServer(t)
 	row.becomeReady()
