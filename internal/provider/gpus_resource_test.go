@@ -388,6 +388,20 @@ func TestGPUResourceInvalidSeries(t *testing.T) {
 			gpuCount:    "1", imageName: "ubuntu-22.04",
 			wantErr: "No attribute specified when one",
 		},
+		// ExactlyOneOf counts an empty string as an answer, so the length
+		// validator is the only gate on it.
+		{
+			name:        "empty_code",
+			seriesField: `series_code = ""`,
+			gpuCount:    "1", imageName: "ubuntu-22.04",
+			wantErr: "Attribute series_code string length must be at least 1",
+		},
+		{
+			name:        "empty_name",
+			seriesField: `series_name = ""`,
+			gpuCount:    "1", imageName: "ubuntu-22.04",
+			wantErr: "Attribute series_name string length must be at least 1",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
