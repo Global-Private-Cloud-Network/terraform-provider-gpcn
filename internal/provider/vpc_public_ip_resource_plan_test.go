@@ -88,6 +88,21 @@ func (row *publicIpPlanTestRow) reacquire() {
 	row.machineID = nil
 }
 
+// detach clears the binding the way a detach outside Terraform does.
+func (row *publicIpPlanTestRow) detach() {
+	row.mu.Lock()
+	defer row.mu.Unlock()
+	row.machineID = nil
+}
+
+// refuseAttach makes every attach answer the given refusal.
+func (row *publicIpPlanTestRow) refuseAttach(status int, message string) {
+	row.mu.Lock()
+	defer row.mu.Unlock()
+	row.attachStatus = status
+	row.attachMessage = message
+}
+
 func (row *publicIpPlanTestRow) isReleased() bool {
 	row.mu.Lock()
 	defer row.mu.Unlock()
