@@ -2,15 +2,9 @@ package volumeattachments
 
 import (
 	"context"
-	"errors"
-	"fmt"
-	"strings"
 
 	"terraform-provider-gpcn/internal/client"
-	"terraform-provider-gpcn/internal/virtualmachines"
 	"terraform-provider-gpcn/internal/volumes"
-
-	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
 // GetAttachedVMId returns the VM ID that the given volume is currently attached to.
@@ -23,111 +17,15 @@ func GetAttachedVMId(gpcnClient *client.GpcnClient, ctx context.Context, volumeI
 	return vol.Data.VirtualMachineId, nil
 }
 
-// AttachVolume stops the VM if required by network_hotplug, attaches the volume, then restarts.
+// AttachVolume attaches the volume to the virtual machine.
+// GPCN accepts an attach to a running machine, so the provider does not stop it.
+// GPCN refuses a machine that is not settled, and that refusal reaches the operator.
 func AttachVolume(gpcnClient *client.GpcnClient, ctx context.Context, vmId, volumeId string) error {
-	stopped, err := conditionallyStopVM(gpcnClient, ctx, vmId)
-	if err != nil {
-		return err
-	}
-
-	if err = volumes.AddVolumeToVirtualMachine(gpcnClient, ctx, vmId, volumeId); err != nil {
-		// Best-effort restart even if attach fails
-		if stopped {
-			if startErr := conditionallyStartVM(gpcnClient, ctx, vmId); startErr != nil {
-				tflog.Warn(ctx, LogBestEffortStartFailed, map[string]any{"error": startErr.Error()})
-			}
-		}
-		return err
-	}
-
-	if stopped {
-		if err = conditionallyStartVM(gpcnClient, ctx, vmId); err != nil {
-			return fmt.Errorf(ErrDetailVMStartFailed, vmId, err)
-		}
-	}
-	return nil
+	return volumes.AddVolumeToVirtualMachine(gpcnClient, ctx, vmId, volumeId)
 }
 
-// DetachVolume stops the VM if required by network_hotplug, detaches the volume, then restarts.
-func DetachVolume(gpcnClient *client.GpcnClient, ctx context.Context, vmId, volumeId string) error {
-	stopped, err := conditionallyStopVM(gpcnClient, ctx, vmId)
-	if err != nil {
-		return err
-	}
-
-	if err = volumes.RemoveVolumeFromVirtualMachine(gpcnClient, ctx, volumeId); err != nil {
-		if stopped {
-			if startErr := conditionallyStartVM(gpcnClient, ctx, vmId); startErr != nil {
-				tflog.Warn(ctx, LogBestEffortStartFailed, map[string]any{"error": startErr.Error()})
-			}
-		}
-		return err
-	}
-
-	if stopped {
-		if err = conditionallyStartVM(gpcnClient, ctx, vmId); err != nil {
-			return fmt.Errorf(ErrDetailVMStartFailed, vmId, err)
-		}
-	}
-	return nil
-}
-
-// conditionallyStopVM stops the VM only if network_hotplug is disabled and the VM is running.
-// Returns true if this call actually stopped the VM (meaning the caller should restart it).
-// Every error comes back already wrapped, so a failed read does not claim a failed stop.
-// Handles the concurrent-stop race: if a stop call fails because another process already
-// stopped the VM, we verify the status and return (false, nil) so the caller does NOT restart.
-func conditionallyStopVM(gpcnClient *client.GpcnClient, ctx context.Context, vmId string) (bool, error) {
-	vmResp, err := virtualmachines.GetVirtualMachine(gpcnClient, ctx, vmId)
-	if err != nil {
-		return false, fmt.Errorf(ErrDetailVMReadFailed, vmId, err)
-	}
-
-	if vmResp.Data.NetworkHotplug == 1 {
-		return false, nil
-	}
-
-	if !strings.EqualFold(vmResp.Data.Status, virtualmachines.VMStatusRunning.String()) {
-		tflog.Info(ctx, LogSkippingStopVMAlreadyStopped)
-		return false, nil
-	}
-
-	tflog.Info(ctx, LogStoppingVMBeforeAttach)
-	err = virtualmachines.StopVirtualMachine(gpcnClient, ctx, vmId)
-	if err != nil {
-		// Stop failed — check if a concurrent operation already stopped the VM
-		checkResp, checkErr := virtualmachines.GetVirtualMachine(gpcnClient, ctx, vmId)
-		if checkErr == nil && strings.EqualFold(checkResp.Data.Status, virtualmachines.VMStatusShutoff.String()) {
-			tflog.Info(ctx, LogSkippingStopVMAlreadyStopped)
-			return false, nil // someone else stopped it; we should not start it
-		}
-		if client.IsNotFound(checkErr) {
-			// The re-check proves the VM is gone, so Delete may drop the attachment.
-			// Only the re-check wraps, so IsNotFound reads the 404 and not the stop status.
-			return false, fmt.Errorf(ErrDetailVMStopFailed, vmId, fmt.Errorf("%s (re-check: %w)", err.Error(), checkErr))
-		}
-		// The re-check does not prove the VM is gone. The error must not read as
-		// not-found, or Delete drops the attachment without a detach.
-		return false, fmt.Errorf(ErrDetailVMStopFailed, vmId, errors.New(err.Error()))
-	}
-
-	return true, nil
-}
-
-// conditionallyStartVM starts the VM. If a concurrent operation already started it, treats as success.
-func conditionallyStartVM(gpcnClient *client.GpcnClient, ctx context.Context, vmId string) error {
-	tflog.Info(ctx, LogStartingVMAfterAttach)
-	err := virtualmachines.StartVirtualMachine(gpcnClient, ctx, vmId)
-	if err != nil {
-		checkResp, checkErr := virtualmachines.GetVirtualMachine(gpcnClient, ctx, vmId)
-		if checkErr != nil {
-			return err
-		}
-		if strings.EqualFold(checkResp.Data.Status, virtualmachines.VMStatusRunning.String()) {
-			tflog.Info(ctx, LogSkippingStartVMAlreadyRunning)
-			return nil
-		}
-		return err
-	}
-	return nil
+// DetachVolume detaches the volume from the virtual machine it is attached to.
+// GPCN reads the machine from the volume row, so the detach names only the volume.
+func DetachVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId string) error {
+	return volumes.RemoveVolumeFromVirtualMachine(gpcnClient, ctx, volumeId)
 }

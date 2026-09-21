@@ -170,8 +170,8 @@ func (r *volumeAttachmentResource) Delete(ctx context.Context, req resource.Dele
 		return
 	}
 
-	if err := volumeattachments.DetachVolume(r.client, ctx, state.VirtualMachineId.ValueString(), state.VolumeId.ValueString()); client.IsNotFound(err) {
-		// The VM or volume is already deleted
+	if err := volumeattachments.DetachVolume(r.client, ctx, state.VolumeId.ValueString()); client.IsNotFound(err) {
+		// GPCN no longer knows the volume, so nothing is left to detach.
 		tflog.Info(ctx, volumeattachments.LogVolumeAttachmentAlreadyDetached)
 	} else if err != nil {
 		resp.Diagnostics.AddError(volumeattachments.ErrSummaryUnableToDetachVolume, err.Error())
