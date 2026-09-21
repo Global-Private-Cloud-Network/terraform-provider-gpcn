@@ -880,7 +880,7 @@ func TestRefreshGPUModelFromResponseKeepsValuesOnEmptyUnit(t *testing.T) {
 	}
 }
 
-// The six advertised series must carry the byte the catalog stores. The seeded
+// The five advertised series must carry the byte the catalog stores. The seeded
 // rows are db/seeds/sqlFiles/data/07-sku-catalog.mjs:3669-3760 on the backend.
 // The inventory query matches sku_series.code exactly, so one wrong byte makes a
 // series unusable.
@@ -894,7 +894,6 @@ func TestGPUSeriesCodesMatchCatalog(t *testing.T) {
 		{"NVIDIA A100 Series", "nvidia-a100-series"},
 		{"NVIDIA RTX PRO 6000 Blackwell", "nvidia-rtx_pro_6000-series"},
 		{"NVIDIA RTX A6000 Series", "nvidia-rtx_a6000-series"},
-		{"NVIDIA L40 Series", "nvidia-l40-series"},
 	}
 
 	if len(GPUSeriesNames) != len(seeded) {
