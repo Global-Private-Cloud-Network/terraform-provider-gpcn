@@ -252,10 +252,10 @@ func TestAttachSurfacesBackendStatusRefusalMockHTTP(t *testing.T) {
 	if got := httpErr.Error(); got != want {
 		t.Errorf("HTTPError.Error() =\n%q\nwant\n%q", got, want)
 	}
-	// net/http wraps the transport error in *url.Error, so the request line is the
-	// only text before the rendered HTTPError. A provider wrapper adds more.
-	if !strings.HasPrefix(err.Error(), `Put "`) {
-		t.Errorf("AttachVolume error =\n%q\nwant the url.Error request line as the only prefix", err.Error())
+	// The client strips the *url.Error that net/http adds, so the operator reads
+	// the API's words first. A provider wrapper adds nothing in front of them.
+	if err.Error() != want {
+		t.Errorf("AttachVolume error =\n%q\nwant\n%q", err.Error(), want)
 	}
 	if code := client.ErrorCode(err); code != "Validation Error" {
 		t.Errorf("client.ErrorCode = %q, want %q", code, "Validation Error")
