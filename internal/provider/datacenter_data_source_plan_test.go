@@ -589,3 +589,30 @@ func TestDatacentersDataSourceFiltersVpcCapableServerSide(t *testing.T) {
 		}
 	}
 }
+
+func TestDatacentersDataSourceDoesNotBlameGpuEnabledForCapabilityMiss(t *testing.T) {
+	t.Parallel()
+
+	// Only vpc_capable matches no row. The probe must carry it, or the
+	// suggestion accuses gpu_enabled of a miss it did not cause.
+	server, rec := startDatacenterPlanMockServer(t, func(r *http.Request) map[string]any {
+		if r.URL.Query().Get("vpcCapable") != "" {
+			return datacenterPlanTestBody([]map[string]any{}, 1, 1)
+		}
+		return datacenterPlanTestBody([]map[string]any{
+			datacenterPlanTestCapabilityRow("dc-1", "Chicago", datacenterPlanTestRegionAlpha, true, false, true),
+		}, 1, 1)
+	})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      datacenterPlanTestConfig(server.URL, "  gpu_enabled = true\n  vpc_capable = true\n"),
+				ExpectError: regexp.MustCompile("(?s)Some possible.*values are.*" + datacenterPlanTestRegionAlpha),
+			},
+		},
+	})
+
+	datacenterPlanTestAssertOnlyListPath(t, rec)
+}
