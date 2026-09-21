@@ -29,14 +29,11 @@ type PublicIp struct {
 	UpdatedAt          string  `json:"updatedAt"`
 }
 
-// acquirePublicIpResponse carries the new row's id beside the job id. The id is
-// immediate, because the API inserts the row before it dispatches the job.
+// acquirePublicIpResponse names the sibling the acquire 202 carries beside the
+// job id. The API inserts the row before it dispatches the job.
 type acquirePublicIpResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Data    struct {
+	Data struct {
 		PublicIpID string `json:"publicIpId"`
-		JobID      string `json:"jobId"`
 	} `json:"data"`
 }
 
@@ -62,14 +59,7 @@ func AcquirePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID s
 		return "", err
 	}
 
-	response, err := gpcnClient.DoWithRetry(request)
-	if err != nil {
-		return "", err
-	}
-	defer response.Body.Close()
-	tflog.Info(ctx, LogIssuedAcquirePublicIpJob)
-
-	body, err := io.ReadAll(response.Body)
+	jobID, body, err := issueJob(gpcnClient, ctx, request, LogIssuedAcquirePublicIpJob)
 	if err != nil {
 		return "", err
 	}
@@ -79,8 +69,8 @@ func AcquirePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID s
 		return "", err
 	}
 
-	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionAcquirePublicIp, acquireResponse.Data.JobID); err != nil {
-		return "", fmt.Errorf("acquire public IP polling failed: %w", err)
+	if err := pollJob(gpcnClient, ctx, ActionAcquirePublicIp, jobID); err != nil {
+		return "", err
 	}
 
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyAcquiredPublicIp, acquireResponse.Data.PublicIpID))
@@ -161,7 +151,7 @@ func AttachPublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, p
 		return err
 	}
 
-	jobID, err := issueJob(gpcnClient, ctx, request, LogIssuedAttachPublicIpJob)
+	jobID, _, err := issueJob(gpcnClient, ctx, request, LogIssuedAttachPublicIpJob)
 	if err != nil {
 		return err
 	}
@@ -173,8 +163,8 @@ func AttachPublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, p
 	return nil
 }
 
-// DetachPublicIp unbinds an address and leaves it held by the VPC, so it can be
-// attached again without a new acquisition.
+// DetachPublicIp unbinds an address and leaves it held by the VPC. The
+// address attaches again without a new acquisition.
 func DetachPublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, publicIpID string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDetachPublicIp, publicIpID))
 
@@ -184,7 +174,7 @@ func DetachPublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, p
 		return err
 	}
 
-	jobID, err := issueJob(gpcnClient, ctx, request, LogIssuedDetachPublicIpJob)
+	jobID, _, err := issueJob(gpcnClient, ctx, request, LogIssuedDetachPublicIpJob)
 	if err != nil {
 		return err
 	}
@@ -209,7 +199,7 @@ func ReleasePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 	// Only the release request itself can report that the address is already
 	// gone. A 404 from the job poll is a routing failure, not an answer about
 	// the address.
-	jobID, err := issueJob(gpcnClient, ctx, request, LogIssuedReleasePublicIpJob)
+	jobID, _, err := issueJob(gpcnClient, ctx, request, LogIssuedReleasePublicIpJob)
 	if client.IsNotFound(err) {
 		tflog.Info(ctx, LogPublicIpAlreadyReleased)
 		return nil
@@ -225,27 +215,27 @@ func ReleasePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 	return nil
 }
 
-// issueJob sends a request whose 202 carries a job id and returns that id.
-// Attach, detach and release differ only in their route and verb.
-func issueJob(gpcnClient *client.GpcnClient, ctx context.Context, request *http.Request, issuedMessage string) (string, error) {
+// issueJob sends a request whose 202 carries a job id. It returns that id with
+// the raw body, because the acquire 202 names a sibling field as well.
+func issueJob(gpcnClient *client.GpcnClient, ctx context.Context, request *http.Request, issuedMessage string) (string, []byte, error) {
 	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	defer response.Body.Close()
 	tflog.Info(ctx, issuedMessage)
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	var jobResponse client.JobStatusSingularResponse
 	if err := json.Unmarshal(body, &jobResponse); err != nil {
-		return "", err
+		return "", nil, err
 	}
 
-	return jobResponse.Data.JobID, nil
+	return jobResponse.Data.JobID, body, nil
 }
 
 func pollJob(gpcnClient *client.GpcnClient, ctx context.Context, action, jobID string) error {
