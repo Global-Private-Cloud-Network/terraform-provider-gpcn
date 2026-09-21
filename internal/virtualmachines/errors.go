@@ -15,7 +15,6 @@ const (
 	ErrSummaryErrorReadingDeleteBody              = "Error reading body response GPCN Virtual Machine - Delete"
 	ErrSummaryErrorUnmarshalingDelete             = "Error unmarshaling GPCN Virtual Machine - Delete"
 	ErrSummaryEncounteredErrorGettingJobInfo      = "Encountered an error getting job info"
-	ErrSummaryEncounteredValidationError          = "Encountered a validation error"
 	ErrSummaryUnableToUpdatePublicIPConfiguration = "Unable to update public IP configuration"
 	ErrSummaryUnableToDetermineSizeChange         = "Unable to determine whether size_id change requires replacement"
 	ErrSummaryNoPrimaryNetworkInterface           = "No primary network interface"

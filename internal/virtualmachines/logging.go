@@ -3,12 +3,11 @@ package virtualmachines
 // Log message constants for virtual machine operations
 const (
 	// CreateVirtualMachine messages
-	LogStartingCreateVirtualMachine         = "Starting CreateVirtualMachine"
-	LogConstructedCreateVMRequest           = "Constructed Create GPCN Virtual Machine request successfully"
-	LogIssuedCreateVMJob                    = "Successfully issued to job to create GPCN Virtual Machine. Beginning long-polling to check the status"
-	LogLongPollingCompletedCreateVM         = "Long polling completed for Create GPCN Virtual Machine - proceeding to poll for VM status"
-	LogSuccessfullyProcessedVMCreate        = "Successfully processed GPCN Virtual Machine - Create"
-	LogSuccessfullyCreatedVMMayNotBeRunning = "Creating the Virtual Machine complete. The Virtual Machine was attempted to be started, but may not be running yet. Check the GPCN Dashboard for more information"
+	LogStartingCreateVirtualMachine  = "Starting CreateVirtualMachine"
+	LogConstructedCreateVMRequest    = "Constructed Create GPCN Virtual Machine request successfully"
+	LogIssuedCreateVMJob             = "Successfully issued to job to create GPCN Virtual Machine. Beginning long-polling to check the status"
+	LogLongPollingCompletedCreateVM  = "Long polling completed for Create GPCN Virtual Machine - proceeding to poll for VM status"
+	LogSuccessfullyProcessedVMCreate = "Successfully processed GPCN Virtual Machine - Create"
 
 	// GetVirtualMachine messages
 	LogStartingGetVMWithID           = "Starting GetVirtualMachine for Virtual Machine ID %s"
