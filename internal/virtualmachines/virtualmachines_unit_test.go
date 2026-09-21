@@ -1351,7 +1351,7 @@ func TestCreateVirtualMachineSendsAcquirePublicIpAndSingleNetworkIdMockHTTP(t *t
 // The detail is a user-facing string that the release pins. It tells the operator that
 // the machine is in state and tainted, so a re-run of apply replaces it unless the
 // operator untaints it first.
-func TestVMCreatedAttachFailedDetailBytes(t *testing.T) {
+func TestVirtualMachineCreatedAttachFailedDetailBytes(t *testing.T) {
 	const expected = "virtual machine %s was created and is in state, but attaching %s failed: %s. Terraform has marked the machine tainted: run terraform untaint on it and apply again to attach the remaining networks, or let the next apply replace it."
 
 	if ErrDetailVMCreatedAttachFailed != expected {

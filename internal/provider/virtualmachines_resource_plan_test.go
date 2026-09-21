@@ -661,6 +661,15 @@ func indexOfRequest(sequence []string, request string) int {
 	return slices.Index(sequence, request)
 }
 
+func lastIndexOfRequest(sequence []string, request string) int {
+	for i := len(sequence) - 1; i >= 0; i-- {
+		if sequence[i] == request {
+			return i
+		}
+	}
+	return -1
+}
+
 // GPCN refuses an add-NIC on a running machine whose image lacks network hotplug. The
 // post-create attach therefore takes the same gate the update path takes.
 func TestVirtualMachineResourcePlanCreateStopsForAttachWithoutHotplug(t *testing.T) {
@@ -686,6 +695,7 @@ func TestVirtualMachineResourcePlanCreateStopsForAttachWithoutHotplug(t *testing
 						Check: func(*terraform.State) error {
 							sequence := recorded()
 							attach := indexOfRequest(sequence, "POST "+vmPlanTestPath+"/network-interfaces")
+							lastAttach := lastIndexOfRequest(sequence, "POST "+vmPlanTestPath+"/network-interfaces")
 							stop := indexOfRequest(sequence, "POST "+vmPlanTestPath+"/stop")
 							start := indexOfRequest(sequence, "POST "+vmPlanTestPath+"/start")
 							if attach < 0 {
@@ -700,8 +710,8 @@ func TestVirtualMachineResourcePlanCreateStopsForAttachWithoutHotplug(t *testing
 							if stop < 0 || stop > attach {
 								return fmt.Errorf("expected a stop before the attach, got %v", sequence)
 							}
-							if start < 0 || start < attach {
-								return fmt.Errorf("expected a start after the attach, got %v", sequence)
+							if start < 0 || start < lastAttach {
+								return fmt.Errorf("expected a start after the last attach, got %v", sequence)
 							}
 							return nil
 						},
