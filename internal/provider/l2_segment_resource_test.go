@@ -63,10 +63,11 @@ func TestL2SegmentResource(t *testing.T) {
 				),
 			},
 			{
-				ResourceName:            gpcnL2SegmentTest,
-				ImportState:             true,
-				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"created_time", "last_updated"},
+				// The timestamps are derived from the detail by the same mapper
+				// the import path runs, so an import reproduces them exactly.
+				ResourceName:      gpcnL2SegmentTest,
+				ImportState:       true,
+				ImportStateVerify: true,
 			},
 			{
 				Config: l2SegmentTestConfig(renamed, "Renamed by acceptance tests", datacenterID),
