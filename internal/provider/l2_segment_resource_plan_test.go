@@ -438,47 +438,55 @@ func TestL2SegmentResourcePlanKeepsFailedSegmentInState(t *testing.T) {
 func TestL2SegmentReadWarnsOnFailedSegmentUnit(t *testing.T) {
 	t.Parallel()
 
-	_, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, _ *http.Request) {
-			testutil.WriteJSONResponse(w, l2PlanTestDetailBodyInState(
-				l2PlanTestName, nil, l2PlanTestFailedState, l2PlanTestFailedReason, 0,
-			))
-		},
-	})
-
 	ctx := context.Background()
-	segmentResource := &l2SegmentResource{client: gpcnClient}
 
-	var schemaResponse fwresource.SchemaResponse
-	segmentResource.Schema(ctx, fwresource.SchemaRequest{}, &schemaResponse)
+	readInState := func(segmentState string, failureReason any) fwresource.ReadResponse {
+		t.Helper()
 
-	priorState := tfsdk.State{Schema: schemaResponse.Schema}
-	diags := priorState.Set(ctx, l2segments.ResourceModel{
-		ID:               types.StringValue(l2PlanTestSegmentID),
-		Name:             types.StringValue(l2PlanTestName),
-		DatacenterId:     types.StringValue(l2PlanTestDatacenterID),
-		Description:      types.StringValue(""),
-		State:            types.StringValue("ready"),
-		Offering:         types.StringValue("plain"),
-		FailureReason:    types.StringNull(),
-		DatacenterName:   types.StringNull(),
-		AttachedNicCount: types.Int64Value(0),
-		CreatedTime:      types.StringValue(l2PlanTestRFC850),
-		LastUpdated:      types.StringValue(l2PlanTestRFC850),
-	})
-	if diags.HasError() {
-		t.Fatalf("failed to build the prior state: %v", diags)
+		_, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+			T: t,
+			Handler: func(w http.ResponseWriter, _ *http.Request) {
+				testutil.WriteJSONResponse(w, l2PlanTestDetailBodyInState(
+					l2PlanTestName, nil, segmentState, failureReason, 0,
+				))
+			},
+		})
+
+		segmentResource := &l2SegmentResource{client: gpcnClient}
+
+		var schemaResponse fwresource.SchemaResponse
+		segmentResource.Schema(ctx, fwresource.SchemaRequest{}, &schemaResponse)
+
+		priorState := tfsdk.State{Schema: schemaResponse.Schema}
+		diags := priorState.Set(ctx, l2segments.ResourceModel{
+			ID:               types.StringValue(l2PlanTestSegmentID),
+			Name:             types.StringValue(l2PlanTestName),
+			DatacenterId:     types.StringValue(l2PlanTestDatacenterID),
+			Description:      types.StringValue(""),
+			State:            types.StringValue("ready"),
+			Offering:         types.StringValue("plain"),
+			FailureReason:    types.StringNull(),
+			DatacenterName:   types.StringNull(),
+			AttachedNicCount: types.Int64Value(0),
+			CreatedTime:      types.StringValue(l2PlanTestRFC850),
+			LastUpdated:      types.StringValue(l2PlanTestRFC850),
+		})
+		if diags.HasError() {
+			t.Fatalf("failed to build the prior state: %v", diags)
+		}
+
+		readResponse := fwresource.ReadResponse{
+			State: tfsdk.State{Schema: schemaResponse.Schema, Raw: priorState.Raw},
+		}
+		segmentResource.Read(ctx, fwresource.ReadRequest{State: priorState}, &readResponse)
+
+		if readResponse.Diagnostics.HasError() {
+			t.Fatalf("Read reported errors: %v", readResponse.Diagnostics.Errors())
+		}
+		return readResponse
 	}
 
-	readResponse := fwresource.ReadResponse{
-		State: tfsdk.State{Schema: schemaResponse.Schema, Raw: priorState.Raw},
-	}
-	segmentResource.Read(ctx, fwresource.ReadRequest{State: priorState}, &readResponse)
-
-	if readResponse.Diagnostics.HasError() {
-		t.Fatalf("Read reported errors: %v", readResponse.Diagnostics.Errors())
-	}
+	readResponse := readInState(l2PlanTestFailedState, l2PlanTestFailedReason)
 
 	warnings := readResponse.Diagnostics.Warnings()
 	if len(warnings) != 1 {
@@ -490,6 +498,13 @@ func TestL2SegmentReadWarnsOnFailedSegmentUnit(t *testing.T) {
 	wantDetail := fmt.Sprintf(l2segments.WarnDetailL2SegmentFailed, l2PlanTestSegmentID, l2PlanTestFailedReason)
 	if got := warnings[0].Detail(); got != wantDetail {
 		t.Errorf("detail = %q, want %q", got, wantDetail)
+	}
+
+	// A ready segment must stay silent. Without this drive an unconditional
+	// warning passes every assertion above.
+	readyResponse := readInState("ready", nil)
+	if quiet := readyResponse.Diagnostics.Warnings(); len(quiet) != 0 {
+		t.Errorf("warnings on a ready segment = %v, want none", quiet)
 	}
 }
 
