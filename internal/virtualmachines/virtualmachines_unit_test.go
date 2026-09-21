@@ -1201,16 +1201,18 @@ func l2SegmentNics(segmentIds ...string) []networks.ReadVirtualMachineNetworkDat
 	return nics
 }
 
-// segmentUpdateMockServer records every attach body.
+// segmentUpdateMockServer records every attach body. It answers the interface route of
+// the named machine only. A call that addresses another machine reaches no arm.
 func segmentUpdateMockServer(t *testing.T, vmID string) (*httptest.Server, *client.GpcnClient, *[]string) {
 	t.Helper()
 
+	interfacesPath := "/v1/resource/virtual-machines/" + vmID + "/network-interfaces"
 	attached := []string{}
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
-			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/network-interfaces"):
+			case r.Method == http.MethodPost && r.URL.Path == interfacesPath:
 				body := testutil.ReadRequestBody(r)
 				segmentId, _ := body["l2SegmentId"].(string)
 				attached = append(attached, segmentId)
