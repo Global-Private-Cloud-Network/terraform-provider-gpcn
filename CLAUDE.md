@@ -116,6 +116,7 @@ five longer names that start with it.
 
 - **Unit tests**: `testutil.SetupMockServerWithGpcnClient` (`internal/testutil/mock_http.go`) serves mocked HTTP. It bypasses `authTransport`, so not-found and `HTTPError` paths cannot be tested through it — use `testutil.SetupMockServerWithRealTransport`, or `client.NewGpcnClient` against an `httptest` server, for those. Run with `make test`.
 - **Acceptance tests**: Create real resources, and there are no sweepers, so a failed run leaves them behind. Run with `make testacc`. Run individual tests to iterate faster. The network and virtual machine cases read `GPCN_TEST_NETWORK_ID` (an existing network the key can see) and skip when it is unset, because the provider refuses to create a `gpcn_network`.
+- `TestCase.ErrorCheck` never runs for a step that sets `ExpectError`; assert an error's absence in `ErrorCheck` on a step without `ExpectError`.
 
 ## Documentation
 
