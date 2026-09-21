@@ -453,7 +453,7 @@ func TestVirtualMachineResourcePlanCreateWritesStateWhenAttachFails(t *testing.T
 		Steps: []resource.TestStep{
 			{
 				Config:      config,
-				ExpectError: regexp.MustCompile(`attaching .* failed`),
+				ExpectError: regexp.MustCompile(`(?s)attaching .* failed.*terraform\s+untaint`),
 			},
 			{
 				RefreshState:       true,
