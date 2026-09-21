@@ -158,7 +158,8 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				Optional:    true,
 				Computed:    true,
 				Validators: []validator.List{
-					listvalidator.SizeAtMost(4),
+					// The birth subnet interface holds one of the five GPCN allows.
+					listvalidator.SizeAtMost(virtualmachines.MAX_NETWORKS_ATTACHED_ALLOWED - 1),
 					listvalidator.UniqueValues(),
 				},
 				Default: listdefault.StaticValue(types.ListValueMust(types.StringType, []attr.Value{})),

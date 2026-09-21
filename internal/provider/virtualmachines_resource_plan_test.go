@@ -523,3 +523,36 @@ func TestVirtualMachineResourcePlanLoadsPriorStateWithNetworkIds(t *testing.T) {
 		t.Fatal("Expected the upgraded state to be returned")
 	}
 }
+
+// GPCN caps a machine at five interfaces, and the birth subnet holds one of them.
+func TestVirtualMachineResourcePlanRefusesMoreThanFourSegments(t *testing.T) {
+	config := fmt.Sprintf(`
+provider "gpcn" {
+  host    = "http://127.0.0.1:1"
+  api_key = "test-key"
+}
+
+resource "gpcn_virtualmachine" "test" {
+  name           = "vm-plan-segments"
+  datacenter_id  = %q
+  size_id        = %q
+  image_id       = %q
+  subnet_id      = %q
+  l2_segment_ids = ["a", "b", "c", "d", "e"]
+  initial_auth = {
+    ssh_key_id = %q
+    username   = %q
+  }
+}
+`, vmPlanTestDatacenterID, vmPlanTestSizeID, vmPlanTestImageID, vmPlanTestSubnetID, vmPlanTestSshKeyID, vmPlanTestUsername)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexp.MustCompile(`list must contain at most 4 elements`),
+			},
+		},
+	})
+}
