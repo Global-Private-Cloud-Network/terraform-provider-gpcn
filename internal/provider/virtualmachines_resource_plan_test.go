@@ -1809,6 +1809,14 @@ var vmPlanTestAttachErrorPattern = regexp.MustCompile(`(?s)Error\s+updating\s+ne
 // vmPlanTestLeftStoppedPattern matches the left-stopped summary after Terraform wraps it.
 var vmPlanTestLeftStoppedPattern = regexp.MustCompile(`(?s)Virtual\s+machine\s+left\s+stopped`)
 
+// vmPlanTestRetrieveErrorPattern matches a refused read of the machine after Terraform
+// wraps it.
+var vmPlanTestRetrieveErrorPattern = regexp.MustCompile(`(?s)Retrieving\s+information\s+about\s+the\s+Virtual\s+Machine\s+failed`)
+
+// vmPlanTestInterfaceReadErrorPattern matches a refused read of the interfaces after
+// Terraform wraps it.
+var vmPlanTestInterfaceReadErrorPattern = regexp.MustCompile(`(?s)Error\s+retrieving\s+network\s+interfaces`)
+
 // The update stops the machine and the segment attach then fails. The provider starts
 // the machine again, so the user reads the attach error alone. The step sets no
 // ExpectError, because ErrorCheck never runs for a step that sets one. A flag records
@@ -1931,7 +1939,7 @@ func TestVirtualMachineResourcePlanStartsAgainWhenTheReadBackFails(t *testing.T)
 			},
 			{
 				Config:      vmSegmentListPlanTestConfig(server.URL, "vm-plan-read-back-fails", vmPlanTestSegmentID),
-				ExpectError: regexp.MustCompile(`(?s)Retrieving\s+information\s+about\s+the\s+Virtual\s+Machine\s+failed`),
+				ExpectError: vmPlanTestRetrieveErrorPattern,
 			},
 		},
 	})
@@ -1939,6 +1947,195 @@ func TestVirtualMachineResourcePlanStartsAgainWhenTheReadBackFails(t *testing.T)
 	if starts := startCount(); starts != 1 {
 		t.Errorf("Expected exactly 1 start, got %d", starts)
 	}
+}
+
+// vmPlanTestReadsBeforeAnUpdate counts the reads Terraform takes of the machine before
+// it applies a step. The plan takes one. The read the update takes for its own decision
+// is the one after it.
+const vmPlanTestReadsBeforeAnUpdate = 1
+
+// startVirtualMachineHoistedReadMockServer refuses one read of the update. The update
+// reads the machine and its interfaces before it decides on a stop. The returned
+// function arms the refusal between the steps, so the create never meets it, and the
+// refusal answers one read only. refuseInterfaces chooses which of the two reads answers
+// 500. The image takes no network hotplug, so a segment change stops a machine that
+// reads back.
+func startVirtualMachineHoistedReadMockServer(t *testing.T, refuseInterfaces bool) (*httptest.Server, func(), func() []string) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	birthSubnetID := ""
+	status := virtualmachines.VMStatusRunning.String()
+	armed := false
+	reads := 0
+	refused := false
+	var events []string
+
+	// refuseThisReadLocked answers the caller that holds the lock. It counts the reads of
+	// the refresh past and then answers true once.
+	refuseThisReadLocked := func() bool {
+		if !armed || refused {
+			return false
+		}
+		reads++
+		if reads <= vmPlanTestReadsBeforeAnUpdate {
+			return false
+		}
+		refused = true
+		return true
+	}
+
+	refuse := func(w http.ResponseWriter, message string) {
+		w.WriteHeader(http.StatusInternalServerError)
+		testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": message})
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			birthSubnetID, _ = body["subnetId"].(string)
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			body := testutil.ReadRequestBody(r)
+			segmentID, _ := body["l2SegmentId"].(string)
+			mu.Lock()
+			events = append(events, "attach "+segmentID)
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mu.Lock()
+			currentSubnet := birthSubnetID
+			refuseRead := refuseInterfaces && refuseThisReadLocked()
+			mu.Unlock()
+			if refuseRead {
+				refuse(w, "interfaces refused")
+				return
+			}
+			testutil.WriteJSONResponse(w, vmSegmentPlanTestNetworkInterfacesBody(currentSubnet, nil))
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			events = append(events, "stop")
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/start":
+			mu.Lock()
+			events = append(events, "start")
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			refuseRead := !refuseInterfaces && refuseThisReadLocked()
+			mu.Unlock()
+			if refuseRead {
+				refuse(w, "detail refused")
+				return
+			}
+			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, vmPlanTestSizeID, 0))
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	arm := func() {
+		mu.Lock()
+		armed = true
+		mu.Unlock()
+	}
+
+	recorded := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), events...)
+	}
+
+	return server, arm, recorded
+}
+
+// The update reads the machine before it decides on a stop. A refused read leaves the
+// provider without the live SKU, so it fails the update and stops nothing.
+func TestVirtualMachineResourcePlanRefusedDetailReadFailsTheUpdateWithoutAStop(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, arm, recorded := startVirtualMachineHoistedReadMockServer(t, false)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmSegmentListPlanTestConfig(server.URL, "vm-plan-refused-detail"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
+				),
+			},
+			{
+				PreConfig:   arm,
+				Config:      vmSegmentListPlanTestConfig(server.URL, "vm-plan-refused-detail", vmPlanTestSegmentID),
+				ExpectError: vmPlanTestRetrieveErrorPattern,
+			},
+			{
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check: func(*terraform.State) error {
+					if events := recorded(); len(events) != 0 {
+						return fmt.Errorf("expected the refused read to call nothing, got %v", events)
+					}
+					return nil
+				},
+			},
+		},
+	})
+}
+
+// The update reads the interfaces of the machine before it decides on a stop. A refused
+// read leaves the provider without the live segments, so it fails the update and stops
+// nothing.
+func TestVirtualMachineResourcePlanRefusedInterfaceReadFailsTheUpdateWithoutAStop(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, arm, recorded := startVirtualMachineHoistedReadMockServer(t, true)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmSegmentListPlanTestConfig(server.URL, "vm-plan-refused-interfaces"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
+				),
+			},
+			{
+				PreConfig:   arm,
+				Config:      vmSegmentListPlanTestConfig(server.URL, "vm-plan-refused-interfaces", vmPlanTestSegmentID),
+				ExpectError: vmPlanTestInterfaceReadErrorPattern,
+			},
+			{
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check: func(*terraform.State) error {
+					if events := recorded(); len(events) != 0 {
+						return fmt.Errorf("expected the refused read to call nothing, got %v", events)
+					}
+					return nil
+				},
+			},
+		},
+	})
 }
 
 const (
