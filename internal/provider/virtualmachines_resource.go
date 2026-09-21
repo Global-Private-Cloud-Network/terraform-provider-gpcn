@@ -314,6 +314,78 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
+	var networkIds []string
+	if !plan.NetworkIds.IsNull() {
+		listDiags := plan.NetworkIds.ElementsAs(ctx, &networkIds, true)
+		resp.Diagnostics.Append(listDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+	// GPCN creates the machine on one birth network, then the loop attaches the rest.
+	// State holds the machine and the networks that attached, so a refused attach leaves
+	// no machine outside Terraform.
+	if len(networkIds) > 1 {
+		attached := []string{networkIds[0]}
+		var attachErr error
+		failedNetworkId := ""
+
+		// GPCN refuses an add-NIC on a running machine whose image has no network
+		// hotplug. The update path takes the same gate.
+		stopped := false
+		if !plan.NetworkHotplug.ValueBool() {
+			if stopErr := virtualmachines.StopVirtualMachine(r.client, ctx, plan.ID.ValueString()); stopErr != nil {
+				attachErr = fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStoppingVM, plan.ID.ValueString()), stopErr)
+				failedNetworkId = networkIds[1]
+			} else {
+				stopped = true
+			}
+		}
+
+		if attachErr == nil {
+			for _, networkId := range networkIds[1:] {
+				attachErr = networks.AddNetworkInterface(r.client, ctx, plan.ID.ValueString(), networkId)
+				if attachErr != nil {
+					failedNetworkId = networkId
+					break
+				}
+				attached = append(attached, networkId)
+			}
+		}
+
+		// A machine the provider stopped must run again, even after a refused attach.
+		if stopped {
+			if startErr := virtualmachines.StartVirtualMachine(r.client, ctx, plan.ID.ValueString()); startErr != nil {
+				tflog.Debug(ctx, fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStartingVM, plan.ID.ValueString()), startErr).Error())
+			}
+		}
+
+		plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
+		resp.Diagnostics.Append(mapDiags...)
+
+		// network_ids names the networks the machine really holds. A configured list that
+		// outruns the attach loop leaves a later plan no difference to act on.
+		attachedIds, attachedDiags := types.ListValueFrom(ctx, types.StringType, attached)
+		resp.Diagnostics.Append(attachedDiags...)
+		if !attachedDiags.HasError() {
+			plan.NetworkIds = attachedIds
+		}
+
+		diags = resp.State.Set(ctx, plan)
+		resp.Diagnostics.Append(diags...)
+
+		if attachErr != nil {
+			resp.Diagnostics.AddError(
+				virtualmachines.ErrSummaryVMCreatedAttachFailed,
+				fmt.Sprintf(virtualmachines.ErrDetailVMCreatedAttachFailed, plan.ID.ValueString(), failedNetworkId, attachErr.Error()),
+			)
+			return
+		}
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
 	tflog.Info(ctx, virtualmachines.LogSuccessfullyFinishedCreateGPCNVirtualMachine)
 }
 
@@ -391,7 +463,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		return
 	}
 
-	// Validate the prospective primary network has a valid configuration for allocatePublicIp
+	// Validate the prospective primary network has a valid configuration for allocate_public_ip
 	if plan.AllocatePublicIp != state.AllocatePublicIp {
 		// First validate the primary network type is standard
 		err := virtualmachines.ValidatePublicIpValue(r.client, ctx, plan)
@@ -499,6 +571,12 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	if client.IsNotFound(err) {
 		// Already deleted outside of Terraform
 		tflog.Info(ctx, virtualmachines.LogVirtualMachineAlreadyDeleted)
+		return
+	} else if virtualmachines.IsTerminalStatusError(err) {
+		// The platform writes Destroyed and Deleting from its own lifecycle. The machine
+		// never stops, and no machine remains to delete.
+		tflog.Info(ctx, fmt.Sprintf(virtualmachines.LogVirtualMachineTerminalRemovingFromState, err.Error()))
+		resp.State.RemoveResource(ctx)
 		return
 	} else if err != nil {
 		resp.Diagnostics.AddError(

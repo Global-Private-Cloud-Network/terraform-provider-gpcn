@@ -84,7 +84,7 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 
 	// Create a new request from the model
 	createVMRequestBody := map[string]any{
-		"allocatePublicIp":  model.AllocatePublicIp.ValueBool(),
+		"acquirePublicIp":   model.AllocatePublicIp.ValueBool(),
 		"authMethod":        authMethod,
 		"skuId":             skuId,
 		"datacenterId":      model.DatacenterId.ValueString(),
@@ -108,21 +108,17 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 		createVMRequestBody["resourceGroupId"] = model.ResourceGroupId.ValueString()
 	}
 
-	// If networkIds is populated, add it to the create request
+	// GPCN create takes one birth network. The caller attaches the rest after the
+	// machine exists.
 	if !model.NetworkIds.IsNull() && len(model.NetworkIds.Elements()) > 0 {
 		var networkIds []string
-		model.NetworkIds.ElementsAs(ctx, &networkIds, true)
+		diags := model.NetworkIds.ElementsAs(ctx, &networkIds, true)
+		if diags.HasError() {
+			return nil, fmt.Errorf("failed to read network_ids")
+		}
 
 		tflog.Info(ctx, LogNetworkIdsNotNull)
-		// Add all network interfaces, setting the first value entered as the primary
-		var networkInterfaces []map[string]any
-		for idx, networkId := range networkIds {
-			networkInterfaces = append(networkInterfaces, map[string]any{
-				"networkId": networkId,
-				"primary":   idx == 0,
-			})
-		}
-		createVMRequestBody["networkInterfaces"] = networkInterfaces
+		createVMRequestBody["networkId"] = networkIds[0]
 	} else {
 		tflog.Info(ctx, LogNetworkIdsNullOrEmpty)
 	}

@@ -181,6 +181,9 @@ func TestCreateVirtualMachineMockHTTP(t *testing.T) {
 				if req["imageId"].(string) != imageID {
 					t.Errorf("Expected imageId %s, got '%v'", imageID, req["imageId"])
 				}
+				if _, present := req["networkId"]; present {
+					t.Error("Expected networkId to be absent when the model names no network")
+				}
 
 				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
 					Success: true,
@@ -396,8 +399,10 @@ func TestValidatePublicIpValueMockHTTP(t *testing.T) {
 				t.Errorf("Expected no error but got: %v", err)
 			}
 			if tc.expectError && err != nil {
-				if !strings.Contains(err.Error(), "allocate_public_ip") && !strings.Contains(err.Error(), "allocatePublicIp") {
-					t.Errorf("Expected error to contain validation message, got '%s'", err.Error())
+				// The detail names the schema attribute, not the retired wire key.
+				const expected = "the prospective primary network (first in the list) is of type custom. allocate_public_ip can only be true when the primary network's network_type is standard"
+				if err.Error() != expected {
+					t.Errorf("Expected error '%s', got '%s'", expected, err.Error())
 				}
 			}
 		})
@@ -1262,5 +1267,94 @@ func TestRefreshVirtualMachineModelFromResponseKeepsValuesOnEmpty(t *testing.T) 
 
 	if result.Name.ValueString() != "configured-vm" {
 		t.Errorf("Expected name 'configured-vm', got '%s'", result.Name.ValueString())
+	}
+}
+
+func TestCreateVirtualMachineSendsAcquirePublicIpAndSingleNetworkIdMockHTTP(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	useNoInitialPollDelay(t)
+	const (
+		jobID    = "job-acquire-1"
+		vmID     = "vm-acquire-1"
+		imageID  = "550e8400-e29b-41d4-a716-446655440000"
+		sizeID   = "sku-abc-123"
+		networkA = "11111111-1111-1111-1111-111111111111"
+		networkB = "22222222-2222-2222-2222-222222222222"
+	)
+
+	var createBody map[string]any
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatalf("reading the create body failed: %v", err)
+				}
+				if err := json.Unmarshal(body, &createBody); err != nil {
+					t.Fatalf("unmarshaling the create body failed: %v", err)
+				}
+				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
+					Success: true,
+					Message: "VM creation job started",
+					Data: client.JobStatusDataResponse{
+						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: vmID}},
+					},
+				})
+			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, vmID, true)
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
+				testutil.WriteJSONResponse(w, newVMResponse(vmID, "test-vm"))
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/networks/"+networkA):
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"message": "Network retrieved",
+					"data":    map[string]any{"id": networkA, "name": "birth-network", "networkType": "standard"},
+				})
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	model := createTestVMModel("test-vm", testVMImage, true)
+	networkIds, listDiags := types.ListValueFrom(context.Background(), types.StringType, []string{networkA, networkB})
+	if listDiags.HasError() {
+		t.Fatalf("building the network id list failed: %v", listDiags)
+	}
+	model.NetworkIds = networkIds
+
+	if _, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, model); err != nil {
+		t.Fatalf("CreateVirtualMachine failed: %v", err)
+	}
+
+	if createBody == nil {
+		t.Fatal("Expected the create endpoint to be called")
+	}
+	if acquire, ok := createBody["acquirePublicIp"].(bool); !ok || !acquire {
+		t.Errorf("Expected acquirePublicIp true, got '%v'", createBody["acquirePublicIp"])
+	}
+	if _, present := createBody["allocatePublicIp"]; present {
+		t.Error("Expected allocatePublicIp to be absent from the create body")
+	}
+	if _, present := createBody["networkInterfaces"]; present {
+		t.Error("Expected networkInterfaces to be absent from the create body")
+	}
+	if createBody["networkId"] != networkA {
+		t.Errorf("Expected networkId '%s', got '%v'", networkA, createBody["networkId"])
+	}
+}
+
+// The detail is a user-facing string that the release pins. It tells the operator that
+// the machine is in state and tainted, so a re-run of apply replaces it unless the
+// operator untaints it first.
+func TestVMCreatedAttachFailedDetailBytes(t *testing.T) {
+	const expected = "virtual machine %s was created and is in state, but attaching %s failed: %s. Terraform has marked the machine tainted: run terraform untaint on it and apply again to attach the remaining networks, or let the next apply replace it."
+
+	if ErrDetailVMCreatedAttachFailed != expected {
+		t.Errorf("Expected detail '%s', got '%s'", expected, ErrDetailVMCreatedAttachFailed)
 	}
 }
