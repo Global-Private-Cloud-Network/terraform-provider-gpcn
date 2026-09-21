@@ -253,10 +253,10 @@ func TestVpcResourceReadWarnsWhenVpcFailed(t *testing.T) {
 	if warning.Severity() != diag.SeverityWarning {
 		t.Errorf("Severity = %v, want %v", warning.Severity(), diag.SeverityWarning)
 	}
-	if got := warning.Summary(); got != vpcs.WarnSummaryVpcFailed {
-		t.Errorf("Summary = %q, want %q", got, vpcs.WarnSummaryVpcFailed)
+	if got := warning.Summary(); got != "VPC is in the failed state" {
+		t.Errorf("Summary = %q, want %q", got, "VPC is in the failed state")
 	}
-	want := fmt.Sprintf(vpcs.WarnDetailVpcFailed, vpcPlanTestID, "the anchor router never came up")
+	want := "VPC vpc-1 is in the failed state: the anchor router never came up. Destroy the VPC and create it again."
 	if got := warning.Detail(); got != want {
 		t.Errorf("Detail = %q, want %q", got, want)
 	}

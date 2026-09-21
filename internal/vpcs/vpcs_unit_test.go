@@ -187,8 +187,8 @@ func TestVpcCreateFailureDiagnosticRendersOverlap(t *testing.T) {
 	if got := diagnostic.Severity(); got != diag.SeverityError {
 		t.Errorf("Severity = %v, want %v", got, diag.SeverityError)
 	}
-	if got := diagnostic.Summary(); got != ErrSummaryVpcCidrOverlap {
-		t.Errorf("Summary = %q, want %q", got, ErrSummaryVpcCidrOverlap)
+	if got := diagnostic.Summary(); got != "VPC CIDR overlaps an existing VPC" {
+		t.Errorf("Summary = %q, want %q", got, "VPC CIDR overlaps an existing VPC")
 	}
 	want := `HTTP 409 (VPC_CIDR_OVERLAP_UNCONFIRMED): CIDR overlaps existing VPC(s): "web" (10.50.0.0/16). Overlapping VPCs can never be connected to each other. Re-submit with acknowledgeOverlap: true to proceed. Overlapping VPCs: web (10.50.0.0/16), data (10.50.128.0/17). Set acknowledge_overlap = true to proceed.`
 	if got := diagnostic.Detail(); got != want {
@@ -235,8 +235,8 @@ func TestVpcCreateFailureDiagnosticForwardsOtherRefusals(t *testing.T) {
 		`A VPC named "shared" already exists in this data center`, `{}`)
 
 	diagnostic := CreateFailureDiagnostic(err)
-	if got := diagnostic.Summary(); got != ErrSummaryUnableToCreateVpc {
-		t.Errorf("Summary = %q, want %q", got, ErrSummaryUnableToCreateVpc)
+	if got := diagnostic.Summary(); got != "Unable to create GPCN VPC" {
+		t.Errorf("Summary = %q, want %q", got, "Unable to create GPCN VPC")
 	}
 	want := `HTTP 409 (VPC_NAME_ALREADY_TAKEN): A VPC named "shared" already exists in this data center`
 	if got := diagnostic.Detail(); got != want {
@@ -252,8 +252,8 @@ func TestVpcDeleteFailureDiagnosticRendersCensus(t *testing.T) {
 		`{"blockers":{"subnets":2,"publicIps":0,"nsgs":1},"inFlight":{"subnets":1,"publicIps":0,"nsgs":0}}`)
 
 	diagnostic := DeleteFailureDiagnostic(vpcUnitTestID, err)
-	if got := diagnostic.Summary(); got != ErrSummaryUnableToDeleteVpc {
-		t.Errorf("Summary = %q, want %q", got, ErrSummaryUnableToDeleteVpc)
+	if got := diagnostic.Summary(); got != "Unable to delete GPCN VPC" {
+		t.Errorf("Summary = %q, want %q", got, "Unable to delete GPCN VPC")
 	}
 	want := `HTTP 409 (VPC_NOT_EMPTY): Cannot delete VPC with 3 subnet(s), 1 network security group(s). Delete subnets and network security groups and release public IPs first. Blockers: 2 subnet(s), 1 network security group(s). In flight: 1 subnet(s).`
 	if got := diagnostic.Detail(); got != want {
@@ -294,8 +294,8 @@ func TestFailedVpcWarningNamesTheReason(t *testing.T) {
 	if got := warning.Severity(); got != diag.SeverityWarning {
 		t.Errorf("Severity = %v, want %v", got, diag.SeverityWarning)
 	}
-	if got := warning.Summary(); got != WarnSummaryVpcFailed {
-		t.Errorf("Summary = %q, want %q", got, WarnSummaryVpcFailed)
+	if got := warning.Summary(); got != "VPC is in the failed state" {
+		t.Errorf("Summary = %q, want %q", got, "VPC is in the failed state")
 	}
 	want := "VPC vpc-1 is in the failed state: the anchor router never came up. Destroy the VPC and create it again."
 	if got := warning.Detail(); got != want {
