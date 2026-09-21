@@ -229,6 +229,7 @@ func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 		if err == nil {
 			return resp, nil
 		}
+		err = unwrapURLError(err)
 
 		lastErr = err
 
@@ -334,4 +335,18 @@ func hasStatus(err error, status int) bool {
 		return httpErr.StatusCode == status
 	}
 	return false
+}
+
+// unwrapURLError strips the *url.Error that net/http wraps around a transport
+// error, so a diagnostic reads the API's words and not the request line.
+func unwrapURLError(err error) error {
+	var urlErr *url.Error
+	if !errors.As(err, &urlErr) {
+		return err
+	}
+	var httpErr *HTTPError
+	if errors.As(urlErr.Err, &httpErr) {
+		return httpErr
+	}
+	return err
 }
