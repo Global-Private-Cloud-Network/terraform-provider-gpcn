@@ -309,7 +309,8 @@ func TestVpcResourceReadWarnsWhenVpcFailed(t *testing.T) {
 }
 
 // gpcn_vpc is a resource, so its Configure refusal must say so. The other five
-// Release B resources say Resource, and a reader matches the two sentences.
+// Release B resources say Resource. Two wordings for one refusal confuse the
+// reader.
 func TestVpcResourceConfigureRefusesAnotherProviderData(t *testing.T) {
 	t.Parallel()
 
