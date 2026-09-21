@@ -34,6 +34,10 @@ const (
 	// the refusal, and the one knob that clears it.
 	ErrDetailVpcCidrOverlap       = "%s Overlapping VPCs: %s. Set acknowledge_overlap = true to proceed."
 	ErrDetailVpcCidrOverlapHidden = "%s Set acknowledge_overlap = true to proceed."
+	// The API withholds the names of VPCs outside the reader's resource groups
+	// and counts them instead. A list without the count names fewer VPCs than
+	// the sentence above it totals.
+	ErrDetailVpcOverlapHiddenSuffix = " and %d more in resource groups you cannot see"
 	// The API counts children in two populations. The reader deletes the first
 	// and waits for the second.
 	ErrDetailVpcNotEmpty = "%s Blockers: %s. In flight: %s."
@@ -163,6 +167,7 @@ func overlappingVpcs(err error) (string, bool) {
 	if !ok {
 		return "", true
 	}
+	hidden, _ := details["hiddenOverlapCount"].(float64)
 	parts := make([]string, 0, len(rows))
 	for _, row := range rows {
 		fields, isObject := row.(map[string]any)
@@ -176,7 +181,14 @@ func overlappingVpcs(err error) (string, bool) {
 		}
 		parts = append(parts, fmt.Sprintf("%s (%s)", name, cidr))
 	}
-	return strings.Join(parts, ", "), true
+	if len(parts) == 0 {
+		return "", true
+	}
+	rendered := strings.Join(parts, ", ")
+	if hidden > 0 {
+		rendered += fmt.Sprintf(ErrDetailVpcOverlapHiddenSuffix, int(hidden))
+	}
+	return rendered, true
 }
 
 func errorDetails(err error, code string) (map[string]any, bool) {

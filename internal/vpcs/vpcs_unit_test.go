@@ -181,7 +181,7 @@ func TestVpcCreateFailureDiagnosticRendersOverlap(t *testing.T) {
 
 	err := httpErrorFromBody(t, 409, ERROR_CODE_CIDR_OVERLAP_UNCONFIRMED,
 		`CIDR overlaps existing VPC(s): "web" (10.50.0.0/16). Overlapping VPCs can never be connected to each other. Re-submit with acknowledgeOverlap: true to proceed.`,
-		`{"overlapping":[{"id":"vpc-2","name":"web","cidr":"10.50.0.0/16"},{"id":"vpc-3","name":"data","cidr":"10.50.128.0/17"}],"hiddenOverlapCount":1}`)
+		`{"overlapping":[{"id":"vpc-2","name":"web","cidr":"10.50.0.0/16"},{"id":"vpc-3","name":"data","cidr":"10.50.128.0/17"}],"hiddenOverlapCount":0}`)
 
 	diagnostic := CreateFailureDiagnostic(err)
 	if got := diagnostic.Severity(); got != diag.SeverityError {
@@ -192,6 +192,22 @@ func TestVpcCreateFailureDiagnosticRendersOverlap(t *testing.T) {
 	}
 	want := `HTTP 409 (VPC_CIDR_OVERLAP_UNCONFIRMED): CIDR overlaps existing VPC(s): "web" (10.50.0.0/16). Overlapping VPCs can never be connected to each other. Re-submit with acknowledgeOverlap: true to proceed. Overlapping VPCs: web (10.50.0.0/16), data (10.50.128.0/17). Set acknowledge_overlap = true to proceed.`
 	if got := diagnostic.Detail(); got != want {
+		t.Errorf("Detail = %q, want %q", got, want)
+	}
+}
+
+// The API names only the VPCs inside the reader's resource groups and counts
+// the rest. A list that drops the count names fewer VPCs than the sentence
+// above it totals.
+func TestVpcCreateFailureDiagnosticCountsHiddenOverlaps(t *testing.T) {
+	t.Parallel()
+
+	err := httpErrorFromBody(t, 409, ERROR_CODE_CIDR_OVERLAP_UNCONFIRMED,
+		`CIDR overlaps existing VPC(s): "web" (10.50.0.0/16) and 2 VPC(s) outside your resource groups. Overlapping VPCs can never be connected to each other. Re-submit with acknowledgeOverlap: true to proceed.`,
+		`{"overlapping":[{"id":"vpc-2","name":"web","cidr":"10.50.0.0/16"}],"hiddenOverlapCount":2}`)
+
+	want := `HTTP 409 (VPC_CIDR_OVERLAP_UNCONFIRMED): CIDR overlaps existing VPC(s): "web" (10.50.0.0/16) and 2 VPC(s) outside your resource groups. Overlapping VPCs can never be connected to each other. Re-submit with acknowledgeOverlap: true to proceed. Overlapping VPCs: web (10.50.0.0/16) and 2 more in resource groups you cannot see. Set acknowledge_overlap = true to proceed.`
+	if got := CreateFailureDiagnostic(err).Detail(); got != want {
 		t.Errorf("Detail = %q, want %q", got, want)
 	}
 }
