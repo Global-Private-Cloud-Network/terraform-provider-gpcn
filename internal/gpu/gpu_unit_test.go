@@ -880,7 +880,7 @@ func TestRefreshGPUModelFromResponseKeepsValuesOnEmptyUnit(t *testing.T) {
 	}
 }
 
-// The five advertised series must carry the byte the catalog stores. The seeded
+// The five enabled series must carry the byte the catalog stores. The seeded
 // rows are db/seeds/sqlFiles/data/07-sku-catalog.mjs:3669-3760 on the backend.
 // The inventory query matches sku_series.code exactly, so one wrong byte makes a
 // series unusable.
@@ -1092,9 +1092,8 @@ func TestCheckInventoryReportsAvailabilityNotUnknownSeriesMockHTTP(t *testing.T)
 	}
 }
 
-// Both series are available in the same datacenter at the same GPU count, so
-// the series filter is the only thing that decides which series ID an order
-// carries.
+// Both series are available in the same datacenter at the same GPU count. The
+// series filter alone then decides which series ID an order carries.
 const inventoryJSONTwoSeriesAvailable = `{
   "data": {
     "series": [

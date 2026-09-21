@@ -6,7 +6,7 @@ var BASE_URL_V1 string = "/v1/resource/gpu/"
 // what a datacenter offers.
 var GPUSeriesNames = []string{"NVIDIA H200 Series", "NVIDIA H100 Series", "NVIDIA A100 Series", "NVIDIA RTX PRO 6000 Blackwell", "NVIDIA RTX A6000 Series"}
 
-// The catalog code of each advertised series, in the order of GPUSeriesNames.
+// The catalog code of each enabled series, in the order of GPUSeriesNames.
 var GPUSeriesCodes = []string{"nvidia-h200-series", "nvidia-h100-series", "nvidia-a100-series", "nvidia-rtx_pro_6000-series", "nvidia-rtx_a6000-series"}
 
 // GPUSeriesNameToCode answers only when the inventory response lists no series.

@@ -139,7 +139,7 @@ func startGPUPlanMockServer(t *testing.T) (*httptest.Server, func(string), func(
 			mu.Lock()
 			current := name
 			mu.Unlock()
-			testutil.WriteJSONResponse(w, gpuCatalogTestReadBody(current))
+			testutil.WriteJSONResponse(w, gpuCatalogTestReadBody(t, current))
 		case r.Method == http.MethodDelete && r.URL.Path == gpuPath:
 			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
 		default:
@@ -294,10 +294,15 @@ func TestGPUResourcePlanDetectsOutOfBandRename(t *testing.T) {
 
 // gpuCatalogTestReadBody answers with the sentinel series the API returns when
 // its own series lookup misses. The state must still carry the code the
-// inventory resolved, so the read echo cannot be the source of that code.
-func gpuCatalogTestReadBody(name string) map[string]any {
+// inventory resolved. The read echo cannot be the source of that code.
+func gpuCatalogTestReadBody(t *testing.T, name string) map[string]any {
+	t.Helper()
+
 	body := gpuPlanTestReadBody(name)
-	data, _ := body["data"].(map[string]any)
+	data, ok := body["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("Expected a data object in the read body, got %T", body["data"])
+	}
 	data["configuration"] = map[string]any{
 		"name":     "Unknown",
 		"code":     "unknown",
