@@ -1123,6 +1123,49 @@ func TestUpdatePublicIPIfChangedReportsMissingPrimaryInterface(t *testing.T) {
 	}
 }
 
+// A public IP attaches to a VPC interface. A machine whose primary interface carries an
+// L2 segment names no VPC, so the provider refuses the change. A verb with no VPC to
+// name would otherwise reach GPCN.
+func TestUpdatePublicIPIfChangedRefusesAnL2PrimaryInterface(t *testing.T) {
+	const vmID = "vm-l2-primary-123"
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces") {
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true, "message": "Network interfaces retrieved",
+					"data": []map[string]any{{
+						"id": "interface-l2", "networkInterface": 1, "isPrimary": 1,
+						"world": "l2", "l2SegmentId": "segment-a", "l2SegmentName": "name of segment-a",
+					}},
+				})
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	state := createTestVMModel("test-vm", testVMImage, false)
+	plan := createTestVMModel("test-vm", testVMImage, true)
+
+	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if !diags.HasError() {
+		t.Fatal("Expected an error diagnostic when the primary interface is not on a VPC")
+	}
+
+	summary := diags.Errors()[0].Summary()
+	if summary != ErrSummaryUnableToUpdatePublicIPConfiguration {
+		t.Errorf("Expected the summary '%s', got '%s'", ErrSummaryUnableToUpdatePublicIPConfiguration, summary)
+	}
+	detail := diags.Errors()[0].Detail()
+	expectedDetail := fmt.Sprintf(ErrDetailPrimaryInterfaceNotOnAVpc, vmID)
+	if detail != expectedDetail {
+		t.Errorf("Expected the detail '%s', got '%s'", expectedDetail, detail)
+	}
+}
+
 func TestMapVirtualMachineResponseToModelRefreshesDrift(t *testing.T) {
 	const (
 		vmID            = "vm-drift-123"
@@ -1592,6 +1635,20 @@ func TestSetNetworkModelValuesNotPresentNeverInfersAnAcquiredAddressUnit(t *test
 				t.Errorf("Expected public_ip_id '%s', got '%s'", tc.wantHeld, result.PublicIpId.ValueString())
 			}
 		})
+	}
+}
+
+// The refusal of an address on a machine that has no VPC is the only report the user
+// reads. The release pins the bytes, and the compiler accepts any rewording.
+func TestPrimaryInterfaceNotOnAVpcBytes(t *testing.T) {
+	const expectedSummary = "Unable to update public IP configuration"
+	if ErrSummaryUnableToUpdatePublicIPConfiguration != expectedSummary {
+		t.Errorf("Expected the summary '%s', got '%s'", expectedSummary, ErrSummaryUnableToUpdatePublicIPConfiguration)
+	}
+
+	const expectedDetail = "the primary network interface of virtual machine %s is not on a VPC subnet, and a public IP attaches to a VPC interface only"
+	if ErrDetailPrimaryInterfaceNotOnAVpc != expectedDetail {
+		t.Errorf("Expected the detail '%s', got '%s'", expectedDetail, ErrDetailPrimaryInterfaceNotOnAVpc)
 	}
 }
 
