@@ -129,6 +129,8 @@ func startVirtualMachinePlanMockServer(t *testing.T) (*httptest.Server, func(str
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
 			body := testutil.ReadRequestBody(r)
 			mu.Lock()
