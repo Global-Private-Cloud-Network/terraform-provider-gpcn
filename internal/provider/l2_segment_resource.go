@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"terraform-provider-gpcn/internal/client"
+	"terraform-provider-gpcn/internal/helpers"
 	"terraform-provider-gpcn/internal/l2segments"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -60,7 +61,7 @@ func (r *l2SegmentResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 					// The update body schema checks length only, so an adopted legacy name round-trips unchanged.
 					// The provider adds no regex and surfaces the 422.
 					stringvalidator.LengthBetween(1, 255),
-					l2segments.NoOuterWhitespaceValidator{Attribute: "name"},
+					helpers.NoOuterWhitespaceValidator{Summary: l2segments.ErrSummaryInvalidL2SegmentAttribute, Attribute: "name"},
 				},
 			},
 			"datacenter_id": schema.StringAttribute{
@@ -76,7 +77,7 @@ func (r *l2SegmentResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Computed:    true,
 				Validators: []validator.String{
 					stringvalidator.LengthAtMost(500),
-					l2segments.NoOuterWhitespaceValidator{Attribute: "description"},
+					helpers.NoOuterWhitespaceValidator{Summary: l2segments.ErrSummaryInvalidL2SegmentAttribute, Attribute: "description"},
 				},
 				Default: stringdefault.StaticString(""),
 			},

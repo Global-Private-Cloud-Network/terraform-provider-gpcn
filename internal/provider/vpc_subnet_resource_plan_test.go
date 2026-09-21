@@ -533,6 +533,20 @@ func TestVpcSubnetResourcePlanSendsChosenNsgOnCreate(t *testing.T) {
 
 // GPCN trims a name, so a configured value with outer whitespace comes back
 // different and the plan never settles. The refusal arrives before the request.
+// The shared validator changes nothing until the schema carries it.
+func TestVpcSubnetResourceSchemaAttachesWhitespaceValidators(t *testing.T) {
+	t.Parallel()
+
+	var schemaResponse fwresource.SchemaResponse
+	(&vpcSubnetResource{}).Schema(context.Background(), fwresource.SchemaRequest{}, &schemaResponse)
+	if schemaResponse.Diagnostics.HasError() {
+		t.Fatalf("Expected a schema, got %v", schemaResponse.Diagnostics)
+	}
+
+	assertWhitespaceValidator(t, schemaResponse.Schema.Attributes, "name", vpcsubnets.ErrSummaryInvalidSubnetAttribute)
+	assertWhitespaceValidator(t, schemaResponse.Schema.Attributes, "description", vpcsubnets.ErrSummaryInvalidSubnetAttribute)
+}
+
 func TestVpcSubnetResourcePlanRefusesOuterWhitespace(t *testing.T) {
 	t.Parallel()
 	server, _ := startSubnetPlanMockServer(t)

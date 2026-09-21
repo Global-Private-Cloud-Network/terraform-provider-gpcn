@@ -14,6 +14,7 @@ import (
 	"terraform-provider-gpcn/internal/vpcnsgs"
 
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
@@ -476,6 +477,27 @@ func TestVpcNsgResourcePlanAcceptsMovedSubnetCount(t *testing.T) {
 			},
 		},
 	})
+}
+
+// The shared validator changes nothing until the schema carries it. The rule
+// block names a summary of its own, so the guard reaches into the block too.
+func TestVpcNsgResourceSchemaAttachesWhitespaceValidators(t *testing.T) {
+	t.Parallel()
+
+	var schemaResponse fwresource.SchemaResponse
+	(&vpcNsgResource{}).Schema(context.Background(), fwresource.SchemaRequest{}, &schemaResponse)
+	if schemaResponse.Diagnostics.HasError() {
+		t.Fatalf("Expected a schema, got %v", schemaResponse.Diagnostics)
+	}
+
+	assertWhitespaceValidator(t, schemaResponse.Schema.Attributes, "name", vpcnsgs.ErrSummaryInvalidNsgAttribute)
+	assertWhitespaceValidator(t, schemaResponse.Schema.Attributes, "description", vpcnsgs.ErrSummaryInvalidNsgAttribute)
+
+	ruleBlock, ok := schemaResponse.Schema.Blocks["rule"].(schema.SetNestedBlock)
+	if !ok {
+		t.Fatalf("rule is %T, want schema.SetNestedBlock", schemaResponse.Schema.Blocks["rule"])
+	}
+	assertWhitespaceValidator(t, ruleBlock.NestedObject.Attributes, "description", vpcnsgs.ErrSummaryInvalidNsgRuleAttribute)
 }
 
 // GPCN trims a name, so a configured value with outer whitespace comes back

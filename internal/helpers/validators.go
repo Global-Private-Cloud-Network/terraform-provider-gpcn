@@ -1,4 +1,4 @@
-package vpcsubnets
+package helpers
 
 import (
 	"context"
@@ -8,6 +8,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
 
+// ErrDetailOuterWhitespace explains the refusal. The attribute name fills the
+// template, so the sentence names the value the user must fix.
+const ErrDetailOuterWhitespace = "%s must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"
+
 // NoOuterWhitespaceValidator refuses a value GPCN stores in a trimmed form. The
 // stored value then differs from the configuration, so the plan never settles.
 // The provider does not trim on the operator's behalf. The stored name would
@@ -15,7 +19,8 @@ import (
 type NoOuterWhitespaceValidator struct {
 	// Summary is the refusal summary format. It carries one %s, which the
 	// validator renders with Attribute.
-	Summary   string
+	Summary string
+	// Attribute names the schema attribute the message points at.
 	Attribute string
 }
 

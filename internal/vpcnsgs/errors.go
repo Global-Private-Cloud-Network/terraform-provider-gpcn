@@ -20,7 +20,6 @@ const (
 	ErrDetailUnableToUpdateNsgWithID = "Unable to update GPCN VPC security group with ID '%s'"
 	ErrDetailUnableToDeleteNsgWithID = "Unable to delete GPCN VPC security group with ID '%s'"
 	ErrDetailImportIDFormat          = "Import ID must be '<vpc_id>/<nsg_id>'. A security group is read through its VPC, so the VPC ID cannot be derived from the group ID alone. Got: '%s'"
-	ErrDetailOuterWhitespace         = "%s must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"
 )
 
 // Rule refusal details. Each one is the sentence GPCN answers with. The plan

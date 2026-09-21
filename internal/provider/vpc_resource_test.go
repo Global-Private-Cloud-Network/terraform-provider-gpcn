@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"terraform-provider-gpcn/internal/client"
+	"terraform-provider-gpcn/internal/helpers"
 	"terraform-provider-gpcn/internal/testutil"
 	"terraform-provider-gpcn/internal/vpcs"
 
@@ -114,6 +115,34 @@ func vpcResourceTestSchema(t *testing.T) schema.Schema {
 		t.Fatalf("Expected a schema, got %v", schemaResponse.Diagnostics)
 	}
 	return schemaResponse.Schema
+}
+
+// assertWhitespaceValidator reports whether the attribute carries the shared
+// whitespace refusal with the summary its resource names. The fold moved the
+// validator out of the resource packages, so the wiring needs a guard.
+func assertWhitespaceValidator(t *testing.T, attributes map[string]schema.Attribute, attributeName, wantSummary string) {
+	t.Helper()
+
+	attribute, ok := attributes[attributeName].(schema.StringAttribute)
+	if !ok {
+		t.Fatalf("%s is %T, want schema.StringAttribute", attributeName, attributes[attributeName])
+	}
+	for _, candidate := range attribute.Validators {
+		whitespace, isWhitespace := candidate.(helpers.NoOuterWhitespaceValidator)
+		if isWhitespace && whitespace.Attribute == attributeName && whitespace.Summary == wantSummary {
+			return
+		}
+	}
+	t.Errorf("%s carries %d validators, none of them a NoOuterWhitespaceValidator for %q with the summary %q", attributeName, len(attribute.Validators), attributeName, wantSummary)
+}
+
+// The shared validator changes nothing until the schema carries it.
+func TestVpcResourceSchemaAttachesWhitespaceValidators(t *testing.T) {
+	t.Parallel()
+
+	attributes := vpcResourceTestSchema(t).Attributes
+	assertWhitespaceValidator(t, attributes, "name", vpcs.ErrSummaryInvalidVpcAttribute)
+	assertWhitespaceValidator(t, attributes, "description", vpcs.ErrSummaryInvalidVpcAttribute)
 }
 
 // The create 202 carries the row, so a failed create job must still leave the

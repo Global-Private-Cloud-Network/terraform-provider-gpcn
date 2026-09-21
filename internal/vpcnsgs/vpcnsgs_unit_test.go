@@ -9,7 +9,6 @@ import (
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
-	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
@@ -369,57 +368,6 @@ func TestDefaultNsgRulesWarningSilentForOrdinaryGroupUnit(t *testing.T) {
 
 	if got := DefaultNsgRulesWarning(false, unitTestNsgID).WarningsCount(); got != 0 {
 		t.Errorf("expected no warning for an ordinary group, got %d", got)
-	}
-}
-
-// GPCN trims a name before it stores one. A configuration that holds outer
-// whitespace therefore never settles, so the plan must refuse it.
-func TestNoOuterWhitespaceValidatorUnit(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name        string
-		summary     string
-		attribute   string
-		value       types.String
-		valid       bool
-		wantSummary string
-		wantDetail  string
-	}{
-		{name: "a leading space", summary: ErrSummaryInvalidNsgAttribute, attribute: "name", value: types.StringValue(" nsg-a"), valid: false, wantSummary: "Invalid security group name", wantDetail: "name must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"},
-		{name: "a trailing newline", summary: ErrSummaryInvalidNsgAttribute, attribute: "description", value: types.StringValue("web tier\n"), valid: false, wantSummary: "Invalid security group description", wantDetail: "description must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"},
-		{name: "a rule description", summary: ErrSummaryInvalidNsgRuleAttribute, attribute: "description", value: types.StringValue(" ping"), valid: false, wantSummary: "Invalid security group rule description", wantDetail: "description must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"},
-		{name: "inner whitespace", summary: ErrSummaryInvalidNsgAttribute, attribute: "name", value: types.StringValue("nsg a"), valid: true},
-		{name: "an empty value", summary: ErrSummaryInvalidNsgAttribute, attribute: "description", value: types.StringValue(""), valid: true},
-		{name: "a null value", summary: ErrSummaryInvalidNsgAttribute, attribute: "description", value: types.StringNull(), valid: true},
-		{name: "an unknown value", summary: ErrSummaryInvalidNsgAttribute, attribute: "name", value: types.StringUnknown(), valid: true},
-	}
-
-	for _, testCase := range cases {
-		t.Run(testCase.name, func(t *testing.T) {
-			t.Parallel()
-
-			request := validator.StringRequest{Path: path.Root(testCase.attribute), ConfigValue: testCase.value}
-			response := &validator.StringResponse{}
-			NoOuterWhitespaceValidator{Summary: testCase.summary, Attribute: testCase.attribute}.ValidateString(context.Background(), request, response)
-
-			if testCase.valid {
-				if response.Diagnostics.HasError() {
-					t.Fatalf("expected no error, got %v", response.Diagnostics)
-				}
-				return
-			}
-			if !response.Diagnostics.HasError() {
-				t.Fatalf("expected an error, got none")
-			}
-			failure := response.Diagnostics.Errors()[0]
-			if got := failure.Summary(); got != testCase.wantSummary {
-				t.Errorf("expected the summary %q, got %q", testCase.wantSummary, got)
-			}
-			if got := failure.Detail(); got != testCase.wantDetail {
-				t.Errorf("expected the detail %q, got %q", testCase.wantDetail, got)
-			}
-		})
 	}
 }
 

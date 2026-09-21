@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"terraform-provider-gpcn/internal/client"
+	"terraform-provider-gpcn/internal/helpers"
 	"terraform-provider-gpcn/internal/vpcnsgs"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
@@ -65,7 +66,7 @@ func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Description: "Human-readable name for the security group. It must be unique within the VPC",
 				Required:    true,
 				Validators: []validator.String{
-					vpcnsgs.NoOuterWhitespaceValidator{Summary: vpcnsgs.ErrSummaryInvalidNsgAttribute, Attribute: "name"},
+					helpers.NoOuterWhitespaceValidator{Summary: vpcnsgs.ErrSummaryInvalidNsgAttribute, Attribute: "name"},
 				},
 			},
 			"description": schema.StringAttribute{
@@ -74,7 +75,7 @@ func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Computed:    true,
 				Default:     stringdefault.StaticString(""),
 				Validators: []validator.String{
-					vpcnsgs.NoOuterWhitespaceValidator{Summary: vpcnsgs.ErrSummaryInvalidNsgAttribute, Attribute: "description"},
+					helpers.NoOuterWhitespaceValidator{Summary: vpcnsgs.ErrSummaryInvalidNsgAttribute, Attribute: "description"},
 				},
 			},
 			"is_default": schema.BoolAttribute{
@@ -144,7 +145,7 @@ func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 							Description: "Additional information about the rule. GPCN edits it in place, because it is not part of the rule's identity",
 							Optional:    true,
 							Validators: []validator.String{
-								vpcnsgs.NoOuterWhitespaceValidator{Summary: vpcnsgs.ErrSummaryInvalidNsgRuleAttribute, Attribute: "description"},
+								helpers.NoOuterWhitespaceValidator{Summary: vpcnsgs.ErrSummaryInvalidNsgRuleAttribute, Attribute: "description"},
 							},
 						},
 					},

@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"terraform-provider-gpcn/internal/client"
+	"terraform-provider-gpcn/internal/helpers"
 	"terraform-provider-gpcn/internal/vpcs"
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/listvalidator"
@@ -60,7 +61,7 @@ func (r *vpcResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Required:    true,
 				Validators: []validator.String{
 					stringvalidator.LengthBetween(1, 64),
-					vpcs.NoSurroundingWhitespaceValidator{Attribute: "name"},
+					helpers.NoOuterWhitespaceValidator{Summary: vpcs.ErrSummaryInvalidVpcAttribute, Attribute: "name"},
 				},
 			},
 			"datacenter_id": schema.StringAttribute{
@@ -86,7 +87,7 @@ func (r *vpcResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Computed:    true,
 				Default:     stringdefault.StaticString(""),
 				Validators: []validator.String{
-					vpcs.NoSurroundingWhitespaceValidator{Attribute: "description"},
+					helpers.NoOuterWhitespaceValidator{Summary: vpcs.ErrSummaryInvalidVpcAttribute, Attribute: "description"},
 				},
 			},
 			"dns_nameservers": schema.ListAttribute{

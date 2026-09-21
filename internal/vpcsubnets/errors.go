@@ -25,7 +25,6 @@ const (
 	ErrDetailUnableToUpdateSubnetWithID = "Unable to update GPCN VPC subnet with ID '%s'"
 	ErrDetailUnableToDeleteSubnetWithID = "Unable to delete GPCN VPC subnet with ID '%s'"
 	ErrDetailImportIDFormat             = "Import ID must be '<vpc_id>/<subnet_id>'. A subnet is read through its VPC's listing, so the VPC ID cannot be derived from the subnet ID alone. Got: '%s'"
-	ErrDetailOuterWhitespace            = "%s must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"
 )
 
 // Warning strings for a subnet the platform could not carve.
