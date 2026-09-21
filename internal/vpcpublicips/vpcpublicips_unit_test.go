@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 
@@ -22,8 +25,8 @@ const (
 	testJobID      = "job-1"
 )
 
-// recorder keeps every request path, method and raw body the mock served, so a
-// test can pin the exact bytes the package puts on the wire.
+// recorder keeps every request path, method and raw body the mock served. A
+// test can then pin the exact bytes the package puts on the wire.
 type recorder struct {
 	mu       sync.Mutex
 	methods  []string
@@ -98,8 +101,8 @@ func listBody(rows []map[string]any, page, totalPages int) map[string]any {
 	}
 }
 
-// A newly acquired address answers with its id before the job finishes, so the
-// package must read the id from the acquire response and not from the job.
+// A newly acquired address answers with its id before the job finishes. The
+// package must read the id from the acquire response, not from the job.
 func TestAcquirePublicIpReturnsIdAndPollsMockHTTP(t *testing.T) {
 	t.Parallel()
 	rec := &recorder{}
@@ -311,10 +314,68 @@ func TestGetPublicIpPagesTheListingMockHTTP(t *testing.T) {
 	if len(queries) != 2 {
 		t.Fatalf("Expected two listing requests, got %d: %v", len(queries), queries)
 	}
+	// The route caps its page size at 100 and defaults to 20. A smaller limit
+	// multiplies the requests every read of one address costs.
+	for i, query := range queries {
+		values, err := url.ParseQuery(query)
+		if err != nil {
+			t.Fatalf("Expected a parsable listing query, got %q: %v", query, err)
+		}
+		if values.Get("limit") != "100" {
+			t.Fatalf("Expected listing request %d to ask for limit=100, got %q", i+1, query)
+		}
+		if values.Get("page") != strconv.Itoa(i+1) {
+			t.Fatalf("Expected listing request %d to ask for page=%d, got %q", i+1, i+1, query)
+		}
+	}
 }
 
-// An absent address must read like any other not-found, so Read can remove the
-// resource from state instead of failing every later operation.
+// A failed acquire job frames its error like every other verb in the package.
+// One shape for one meaning keeps the diagnostics readable.
+func TestAcquirePublicIpFramesPollingFailureWithTheActionMockHTTP(t *testing.T) {
+	t.Parallel()
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/vpcs/"+testVpcID+"/public-ips":
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"message": "Operation initiated successfully",
+					"data":    map[string]any{"publicIpId": testPublicIpID, "jobId": testJobID},
+				})
+			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"message": "Job status retrieved",
+					"data": map[string]any{"jobs": []map[string]any{{
+						"jobId":        testJobID,
+						"isCompleted":  false,
+						"isTerminal":   true,
+						"hasFailed":    true,
+						"errorMessage": "No addresses are free in this region",
+					}}},
+				})
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+
+	_, err := AcquirePublicIp(gpcnClient, context.Background(), testVpcID)
+	if err == nil {
+		t.Fatalf("Expected an error when the acquire job fails, got none")
+	}
+	if !strings.HasPrefix(err.Error(), ActionAcquirePublicIp+" polling failed: ") {
+		t.Fatalf("Expected the error to start with %q, got %q", ActionAcquirePublicIp+" polling failed: ", err.Error())
+	}
+	if !strings.Contains(err.Error(), "No addresses are free in this region") {
+		t.Fatalf("Expected the platform reason in the error, got %q", err.Error())
+	}
+}
+
+// An absent address must read like any other not-found. Read can then remove
+// the resource from state instead of failing every later operation.
 func TestGetPublicIpReturnsNotFoundWhenAbsentMockHTTP(t *testing.T) {
 	t.Parallel()
 	listPath := "/v1/resource/vpcs/" + testVpcID + "/public-ips"
@@ -369,8 +430,8 @@ func TestMapPublicIpResponseToModelKeepsNullsUnit(t *testing.T) {
 	}
 }
 
-// An attached address fills the machine id and clears held, which is what the
-// attachment resource reads to decide whether its binding still exists.
+// An attached address fills the machine id and clears held. The attachment
+// resource reads those fields to decide whether its binding still exists.
 func TestMapPublicIpResponseToModelFillsAttachedMachineUnit(t *testing.T) {
 	t.Parallel()
 	address := "203.0.113.10"
