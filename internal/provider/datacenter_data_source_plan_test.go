@@ -92,6 +92,10 @@ func startDatacenterPlanMockServer(t *testing.T, list func(r *http.Request) map[
 	rec := &datacenterPlanTestRecorder{}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check" {
+			testutil.HandleAuthCheck(w)
+			return
+		}
 		rec.record(r)
 		if r.Method == http.MethodGet && r.URL.Path == datacenterPlanTestPath {
 			testutil.WriteJSONResponse(w, list(r))
