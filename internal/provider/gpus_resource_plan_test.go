@@ -378,3 +378,31 @@ data "gpcn_gpu_inventory" "test" {
 		}},
 	})
 }
+
+// The schema carries one length rule per filter attribute. A test of the
+// series_code rule proves nothing about the series_name rule, so the twin
+// pins the second one.
+func TestGPUInventoryDataSourcePlanRefusesEmptySeriesName(t *testing.T) {
+	t.Parallel()
+	server, _, _ := startGPUPlanMockServer(t)
+
+	config := fmt.Sprintf(`
+provider "gpcn" {
+  host    = %q
+  api_key = "test-key"
+}
+
+data "gpcn_gpu_inventory" "test" {
+  datacenter_id = %q
+  series_name   = ""
+}
+`, server.URL, gpuPlanTestDatacenterID)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config:      config,
+			ExpectError: regexp.MustCompile(`(?s)Invalid Attribute Value Length`),
+		}},
+	})
+}
