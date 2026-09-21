@@ -532,42 +532,54 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		}
 	}
 
-	// Attach and detach the L2 segments if the list changed
-	segmentDiags := virtualmachines.UpdateL2SegmentsIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
-	resp.Diagnostics.Append(segmentDiags...)
-	if resp.Diagnostics.HasError() {
-		return
+	// Every step between the stop and the state write leaves the machine stopped when
+	// it fails. The steps run in order through one runner, so one early return owns
+	// that repair. The runner keeps the response of the read-back for the mapping.
+	var getVirtualMachineResponse *virtualmachines.ReadVirtualMachinesResponse
+	updateSteps := []func() diag.Diagnostics{
+		func() diag.Diagnostics {
+			return virtualmachines.UpdateL2SegmentsIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+		},
+		func() diag.Diagnostics {
+			return virtualmachines.UpdatePublicIPIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+		},
+		func() diag.Diagnostics {
+			return virtualmachines.UpdateSizeIfChanged(r.client, ctx, plan.ID.ValueString(), state, plan)
+		},
+		func() diag.Diagnostics {
+			return virtualmachines.UpdateChangeableAttributesIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+		},
+		func() diag.Diagnostics {
+			var readBackDiags diag.Diagnostics
+			tflog.Info(ctx, virtualmachines.LogAllVMUpdateOpsCompleteRetrievingLatestInfo)
+			var readBackErr error
+			getVirtualMachineResponse, readBackErr = virtualmachines.GetVirtualMachine(r.client, ctx, plan.ID.ValueString())
+			if readBackErr != nil {
+				readBackDiags.AddError(
+					virtualmachines.ErrSummaryRetrievingVMInfoFailed,
+					fmt.Errorf("%s: %w", virtualmachines.ErrDetailVMInfoFailedCanImport, readBackErr).Error(),
+				)
+			}
+			return readBackDiags
+		},
 	}
 
-	// Update public IP allocation if changed
-	publicIPDiags := virtualmachines.UpdatePublicIPIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
-	resp.Diagnostics.Append(publicIPDiags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Update size if changed
-	sizeDiags := virtualmachines.UpdateSizeIfChanged(r.client, ctx, plan.ID.ValueString(), state, plan)
-	resp.Diagnostics.Append(sizeDiags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Update name if changed
-	nameDiags := virtualmachines.UpdateChangeableAttributesIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
-	resp.Diagnostics.Append(nameDiags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Perform a GET call to retrieve actual information about the Virtual Machine
-	tflog.Info(ctx, virtualmachines.LogAllVMUpdateOpsCompleteRetrievingLatestInfo)
-	getVirtualMachineResponse, err := virtualmachines.GetVirtualMachine(r.client, ctx, plan.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError(
-			virtualmachines.ErrSummaryRetrievingVMInfoFailed,
-			fmt.Errorf("%s: %w", virtualmachines.ErrDetailVMInfoFailedCanImport, err).Error(),
-		)
+	// A start that fails is the only report the user gets. It follows the diagnostics
+	// of the step that fails. The change is not in state, so the next apply retries it.
+	for _, updateStep := range updateSteps {
+		resp.Diagnostics.Append(updateStep()...)
+		if !resp.Diagnostics.HasError() {
+			continue
+		}
+		if needStopVM {
+			startErr := virtualmachines.StartVirtualMachine(r.client, ctx, state.ID.ValueString())
+			if startErr != nil {
+				resp.Diagnostics.AddError(
+					virtualmachines.ErrSummaryVMLeftStopped,
+					fmt.Sprintf(virtualmachines.ErrDetailVMLeftStoppedRetry, state.ID.ValueString(), startErr.Error()),
+				)
+			}
+		}
 		return
 	}
 
@@ -576,18 +588,25 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
 	resp.Diagnostics.Append(mapDiags...)
 
-	// Once finished, conditionally start the virtual machine again
+	// Once finished, conditionally start the virtual machine again. The diagnostic below
+	// the state write reports a failed start.
+	var startErr error
 	if needStopVM {
-		err = virtualmachines.StartVirtualMachine(r.client, ctx, state.ID.ValueString())
-		if err != nil {
-			tflog.Debug(ctx, fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStartingVM, state.ID.ValueString()), err).Error())
-		}
+		startErr = virtualmachines.StartVirtualMachine(r.client, ctx, state.ID.ValueString())
 	}
 	tflog.Debug(ctx, fmt.Sprintf(virtualmachines.LogSuccessfullyUpdatedVMMayNotBeRunning, state.ID.ValueString()))
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
+
+	if startErr != nil {
+		resp.Diagnostics.AddError(
+			virtualmachines.ErrSummaryVMLeftStopped,
+			fmt.Sprintf(virtualmachines.ErrDetailVMLeftStoppedUpdate, state.ID.ValueString(), startErr.Error()),
+		)
+	}
+
 	if resp.Diagnostics.HasError() {
 		return
 	}
