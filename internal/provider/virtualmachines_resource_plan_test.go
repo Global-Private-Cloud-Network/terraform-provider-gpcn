@@ -1382,7 +1382,7 @@ func vmPublicIpPlanTestInterfacesBody(addressID, address string) map[string]any 
 }
 
 // startVirtualMachinePublicIpMockServer serves the VPC address verbs and records them in
-// order. The legacy per-NIC routes answer nothing but a test failure: GPCN refuses them
+// order. The legacy per-NIC routes answer nothing but a test failure. GPCN refuses them
 // on a VPC interface, so the provider must never reach for one. A create that names an
 // address binds it, and the image list answers the import.
 func startVirtualMachinePublicIpMockServer(t *testing.T) (*httptest.Server, func() []string) {
@@ -2006,7 +2006,7 @@ func TestVirtualMachineResourcePlanRenameKeepsThePinnedPublicIp(t *testing.T) {
 
 // The create stops the machine to attach the segment. A start that fails leaves the
 // machine stopped, and only an error tells the user so. The machine exists at the API,
-// so it stays in state, and the error taints it: the remedy has to say so.
+// so it stays in state, and the error taints it. The remedy has to say so.
 func TestVirtualMachineResourcePlanCreateReportsFailedRestart(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server, recorded := startVirtualMachineSegmentHotplugMockServer(t, 0, false)
