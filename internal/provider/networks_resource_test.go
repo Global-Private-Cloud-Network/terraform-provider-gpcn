@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sync"
 	"testing"
 
 	"terraform-provider-gpcn/internal/networks"
@@ -369,11 +370,14 @@ func TestNetworkResourceReadWarnsWhenCustomNetworkGone(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
+			var mutex sync.Mutex
 			var requestedPath string
 			_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
 				T: t,
 				Handler: func(w http.ResponseWriter, r *http.Request) {
+					mutex.Lock()
 					requestedPath = r.URL.Path
+					mutex.Unlock()
 					w.WriteHeader(http.StatusNotFound)
 					_, _ = w.Write([]byte(`{"success":false,"message":"Network not found"}`))
 				},
@@ -385,8 +389,11 @@ func TestNetworkResourceReadWarnsWhenCustomNetworkGone(t *testing.T) {
 
 			networkResource.Read(context.Background(), fwresource.ReadRequest{State: priorState}, readResponse)
 
-			if want := networks.BASE_URL_V1 + networkID; requestedPath != want {
-				t.Fatalf("requested path = %q, want %q", requestedPath, want)
+			mutex.Lock()
+			gotPath := requestedPath
+			mutex.Unlock()
+			if want := networks.BASE_URL_V1 + networkID; gotPath != want {
+				t.Fatalf("requested path = %q, want %q", gotPath, want)
 			}
 			if !readResponse.State.Raw.IsNull() {
 				t.Errorf("expected Read to remove the resource from state")
