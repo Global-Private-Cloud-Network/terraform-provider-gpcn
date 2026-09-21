@@ -13,6 +13,9 @@ import (
 // The provider does not trim on the operator's behalf. The stored name would
 // no longer be the one the configuration names.
 type NoOuterWhitespaceValidator struct {
+	// Summary is the refusal summary format. It carries one %s, which the
+	// validator renders with Attribute.
+	Summary   string
 	Attribute string
 }
 
@@ -38,7 +41,7 @@ func (v NoOuterWhitespaceValidator) ValidateString(_ context.Context, request va
 
 	response.Diagnostics.AddAttributeError(
 		request.Path,
-		ErrSummaryInvalidSubnetAttribute,
+		fmt.Sprintf(v.Summary, v.Attribute),
 		fmt.Sprintf(ErrDetailOuterWhitespace, v.Attribute),
 	)
 }

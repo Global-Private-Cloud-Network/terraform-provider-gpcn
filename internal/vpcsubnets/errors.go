@@ -15,7 +15,7 @@ const (
 	ErrSummaryUnableToUpdateSubnet    = "Unable to update GPCN VPC subnet"
 	ErrSummaryUnableToDeleteSubnet    = "Unable to delete GPCN VPC subnet"
 	ErrSummaryInvalidImportID         = "Invalid import ID"
-	ErrSummaryInvalidSubnetAttribute  = "Invalid GPCN VPC subnet attribute"
+	ErrSummaryInvalidSubnetAttribute  = "Invalid VPC subnet %s"
 )
 
 // Error detail message templates

@@ -2,7 +2,6 @@ package vpcnsgs
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -379,17 +378,21 @@ func TestNoOuterWhitespaceValidatorUnit(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
-		name      string
-		attribute string
-		value     types.String
-		valid     bool
+		name        string
+		summary     string
+		attribute   string
+		value       types.String
+		valid       bool
+		wantSummary string
+		wantDetail  string
 	}{
-		{name: "a leading space", attribute: "name", value: types.StringValue(" nsg-a"), valid: false},
-		{name: "a trailing newline", attribute: "description", value: types.StringValue("web tier\n"), valid: false},
-		{name: "inner whitespace", attribute: "name", value: types.StringValue("nsg a"), valid: true},
-		{name: "an empty value", attribute: "description", value: types.StringValue(""), valid: true},
-		{name: "a null value", attribute: "description", value: types.StringNull(), valid: true},
-		{name: "an unknown value", attribute: "name", value: types.StringUnknown(), valid: true},
+		{name: "a leading space", summary: ErrSummaryInvalidNsgAttribute, attribute: "name", value: types.StringValue(" nsg-a"), valid: false, wantSummary: "Invalid security group name", wantDetail: "name must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"},
+		{name: "a trailing newline", summary: ErrSummaryInvalidNsgAttribute, attribute: "description", value: types.StringValue("web tier\n"), valid: false, wantSummary: "Invalid security group description", wantDetail: "description must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"},
+		{name: "a rule description", summary: ErrSummaryInvalidNsgRuleAttribute, attribute: "description", value: types.StringValue(" ping"), valid: false, wantSummary: "Invalid security group rule description", wantDetail: "description must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"},
+		{name: "inner whitespace", summary: ErrSummaryInvalidNsgAttribute, attribute: "name", value: types.StringValue("nsg a"), valid: true},
+		{name: "an empty value", summary: ErrSummaryInvalidNsgAttribute, attribute: "description", value: types.StringValue(""), valid: true},
+		{name: "a null value", summary: ErrSummaryInvalidNsgAttribute, attribute: "description", value: types.StringNull(), valid: true},
+		{name: "an unknown value", summary: ErrSummaryInvalidNsgAttribute, attribute: "name", value: types.StringUnknown(), valid: true},
 	}
 
 	for _, testCase := range cases {
@@ -398,7 +401,7 @@ func TestNoOuterWhitespaceValidatorUnit(t *testing.T) {
 
 			request := validator.StringRequest{Path: path.Root(testCase.attribute), ConfigValue: testCase.value}
 			response := &validator.StringResponse{}
-			NoOuterWhitespaceValidator{Attribute: testCase.attribute}.ValidateString(context.Background(), request, response)
+			NoOuterWhitespaceValidator{Summary: testCase.summary, Attribute: testCase.attribute}.ValidateString(context.Background(), request, response)
 
 			if testCase.valid {
 				if response.Diagnostics.HasError() {
@@ -410,12 +413,11 @@ func TestNoOuterWhitespaceValidatorUnit(t *testing.T) {
 				t.Fatalf("expected an error, got none")
 			}
 			failure := response.Diagnostics.Errors()[0]
-			if got := failure.Summary(); got != ErrSummaryInvalidNsgAttribute {
-				t.Errorf("expected the summary %q, got %q", ErrSummaryInvalidNsgAttribute, got)
+			if got := failure.Summary(); got != testCase.wantSummary {
+				t.Errorf("expected the summary %q, got %q", testCase.wantSummary, got)
 			}
-			want := fmt.Sprintf(ErrDetailOuterWhitespace, testCase.attribute)
-			if got := failure.Detail(); got != want {
-				t.Errorf("expected the detail %q, got %q", want, got)
+			if got := failure.Detail(); got != testCase.wantDetail {
+				t.Errorf("expected the detail %q, got %q", testCase.wantDetail, got)
 			}
 		})
 	}

@@ -64,7 +64,7 @@ func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Description: "Human-readable name for the security group. It must be unique within the VPC",
 				Required:    true,
 				Validators: []validator.String{
-					vpcnsgs.NoOuterWhitespaceValidator{Attribute: "name"},
+					vpcnsgs.NoOuterWhitespaceValidator{Summary: vpcnsgs.ErrSummaryInvalidNsgAttribute, Attribute: "name"},
 				},
 			},
 			"description": schema.StringAttribute{
@@ -73,7 +73,7 @@ func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Computed:    true,
 				Default:     stringdefault.StaticString(""),
 				Validators: []validator.String{
-					vpcnsgs.NoOuterWhitespaceValidator{Attribute: "description"},
+					vpcnsgs.NoOuterWhitespaceValidator{Summary: vpcnsgs.ErrSummaryInvalidNsgAttribute, Attribute: "description"},
 				},
 			},
 			"is_default": schema.BoolAttribute{
@@ -143,7 +143,7 @@ func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 							Description: "Additional information about the rule. GPCN edits it in place, because it is not part of the rule's identity",
 							Optional:    true,
 							Validators: []validator.String{
-								vpcnsgs.NoOuterWhitespaceValidator{Attribute: "description"},
+								vpcnsgs.NoOuterWhitespaceValidator{Summary: vpcnsgs.ErrSummaryInvalidNsgRuleAttribute, Attribute: "description"},
 							},
 						},
 					},

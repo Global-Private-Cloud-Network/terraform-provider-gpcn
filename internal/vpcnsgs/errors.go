@@ -9,7 +9,8 @@ const (
 	ErrSummaryUnableToDeleteNsg       = "Unable to delete GPCN VPC security group"
 	ErrSummaryInvalidImportID         = "Invalid import ID"
 	ErrSummaryInvalidRule             = "Invalid security group rule"
-	ErrSummaryInvalidNsgAttribute     = "Invalid GPCN VPC security group attribute"
+	ErrSummaryInvalidNsgAttribute     = "Invalid security group %s"
+	ErrSummaryInvalidNsgRuleAttribute = "Invalid security group rule %s"
 )
 
 // Error detail message templates

@@ -485,11 +485,11 @@ func TestVpcNsgResourcePlanRefusesOuterWhitespace(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:      nsgPlanTestConfig(server.URL, "nsg-plan-a ", nsgPlanTestRuleHTTPS),
-				ExpectError: regexp.MustCompile(strings.ReplaceAll(regexp.QuoteMeta("name must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"), " ", `\s+`)),
+				ExpectError: whitespaceRefusal("Invalid security group name", "name"),
 			},
 			{
 				Config:      nsgPlanTestConfig(server.URL, "nsg-plan-a", whitespaceRule),
-				ExpectError: regexp.MustCompile(strings.ReplaceAll(regexp.QuoteMeta("description must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"), " ", `\s+`)),
+				ExpectError: whitespaceRefusal("Invalid security group rule description", "description"),
 			},
 		},
 	})

@@ -67,7 +67,7 @@ func (r *vpcSubnetResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Description: "Human-readable name for the subnet. It must be unique within the VPC",
 				Required:    true,
 				Validators: []validator.String{
-					vpcsubnets.NoOuterWhitespaceValidator{Attribute: "name"},
+					vpcsubnets.NoOuterWhitespaceValidator{Summary: vpcsubnets.ErrSummaryInvalidSubnetAttribute, Attribute: "name"},
 				},
 			},
 			"description": schema.StringAttribute{
@@ -76,7 +76,7 @@ func (r *vpcSubnetResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Computed:    true,
 				Default:     stringdefault.StaticString(""),
 				Validators: []validator.String{
-					vpcsubnets.NoOuterWhitespaceValidator{Attribute: "description"},
+					vpcsubnets.NoOuterWhitespaceValidator{Summary: vpcsubnets.ErrSummaryInvalidSubnetAttribute, Attribute: "description"},
 				},
 			},
 			"cidr": schema.StringAttribute{

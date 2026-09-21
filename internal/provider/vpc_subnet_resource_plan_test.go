@@ -175,6 +175,16 @@ func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestS
 	return server, state
 }
 
+// whitespaceRefusal builds the pattern for a whitespace refusal. Terraform
+// prints the summary and the detail with the offending line between them.
+func whitespaceRefusal(summary, attribute string) *regexp.Regexp {
+	loosen := func(text string) string {
+		return strings.ReplaceAll(regexp.QuoteMeta(text), " ", `\s+`)
+	}
+	detail := attribute + " must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"
+	return regexp.MustCompile(`(?s)` + loosen(summary) + `.*` + loosen(detail))
+}
+
 func subnetPlanTestConfig(host, name, extra string) string {
 	return fmt.Sprintf(`
 provider "gpcn" {
@@ -521,7 +531,7 @@ func TestVpcSubnetResourcePlanRefusesOuterWhitespace(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:      subnetPlanTestConfig(server.URL, " subnet-plan-a", ""),
-				ExpectError: regexp.MustCompile(strings.ReplaceAll(regexp.QuoteMeta("name must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"), " ", `\s+`)),
+				ExpectError: whitespaceRefusal("Invalid VPC subnet name", "name"),
 			},
 		},
 	})
