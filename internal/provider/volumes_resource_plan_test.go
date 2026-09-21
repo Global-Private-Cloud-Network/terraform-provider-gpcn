@@ -167,8 +167,8 @@ resource "gpcn_volume" "test" {
 `, host, volPlanTestName, volPlanTestDatacenterID, volumeType, sizeGb)
 }
 
-// The schema no longer rules on the spelling of a volume type. The datacenter
-// catalog is the gate, and its refusal names the codes the datacenter offers.
+// The schema rules only on the spelling of a built-in class. The datacenter
+// catalog gates every other code, and its refusal names the codes it offers.
 func TestVolumeResourcePlanRefusesUnknownTypeAtLookup(t *testing.T) {
 	t.Parallel()
 	server, _, _ := startVolumePlanMockServer(t)
@@ -464,8 +464,8 @@ func TestVolumeResourcePlanImportAliasPlansEmpty(t *testing.T) {
 	})
 }
 
-// Import writes the display alias of a built-in storage class. The schema
-// refuses every other spelling of that class, so no plan reaches a replacement.
+// The unit table pins the refusal bytes. This case proves the validator hangs
+// on the schema and stops a plan.
 func TestVolumeResourcePlanRefusesDivergentSpelling(t *testing.T) {
 	t.Parallel()
 	server, _, _ := startVolumePlanMockServer(t)
