@@ -1497,7 +1497,7 @@ func vmStopDecisionInterfaces(segmentIds ...string) []networks.ReadVirtualMachin
 
 // The machine already carries the planned segments, so the change is done. A stop for
 // finished work costs the user the whole downtime.
-func TestDetermineIfVMNeedsStoppedSkipsAnAppliedSegmentChange(t *testing.T) {
+func TestVirtualMachineStopDecisionSkipsAnAppliedSegmentChange(t *testing.T) {
 	state := vmStopDecisionModel(false, vmPlanTestSizeID, vmPlanTestSegmentID)
 	plan := vmStopDecisionModel(false, vmPlanTestSizeID, vmPlanTestSegmentID, vmPlanTestSegmentID2)
 
@@ -1511,7 +1511,7 @@ func TestDetermineIfVMNeedsStoppedSkipsAnAppliedSegmentChange(t *testing.T) {
 
 // GPCN refuses an add-NIC on a running machine without network hotplug. A segment the
 // live interfaces lack therefore needs a stop.
-func TestDetermineIfVMNeedsStoppedStopsForASegmentTheMachineLacks(t *testing.T) {
+func TestVirtualMachineStopDecisionStopsForASegmentTheMachineLacks(t *testing.T) {
 	state := vmStopDecisionModel(false, vmPlanTestSizeID, vmPlanTestSegmentID)
 	plan := vmStopDecisionModel(false, vmPlanTestSizeID, vmPlanTestSegmentID, vmPlanTestSegmentID2)
 
@@ -1525,7 +1525,7 @@ func TestDetermineIfVMNeedsStoppedStopsForASegmentTheMachineLacks(t *testing.T) 
 
 // The machine already carries the planned SKU, so the resize is done. State lags the
 // machine after a failed read-back, and state is not the question.
-func TestDetermineIfVMNeedsStoppedSkipsAnAppliedResize(t *testing.T) {
+func TestVirtualMachineStopDecisionSkipsAnAppliedResize(t *testing.T) {
 	state := vmStopDecisionModel(false, vmPlanTestSizeID)
 	plan := vmStopDecisionModel(false, vmPlanTestSizeID2)
 
@@ -1537,7 +1537,7 @@ func TestDetermineIfVMNeedsStoppedSkipsAnAppliedResize(t *testing.T) {
 }
 
 // GPCN resizes a stopped machine only, so a SKU the machine lacks needs a stop.
-func TestDetermineIfVMNeedsStoppedStopsForAResize(t *testing.T) {
+func TestVirtualMachineStopDecisionStopsForAResize(t *testing.T) {
 	state := vmStopDecisionModel(false, vmPlanTestSizeID)
 	plan := vmStopDecisionModel(false, vmPlanTestSizeID2)
 
@@ -1549,7 +1549,7 @@ func TestDetermineIfVMNeedsStoppedStopsForAResize(t *testing.T) {
 }
 
 // An image with network hotplug takes every change while the machine runs.
-func TestDetermineIfVMNeedsStoppedSkipsAMachineWithHotplug(t *testing.T) {
+func TestVirtualMachineStopDecisionSkipsAMachineWithHotplug(t *testing.T) {
 	state := vmStopDecisionModel(true, vmPlanTestSizeID)
 	plan := vmStopDecisionModel(true, vmPlanTestSizeID2, vmPlanTestSegmentID)
 
@@ -1563,7 +1563,7 @@ func TestDetermineIfVMNeedsStoppedSkipsAMachineWithHotplug(t *testing.T) {
 // DEV sends a null skuId for a machine whose SKU it cannot resolve, and the provider
 // reads that null as an empty string. Live drift alone must never stop a machine. A
 // rename would otherwise stop and start such a machine on every apply.
-func TestDetermineIfVMNeedsStoppedSkipsARenameOfAnUnresolvedSku(t *testing.T) {
+func TestVirtualMachineStopDecisionSkipsARenameOfAnUnresolvedSku(t *testing.T) {
 	state := vmStopDecisionModel(false, vmPlanTestSizeID)
 	plan := vmStopDecisionModel(false, vmPlanTestSizeID)
 
@@ -1576,7 +1576,7 @@ func TestDetermineIfVMNeedsStoppedSkipsARenameOfAnUnresolvedSku(t *testing.T) {
 
 // A segment the platform attached out of band leaves the live set ahead of state. The
 // configuration asks for no segment change here, so the machine needs no stop.
-func TestDetermineIfVMNeedsStoppedSkipsARenameOfADriftedSegmentSet(t *testing.T) {
+func TestVirtualMachineStopDecisionSkipsARenameOfADriftedSegmentSet(t *testing.T) {
 	state := vmStopDecisionModel(false, vmPlanTestSizeID, vmPlanTestSegmentID)
 	plan := vmStopDecisionModel(false, vmPlanTestSizeID, vmPlanTestSegmentID)
 
