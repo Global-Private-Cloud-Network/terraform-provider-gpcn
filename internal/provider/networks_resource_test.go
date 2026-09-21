@@ -3,11 +3,18 @@ package provider
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"regexp"
 	"testing"
 
+	"terraform-provider-gpcn/internal/networks"
+	"terraform-provider-gpcn/internal/testutil"
+
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
@@ -317,4 +324,98 @@ func TestNetworksResourceDNSServersValidator(t *testing.T) {
 			},
 		})
 	})
+}
+
+// networkReadTestState builds a prior state for the Read cases below. Read needs a state
+// that the resource schema accepts, and only the id and the network type decide the path
+// under test.
+func networkReadTestState(t *testing.T, networkID string, networkType string) tfsdk.State {
+	t.Helper()
+
+	schemaResponse := &fwresource.SchemaResponse{}
+	NewNetworksResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
+
+	state := tfsdk.State{Schema: schemaResponse.Schema}
+	diags := state.Set(context.Background(), networks.ResourceModel{
+		ID:          types.StringValue(networkID),
+		NetworkType: types.StringValue(networkType),
+		Location:    types.MapNull(types.StringType),
+		DNSServers:  types.ListNull(types.StringType),
+	})
+	if diags.HasError() {
+		t.Fatalf("failed to build the prior state: %v", diags)
+	}
+	return state
+}
+
+// TestNetworkResourceReadWarnsWhenCustomNetworkGone drives Read against a 404. The
+// acceptance harness cannot observe a warning diagnostic, so the branch needs a direct
+// call. A standard network keeps the silent removal, so the second case pins the absence.
+func TestNetworkResourceReadWarnsWhenCustomNetworkGone(t *testing.T) {
+	t.Parallel()
+
+	const networkID = "net-gone-1"
+
+	cases := []struct {
+		name        string
+		networkType string
+		wantWarning bool
+	}{
+		{name: "custom", networkType: networks.NETWORK_TYPE_CUSTOM, wantWarning: true},
+		{name: "standard", networkType: networks.NETWORK_TYPE_STANDARD, wantWarning: false},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			var requestedPath string
+			_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+				T: t,
+				Handler: func(w http.ResponseWriter, r *http.Request) {
+					requestedPath = r.URL.Path
+					w.WriteHeader(http.StatusNotFound)
+					_, _ = w.Write([]byte(`{"success":false,"message":"Network not found"}`))
+				},
+			})
+
+			networkResource := &networksResource{client: gpcnClient}
+			priorState := networkReadTestState(t, networkID, testCase.networkType)
+			readResponse := &fwresource.ReadResponse{State: priorState}
+
+			networkResource.Read(context.Background(), fwresource.ReadRequest{State: priorState}, readResponse)
+
+			if want := networks.BASE_URL_V1 + networkID; requestedPath != want {
+				t.Fatalf("requested path = %q, want %q", requestedPath, want)
+			}
+			if !readResponse.State.Raw.IsNull() {
+				t.Errorf("expected Read to remove the resource from state")
+			}
+			if readResponse.Diagnostics.HasError() {
+				t.Fatalf("expected no error diagnostic, got %v", readResponse.Diagnostics)
+			}
+
+			if !testCase.wantWarning {
+				if count := len(readResponse.Diagnostics); count != 0 {
+					t.Fatalf("expected 0 diagnostics for a standard network, got %d: %v", count, readResponse.Diagnostics)
+				}
+				return
+			}
+
+			if count := len(readResponse.Diagnostics); count != 1 {
+				t.Fatalf("expected 1 diagnostic for a custom network, got %d: %v", count, readResponse.Diagnostics)
+			}
+			warning := readResponse.Diagnostics[0]
+			if warning.Severity() != diag.SeverityWarning {
+				t.Errorf("severity = %v, want %v", warning.Severity(), diag.SeverityWarning)
+			}
+			if got := warning.Summary(); got != networks.WarnSummaryNetworkRemovedFromState {
+				t.Errorf("summary = %q, want %q", got, networks.WarnSummaryNetworkRemovedFromState)
+			}
+			want := fmt.Sprintf(networks.WarnDetailCustomNetworkGone, networkID, networkID)
+			if got := warning.Detail(); got != want {
+				t.Errorf("detail = %q, want %q", got, want)
+			}
+		})
+	}
 }
