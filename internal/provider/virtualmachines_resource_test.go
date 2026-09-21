@@ -17,20 +17,29 @@ var gpcnVirtualMachineTest = "gpcn_virtualmachine.test"
 
 // vpcAndSubnet returns the VPC and the subnet a virtual machine is born on. A machine
 // lives in exactly one VPC, so every case that creates one creates these two first.
-func vpcAndSubnet() string {
-	return `
+// GPCN checks a CIDR for overlap across the whole entity and the repository has no
+// sweepers, so each case takes its own name and its own block. One fixed block would
+// fail every run after the first.
+func vpcAndSubnet(suffix string, octet int) string {
+	return fmt.Sprintf(`
 resource "gpcn_vpc" "vm_vpc" {
-	name          = "terraform-demo-vpc"
+	name          = "terraform-demo-vpc-%[1]s"
 	datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-	cidr          = "10.60.0.0/16"
+	cidr          = "10.%[2]d.0.0/16"
 }
 
 resource "gpcn_vpc_subnet" "vm_subnet" {
 	vpc_id = gpcn_vpc.vm_vpc.id
-	name   = "terraform-demo-subnet"
-	cidr   = "10.60.1.0/24"
+	name   = "terraform-demo-subnet-%[1]s"
+	cidr   = "10.%[2]d.1.0/24"
 }
-`
+`, suffix, octet)
+}
+
+// vpcTestOctet draws the second octet of a case's own /16 out of the private range the
+// platform leaves to tenants.
+func vpcTestOctet() int {
+	return 64 + acctest.RandIntRange(0, 64)
 }
 
 // dataCenterImagesAndSize returns the common datacenter, image, and size datasource lookup blocks for Chicago.
@@ -58,6 +67,7 @@ data "gpcn_virtualmachine_sizes" "vm_size" {
 func TestVirtualMachinesResource(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
+	vpcOctet := vpcTestOctet()
 	sshKeyName := fmt.Sprintf("vm-basic-key-%s", rName)
 	volumeName := fmt.Sprintf("vm-basic-vol-%s", rName)
 	vmName := fmt.Sprintf("vm-basic-%s", rName)
@@ -68,7 +78,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
-				Config: providerConfig + dataCenterImagesAndSize() + vpcAndSubnet() + fmt.Sprintf(`
+				Config: providerConfig + dataCenterImagesAndSize() + vpcAndSubnet(rName, vpcOctet) + fmt.Sprintf(`
 			resource "gpcn_resource_group" "vm_group" {
 				name = "terraform-demo-group"
 			}
@@ -135,7 +145,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 			},
 			// Update and Read testing
 			{
-				Config: providerConfig + dataCenterImagesAndSize() + vpcAndSubnet() + fmt.Sprintf(`
+				Config: providerConfig + dataCenterImagesAndSize() + vpcAndSubnet(rName, vpcOctet) + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -186,7 +196,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 				category      = "general-purpose"
 				min_cpu       = 2
 			}
-			` + vpcAndSubnet() + fmt.Sprintf(`
+			` + vpcAndSubnet(rName, vpcOctet) + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -221,11 +231,12 @@ func TestVirtualMachinesResource(t *testing.T) {
 func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
+	vpcOctet := vpcTestOctet()
 	sshKeyName := fmt.Sprintf("vm-public-ip-key-%s", rName)
 	vmName := fmt.Sprintf("vm-public-ip-%s", rName)
 
 	vmConfig := func(sshKey, vm string, allocatePublicIp bool) string {
-		return providerConfig + dataCenterImagesAndSize() + vpcAndSubnet() + fmt.Sprintf(`
+		return providerConfig + dataCenterImagesAndSize() + vpcAndSubnet(rName, vpcOctet) + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -289,6 +300,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
+	vpcOctet := vpcTestOctet()
 	sshKeyName := fmt.Sprintf("vm-size-upgrade-key-%s", rName)
 	vmName := fmt.Sprintf("vm-size-upgrade-%s", rName)
 
@@ -304,7 +316,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 				image_name    = "Alma Linux 8"
 			}
-		` + sizeDataSource + vpcAndSubnet() + fmt.Sprintf(`
+		` + sizeDataSource + vpcAndSubnet(rName, vpcOctet) + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -384,13 +396,14 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
+	vpcOctet := vpcTestOctet()
 	sshKeyName := fmt.Sprintf("vm-vol-attach-key-%s", rName)
 	vol1Name := fmt.Sprintf("vm-vol-attach-vol1-%s", rName)
 	vol2Name := fmt.Sprintf("vm-vol-attach-vol2-%s", rName)
 	vmName := fmt.Sprintf("vm-vol-attach-%s", rName)
 
 	vmBase := func(sshKey, vol1, vol2, vm string) string {
-		return providerConfig + dataCenterImagesAndSize() + vpcAndSubnet() + fmt.Sprintf(`
+		return providerConfig + dataCenterImagesAndSize() + vpcAndSubnet(rName, vpcOctet) + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -495,6 +508,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 func TestVirtualMachinesAuth(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
+	vpcOctet := vpcTestOctet()
 	sshKeyName := fmt.Sprintf("vm-auth-key-%s", rName)
 	vmName := fmt.Sprintf("vm-auth-%s", rName)
 
@@ -503,7 +517,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 		Steps: []resource.TestStep{
 			// Create with ssh_key_id and username
 			{
-				Config: providerConfig + dataCenterImagesAndSize() + vpcAndSubnet() + fmt.Sprintf(`
+				Config: providerConfig + dataCenterImagesAndSize() + vpcAndSubnet(rName, vpcOctet) + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -537,7 +551,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 			},
 			// Changing initial_auth is a no-op - state is updated with new config values but no API calls are made
 			{
-				Config: providerConfig + dataCenterImagesAndSize() + vpcAndSubnet() + fmt.Sprintf(`
+				Config: providerConfig + dataCenterImagesAndSize() + vpcAndSubnet(rName, vpcOctet) + fmt.Sprintf(`
 
 			resource "gpcn_virtualmachine" "test" {
 				name          = "%s"
