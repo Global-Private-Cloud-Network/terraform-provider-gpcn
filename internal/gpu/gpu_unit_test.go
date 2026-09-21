@@ -897,10 +897,10 @@ func TestGPUSeriesCodesMatchCatalog(t *testing.T) {
 	}
 
 	if len(GPUSeriesNames) != len(seeded) {
-		t.Fatalf("Expected %d advertised series names, got %d", len(seeded), len(GPUSeriesNames))
+		t.Fatalf("Expected %d enabled series names, got %d", len(seeded), len(GPUSeriesNames))
 	}
 	if len(GPUSeriesCodes) != len(seeded) {
-		t.Fatalf("Expected %d advertised series codes, got %d", len(seeded), len(GPUSeriesCodes))
+		t.Fatalf("Expected %d enabled series codes, got %d", len(seeded), len(GPUSeriesCodes))
 	}
 	if len(GPUSeriesNameToCode) != len(seeded) {
 		t.Fatalf("Expected %d name-to-code entries, got %d", len(seeded), len(GPUSeriesNameToCode))

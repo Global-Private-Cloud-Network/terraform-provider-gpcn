@@ -220,7 +220,6 @@ func CheckInventory(gpcnClient *client.GpcnClient, ctx context.Context, model Re
 	inventory := flattenInventory(invResp, datacenterId, seriesCode, gpuCount)
 	if len(inventory) == 0 {
 		// An empty series list leaves the resolved code empty or unreliable.
-		// The refusal then names the series as the configuration spells it.
 		reported := seriesCode
 		if len(invResp.Data.Series) == 0 {
 			reported = requested

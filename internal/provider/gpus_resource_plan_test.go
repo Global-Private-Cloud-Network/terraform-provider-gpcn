@@ -71,6 +71,8 @@ func gpuPlanTestSeriesEntry(id, name, code, skuCode, gpuDescription string, vcpu
 	}
 }
 
+// Every read the mock serves adds the sentinel configuration, so this envelope
+// omits the block.
 func gpuPlanTestReadBody(name string) map[string]any {
 	return map[string]any{
 		"data": map[string]any{
@@ -80,15 +82,6 @@ func gpuPlanTestReadBody(name string) map[string]any {
 			"updatedAt": gpuPlanTestTimestamp,
 			"status":    "Running",
 			"ip":        "10.0.0.1",
-			"configuration": map[string]any{
-				"name":     gpuPlanTestSeriesName,
-				"code":     gpuPlanTestSeriesCode,
-				"skuCode":  gpuPlanTestSkuCode,
-				"gpuCount": 1,
-				"cpu":      6,
-				"ram":      48,
-				"disk":     256,
-			},
 			"datacenter": map[string]any{
 				"id":          gpuPlanTestDatacenterID,
 				"name":        "Kansas",
