@@ -3,6 +3,7 @@ package volumeattachments
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"sync"
@@ -243,11 +244,18 @@ func TestAttachSurfacesBackendStatusRefusalMockHTTP(t *testing.T) {
 		t.Fatal("expected AttachVolume to report the refusal")
 	}
 
-	// net/http wraps a transport error in *url.Error, so the sentence the operator
-	// reads ends with the rendered HTTPError. The prefix is the request line.
+	var httpErr *client.HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("expected a *client.HTTPError in the chain, got %T: %v", err, err)
+	}
 	want := "HTTP 400 (Validation Error): " + backendStatusRefusal
-	if !strings.HasSuffix(err.Error(), want) {
-		t.Errorf("AttachVolume error =\n%q\nwant a suffix of\n%q", err.Error(), want)
+	if got := httpErr.Error(); got != want {
+		t.Errorf("HTTPError.Error() =\n%q\nwant\n%q", got, want)
+	}
+	// net/http wraps the transport error in *url.Error, so the request line is the
+	// only text before the rendered HTTPError. A provider wrapper adds more.
+	if !strings.HasPrefix(err.Error(), `Put "`) {
+		t.Errorf("AttachVolume error =\n%q\nwant the url.Error request line as the only prefix", err.Error())
 	}
 	if code := client.ErrorCode(err); code != "Validation Error" {
 		t.Errorf("client.ErrorCode = %q, want %q", code, "Validation Error")
