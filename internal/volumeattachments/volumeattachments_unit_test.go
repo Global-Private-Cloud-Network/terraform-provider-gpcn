@@ -45,7 +45,7 @@ func volumeResponse(volID, attachedVMID string) map[string]any {
 		"data": map[string]any{
 			"id": volID, "name": "test-vol", "sizeGb": 100,
 			"skuId":      "sku-vol-1",
-			"volumeType": map[string]any{"id": 1, "name": "SSD", "description": "SSD volume"},
+			"volumeType": map[string]any{"name": "SSD", "description": "SSD volume"},
 			"datacenter": map[string]any{
 				"id": "dc-1", "name": "Chicago", "region": "Central",
 				"countryAbbr": "US", "country": "United States",

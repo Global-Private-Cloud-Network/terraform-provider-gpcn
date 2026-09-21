@@ -88,7 +88,7 @@ func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel
 }
 
 // The code is the value the catalog lookup takes, so an import writes it.
-// A volume whose SKU the platform cannot resolve has no code and is named "Unknown".
+// A volume can have no code, and the API names such a volume "Unknown".
 func importedVolumeType(volumeType volumeTypeResponse) VolumeTypeValue {
 	if volumeType.Code != "" {
 		return NewVolumeTypeValue(volumeType.Code)
@@ -99,9 +99,7 @@ func importedVolumeType(volumeType volumeTypeResponse) VolumeTypeValue {
 	return NewVolumeTypeNull()
 }
 
-// The API can send the volume type in a different case. The canonical key keeps
-// the configured value from planning a replacement. A component code is already
-// canonical, because the API and the schema spell it the same way.
+// An alias can arrive in any case. The mapping lookup takes the normalised key.
 func canonicalVolumeType(name string) string {
 	for alias := range volumeTypeMapping {
 		if strings.EqualFold(alias, name) {

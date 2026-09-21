@@ -331,9 +331,8 @@ const (
 	volPlanTestUnknownName      = "Unknown"
 )
 
-// startUnknownVolumeTypePlanMockServer answers for a volume whose SKU the platform
-// cannot resolve. Such a volume has no component code, and the API names it
-// "Unknown", so an import has to fall back to that name.
+// startUnknownVolumeTypePlanMockServer answers for a volume whose SKU the
+// platform cannot resolve.
 func startUnknownVolumeTypePlanMockServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
