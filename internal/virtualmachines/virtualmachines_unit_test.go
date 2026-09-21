@@ -1264,3 +1264,81 @@ func TestRefreshVirtualMachineModelFromResponseKeepsValuesOnEmpty(t *testing.T) 
 		t.Errorf("Expected name 'configured-vm', got '%s'", result.Name.ValueString())
 	}
 }
+
+func TestCreateVirtualMachineSendsAcquirePublicIpAndSingleNetworkIdMockHTTP(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	useNoInitialPollDelay(t)
+	const (
+		jobID    = "job-acquire-1"
+		vmID     = "vm-acquire-1"
+		imageID  = "550e8400-e29b-41d4-a716-446655440000"
+		sizeID   = "sku-abc-123"
+		networkA = "11111111-1111-1111-1111-111111111111"
+		networkB = "22222222-2222-2222-2222-222222222222"
+	)
+
+	var createBody map[string]any
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatalf("reading the create body failed: %v", err)
+				}
+				if err := json.Unmarshal(body, &createBody); err != nil {
+					t.Fatalf("unmarshaling the create body failed: %v", err)
+				}
+				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
+					Success: true,
+					Message: "VM creation job started",
+					Data: client.JobStatusDataResponse{
+						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: vmID}},
+					},
+				})
+			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, vmID, true)
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
+				testutil.WriteJSONResponse(w, newVMResponse(vmID, "test-vm"))
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/networks/"+networkA):
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"message": "Network retrieved",
+					"data":    map[string]any{"id": networkA, "name": "birth-network", "networkType": "standard"},
+				})
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	model := createTestVMModel("test-vm", testVMImage, true)
+	networkIds, listDiags := types.ListValueFrom(context.Background(), types.StringType, []string{networkA, networkB})
+	if listDiags.HasError() {
+		t.Fatalf("building the network id list failed: %v", listDiags)
+	}
+	model.NetworkIds = networkIds
+
+	if _, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, model); err != nil {
+		t.Fatalf("CreateVirtualMachine failed: %v", err)
+	}
+
+	if createBody == nil {
+		t.Fatal("Expected the create endpoint to be called")
+	}
+	if acquire, ok := createBody["acquirePublicIp"].(bool); !ok || !acquire {
+		t.Errorf("Expected acquirePublicIp true, got '%v'", createBody["acquirePublicIp"])
+	}
+	if _, present := createBody["allocatePublicIp"]; present {
+		t.Error("Expected allocatePublicIp to be absent from the create body")
+	}
+	if _, present := createBody["networkInterfaces"]; present {
+		t.Error("Expected networkInterfaces to be absent from the create body")
+	}
+	if createBody["networkId"] != networkA {
+		t.Errorf("Expected networkId '%s', got '%v'", networkA, createBody["networkId"])
+	}
+}
