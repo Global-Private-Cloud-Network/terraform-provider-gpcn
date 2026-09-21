@@ -73,6 +73,8 @@ func startNetworkPlanMockServer(t *testing.T, initialName string) (*httptest.Ser
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", networkPlanTestID, true)
 		case r.Method == http.MethodPut && r.URL.Path == networkPath:
@@ -290,6 +292,8 @@ func startCustomNetworkPlanMockServer(t *testing.T) (*httptest.Server, *customNe
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", networkPlanTestCustomID, true)
 		case r.Method == http.MethodPut && r.URL.Path == networkPath:
