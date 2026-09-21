@@ -16,8 +16,8 @@ const vpcNicTestIDEnvVar = "GPCN_TEST_VPC_NIC_ID"
 
 // TestVPCPublicIpAttachmentResource acquires an address, attaches it to a
 // running machine's interface and detaches it. The destroy leaves the address
-// held, and the gpcn_vpc_public_ip resource then releases it. The case does not
-// assert held on the address, because the address resource keeps the state its
+// held, and the gpcn_vpc_public_ip resource then releases it. The case does
+// not assert held on the address. The address resource keeps the state its
 // own create wrote until the next refresh.
 func TestVPCPublicIpAttachmentResource(t *testing.T) {
 	t.Parallel()

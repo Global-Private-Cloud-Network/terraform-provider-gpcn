@@ -16,6 +16,10 @@ import (
 var regexpPublicIpsAttachToVPCInterfacesOnly = regexp.MustCompile(`Public\s+IPs\s+attach\s+to\s+VPC\s+interfaces\s+only`)
 
 func vpcPublicIpAttachmentPlanTestConfig(host string) string {
+	return vpcPublicIpAttachmentPlanTestConfigForNic(host, vpcPublicIpPlanTestNicID)
+}
+
+func vpcPublicIpAttachmentPlanTestConfigForNic(host, nicID string) string {
 	return fmt.Sprintf(`
 provider "gpcn" {
   host    = %q
@@ -27,7 +31,7 @@ resource "gpcn_vpc_public_ip_attachment" "test" {
   public_ip_id = %q
   nic_id       = %q
 }
-`, host, vpcPublicIpPlanTestVpcID, vpcPublicIpPlanTestID, vpcPublicIpPlanTestNicID)
+`, host, vpcPublicIpPlanTestVpcID, vpcPublicIpPlanTestID, nicID)
 }
 
 // The attach names the interface, and the state records the machine the
@@ -52,6 +56,7 @@ func TestVPCPublicIpAttachmentResourcePlanAttachReadAndDetach(t *testing.T) {
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy:             checkAttachmentDestroyDetachedOnly(row),
 		Steps: []resource.TestStep{
 			{
 				Config: config,
@@ -80,6 +85,51 @@ func TestVPCPublicIpAttachmentResourcePlanAttachReadAndDetach(t *testing.T) {
 	})
 }
 
+// checkAttachmentDestroyDetachedOnly pins the destroy verb. A release would
+// give the billable address back to the platform. It would also orphan the
+// gpcn_vpc_public_ip that still owns the address.
+func checkAttachmentDestroyDetachedOnly(row *publicIpPlanTestRow) func(*terraform.State) error {
+	return func(*terraform.State) error {
+		if row.detachCallCount() == 0 {
+			return fmt.Errorf("expected the destroy to detach the address, got no detach request")
+		}
+		if got := row.releaseCallCount(); got != 0 {
+			return fmt.Errorf("expected the destroy to send no release, got %d", got)
+		}
+		if row.isReleased() {
+			return fmt.Errorf("expected the address to survive the destroy, but the mock reports it released")
+		}
+		return nil
+	}
+}
+
+// GPCN has no verb that re-points a live address. A new nic_id must therefore
+// plan a replacement, not an in-place update.
+func TestVPCPublicIpAttachmentResourcePlanReplacesOnNicIdChange(t *testing.T) {
+	t.Parallel()
+	server, row := startVPCPublicIpPlanMockServer(t)
+	row.becomeReady()
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vpcPublicIpAttachmentPlanTestConfig(server.URL),
+			},
+			{
+				Config:             vpcPublicIpAttachmentPlanTestConfigForNic(server.URL, vpcPublicIpPlanTestOtherNic),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVPCPublicIpAttachmentTest, plancheck.ResourceActionDestroyBeforeCreate),
+					},
+				},
+			},
+		},
+	})
+}
+
 // An address detached outside Terraform holds no machine. The attachment is
 // gone, and the next plan attaches it again.
 func TestVPCPublicIpAttachmentResourcePlanRemovesDetachedAttachmentFromState(t *testing.T) {
@@ -99,6 +149,19 @@ func TestVPCPublicIpAttachmentResourcePlanRemovesDetachedAttachmentFromState(t *
 				Config:    config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVPCPublicIpAttachmentTest, plancheck.ResourceActionCreate),
+					},
+				},
+			},
+			// An address released outside Terraform leaves the listing. The
+			// read must drop the attachment as well.
+			{
+				PreConfig:          row.release,
+				Config:             config,
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: true,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVPCPublicIpAttachmentTest, plancheck.ResourceActionCreate),
 					},
 				},
