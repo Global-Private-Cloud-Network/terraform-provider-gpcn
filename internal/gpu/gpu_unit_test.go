@@ -390,8 +390,8 @@ func TestFetchInventoryCountFilterMockHTTP(t *testing.T) {
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/inventory") {
-				if r.URL.Query().Get("count") != "1" {
-					t.Errorf("Expected count '1', got '%s'", r.URL.Query().Get("count"))
+				if r.URL.Query().Has("count") {
+					t.Errorf("Expected no count query param, got '%s'", r.URL.Query().Get("count"))
 				}
 				w.Header().Set("Content-Type", "application/json")
 				_, _ = w.Write([]byte(inventoryJSONA6000))
@@ -536,8 +536,8 @@ func TestCheckInventoryMockHTTP(t *testing.T) {
 				if query.Get("datacenterId") != testDatacenterID {
 					t.Errorf("Expected datacenterId '%s', got '%s'", testDatacenterID, query.Get("datacenterId"))
 				}
-				if query.Get("count") != "2" {
-					t.Errorf("Expected count '2', got '%s'", query.Get("count"))
+				if query.Has("count") {
+					t.Errorf("Expected no count query param, got '%s'", query.Get("count"))
 				}
 				testutil.WriteJSONResponse(w, newInventoryResponse("series-123", seriesCode, testDatacenterID, gpuCount, 5))
 			} else {
@@ -1049,5 +1049,45 @@ func TestCheckInventoryResolvesSeriesNameMockHTTP(t *testing.T) {
 	}
 	if inventory[0].SeriesID != "series-a6000" {
 		t.Errorf("Expected series ID 'series-a6000', got '%s'", inventory[0].SeriesID)
+	}
+}
+
+// The backend applies the GPU-count filter to the same query that produces the
+// series rows, so a filtered response hides every series without that count.
+const inventoryJSONCountFiltered = `{
+  "data": {
+    "series": [
+      {"id": "series-h200", "name": "NVIDIA H200 Series", "code": "nvidia-h200-series", "availability": []}
+    ]
+  }
+}`
+
+func TestCheckInventoryReportsAvailabilityNotUnknownSeriesMockHTTP(t *testing.T) {
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/inventory") {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Query().Has("count") {
+					_, _ = w.Write([]byte(inventoryJSONCountFiltered))
+					return
+				}
+				_, _ = w.Write([]byte(inventoryJSONA6000))
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	model := createTestGPUModel("test-gpu", "", "nvidia-rtx_a6000-series", testImageName, 4)
+
+	_, _, err := CheckInventory(gpcnClient, context.Background(), model)
+	if err == nil {
+		t.Fatal("Expected an error for a series with no SKU at the requested count, got nil")
+	}
+	want := fmt.Sprintf(ErrDetailNoInventoryAvailable, "nvidia-rtx_a6000-series", testDatacenterID, 4)
+	if err.Error() != want {
+		t.Errorf("Expected error %q, got %q", want, err.Error())
 	}
 }

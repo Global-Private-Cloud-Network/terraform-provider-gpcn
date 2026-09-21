@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 
 	"terraform-provider-gpcn/internal/client"
@@ -96,19 +95,17 @@ func flattenInventory(invResp *inventoryResp, datacenterId, seriesCode string, g
 	return inventory
 }
 
-// getInventory sends the inventory GET and returns the parsed response. It never
-// sends the series filter, because an unknown series must be answered with the
-// list of series the datacenter does offer.
-func getInventory(gpcnClient *client.GpcnClient, ctx context.Context, datacenterId string, gpuCount int64) (*inventoryResp, error) {
+// getInventory sends the inventory GET and returns the parsed response. It asks
+// for the whole datacenter. The series and count filters both prune the series
+// list, and a refusal must tell the user which series the datacenter offers and
+// whether the count is what is missing.
+func getInventory(gpcnClient *client.GpcnClient, ctx context.Context, datacenterId string) (*inventoryResp, error) {
 	u, err := url.Parse(BASE_URL_V1 + "inventory")
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse inventory URL: %w", err)
 	}
 	q := u.Query()
 	q.Add("datacenterId", datacenterId)
-	if gpuCount != 0 {
-		q.Add("count", strconv.FormatInt(gpuCount, 10))
-	}
 	u.RawQuery = q.Encode()
 
 	tflog.Info(ctx, LogConstructedInventoryRequestURL)
@@ -192,7 +189,7 @@ func CheckInventory(gpcnClient *client.GpcnClient, ctx context.Context, model Re
 
 	tflog.Info(ctx, fmt.Sprintf(LogStartingCheckInventory, model.SeriesCode.ValueString(), datacenterId, gpuCount))
 
-	invResp, err := getInventory(gpcnClient, ctx, datacenterId, gpuCount)
+	invResp, err := getInventory(gpcnClient, ctx, datacenterId)
 	if err != nil {
 		return nil, "", err
 	}
@@ -219,7 +216,7 @@ func CheckInventory(gpcnClient *client.GpcnClient, ctx context.Context, model Re
 func FetchInventory(gpcnClient *client.GpcnClient, ctx context.Context, datacenterId, seriesCode, seriesName string, gpuCount int64) ([]FlatInventory, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingFetchInventory, datacenterId, seriesCode, gpuCount))
 
-	invResp, err := getInventory(gpcnClient, ctx, datacenterId, gpuCount)
+	invResp, err := getInventory(gpcnClient, ctx, datacenterId)
 	if err != nil {
 		return nil, err
 	}
