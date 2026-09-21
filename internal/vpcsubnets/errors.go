@@ -31,5 +31,5 @@ const (
 const (
 	WarnSummarySubnetFailed         = "GPCN VPC subnet is in the failed state"
 	WarnDetailSubnetFailed          = "Subnet '%s' is in the 'failed' state, so it carries no working network. GPCN gives this reason: %s. Delete the subnet and create it again, or contact GPCN support."
-	WarnDetailSubnetNoFailureReason = "the API reported no reason"
+	WarnDetailSubnetNoFailureReason = "Subnet '%s' is in the 'failed' state, so it carries no working network. GPCN recorded no reason. Delete the subnet and create it again, or contact GPCN support."
 )

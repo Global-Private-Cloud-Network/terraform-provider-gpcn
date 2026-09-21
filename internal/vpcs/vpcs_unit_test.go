@@ -306,7 +306,7 @@ func TestFailedVpcWarningNamesTheReason(t *testing.T) {
 func TestFailedVpcWarningWithoutAReason(t *testing.T) {
 	t.Parallel()
 
-	want := "VPC vpc-1 is in the failed state: the platform reported no reason. Destroy the VPC and create it again."
+	want := "VPC vpc-1 is in the failed state. Destroy the VPC and create it again."
 	if got := FailedVpcWarning(vpcUnitTestID, "").Detail(); got != want {
 		t.Errorf("Detail = %q, want %q", got, want)
 	}

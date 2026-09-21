@@ -76,11 +76,11 @@ func SubnetFailedWarning(response *ApiSubnet) diag.Diagnostics {
 		return diags
 	}
 
-	reason := WarnDetailSubnetNoFailureReason
-	if response.FailureReason != nil && *response.FailureReason != "" {
-		reason = *response.FailureReason
+	if response.FailureReason == nil || *response.FailureReason == "" {
+		diags.AddWarning(WarnSummarySubnetFailed, fmt.Sprintf(WarnDetailSubnetNoFailureReason, response.ID))
+		return diags
 	}
-	diags.AddWarning(WarnSummarySubnetFailed, fmt.Sprintf(WarnDetailSubnetFailed, response.ID, reason))
+	diags.AddWarning(WarnSummarySubnetFailed, fmt.Sprintf(WarnDetailSubnetFailed, response.ID, *response.FailureReason))
 	return diags
 }
 

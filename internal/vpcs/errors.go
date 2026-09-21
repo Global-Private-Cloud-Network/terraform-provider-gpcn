@@ -58,7 +58,7 @@ const (
 const (
 	WarnSummaryVpcFailed        = "VPC is in the failed state"
 	WarnDetailVpcFailed         = "VPC %s is in the failed state: %s. Destroy the VPC and create it again."
-	WarnDetailVpcFailedNoReason = "the platform reported no reason"
+	WarnDetailVpcFailedNoReason = "VPC %s is in the failed state. Destroy the VPC and create it again."
 )
 
 const noChildren = "none"
@@ -99,9 +99,15 @@ func DeleteFailureDiagnostic(vpcID string, err error) diag.Diagnostic {
 	)
 }
 
+// FailedVpcWarning explains a parked VPC. The platform can park a row with no
+// reason recorded. A sentence with an empty clause in it reads as a provider
+// bug.
 func FailedVpcWarning(vpcID, failureReason string) diag.Diagnostic {
 	if failureReason == "" {
-		failureReason = WarnDetailVpcFailedNoReason
+		return diag.NewWarningDiagnostic(
+			WarnSummaryVpcFailed,
+			fmt.Sprintf(WarnDetailVpcFailedNoReason, vpcID),
+		)
 	}
 	return diag.NewWarningDiagnostic(
 		WarnSummaryVpcFailed,

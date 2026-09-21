@@ -891,6 +891,17 @@ func TestVpcSubnetReadWarnsOnFailedSubnetUnit(t *testing.T) {
 		t.Errorf("detail = %q, want %q", got, wantDetail)
 	}
 
+	// The platform can park a carve with no reason recorded.
+	noReason := readInState("failed", "")
+	noReasonWarnings := noReason.Diagnostics.Warnings()
+	if len(noReasonWarnings) != 1 {
+		t.Fatalf("warnings with no reason = %v, want exactly one", noReasonWarnings)
+	}
+	wantNoReasonDetail := "Subnet '22222222-2222-4222-8222-222222222222' is in the 'failed' state, so it carries no working network. GPCN recorded no reason. Delete the subnet and create it again, or contact GPCN support."
+	if got := noReasonWarnings[0].Detail(); got != wantNoReasonDetail {
+		t.Errorf("detail with no reason = %q, want %q", got, wantNoReasonDetail)
+	}
+
 	ready := readInState("ready", "")
 	if got := ready.Diagnostics.WarningsCount(); got != 0 {
 		t.Errorf("warnings for a ready subnet = %d, want 0", got)

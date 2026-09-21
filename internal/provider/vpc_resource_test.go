@@ -230,55 +230,61 @@ func TestVpcResourceCreateWritesIdBeforePolling(t *testing.T) {
 func TestVpcResourceReadWarnsWhenVpcFailed(t *testing.T) {
 	t.Parallel()
 
-	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, _ *http.Request) {
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true,
-				"message": "",
-				"data": map[string]any{
-					"id":             vpcPlanTestID,
-					"name":           "vpc-failed",
-					"description":    "",
-					"cidr":           vpcPlanTestCidr,
-					"datacenter":     map[string]any{"id": vpcPlanTestDatacenterID, "code": "kansas", "name": "Kansas"},
-					"status":         "failed",
-					"failureReason":  "the anchor router never came up",
-					"egressIp":       nil,
-					"activeJobId":    nil,
-					"createdAt":      vpcPlanTestTimestamp,
-					"updatedAt":      vpcPlanTestTimestamp,
-					"dnsNameservers": []string{"8.8.8.8"},
-				},
-			})
-		},
-	})
+	readWithFailureReason := func(failureReason any) diag.Diagnostic {
+		t.Helper()
 
-	vpcSchema := vpcResourceTestSchema(t)
-	priorState := tfsdk.State{Schema: vpcSchema}
-	diags := priorState.Set(context.Background(), vpcs.ResourceModel{
-		ID:             types.StringValue(vpcPlanTestID),
-		Name:           types.StringValue("vpc-failed"),
-		DatacenterId:   types.StringValue(vpcPlanTestDatacenterID),
-		CIDR:           types.StringValue(vpcPlanTestCidr),
-		Description:    types.StringValue(""),
-		DNSNameservers: types.ListNull(types.StringType),
-	})
-	if diags.HasError() {
-		t.Fatalf("Expected a prior state, got %v", diags)
+		_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+			T: t,
+			Handler: func(w http.ResponseWriter, _ *http.Request) {
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"message": "",
+					"data": map[string]any{
+						"id":             vpcPlanTestID,
+						"name":           "vpc-failed",
+						"description":    "",
+						"cidr":           vpcPlanTestCidr,
+						"datacenter":     map[string]any{"id": vpcPlanTestDatacenterID, "code": "kansas", "name": "Kansas"},
+						"status":         "failed",
+						"failureReason":  failureReason,
+						"egressIp":       nil,
+						"activeJobId":    nil,
+						"createdAt":      vpcPlanTestTimestamp,
+						"updatedAt":      vpcPlanTestTimestamp,
+						"dnsNameservers": []string{"8.8.8.8"},
+					},
+				})
+			},
+		})
+
+		vpcSchema := vpcResourceTestSchema(t)
+		priorState := tfsdk.State{Schema: vpcSchema}
+		diags := priorState.Set(context.Background(), vpcs.ResourceModel{
+			ID:             types.StringValue(vpcPlanTestID),
+			Name:           types.StringValue("vpc-failed"),
+			DatacenterId:   types.StringValue(vpcPlanTestDatacenterID),
+			CIDR:           types.StringValue(vpcPlanTestCidr),
+			Description:    types.StringValue(""),
+			DNSNameservers: types.ListNull(types.StringType),
+		})
+		if diags.HasError() {
+			t.Fatalf("Expected a prior state, got %v", diags)
+		}
+
+		vpcResource := &vpcResource{client: gpcnClient}
+		readResponse := &fwresource.ReadResponse{State: priorState}
+		vpcResource.Read(context.Background(), fwresource.ReadRequest{State: priorState}, readResponse)
+
+		if readResponse.Diagnostics.HasError() {
+			t.Fatalf("Expected no error diagnostic, got %v", readResponse.Diagnostics)
+		}
+		if count := len(readResponse.Diagnostics); count != 1 {
+			t.Fatalf("Expected 1 diagnostic, got %d: %v", count, readResponse.Diagnostics)
+		}
+		return readResponse.Diagnostics[0]
 	}
 
-	vpcResource := &vpcResource{client: gpcnClient}
-	readResponse := &fwresource.ReadResponse{State: priorState}
-	vpcResource.Read(context.Background(), fwresource.ReadRequest{State: priorState}, readResponse)
-
-	if readResponse.Diagnostics.HasError() {
-		t.Fatalf("Expected no error diagnostic, got %v", readResponse.Diagnostics)
-	}
-	if count := len(readResponse.Diagnostics); count != 1 {
-		t.Fatalf("Expected 1 diagnostic, got %d: %v", count, readResponse.Diagnostics)
-	}
-	warning := readResponse.Diagnostics[0]
+	warning := readWithFailureReason("the anchor router never came up")
 	if warning.Severity() != diag.SeverityWarning {
 		t.Errorf("Severity = %v, want %v", warning.Severity(), diag.SeverityWarning)
 	}
@@ -288,6 +294,13 @@ func TestVpcResourceReadWarnsWhenVpcFailed(t *testing.T) {
 	want := "VPC vpc-1 is in the failed state: the anchor router never came up. Destroy the VPC and create it again."
 	if got := warning.Detail(); got != want {
 		t.Errorf("Detail = %q, want %q", got, want)
+	}
+
+	// The platform can park a VPC with no reason recorded.
+	noReason := readWithFailureReason(nil)
+	wantNoReason := "VPC vpc-1 is in the failed state. Destroy the VPC and create it again."
+	if got := noReason.Detail(); got != wantNoReason {
+		t.Errorf("Detail with no reason = %q, want %q", got, wantNoReason)
 	}
 }
 

@@ -315,7 +315,7 @@ func TestSubnetFailedWarningWithoutReasonUnit(t *testing.T) {
 
 	diags := SubnetFailedWarning(response)
 
-	want := "Subnet 'subnet-1' is in the 'failed' state, so it carries no working network. GPCN gives this reason: the API reported no reason. Delete the subnet and create it again, or contact GPCN support."
+	want := "Subnet 'subnet-1' is in the 'failed' state, so it carries no working network. GPCN recorded no reason. Delete the subnet and create it again, or contact GPCN support."
 	if got := diags.Warnings()[0].Detail(); got != want {
 		t.Errorf("expected the detail %q, got %q", want, got)
 	}
