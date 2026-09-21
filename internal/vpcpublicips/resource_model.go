@@ -60,6 +60,20 @@ func MapPublicIpResponseToModel(publicIp *PublicIp, model ResourceModel) Resourc
 	return model
 }
 
+// MapAcquiredIdToModel records the id the acquire answered with before the job
+// finished. Nothing about the row is read yet, so every other attribute is null.
+func MapAcquiredIdToModel(publicIpID string, model ResourceModel) ResourceModel {
+	model.ID = types.StringValue(publicIpID)
+	model.IPAddress = types.StringNull()
+	model.State = types.StringNull()
+	model.Held = types.BoolNull()
+	model.VirtualMachineID = types.StringNull()
+	model.FailureReason = types.StringNull()
+	model.CreatedTime = types.StringNull()
+	model.LastUpdated = types.StringNull()
+	return model
+}
+
 // MapPublicIpResponseToAttachmentModel records the machine the address now
 // serves. The attachment carries no other state of its own.
 func MapPublicIpResponseToAttachmentModel(publicIp *PublicIp, model AttachmentResourceModel) AttachmentResourceModel {

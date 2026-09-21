@@ -69,8 +69,10 @@ func AcquirePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID s
 		return "", err
 	}
 
+	// The API inserts the row before it dispatches the job, so a failed job
+	// still leaves a real address. The caller records the id and releases it.
 	if err := pollJob(gpcnClient, ctx, ActionAcquirePublicIp, jobID); err != nil {
-		return "", err
+		return acquireResponse.Data.PublicIpID, err
 	}
 
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyAcquiredPublicIp, acquireResponse.Data.PublicIpID))

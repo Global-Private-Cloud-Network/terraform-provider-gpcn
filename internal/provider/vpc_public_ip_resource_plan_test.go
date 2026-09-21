@@ -12,12 +12,17 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 // The provider forwards the platform's own refusal sentence. The test pins
 // those bytes, not a summary the provider writes. Terraform wraps a
 // diagnostic to the terminal width, so the pattern accepts a break at any space.
 var regexpPublicIpReleaseInProgress = regexp.MustCompile(`Public\s+IP\s+release\s+is\s+in\s+progress;\s+wait\s+for\s+it\s+to\s+finish`)
+
+// A failed acquire names the address it left behind. The id is what the
+// operator needs to find the row.
+var regexpPublicIpAcquiredButJobFailed = regexp.MustCompile(`public\s+IP\s+` + vpcPublicIpPlanTestID + `\s+was\s+acquired\s+and\s+is\s+in\s+state`)
 
 const (
 	vpcPublicIpPlanTestVpcID     = "11111111-1111-1111-1111-111111111111"
@@ -28,6 +33,8 @@ const (
 	vpcPublicIpPlanTestVmID      = "44444444-4444-4444-4444-444444444444"
 	vpcPublicIpPlanTestAddress   = "203.0.113.10"
 	vpcPublicIpPlanTestTimestamp = "2026-01-02T15:04:05Z"
+	// The acquire job carries its own id, so one test can fail it alone.
+	vpcPublicIpPlanTestAcquireJob = "job-acquire"
 )
 
 // publicIpPlanTestRow is the mock's copy of the one address row. The tests
@@ -42,11 +49,14 @@ type publicIpPlanTestRow struct {
 	// refuseFirstRelease makes the first DELETE answer the 409 the platform
 	// sends while a release is already running.
 	refuseFirstRelease bool
-	releaseCalls       int
-	detachCalls        int
-	attachStatus       int
-	attachMessage      string
-	lastAttachBody     map[string]any
+	// acquireJobFailed makes the acquire job report a failure. The row still
+	// exists, because the API inserts it before it dispatches the job.
+	acquireJobFailed bool
+	releaseCalls     int
+	detachCalls      int
+	attachStatus     int
+	attachMessage    string
+	lastAttachBody   map[string]any
 }
 
 func (row *publicIpPlanTestRow) body() map[string]any {
@@ -120,6 +130,20 @@ func (row *publicIpPlanTestRow) refuseFirstReleaseOnce() {
 	row.refuseFirstRelease = true
 }
 
+// failAcquireJob arms the failure under the lock. The mock server reads the
+// field from its own goroutine.
+func (row *publicIpPlanTestRow) failAcquireJob() {
+	row.mu.Lock()
+	defer row.mu.Unlock()
+	row.acquireJobFailed = true
+}
+
+func (row *publicIpPlanTestRow) acquireJobFails() bool {
+	row.mu.Lock()
+	defer row.mu.Unlock()
+	return row.acquireJobFailed
+}
+
 func (row *publicIpPlanTestRow) releaseCallCount() int {
 	row.mu.Lock()
 	defer row.mu.Unlock()
@@ -147,13 +171,13 @@ func startVPCPublicIpPlanMockServer(t *testing.T) (*httptest.Server, *publicIpPl
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
 			testutil.HandleAuthCheck(w)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
-			testutil.HandleJobResponse(w, "job-1", vpcPublicIpPlanTestID, true)
+			publicIpPlanTestHandleJob(w, r, row)
 		case r.Method == http.MethodPost && r.URL.Path == listPath:
 			row.reacquire()
 			testutil.WriteJSONResponse(w, map[string]any{
 				"success": true,
 				"message": "Operation initiated successfully",
-				"data":    map[string]any{"publicIpId": vpcPublicIpPlanTestID, "jobId": "job-1"},
+				"data":    map[string]any{"publicIpId": vpcPublicIpPlanTestID, "jobId": vpcPublicIpPlanTestAcquireJob},
 			})
 		case r.Method == http.MethodGet && r.URL.Path == listPath:
 			rows := []map[string]any{}
@@ -178,6 +202,31 @@ func startVPCPublicIpPlanMockServer(t *testing.T) (*httptest.Server, *publicIpPl
 	t.Cleanup(server.Close)
 
 	return server, row
+}
+
+// publicIpPlanTestHandleJob answers the poll for the job the request names.
+func publicIpPlanTestHandleJob(w http.ResponseWriter, r *http.Request, row *publicIpPlanTestRow) {
+	jobID := "job-1"
+	if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
+		jobID, _ = ids[0].(string)
+	}
+
+	if jobID == vpcPublicIpPlanTestAcquireJob && row.acquireJobFails() {
+		testutil.WriteJSONResponse(w, map[string]any{
+			"success": true,
+			"message": "Job status retrieved",
+			"data": map[string]any{"jobs": []map[string]any{{
+				"jobId":        jobID,
+				"isCompleted":  false,
+				"isTerminal":   true,
+				"hasFailed":    true,
+				"errorMessage": "No addresses are free in this region",
+			}}},
+		})
+		return
+	}
+
+	testutil.HandleJobResponse(w, jobID, vpcPublicIpPlanTestID, true)
 }
 
 func publicIpPlanTestHandleAttach(w http.ResponseWriter, r *http.Request, row *publicIpPlanTestRow) {
@@ -384,4 +433,45 @@ func TestVPCPublicIpResourcePlanSurfacesReleaseRefusal(t *testing.T) {
 			},
 		},
 	})
+}
+
+// The platform inserts the address row before it dispatches the acquire job.
+// A failed job must therefore leave the id in state. The destroy then releases
+// the address instead of leaving a billable row outside Terraform.
+func TestVPCPublicIpResourcePlanKeepsTheIdWhenTheAcquireJobFails(t *testing.T) {
+	t.Parallel()
+	server, row := startVPCPublicIpPlanMockServer(t)
+	row.failAcquireJob()
+
+	config := vpcPublicIpPlanTestConfig(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexpPublicIpAcquiredButJobFailed,
+			},
+			{
+				Config:  config,
+				Destroy: true,
+				Check:   checkPublicIpDestroyReleasedTheAddress(row),
+			},
+		},
+	})
+}
+
+// checkPublicIpDestroyReleasedTheAddress proves the failed create wrote the id
+// to state. The mock routes the release by that id, so a create that kept the
+// id to itself leaves the destroy with nothing to release.
+func checkPublicIpDestroyReleasedTheAddress(row *publicIpPlanTestRow) func(*terraform.State) error {
+	return func(*terraform.State) error {
+		if row.releaseCallCount() == 0 {
+			return fmt.Errorf("expected the destroy to release the acquired address, got no release request")
+		}
+		if !row.isReleased() {
+			return fmt.Errorf("expected the address to be released, but the mock still lists it")
+		}
+		return nil
+	}
 }

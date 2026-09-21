@@ -522,3 +522,45 @@ func TestGetPublicIpFailsRatherThanReportNotFoundAtThePageCapMockHTTP(t *testing
 		t.Fatalf("Expected an error that is not a not-found, got: %v", err)
 	}
 }
+
+// The API inserts the row before it dispatches the acquire job. A failed job
+// therefore leaves a real address behind, and the caller needs its id to
+// release it.
+func TestAcquirePublicIpReturnsTheIdWhenTheJobFailsMockHTTP(t *testing.T) {
+	t.Parallel()
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/vpcs/"+testVpcID+"/public-ips":
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"message": "Operation initiated successfully",
+					"data":    map[string]any{"publicIpId": testPublicIpID, "jobId": testJobID},
+				})
+			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"message": "Job status retrieved",
+					"data": map[string]any{"jobs": []map[string]any{{
+						"jobId":        testJobID,
+						"isCompleted":  false,
+						"isTerminal":   true,
+						"hasFailed":    true,
+						"errorMessage": "No addresses are free in this region",
+					}}},
+				})
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+
+	publicIpID, err := AcquirePublicIp(gpcnClient, context.Background(), testVpcID)
+	if err == nil {
+		t.Fatalf("Expected an error when the acquire job fails, got none")
+	}
+	if publicIpID != testPublicIpID {
+		t.Fatalf("Expected the failed acquire to still report ID %q, got %q", testPublicIpID, publicIpID)
+	}
+}
