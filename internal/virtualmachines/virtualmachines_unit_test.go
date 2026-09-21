@@ -906,6 +906,9 @@ func TestPollForVirtualMachineStatusFailsFastOnDestroyed(t *testing.T) {
 	if err.Error() != expectedMessage {
 		t.Errorf("Expected error '%s', got '%s'", expectedMessage, err.Error())
 	}
+	if !strings.Contains(err.Error(), `reached status "Destroyed"`) {
+		t.Errorf("Expected the error to name the observed status, got '%s'", err.Error())
+	}
 	if pollCount != 1 {
 		t.Errorf("Expected exactly 1 GET before the poller gave up, got %d", pollCount)
 	}
