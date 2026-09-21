@@ -3,156 +3,60 @@ package provider
 import (
 	"context"
 	"fmt"
+	"os"
 	"regexp"
 	"testing"
 
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
-	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
-	"github.com/hashicorp/terraform-plugin-testing/plancheck"
-	"github.com/hashicorp/terraform-plugin-testing/statecheck"
-	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 var gpcnNetworkTest = "gpcn_network.test"
 
+// networkTestIDEnvVar names an existing GPCN network for the import case below. Creation is
+// retired, so the acceptance case can no longer mint the network it exercises.
+const networkTestIDEnvVar = "GPCN_TEST_NETWORK_ID"
+
+// TestNetworksResource imports a grandfathered network and checks the state it lands in.
+// The step does not persist the imported state, so the run never plans a destroy against a
+// network the platform still serves.
 func TestNetworksResource(t *testing.T) {
 	t.Parallel()
-	rName := acctest.RandString(8)
-	nameStandard := fmt.Sprintf("network-standard-%s", rName)
-	nameCustom := fmt.Sprintf("network-custom-%s", rName)
+	networkID := os.Getenv(networkTestIDEnvVar)
 
 	resource.Test(t, resource.TestCase{
+		PreCheck: func() {
+			if networkID == "" {
+				t.Skipf("%s is not set: name an existing GPCN network to import", networkTestIDEnvVar)
+			}
+		},
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			// Create and Read testing
 			{
-				Config: providerConfig + fmt.Sprintf(`
-			data "gpcn_datacenters" "central_us" {
-				country_name = "United States"
-				region_name  = "Central"
-				name = "Chicago"
-			}
-
+				Config: providerConfig + `
 			resource "gpcn_network" "test" {
-				name = "%s"
-				description = "An example Network for a demo of Terraform! This one uses the standard network_type."
-				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				network_type = "standard"
-				cidr_block = "10.0.0.0/24"
-				dhcp_start_address = "10.0.0.10"
-				dhcp_end_address   = "10.0.0.254"
-				dns_servers = ["8.8.8.8", "8.8.4.4"]
+				name          = "imported-network"
+				datacenter_id = "imported-datacenter"
+				network_type  = "custom"
 			}
-			`, nameStandard),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					// Verify attributes are set to the values from the config
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "cidr_block", "10.0.0.0/24"),
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "description", "An example Network for a demo of Terraform! This one uses the standard network_type."),
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "dhcp_end_address", "10.0.0.254"),
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "dhcp_start_address", "10.0.0.10"),
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "dns_servers.#", "2"),
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "dns_servers.0", "8.8.8.8"),
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "dns_servers.1", "8.8.4.4"),
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "name", nameStandard),
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "network_type", "standard"),
-					// Verify generated values are generated
-					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "id"),
-					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "last_updated"),
-					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "connected_vms"),
-					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "created_time"),
-					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "gateway_ip"),
-					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "location.country"),
-					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "location.datacenter"),
-					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "location.region"),
-					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "snat"),
-				),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						// Expect initial create action
-						plancheck.ExpectResourceAction(gpcnNetworkTest, plancheck.ResourceActionCreate),
-					},
-				},
-			},
-			// ImportState testing
-			{
-				ResourceName:            gpcnNetworkTest,
-				ImportState:             true,
-				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"created_time", "last_updated"},
-			},
-			// Update and Read testing with little changes
-			{
-				Config: providerConfig + fmt.Sprintf(`
-			data "gpcn_datacenters" "central_us" {
-				country_name = "United States"
-				region_name  = "Central"
-				name = "Chicago"
-			}
-
-			resource "gpcn_network" "test" {
-				name = "%s"
-				description = "An example Network for a demo of Terraform! This one uses the standard network_type."
-				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				network_type = "standard"
-				cidr_block = "10.0.0.0/24"
-				dhcp_start_address = "10.0.0.10"
-				dhcp_end_address   = "10.0.0.140"
-				dns_servers = ["8.8.8.8", "8.8.4.4"]
-			}
-			`, nameStandard),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					// Verify attributes are set to the values from the config
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "dhcp_end_address", "10.0.0.140"),
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "name", nameStandard),
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "network_type", "standard"),
-					// Verify generated values are generated
-					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "id"),
-				),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						// This is a straightforward update, check for a regular update action
-						plancheck.ExpectResourceAction(gpcnNetworkTest, plancheck.ResourceActionUpdate),
-					},
-				},
-				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(gpcnNetworkTest, tfjsonpath.New("network_type"), knownvalue.StringExact("standard")),
-					statecheck.ExpectKnownValue(gpcnNetworkTest, tfjsonpath.New("dhcp_end_address"), knownvalue.StringExact("10.0.0.140")),
-				},
-			},
-			// Update and Read testing with a replace
-			// Changing network_type forces a replace
-			{
-				Config: providerConfig + fmt.Sprintf(`
-			data "gpcn_datacenters" "central_us" {
-				country_name = "United States"
-				region_name  = "Central"
-				name = "Chicago"
-			}
-
-			resource "gpcn_network" "test" {
-				name = "%s"
-				description = "An example Network for a demo of Terraform! This one uses the custom network_type."
-				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				network_type = "custom"
-			}
-			`, nameCustom),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					// Verify attributes are set to the values from the config
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "name", nameCustom),
-					resource.TestCheckResourceAttr(gpcnNetworkTest, "network_type", "custom"),
-					// Verify generated values are generated
-					resource.TestCheckResourceAttrSet(gpcnNetworkTest, "id"),
-				),
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						// Since we are switching to custom, we will need to destroy and re-create
-						plancheck.ExpectResourceAction(gpcnNetworkTest, plancheck.ResourceActionReplace),
-					},
-				},
-				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(gpcnNetworkTest, tfjsonpath.New("network_type"), knownvalue.StringExact("custom")),
+			`,
+				ResourceName:  gpcnNetworkTest,
+				ImportState:   true,
+				ImportStateId: networkID,
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported state, got %d", len(states))
+					}
+					if got := states[0].Attributes["id"]; got != networkID {
+						return fmt.Errorf("imported id = %q, want %q", got, networkID)
+					}
+					for _, attribute := range []string{"name", "network_type", "datacenter_id", "created_time", "snat", "connected_vms"} {
+						if states[0].Attributes[attribute] == "" {
+							return fmt.Errorf("imported %s is empty", attribute)
+						}
+					}
+					return nil
 				},
 			},
 		},
