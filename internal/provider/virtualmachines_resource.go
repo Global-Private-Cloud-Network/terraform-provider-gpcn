@@ -364,7 +364,93 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
+	resp.Diagnostics.Append(r.attachSegmentsAfterCreate(ctx, getVirtualMachineResponse, plan, resp)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	tflog.Info(ctx, virtualmachines.LogSuccessfullyFinishedCreateGPCNVirtualMachine)
+}
+
+// The create body carries no segment, so every segment attaches after the machine
+// exists. State already holds the machine, and it holds the segments that attached, so a
+// refused attach leaves nothing outside Terraform and leaves a later plan work to do.
+func (r *virtualMachinesResource) attachSegmentsAfterCreate(ctx context.Context, response *virtualmachines.ReadVirtualMachinesResponse, plan virtualmachines.ResourceModel, resp *resource.CreateResponse) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	var segmentIds []string
+	if !plan.L2SegmentIds.IsNull() && !plan.L2SegmentIds.IsUnknown() {
+		diags.Append(plan.L2SegmentIds.ElementsAs(ctx, &segmentIds, true)...)
+		if diags.HasError() {
+			return diags
+		}
+	}
+	if len(segmentIds) == 0 {
+		return diags
+	}
+
+	virtualMachineID := plan.ID.ValueString()
+	attached := []string{}
+	var attachErr error
+	failedSegmentId := ""
+
+	// GPCN refuses an add-NIC on a running machine whose image has no network hotplug.
+	// The update path takes the same gate.
+	stopped := false
+	if !plan.NetworkHotplug.ValueBool() {
+		if stopErr := virtualmachines.StopVirtualMachine(r.client, ctx, virtualMachineID); stopErr != nil {
+			attachErr = fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStoppingVM, virtualMachineID), stopErr)
+			failedSegmentId = segmentIds[0]
+		} else {
+			stopped = true
+		}
+	}
+
+	if attachErr == nil {
+		for _, segmentId := range segmentIds {
+			attachErr = networks.AddL2SegmentInterface(r.client, ctx, virtualMachineID, segmentId)
+			if attachErr != nil {
+				failedSegmentId = segmentId
+				break
+			}
+			attached = append(attached, segmentId)
+		}
+	}
+
+	// The provider stops the machine for the attach, so it starts the machine again.
+	// A start that fails leaves the machine stopped, and the user learns that from the
+	// diagnostic below the state write.
+	var startErr error
+	if stopped {
+		startErr = virtualmachines.StartVirtualMachine(r.client, ctx, virtualMachineID)
+	}
+
+	var mapDiags diag.Diagnostics
+	plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, response, plan)
+	diags.Append(mapDiags...)
+
+	attachedIds, attachedDiags := types.ListValueFrom(ctx, types.StringType, attached)
+	diags.Append(attachedDiags...)
+	if !attachedDiags.HasError() {
+		plan.L2SegmentIds = attachedIds
+	}
+
+	diags.Append(resp.State.Set(ctx, plan)...)
+
+	if startErr != nil {
+		diags.AddError(
+			virtualmachines.ErrSummaryVMLeftStopped,
+			fmt.Sprintf(virtualmachines.ErrDetailVMLeftStoppedCreate, virtualMachineID, startErr.Error()),
+		)
+	}
+	if attachErr != nil {
+		diags.AddError(
+			virtualmachines.ErrSummaryVMCreatedAttachFailed,
+			fmt.Sprintf(virtualmachines.ErrDetailVMCreatedAttachFailed, virtualMachineID, failedSegmentId, attachErr.Error()),
+		)
+	}
+
+	return diags
 }
 
 // Read refreshes the Terraform state with the latest data.

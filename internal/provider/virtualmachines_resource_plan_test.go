@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 const (
@@ -28,9 +31,13 @@ const (
 	vmPlanTestImageName    = "ubuntu-22.04"
 	vmPlanTestSubnetID     = "subnet-1"
 	vmPlanTestVpcID        = "vpc-1"
+	vmPlanTestSegmentID    = "segment-1"
+	vmPlanTestSegmentID2   = "segment-2"
+	vmPlanTestSegmentID3   = "segment-3"
 	vmPlanTestSshKeyID     = "key-1"
 	vmPlanTestUsername     = "ubuntu"
 	vmPlanTestTimestamp    = "2026-01-02T15:04:05Z"
+	vmPlanTestPath         = "/v1/resource/virtual-machines/" + vmPlanTestID
 )
 
 // shortenVirtualMachinePolling removes the waits the create, stop, and delete paths
@@ -555,4 +562,373 @@ resource "gpcn_virtualmachine" "test" {
 			},
 		},
 	})
+}
+
+func vmPlanTestReadBodyWithHotplug(name, status string, hotplug int) map[string]any {
+	body := vmPlanTestReadBody(name, status, vmPlanTestSizeID)
+	body["data"].(map[string]any)["networkHotplug"] = hotplug
+	return body
+}
+
+// vmSegmentPlanTestNetworkInterfacesBody lists the birth subnet interface and one L2 row
+// per segment that attached. A test can then observe the state a failed attach leaves
+// behind. An L2 interface carries no address and no subnet, so those columns are null.
+func vmSegmentPlanTestNetworkInterfacesBody(birthSubnetID string, attached []string) map[string]any {
+	rows := make([]map[string]any, 0, 1+len(attached))
+	rows = append(rows, map[string]any{
+		"id":               "nic-1",
+		"networkInterface": 1,
+		"isPrimary":        1,
+		"macAddress":       "fa:16:3e:00:00:01",
+		"publicIp":         nil,
+		"publicIpId":       nil,
+		"privateIp":        "10.0.0.5",
+		"world":            "vpc",
+		"networkName":      nil,
+		"networkId":        nil,
+		"cidrBlock":        "10.0.0.0/24",
+		"gatewayIp":        nil,
+		"networkType":      nil,
+		"vpcSubnetId":      birthSubnetID,
+		"subnetName":       "web",
+		"vpcId":            vmPlanTestVpcID,
+		"vpcName":          "prod",
+		"l2SegmentId":      nil,
+		"l2SegmentName":    nil,
+	})
+	for index, segmentID := range attached {
+		rows = append(rows, map[string]any{
+			"id":               fmt.Sprintf("nic-%d", index+2),
+			"networkInterface": index + 2,
+			"isPrimary":        0,
+			"macAddress":       fmt.Sprintf("fa:16:3e:00:00:%02d", index+2),
+			"publicIp":         nil,
+			"publicIpId":       nil,
+			"privateIp":        nil,
+			"world":            "l2",
+			"networkName":      nil,
+			"networkId":        nil,
+			"cidrBlock":        nil,
+			"gatewayIp":        nil,
+			"networkType":      nil,
+			"vpcSubnetId":      nil,
+			"subnetName":       nil,
+			"vpcId":            nil,
+			"vpcName":          nil,
+			"l2SegmentId":      segmentID,
+			"l2SegmentName":    "segment-" + segmentID,
+		})
+	}
+	return map[string]any{"success": true, "message": "ok", "data": rows}
+}
+
+// vmSegmentListPlanTestConfig takes any number of segments, so a test can observe the
+// attach loop. It asks for no retries, so a refused call fails on the first attempt.
+func vmSegmentListPlanTestConfig(host, name string, segmentIDs ...string) string {
+	quoted := make([]string, 0, len(segmentIDs))
+	for _, segmentID := range segmentIDs {
+		quoted = append(quoted, fmt.Sprintf("%q", segmentID))
+	}
+
+	return fmt.Sprintf(`
+provider "gpcn" {
+  host        = %q
+  api_key     = "test-key"
+  max_retries = 0
+}
+
+resource "gpcn_virtualmachine" "test" {
+  name               = %q
+  datacenter_id      = %q
+  size_id            = %q
+  image_id           = %q
+  allocate_public_ip = false
+  subnet_id          = %q
+  l2_segment_ids     = [%s]
+  initial_auth = {
+    ssh_key_id = %q
+    username   = %q
+  }
+}
+`, host, name, vmPlanTestDatacenterID, vmPlanTestSizeID, vmPlanTestImageID, vmPlanTestSubnetID, strings.Join(quoted, ", "), vmPlanTestSshKeyID, vmPlanTestUsername)
+}
+
+// startVirtualMachineSegmentAttachMockServer refuses the post-create attach until the
+// returned function heals it. The refusal is a 500, and the provider configuration asks
+// for no retries. The attach therefore fails on the first call.
+func startVirtualMachineSegmentAttachMockServer(t *testing.T) (*httptest.Server, func()) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	birthSubnetID := ""
+	attachFails := true
+	status := virtualmachines.VMStatusRunning.String()
+	var attached []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			birthSubnetID, _ = body["subnetId"].(string)
+			attached = nil
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			refuse := attachFails
+			if !refuse {
+				segmentID, _ := body["l2SegmentId"].(string)
+				attached = append(attached, segmentID)
+			}
+			mu.Unlock()
+			if refuse {
+				w.WriteHeader(http.StatusInternalServerError)
+				testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "attach refused"})
+				return
+			}
+			testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mu.Lock()
+			currentSubnet := birthSubnetID
+			current := append([]string(nil), attached...)
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmSegmentPlanTestNetworkInterfacesBody(currentSubnet, current))
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/"):
+			mu.Lock()
+			attached = nil
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-4", "detach issued")
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, vmPlanTestSizeID))
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	heal := func() {
+		mu.Lock()
+		attachFails = false
+		mu.Unlock()
+	}
+
+	return server, heal
+}
+
+// A failed attach must not orphan the machine: it exists at the API, so it belongs in
+// state. State must also name only the segments that attached, or no later plan can
+// attach the rest. Terraform taints a resource whose create returned an error, so the
+// last step plans a replacement. A machine absent from state would plan a bare create
+// instead, with nothing to destroy.
+func TestVirtualMachineResourcePlanCreateWritesStateWhenASegmentAttachFails(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, heal := startVirtualMachineSegmentAttachMockServer(t)
+
+	config := vmSegmentListPlanTestConfig(server.URL, "vm-plan-segment-attach", vmPlanTestSegmentID)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexp.MustCompile(`(?s)attaching\s+` + vmPlanTestSegmentID + `\s+failed.*terraform\s+untaint`),
+			},
+			{
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "l2_segment_ids.#", "0"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.#", "1"),
+				),
+			},
+			{
+				PreConfig: heal,
+				Config:    config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionReplace),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "l2_segment_ids.#", "1"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.#", "2"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.1.l2_segment_id", vmPlanTestSegmentID),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.1.world", "l2"),
+				),
+			},
+		},
+	})
+}
+
+// startVirtualMachineSegmentHotplugMockServer accepts every call and records the order in
+// which they arrive. A test reads the order to learn whether the provider stopped the
+// machine around the post-create attach.
+func startVirtualMachineSegmentHotplugMockServer(t *testing.T, hotplug int) (*httptest.Server, func() []string) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	birthSubnetID := ""
+	status := virtualmachines.VMStatusRunning.String()
+	var attached []string
+	var sequence []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		sequence = append(sequence, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			birthSubnetID, _ = body["subnetId"].(string)
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			body := testutil.ReadRequestBody(r)
+			segmentID, _ := body["l2SegmentId"].(string)
+			mu.Lock()
+			attached = append(attached, segmentID)
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mu.Lock()
+			currentSubnet := birthSubnetID
+			current := append([]string(nil), attached...)
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmSegmentPlanTestNetworkInterfacesBody(currentSubnet, current))
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/"):
+			mu.Lock()
+			attached = nil
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-4", "detach issued")
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/start":
+			mu.Lock()
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, hotplug))
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	recorded := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), sequence...)
+	}
+
+	return server, recorded
+}
+
+func indexOfRequest(sequence []string, request string) int {
+	return slices.Index(sequence, request)
+}
+
+func lastIndexOfRequest(sequence []string, request string) int {
+	for i := len(sequence) - 1; i >= 0; i-- {
+		if sequence[i] == request {
+			return i
+		}
+	}
+	return -1
+}
+
+// GPCN refuses an add-NIC on a running machine whose image has no network hotplug, so
+// the provider stops the machine around the whole loop and starts it after the last
+// attach.
+func TestVirtualMachineResourcePlanCreateStopsForASegmentAttachWithoutHotplug(t *testing.T) {
+	tests := []struct {
+		name          string
+		hotplug       int
+		segmentIDs    []string
+		expectStopped bool
+	}{
+		// Three segments mean three attaches. A start after the first attach then
+		// differs from a start after the last one.
+		{"without hotplug the machine stops around the attach", 0, []string{vmPlanTestSegmentID, vmPlanTestSegmentID2, vmPlanTestSegmentID3}, true},
+		{"with hotplug the machine stays running", 1, []string{vmPlanTestSegmentID, vmPlanTestSegmentID2}, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			shortenVirtualMachinePolling(t)
+			server, recorded := startVirtualMachineSegmentHotplugMockServer(t, tc.hotplug)
+
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config: vmSegmentListPlanTestConfig(server.URL, "vm-plan-segment-hotplug", tc.segmentIDs...),
+						Check: func(*terraform.State) error {
+							sequence := recorded()
+							attach := indexOfRequest(sequence, "POST "+vmPlanTestPath+"/network-interfaces")
+							lastAttach := lastIndexOfRequest(sequence, "POST "+vmPlanTestPath+"/network-interfaces")
+							stop := indexOfRequest(sequence, "POST "+vmPlanTestPath+"/stop")
+							start := indexOfRequest(sequence, "POST "+vmPlanTestPath+"/start")
+							if attach < 0 {
+								return fmt.Errorf("expected an attach call, got %v", sequence)
+							}
+							if !tc.expectStopped {
+								if stop >= 0 || start >= 0 {
+									return fmt.Errorf("expected no stop or start, got %v", sequence)
+								}
+								return nil
+							}
+							if stop < 0 || stop > attach {
+								return fmt.Errorf("expected a stop before the attach, got %v", sequence)
+							}
+							if start < 0 || start < lastAttach {
+								return fmt.Errorf("expected a start after the last attach, got %v", sequence)
+							}
+							return nil
+						},
+					},
+				},
+			})
+		})
+	}
 }

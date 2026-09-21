@@ -216,11 +216,12 @@ func GetNetworkInterfaces(gpcnClient *client.GpcnClient, ctx context.Context, vi
 	return networkInterfaces, nil
 }
 
-// Attach a network interface to the virtual machine
-func AddNetworkInterface(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId, networkId string) error {
-	tflog.Info(ctx, fmt.Sprintf(LogStartingAddNetworkInterfaceWithIDs, virtualMachineId, networkId))
+// AddL2SegmentInterface attaches an L2 segment to the virtual machine as a new
+// interface. GPCN accepts exactly one target key, and l2SegmentId names a segment.
+func AddL2SegmentInterface(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId, l2SegmentId string) error {
+	tflog.Info(ctx, fmt.Sprintf(LogStartingAddL2SegmentInterfaceWithIDs, virtualMachineId, l2SegmentId))
 	attachNetworkInterfaceRequestBody := map[string]string{
-		"networkId": networkId,
+		"l2SegmentId": l2SegmentId,
 	}
 
 	jsonAttachNetworkInterfaceRequestBody, err := json.Marshal(attachNetworkInterfaceRequestBody)

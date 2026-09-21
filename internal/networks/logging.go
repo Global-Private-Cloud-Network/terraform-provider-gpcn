@@ -44,8 +44,8 @@ const (
 	LogStartingGetNetworkInterfacesWithID        = "Starting GetNetworkInterfaces for Virtual Machine ID %s"
 	LogSuccessfullyRetrievedAllNetworkInterfaces = "Successfully retrieved all network interfaces for Virtual Machine ID %s"
 
-	// AddNetworkInterface messages
-	LogStartingAddNetworkInterfaceWithIDs   = "Starting AddNetworkInterface for Virtual Machine ID %s with network ID %s"
+	// AddL2SegmentInterface messages
+	LogStartingAddL2SegmentInterfaceWithIDs = "Starting AddL2SegmentInterface for Virtual Machine ID %s with L2 segment ID %s"
 	LogSuccessfullyAttachedNetworkInterface = "Successfully attached network interface"
 
 	// SetNextNetworkInterfaceToPrimary messages

@@ -653,3 +653,40 @@ func TestCustomNetworkGoneWarningUnit(t *testing.T) {
 		t.Errorf("Expected detail '%s', got '%s'", want, got)
 	}
 }
+
+// GPCN accepts exactly one target key on an add-NIC body, and l2SegmentId names a
+// segment. A body that named a network would attach the wrong world, or be refused.
+func TestAddL2SegmentInterfaceSendsSegmentIdMockHTTP(t *testing.T) {
+	vmID := "vm-1"
+	segmentID := "segment-1"
+
+	var capturedBody map[string]any
+	var capturedPath string
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/"+vmID+"/network-interfaces" {
+				capturedPath = r.URL.Path
+				capturedBody = testutil.ReadRequestBody(r)
+				testutil.HandleCreateJobResponse(w, "job-1", "attach issued")
+				return
+			}
+			testutil.HandleJobResponse(w, "job-1", "", true)
+		},
+	})
+	defer server.Close()
+
+	if err := AddL2SegmentInterface(gpcnClient, context.Background(), vmID, segmentID); err != nil {
+		t.Fatalf("AddL2SegmentInterface returned an error: %v", err)
+	}
+
+	if capturedPath != "/v1/resource/virtual-machines/"+vmID+"/network-interfaces" {
+		t.Errorf("Expected the interface collection route, got '%s'", capturedPath)
+	}
+	if len(capturedBody) != 1 {
+		t.Errorf("Expected exactly one body key, got %v", capturedBody)
+	}
+	if capturedBody["l2SegmentId"] != segmentID {
+		t.Errorf("Expected l2SegmentId '%s', got %v", segmentID, capturedBody["l2SegmentId"])
+	}
+}
