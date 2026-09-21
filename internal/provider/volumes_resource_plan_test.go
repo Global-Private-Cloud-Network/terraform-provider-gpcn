@@ -425,8 +425,7 @@ func TestVolumeResourcePlanImportsUnknownTypeName(t *testing.T) {
 	})
 }
 
-// A configuration spells a built-in storage class by its alias.
-// An import that writes the component code instead plans a replacement.
+// Only terraform can show that the alias round trip plans nothing.
 func TestVolumeResourcePlanImportAliasPlansEmpty(t *testing.T) {
 	t.Parallel()
 	server, _, _ := startVolumePlanMockServer(t)

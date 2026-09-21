@@ -383,9 +383,8 @@ func TestUpdateVolumeLooksUpSkuByComponentCodeMockHTTP(t *testing.T) {
 	}
 }
 
-// The platform cannot always resolve the SKU of a volume, and the API names such
-// a volume "Unknown". No datacenter offers that as a component code, so the
-// catalog refuses the resize and names the codes it does offer.
+// No datacenter offers "Unknown" as a component code. The catalog refuses the
+// resize and names the codes it does offer.
 func TestUpdateVolumeRefusesUnresolvableTypeMockHTTP(t *testing.T) {
 	const (
 		offeredCode = "vol-add-ssd"
@@ -601,8 +600,6 @@ func TestMapVolumeResponseToModelKeepsPlanValuesUnit(t *testing.T) {
 	}
 }
 
-// A configuration spells a built-in storage class by its alias, so an import
-// that writes the code plans a replacement.
 func TestImportedVolumeTypePrefersAliasUnit(t *testing.T) {
 	cases := []struct {
 		name     string
