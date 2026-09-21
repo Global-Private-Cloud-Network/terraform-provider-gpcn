@@ -1148,7 +1148,7 @@ func TestCustomNetworkGoneWarningUnit(t *testing.T) {
 	if got, want := warning.Summary(), "Network removed from state"; got != want {
 		t.Errorf("Expected summary '%s', got '%s'", want, got)
 	}
-	want := "Network network-adopted-123 was not found. If it was adopted into an L2 segment by the platform, remove it from state and import the segment as gpcn_l2_segment: terraform state rm network-adopted-123 && terraform import gpcn_l2_segment.<name> <segment-id>."
+	want := "Network network-adopted-123 was not found. If it was adopted into an L2 segment by the platform, remove it from state and import the segment as gpcn_l2_segment: terraform state rm gpcn_network.<name> && terraform import gpcn_l2_segment.<name> <segment-id>."
 	if got := warning.Detail(); got != want {
 		t.Errorf("Expected detail '%s', got '%s'", want, got)
 	}

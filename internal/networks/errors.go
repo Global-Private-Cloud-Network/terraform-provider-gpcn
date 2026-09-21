@@ -43,7 +43,7 @@ const (
 // Warning strings for a custom network the platform adopted into an L2 segment
 const (
 	WarnSummaryNetworkRemovedFromState = "Network removed from state"
-	WarnDetailCustomNetworkGone        = "Network %s was not found. If it was adopted into an L2 segment by the platform, remove it from state and import the segment as gpcn_l2_segment: terraform state rm %s && terraform import gpcn_l2_segment.<name> <segment-id>."
+	WarnDetailCustomNetworkGone        = "Network %s was not found. If it was adopted into an L2 segment by the platform, remove it from state and import the segment as gpcn_l2_segment: terraform state rm gpcn_network.<name> && terraform import gpcn_l2_segment.<name> <segment-id>."
 )
 
 // The platform answers the same 404 for an adopted network as for a typo. The message
@@ -51,6 +51,6 @@ const (
 func CustomNetworkGoneWarning(networkID string) diag.Diagnostic {
 	return diag.NewWarningDiagnostic(
 		WarnSummaryNetworkRemovedFromState,
-		fmt.Sprintf(WarnDetailCustomNetworkGone, networkID, networkID),
+		fmt.Sprintf(WarnDetailCustomNetworkGone, networkID),
 	)
 }

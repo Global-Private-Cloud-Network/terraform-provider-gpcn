@@ -419,7 +419,7 @@ func TestNetworkResourceReadWarnsWhenCustomNetworkGone(t *testing.T) {
 			if got := warning.Summary(); got != networks.WarnSummaryNetworkRemovedFromState {
 				t.Errorf("summary = %q, want %q", got, networks.WarnSummaryNetworkRemovedFromState)
 			}
-			want := fmt.Sprintf(networks.WarnDetailCustomNetworkGone, networkID, networkID)
+			want := fmt.Sprintf(networks.WarnDetailCustomNetworkGone, networkID)
 			if got := warning.Detail(); got != want {
 				t.Errorf("detail = %q, want %q", got, want)
 			}
