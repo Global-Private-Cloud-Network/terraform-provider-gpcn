@@ -1,7 +1,7 @@
 package vpcnsgs
 
-// BaseURLV1 is the VPC collection. Every security group route is scoped under a
-// VPC, because a group carries no datacenter and no resource group of its own.
+// BaseURLV1 is the VPC collection. Every security group route is scoped under
+// a VPC. A group carries no datacenter and no resource group of its own.
 const BaseURLV1 = "/v1/resource/vpcs/"
 
 const (

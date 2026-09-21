@@ -25,8 +25,8 @@ type ResourceModel struct {
 	LastUpdated   types.String `tfsdk:"last_updated"`
 }
 
-// RuleModel is one `rule` block. The API's rule ID is absent on purpose: it is
-// ignored on write, and a set keyed on it would churn on every replace.
+// RuleModel is one `rule` block. The API's rule ID is absent on purpose. GPCN
+// ignores it on write. A set keyed on it churns on every replace.
 type RuleModel struct {
 	Direction    types.String `tfsdk:"direction"`
 	Protocol     types.String `tfsdk:"protocol"`
@@ -118,9 +118,10 @@ func RulesFromSet(ctx context.Context, set types.Set) ([]RuleModel, diag.Diagnos
 	return rules, diags
 }
 
-// RuleRequestBodies builds the payload the create and the replace both send. A
-// null port or description is left out: the API reads an absent key and a null
-// one the same way, and the body is strict about the keys it does not know.
+// RuleRequestBodies builds the payload the create and the replace both send.
+// The body leaves out a null port or a null description. The API reads an
+// absent key and a null one the same way. The body is also strict about the
+// keys it does not know.
 func RuleRequestBodies(rules []RuleModel) []map[string]any {
 	bodies := make([]map[string]any, 0, len(rules))
 	for _, rule := range rules {
@@ -143,9 +144,9 @@ func RuleRequestBodies(rules []RuleModel) []map[string]any {
 	return bodies
 }
 
-// MapNsgResponseToModel writes the Computed attributes and fills the
-// configurable ones only when the caller chose no value, which is what an
-// import and a Create both leave behind.
+// MapNsgResponseToModel writes the Computed attributes. It fills the
+// configurable ones only when the caller chose no value. An import and a
+// Create both leave that behind.
 func MapNsgResponseToModel(ctx context.Context, response *NsgDetail, model ResourceModel) (ResourceModel, diag.Diagnostics) {
 	var diags diag.Diagnostics
 

@@ -201,8 +201,8 @@ func (r *vpcSubnetResource) Read(ctx context.Context, req resource.ReadRequest, 
 
 	subnet, err := vpcsubnets.GetSubnet(r.client, ctx, state.VpcID.ValueString(), state.ID.ValueString())
 	if err != nil {
-		// A deleted VPC answers 404 for its whole tree, which makes every
-		// subnet under it absent as surely as a row missing from the listing.
+		// A deleted VPC answers 404 for its whole tree. Every subnet under it
+		// is then absent, like a row missing from the listing.
 		if errors.Is(err, vpcsubnets.ErrSubnetAbsent) || client.IsNotFound(err) {
 			tflog.Info(ctx, vpcsubnets.LogSubnetNotFoundRemovingState)
 			resp.State.RemoveResource(ctx)

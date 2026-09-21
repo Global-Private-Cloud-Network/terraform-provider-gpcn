@@ -1,7 +1,7 @@
 package vpcsubnets
 
-// BaseURLV1 is the VPC collection. Every subnet route is scoped under a VPC,
-// because a subnet carries no datacenter and no resource group of its own.
+// BaseURLV1 is the VPC collection. Every subnet route is scoped under a VPC.
+// A subnet carries no datacenter and no resource group of its own.
 const BaseURLV1 = "/v1/resource/vpcs/"
 
 const (

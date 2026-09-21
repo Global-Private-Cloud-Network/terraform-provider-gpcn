@@ -3,8 +3,8 @@ package vpcsubnets
 import "errors"
 
 // ErrSubnetAbsent reports that the subnet is on no page of its VPC's listing.
-// The listing is the only read this API offers for a subnet, so absence is how
-// a deletion outside Terraform arrives.
+// The listing is the only read this API offers for a subnet. Absence is how a
+// deletion outside Terraform arrives.
 var ErrSubnetAbsent = errors.New("the subnet is not in the VPC's subnet listing")
 
 // Error summary constants

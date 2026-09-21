@@ -78,9 +78,9 @@ func SubnetFailedWarning(response *ApiSubnet) diag.Diagnostics {
 	return diags
 }
 
-// MapSubnetResponseToModel writes the Computed attributes and fills the
-// configurable ones only when the caller chose no value, which is what an
-// import and a Create both leave behind. A configured CIDR must survive.
+// MapSubnetResponseToModel writes the Computed attributes. It fills the
+// configurable ones only when the caller chose no value. An import and a
+// Create both leave that behind. A configured CIDR must survive.
 // Reconciling a drifted one destroys a subnet that can hold live interfaces.
 func MapSubnetResponseToModel(response *ApiSubnet, model ResourceModel) ResourceModel {
 	model.ID = types.StringValue(response.ID)

@@ -84,8 +84,8 @@ func TestMapSubnetResponseToModelFillsComputedUnit(t *testing.T) {
 	}
 }
 
-// A drifted CIDR plans a destroy of a subnet that can hold live interfaces, so
-// the mapper must leave a value the configuration already carries.
+// A drifted CIDR plans a destroy of a subnet that can hold live interfaces.
+// The mapper must leave a value the configuration already carries.
 func TestMapSubnetResponseToModelKeepsConfiguredCidrUnit(t *testing.T) {
 	t.Parallel()
 
@@ -426,8 +426,8 @@ func TestRefreshSubnetModelFromResponseUpdatesDescriptionUnit(t *testing.T) {
 }
 
 // The API never reports the prefix, so an import must read it from the carved
-// CIDR. Every other caller already holds the CIDR, and a prefix written there
-// would plan a replacement the configuration never asked for.
+// CIDR. Every other caller already holds the CIDR. A prefix written there
+// plans a replacement the configuration never asked for.
 func TestMapSubnetResponseToModelFillsPrefixOnImportUnit(t *testing.T) {
 	t.Parallel()
 

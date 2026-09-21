@@ -79,8 +79,8 @@ func TestVpcNsgResource(t *testing.T) {
 				),
 			},
 			{
-				// A rename and a rule addition in one apply: the rename is
-				// synchronous and the rules replace runs as a job.
+				// One apply carries a rename and a rule addition. The rename is
+				// synchronous, and the rules replace runs as a job.
 				Config: vpcNsgAccTestConfig(vpcName, nsgNameUpdated, vpcNsgAccTestRuleHTTPS+vpcNsgAccTestRulePing),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{

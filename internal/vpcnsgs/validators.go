@@ -11,8 +11,8 @@ import (
 
 // NoOuterWhitespaceValidator refuses a value GPCN stores in a trimmed form. The
 // stored value then differs from the configuration, so the plan never settles.
-// The provider does not trim on the operator's behalf, because the stored name
-// would no longer be the one the configuration names.
+// The provider does not trim on the operator's behalf. The stored name would
+// no longer be the one the configuration names.
 type NoOuterWhitespaceValidator struct {
 	Attribute string
 }
@@ -45,9 +45,9 @@ func (v NoOuterWhitespaceValidator) ValidateString(_ context.Context, request va
 }
 
 // RulePortValidator judges a rule's port pair. The rule needs all of its own
-// attributes to do it, which is why it validates the block rather than one
-// attribute. Every refusal quotes the sentence GPCN answers with, so the plan
-// and the apply refuse a rule in the same words.
+// attributes to do it. It therefore validates the block rather than one
+// attribute. Every refusal quotes the sentence GPCN answers with. The plan and
+// the apply then refuse a rule in the same words.
 type RulePortValidator struct{}
 
 func (v RulePortValidator) Description(_ context.Context) string {

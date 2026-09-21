@@ -22,8 +22,8 @@ const (
 	ErrDetailOuterWhitespace         = "%s must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"
 )
 
-// Rule refusal details. Each one is the sentence GPCN answers with, so the plan
-// and the apply refuse a rule in the same words.
+// Rule refusal details. Each one is the sentence GPCN answers with. The plan
+// and the apply then refuse a rule in the same words.
 const (
 	ErrDetailRulePortsNotApplicable = "ports are not applicable to protocol '%s'"
 	ErrDetailRulePortsTogether      = "portRangeMin and portRangeMax must be provided together"
@@ -31,8 +31,10 @@ const (
 )
 
 // Warning strings for a rules replace against the VPC's own default group. The
-// two quoted sentences are the descriptions GPCN stages with the VPC.
+// two quoted sentences are the descriptions GPCN stages with the VPC. GPCN
+// removes only the rows the desired set leaves out, so the sentence promises no
+// deletion the configuration prevents.
 const (
 	WarnSummaryDefaultNsgRulesReplaced = "Replacing the rules of the VPC default security group"
-	WarnDetailDefaultNsgRulesReplaced  = "Security group '%s' is the VPC's own default group. GPCN replaces the whole rule set on every change, so this apply deletes the two rules the VPC was born with: 'Default: allow all outbound traffic' and 'Default: allow traffic from this VPC'. Add them to the configuration to keep them."
+	WarnDetailDefaultNsgRulesReplaced  = "Security group '%s' is the VPC's own default group. GPCN replaces the whole rule set on every change, so this apply deletes any rule this configuration does not list, including the two GPCN staged with the VPC: 'Default: allow all outbound traffic' and 'Default: allow traffic from this VPC'. Add them to the configuration to keep them."
 )

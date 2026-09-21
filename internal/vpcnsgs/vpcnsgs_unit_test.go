@@ -110,8 +110,8 @@ func TestMapNsgResponseToModelFillsComputedUnit(t *testing.T) {
 	}
 }
 
-// A rule with no ports and no description keeps those attributes null, because
-// null and absent mean the same thing to the API.
+// A rule with no ports and no description keeps those attributes null. Null
+// and absent mean the same thing to the API.
 func TestRulesToSetMapsNullPortsUnit(t *testing.T) {
 	t.Parallel()
 
@@ -168,8 +168,8 @@ func TestRefreshNsgModelFromResponseReplacesRuleSetUnit(t *testing.T) {
 	}
 }
 
-// A null port or description must not reach the wire as a key, because the API
-// reads an absent key and a null one the same way and the body is strict.
+// A null port or description must not reach the wire as a key. The API reads
+// an absent key and a null one the same way. The body is also strict.
 func TestRuleRequestBodiesOmitNullKeysUnit(t *testing.T) {
 	t.Parallel()
 
@@ -210,8 +210,8 @@ func TestRuleRequestBodiesOmitNullKeysUnit(t *testing.T) {
 	}
 }
 
-// The rules PUT is a full replace keyed on content, so the body must carry
-// every rule the configuration still wants, not only the new ones.
+// The rules PUT is a full replace keyed on content. The body must carry every
+// rule the configuration still wants. It does not carry only the new ones.
 func TestReplaceNsgRulesSendsCompleteSetUnit(t *testing.T) {
 	t.Parallel()
 
@@ -272,8 +272,8 @@ func unitTestRuleObject(direction, protocol, remoteCidr string, min, max types.I
 	})
 }
 
-// Each refusal quotes the API's own sentence, so an operator reads the same
-// words from the plan that the apply would have produced.
+// Each refusal quotes the API's own sentence. The plan gives the operator the
+// same words the apply would have produced.
 func TestRulePortValidatorMessagesUnit(t *testing.T) {
 	t.Parallel()
 
@@ -344,8 +344,8 @@ func TestRulePortValidatorMessagesUnit(t *testing.T) {
 }
 
 // The rules PUT is a full replace, and the backend puts no guard on the default
-// group. An apply against it deletes the posture rows GPCN staged with the VPC.
-// The operator must read that before the rules are gone.
+// group. GPCN removes only the rows the desired set leaves out. The sentence
+// must not promise a deletion the configuration prevents.
 func TestDefaultNsgRulesWarningUnit(t *testing.T) {
 	t.Parallel()
 
@@ -355,10 +355,10 @@ func TestDefaultNsgRulesWarningUnit(t *testing.T) {
 		t.Fatalf("expected one warning, got %d", got)
 	}
 	warning := diags.Warnings()[0]
-	if got := warning.Summary(); got != WarnSummaryDefaultNsgRulesReplaced {
-		t.Errorf("expected the summary %q, got %q", WarnSummaryDefaultNsgRulesReplaced, got)
+	if got := warning.Summary(); got != "Replacing the rules of the VPC default security group" {
+		t.Errorf("expected the ruled summary, got %q", got)
 	}
-	want := fmt.Sprintf(WarnDetailDefaultNsgRulesReplaced, unitTestNsgID)
+	want := "Security group 'nsg-1' is the VPC's own default group. GPCN replaces the whole rule set on every change, so this apply deletes any rule this configuration does not list, including the two GPCN staged with the VPC: 'Default: allow all outbound traffic' and 'Default: allow traffic from this VPC'. Add them to the configuration to keep them."
 	if got := warning.Detail(); got != want {
 		t.Errorf("expected the detail %q, got %q", want, got)
 	}

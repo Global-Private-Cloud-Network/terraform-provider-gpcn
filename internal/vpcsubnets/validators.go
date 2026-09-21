@@ -10,8 +10,8 @@ import (
 
 // NoOuterWhitespaceValidator refuses a value GPCN stores in a trimmed form. The
 // stored value then differs from the configuration, so the plan never settles.
-// The provider does not trim on the operator's behalf, because the stored name
-// would no longer be the one the configuration names.
+// The provider does not trim on the operator's behalf. The stored name would
+// no longer be the one the configuration names.
 type NoOuterWhitespaceValidator struct {
 	Attribute string
 }

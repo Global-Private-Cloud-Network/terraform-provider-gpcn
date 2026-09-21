@@ -192,15 +192,15 @@ resource "gpcn_vpc_subnet" "test" {
 }
 
 // subnetPlanTestConfigWithoutCidr asks the allocator for a block rather than
-// naming one, which is the only way the prefix reaches the create body.
+// naming one. That is the only way the prefix reaches the create body.
 func subnetPlanTestConfigWithoutCidr(host, name, extra string) string {
 	config := subnetPlanTestConfig(host, name, extra)
 	return strings.Replace(config, fmt.Sprintf("  cidr   = %q\n", subnetPlanTestCIDR), "", 1)
 }
 
-// The subnet is created with its CIDR, read back through the parent listing,
-// renamed in place, rebound to another security group and imported by the
-// composite ID its listing read needs.
+// The subnet is created with its CIDR and read back through the parent
+// listing. It is then renamed in place and rebound to another security group.
+// The import uses the composite ID the listing read needs.
 func TestVpcSubnetResourcePlanCreateReadRenameRebind(t *testing.T) {
 	t.Parallel()
 	server, state := startSubnetPlanMockServer(t)
@@ -287,8 +287,8 @@ func TestVpcSubnetResourcePlanCreateReadRenameRebind(t *testing.T) {
 				ImportState:       true,
 				ImportStateId:     subnetPlanTestVpcID + "/" + subnetPlanTestID,
 				ImportStateVerify: true,
-				// R69 fills the prefix from the imported CIDR, and this subnet
-				// named its CIDR, so the import adds a prefix the create left
+				// R69 fills the prefix from the imported CIDR. This subnet names
+				// its CIDR. The import therefore adds a prefix the create left
 				// null. The steward holds an open ruling on that cost.
 				ImportStateVerifyIgnore: []string{"prefix"},
 			},
@@ -313,8 +313,9 @@ func TestVpcSubnetResourcePlanRefusesCidrAndPrefix(t *testing.T) {
 	})
 }
 
-// A subnet that still holds interfaces cannot be deleted, and the operator
-// needs the API's own sentence: it names how many, and what to do first.
+// A subnet that still holds interfaces cannot be deleted. The operator needs
+// the API's own sentence. It names how many interfaces hold the subnet, and
+// what to do first.
 func TestVpcSubnetResourcePlanSurfacesDeleteRefusal(t *testing.T) {
 	t.Parallel()
 	server, state := startSubnetPlanMockServer(t)
@@ -342,7 +343,7 @@ func TestVpcSubnetResourcePlanSurfacesDeleteRefusal(t *testing.T) {
 }
 
 // A subnet missing from its VPC's listing was deleted outside Terraform. Read
-// drops it from state, so the next plan proposes a create rather than an
+// drops it from state. The next plan then proposes a create rather than an
 // update against a row that is gone.
 func TestVpcSubnetResourcePlanRecreatesWhenAbsentFromListing(t *testing.T) {
 	t.Parallel()
@@ -595,7 +596,7 @@ func TestVpcSubnetResourcePlanRefreshesDescription(t *testing.T) {
 	})
 }
 
-// The API never reports the prefix, so an import leaves it null and a
+// The API never reports the prefix. An import leaves it null, and a
 // configuration that names one plans a replacement. The carved CIDR's mask
 // length is the same number, so the import reads the prefix from it.
 func TestVpcSubnetResourcePlanImportFillsPrefixFromCidr(t *testing.T) {

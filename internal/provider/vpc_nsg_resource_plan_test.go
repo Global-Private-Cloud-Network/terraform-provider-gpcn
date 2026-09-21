@@ -42,8 +42,8 @@ const (
 )
 
 // nsgPlanTestServerState is the group the mock keeps between requests. It
-// stores the rule bodies it was sent, so a read after an apply agrees with the
-// configuration and leaves the refresh plan empty.
+// stores the rule bodies it was sent. A read after an apply then agrees with
+// the configuration and leaves the refresh plan empty.
 type nsgPlanTestServerState struct {
 	mu           sync.Mutex
 	name         string
@@ -209,7 +209,7 @@ resource "gpcn_vpc_nsg" "test" {
 `, host, nsgPlanTestVpcID, name, description, rules)
 }
 
-// The rules PUT is a full replace, so a configuration that drops one rule must
+// The rules PUT is a full replace. A configuration that drops one rule must
 // still send every rule it keeps. A rename must not touch the rules at all.
 func TestVpcNsgResourcePlanCreateRenameAndReplaceRules(t *testing.T) {
 	t.Parallel()
@@ -325,7 +325,7 @@ func TestVpcNsgResourcePlanCreateRenameAndReplaceRules(t *testing.T) {
 	})
 }
 
-// Ports belong to tcp and udp only, and the plan refuses the rule in the same
+// Ports belong to tcp and udp only. The plan refuses the rule in the same
 // words the API would have.
 func TestVpcNsgResourcePlanRefusesPortsOnIcmp(t *testing.T) {
 	t.Parallel()
@@ -484,7 +484,7 @@ func TestVpcNsgResourcePlanRefusesOuterWhitespace(t *testing.T) {
 }
 
 // GPCN stages the platform posture in the VPC's own default group as ordinary
-// rule rows, and the rules route replaces the whole set. An apply against that
+// rule rows. The rules route replaces the whole set. An apply against that
 // group must still send every rule the configuration keeps.
 func TestVpcNsgResourcePlanReplacesRulesOnDefaultGroup(t *testing.T) {
 	t.Parallel()
