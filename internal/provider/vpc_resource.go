@@ -47,7 +47,7 @@ func (r *vpcResource) Metadata(_ context.Context, req resource.MetadataRequest, 
 // Schema defines the schema for the resource.
 func (r *vpcResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a VPC, the routed private network that holds subnets, security groups and public IP addresses in one datacenter. The API key needs vpc:read, vpc:create, vpc:update and vpc:delete",
+		Description: "Manages a VPC, the routed private network that holds subnets, security groups and public IP addresses in one datacenter. The API key needs vpc:read, vpc:create, vpc:update and vpc:delete.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the VPC in UUID format",

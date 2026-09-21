@@ -315,3 +315,14 @@ func TestVpcResourceConfigureRefusesAnotherProviderData(t *testing.T) {
 		t.Errorf("Detail = %q, want %q", got, want)
 	}
 }
+
+// The Registry prints the resource Description as prose. A sentence that stops
+// without a full stop runs into the heading below it.
+func TestVpcResourceSchemaDescriptionBytes(t *testing.T) {
+	t.Parallel()
+
+	want := "Manages a VPC, the routed private network that holds subnets, security groups and public IP addresses in one datacenter. The API key needs vpc:read, vpc:create, vpc:update and vpc:delete."
+	if got := vpcResourceTestSchema(t).Description; got != want {
+		t.Errorf("Description = %q, want %q", got, want)
+	}
+}
