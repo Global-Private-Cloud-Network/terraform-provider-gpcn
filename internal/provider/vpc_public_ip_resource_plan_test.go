@@ -28,6 +28,10 @@ var regexpPublicIpImportIdentifier = regexp.MustCompile(`Expected\s+an\s+import\
 // operator needs to find the row.
 var regexpPublicIpAcquiredButJobFailed = regexp.MustCompile(`public\s+IP\s+` + vpcPublicIpPlanTestID + `\s+was\s+acquired\s+and\s+is\s+in\s+state`)
 
+// A read-back that fails names the address the acquire left behind. The
+// operator needs that id to find the row.
+var regexpPublicIpAcquiredButReadBackFailed = regexp.MustCompile(`public\s+IP\s+` + vpcPublicIpPlanTestID + `\s+was\s+acquired\s+and\s+is\s+in\s+state,\s+but\s+reading\s+it\s+back\s+failed`)
+
 const (
 	vpcPublicIpPlanTestVpcID     = "11111111-1111-1111-1111-111111111111"
 	vpcPublicIpPlanTestID        = "22222222-2222-2222-2222-222222222222"
@@ -56,11 +60,14 @@ type publicIpPlanTestRow struct {
 	// acquireJobFailed makes the acquire job report a failure. The row still
 	// exists, because the API inserts it before it dispatches the job.
 	acquireJobFailed bool
-	releaseCalls     int
-	detachCalls      int
-	attachStatus     int
-	attachMessage    string
-	lastAttachBody   map[string]any
+	// failListing makes every listing GET answer a 500. A read-back then fails
+	// while the address itself exists.
+	failListing    bool
+	releaseCalls   int
+	detachCalls    int
+	attachStatus   int
+	attachMessage  string
+	lastAttachBody map[string]any
 }
 
 func (row *publicIpPlanTestRow) body() map[string]any {
@@ -148,6 +155,28 @@ func (row *publicIpPlanTestRow) acquireJobFails() bool {
 	return row.acquireJobFailed
 }
 
+// failListingGets arms the listing failure under the lock. The mock server
+// reads the field from its own goroutine.
+func (row *publicIpPlanTestRow) failListingGets() {
+	row.mu.Lock()
+	defer row.mu.Unlock()
+	row.failListing = true
+}
+
+// healListingGets lets the listing answer again, so a later step can read the
+// address the failed create left behind.
+func (row *publicIpPlanTestRow) healListingGets() {
+	row.mu.Lock()
+	defer row.mu.Unlock()
+	row.failListing = false
+}
+
+func (row *publicIpPlanTestRow) listingFails() bool {
+	row.mu.Lock()
+	defer row.mu.Unlock()
+	return row.failListing
+}
+
 func (row *publicIpPlanTestRow) releaseCallCount() int {
 	row.mu.Lock()
 	defer row.mu.Unlock()
@@ -183,6 +212,8 @@ func startVPCPublicIpPlanMockServer(t *testing.T) (*httptest.Server, *publicIpPl
 				"message": "Operation initiated successfully",
 				"data":    map[string]any{"publicIpId": vpcPublicIpPlanTestID, "jobId": vpcPublicIpPlanTestAcquireJob},
 			})
+		case r.Method == http.MethodGet && r.URL.Path == listPath && row.listingFails():
+			publicIpPlanTestServerError(w)
 		case r.Method == http.MethodGet && r.URL.Path == listPath:
 			rows := []map[string]any{}
 			if !row.isReleased() {
@@ -277,6 +308,17 @@ func publicIpPlanTestHandleRelease(w http.ResponseWriter, row *publicIpPlanTestR
 	publicIpPlanTestAcceptJob(w)
 }
 
+// publicIpPlanTestServerError answers the listing the way the platform does
+// when its own read fails. The address is untouched.
+func publicIpPlanTestServerError(w http.ResponseWriter) {
+	w.WriteHeader(http.StatusInternalServerError)
+	testutil.WriteJSONResponse(w, map[string]any{
+		"success": false,
+		"message": "Public IP listing is temporarily unavailable",
+		"error":   map[string]any{"code": "INTERNAL_ERROR", "statusCode": 500, "details": nil},
+	})
+}
+
 func publicIpPlanTestAcceptJob(w http.ResponseWriter) {
 	testutil.WriteJSONResponse(w, map[string]any{
 		"success": true,
@@ -303,6 +345,22 @@ func publicIpPlanTestListBody(rows []map[string]any) map[string]any {
 
 func vpcPublicIpPlanTestConfig(host string) string {
 	return vpcPublicIpPlanTestConfigForVpc(host, vpcPublicIpPlanTestVpcID)
+}
+
+// vpcPublicIpPlanTestConfigWithoutRetries turns the client retries off, so one
+// refused listing is one failed read rather than four.
+func vpcPublicIpPlanTestConfigWithoutRetries(host string) string {
+	return fmt.Sprintf(`
+provider "gpcn" {
+  host        = %q
+  api_key     = "test-key"
+  max_retries = 0
+}
+
+resource "gpcn_vpc_public_ip" "test" {
+  vpc_id = %q
+}
+`, host, vpcPublicIpPlanTestVpcID)
 }
 
 func vpcPublicIpPlanTestConfigForVpc(host, vpcID string) string {
@@ -472,6 +530,48 @@ func checkPublicIpDestroyReleasedTheAddress(row *publicIpPlanTestRow) func(*terr
 	return func(*terraform.State) error {
 		if row.releaseCallCount() == 0 {
 			return fmt.Errorf("expected the destroy to release the acquired address, got no release request")
+		}
+		if !row.isReleased() {
+			return fmt.Errorf("expected the address to be released, but the mock still lists it")
+		}
+		return nil
+	}
+}
+
+// The acquire writes the row before it dispatches the job, so an address
+// exists even when the read-back fails. The id must reach state. A destroy
+// then releases the address instead of leaving a billable row behind.
+func TestVpcPublicIpResourcePlanKeepsAcquiredAddressWhenReadBackFails(t *testing.T) {
+	t.Parallel()
+	server, row := startVPCPublicIpPlanMockServer(t)
+	row.failListingGets()
+
+	config := vpcPublicIpPlanTestConfigWithoutRetries(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexpPublicIpAcquiredButReadBackFailed,
+			},
+			{
+				PreConfig: row.healListingGets,
+				Config:    config,
+				Destroy:   true,
+				Check:     checkPublicIpDestroySentOneRelease(row),
+			},
+		},
+	})
+}
+
+// checkPublicIpDestroySentOneRelease proves the failed read-back wrote the id
+// to state. The mock routes the release by that id. A create that keeps the id
+// to itself leaves the destroy nothing to release.
+func checkPublicIpDestroySentOneRelease(row *publicIpPlanTestRow) func(*terraform.State) error {
+	return func(*terraform.State) error {
+		if got := row.releaseCallCount(); got != 1 {
+			return fmt.Errorf("expected the destroy to send exactly one release, got %d", got)
 		}
 		if !row.isReleased() {
 			return fmt.Errorf("expected the address to be released, but the mock still lists it")

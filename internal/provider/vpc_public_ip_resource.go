@@ -142,9 +142,12 @@ func (r *vpcPublicIpResource) Create(ctx context.Context, req resource.CreateReq
 
 	publicIp, err := vpcpublicips.GetPublicIp(r.client, ctx, vpcID, publicIpID)
 	if err != nil {
+		// The address exists whatever the read-back says, so state must name
+		// it. The next apply then releases it instead of orphaning it.
+		resp.Diagnostics.Append(resp.State.Set(ctx, vpcpublicips.MapAcquiredIdToModel(publicIpID, plan))...)
 		resp.Diagnostics.AddError(
 			vpcpublicips.ErrSummaryUnableToGetPublicIp,
-			fmt.Sprintf(vpcpublicips.ErrDetailUnableToGetPublicIpWithID, publicIpID, vpcID)+": "+err.Error(),
+			fmt.Sprintf(vpcpublicips.ErrDetailAcquiredPublicIpReadFailed, publicIpID, err.Error()),
 		)
 		return
 	}

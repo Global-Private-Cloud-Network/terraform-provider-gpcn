@@ -22,6 +22,7 @@ const (
 	ErrDetailUnableToAttachPublicIpWithID  = "Unable to attach GPCN VPC public IP with ID '%s' to network interface '%s'"
 	ErrDetailUnableToDetachPublicIpWithID  = "Unable to detach GPCN VPC public IP with ID '%s'"
 	ErrDetailAcquiredPublicIpJobFailed     = "public IP %s was acquired and is in state, but its acquisition job failed: %s. Terraform has marked the address tainted, so the next apply releases it and acquires another."
+	ErrDetailAcquiredPublicIpReadFailed    = "public IP %s was acquired and is in state, but reading it back failed: %s. Terraform has marked the address tainted, so the next apply releases it and acquires another."
 	ErrDetailPublicIpImportID              = "Expected an import identifier of the form <vpc_id>/<public_ip_id>, got: '%s'"
 	ErrDetailPublicIpAttachmentImport      = "gpcn_vpc_public_ip_attachment cannot be imported: the API does not report which interface holds an address"
 	ErrDetailPublicIpNotFound              = "Public IP not found"
