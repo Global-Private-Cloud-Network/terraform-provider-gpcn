@@ -290,10 +290,8 @@ func TestL2SegmentResourcePlanRefusesPaddedName(t *testing.T) {
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: l2PlanTestConfig(server.URL, " seg"),
-				// Terraform wraps a diagnostic, so the pattern tolerates a line
-				// break inside the sentence.
-				ExpectError: regexp.MustCompile(`(?s)Invalid L2 segment name.*name must not start or end with\s+whitespace`),
+				Config:      l2PlanTestConfig(server.URL, " seg"),
+				ExpectError: whitespaceRefusal("Invalid L2 segment name", "name"),
 			},
 		},
 	})
