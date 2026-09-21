@@ -12,7 +12,9 @@ import (
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 const (
@@ -135,6 +137,10 @@ func startVolumePlanMockServer(t *testing.T) (*httptest.Server, func(string), fu
 }
 
 func volPlanTestConfig(host string) string {
+	return volPlanTestConfigWithSize(host, volPlanTestSizeGb)
+}
+
+func volPlanTestConfigWithSize(host string, sizeGb int64) string {
 	return fmt.Sprintf(`
 provider "gpcn" {
   host    = %q
@@ -147,7 +153,7 @@ resource "gpcn_volume" "test" {
   volume_type   = %q
   size_gb       = %d
 }
-`, host, volPlanTestName, volPlanTestDatacenterID, volPlanTestVolumeType, volPlanTestSizeGb)
+`, host, volPlanTestName, volPlanTestDatacenterID, volPlanTestVolumeType, sizeGb)
 }
 
 // Read keeps the configured name and size_gb instead of refreshing them.
@@ -256,6 +262,35 @@ func TestVolumeResourcePlanIgnoresOutOfBandGrow(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVolumeTest, "size_gb", fmt.Sprint(volPlanTestSizeGb)),
 				),
+			},
+		},
+	})
+}
+
+// A plan that changes anything marks every computed attribute with a null
+// configuration value as unknown. The storage class cannot change in place, so a
+// resize must not offer the code as known after apply.
+func TestVolumeResourcePlanKeepsTypeCodeOnResize(t *testing.T) {
+	t.Parallel()
+	server, _, _ := startVolumePlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithSize(server.URL, 128),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type_code", volPlanTestComponent),
+				),
+			},
+			{
+				Config: volPlanTestConfigWithSize(server.URL, volPlanTestSizeGb),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionUpdate),
+						plancheck.ExpectKnownValue(gpcnVolumeTest, tfjsonpath.New("volume_type_code"), knownvalue.StringExact(volPlanTestComponent)),
+					},
+				},
 			},
 		},
 	})

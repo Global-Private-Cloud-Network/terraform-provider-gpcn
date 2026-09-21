@@ -90,6 +90,10 @@ func (r *volumesResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 			"volume_type_code": schema.StringAttribute{
 				Description: "Component code of the storage class, for example 'vol-add-ssd'. This is the identifier the API uses for a volume type",
 				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					// A resize cannot change the storage class, so the known code survives it
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"volume_type_id": schema.Int64Attribute{
 				Description:        "Always null. The API identifies a volume type by code",
