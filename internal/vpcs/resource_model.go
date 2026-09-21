@@ -25,7 +25,7 @@ type ResourceModel struct {
 }
 
 // MapCreatedVpcToModel fills the model from the row the 202 carries. The id
-// reaches state from here, before the create job is polled.
+// reaches state from here, before the create poll starts.
 func MapCreatedVpcToModel(ctx context.Context, response *createVpcResponse, model ResourceModel) ResourceModel {
 	return mapVpcPayloadToModel(ctx, response.Data.Vpc, model)
 }
@@ -35,8 +35,8 @@ func MapVpcResponseToModel(ctx context.Context, response *readVpcResponse, model
 }
 
 // RefreshVpcModelFromResponse shows a rename, which Terraform reconciles in
-// place. Every other configured attribute requires replacement, so an
-// out-of-band change to one must not reach the plan.
+// place. Every other configured attribute requires replacement. An out-of-band
+// change to one must not reach the plan.
 func RefreshVpcModelFromResponse(response *readVpcResponse, model ResourceModel) ResourceModel {
 	if response.Data.Name != "" {
 		model.Name = types.StringValue(response.Data.Name)
@@ -74,7 +74,7 @@ func mapVpcPayloadToModel(_ context.Context, payload vpcPayload, model ResourceM
 }
 
 // The platform resolves its own nameservers when the request omits them, and
-// the list is frozen at create. Only an unset value takes the API's answer.
+// it freezes the list at create. Only an unset value takes the API's answer.
 func nameserverList(nameservers []string) types.List {
 	if len(nameservers) == 0 {
 		return types.ListNull(types.StringType)

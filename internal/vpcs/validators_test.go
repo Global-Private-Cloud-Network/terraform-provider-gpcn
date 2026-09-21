@@ -9,9 +9,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// The three details are the backend's own refinement messages. A plan that
-// refuses a CIDR the API accepts, or accepts one the API refuses, is worse than
-// no validator at all.
+// The three details are the backend's own refinement messages. A validator
+// that disagrees with the API is worse than no validator at all.
 func TestVpcSuperCidrValidator(t *testing.T) {
 	t.Parallel()
 

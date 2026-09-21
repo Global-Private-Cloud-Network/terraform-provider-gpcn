@@ -29,8 +29,8 @@ var rfc1918Blocks = []cidrRange{
 }
 
 // SuperCidrValidator applies the super-CIDR rules GPCN applies, in the order
-// GPCN applies them. A plan that disagrees with the API sends the operator to
-// the API to learn the rule.
+// GPCN applies them. A plan that disagrees with the API teaches the rule one
+// failed apply at a time.
 type SuperCidrValidator struct{}
 
 var _ validator.String = SuperCidrValidator{}
@@ -63,8 +63,8 @@ func (v SuperCidrValidator) ValidateString(_ context.Context, req validator.Stri
 }
 
 // parseCidr mirrors the backend parser (src/components/vpc/cidr.utils.ts:35-55).
-// A leading-zero octet is refused there because an inet_aton parser downstream
-// reads it as octal.
+// The backend refuses a leading-zero octet, because an inet_aton parser reads
+// such an octet as octal.
 func parseCidr(cidr string) (cidrRange, bool) {
 	match := ipv4CidrPattern.FindStringSubmatch(cidr)
 	if match == nil {

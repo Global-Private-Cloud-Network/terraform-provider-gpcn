@@ -56,8 +56,7 @@ const (
 const noChildren = "none"
 
 // CreateFailureDiagnostic names the confirm gate for what it is. The overlap
-// 409 asks a question, so the answer belongs to the operator and never to the
-// provider.
+// 409 asks a question. Only the operator answers it.
 func CreateFailureDiagnostic(err error) diag.Diagnostic {
 	overlapping, isOverlap := overlappingVpcs(err)
 	if !isOverlap {
@@ -76,8 +75,8 @@ func CreateFailureDiagnostic(err error) diag.Diagnostic {
 }
 
 // DeleteFailureDiagnostic renders the census the API refused on. The sentence
-// alone totals the two populations, and only the split tells the reader which
-// rows they can delete now.
+// alone totals the two populations. Only the split names the rows the reader
+// can delete now.
 func DeleteFailureDiagnostic(vpcID string, err error) diag.Diagnostic {
 	details, isNotEmpty := childCensus(err)
 	if !isNotEmpty {

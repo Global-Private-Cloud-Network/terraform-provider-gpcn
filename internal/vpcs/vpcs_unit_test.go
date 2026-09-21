@@ -49,8 +49,8 @@ func stringList(t *testing.T, values ...string) types.List {
 	return list
 }
 
-// An import arrives with the id alone, so every other attribute has to come off
-// the detail read. The three nullable strings must stay null: an empty string
+// An import arrives with the id alone. Every other attribute comes off the
+// detail read. The three nullable strings stay null, because an empty string
 // reads as a reported value.
 func TestMapVpcResponseToModelFillsAnImportedVpc(t *testing.T) {
 	t.Parallel()
@@ -196,8 +196,8 @@ func TestVpcCreateFailureDiagnosticRendersOverlap(t *testing.T) {
 	}
 }
 
-// Only VPCs inside the reader's resource groups are named. A refusal that names
-// none must still tell the reader how to proceed.
+// The API names only the VPCs inside the reader's resource groups. A refusal
+// that names none still tells the reader how to proceed.
 func TestVpcCreateFailureDiagnosticWithNoVisibleOverlap(t *testing.T) {
 	t.Parallel()
 

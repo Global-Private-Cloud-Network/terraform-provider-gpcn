@@ -36,8 +36,8 @@ const vpcNotEmptyRefusalBody = `{"success":false,` +
 	`"details":{"blockers":{"subnets":1,"publicIps":0,"nsgs":0},"inFlight":{"subnets":0,"publicIps":0,"nsgs":0}}}}`
 
 // vpcMock serves the VPC endpoints an apply walks. It keeps the name the last
-// create or update sent, so the read after an apply agrees with the
-// configuration and the refresh plan stays empty.
+// create or update sent. The read after an apply then agrees with the
+// configuration, and the refresh plan stays empty.
 type vpcMock struct {
 	url string
 
@@ -347,8 +347,8 @@ resource "gpcn_vpc" "test" {
 	})
 }
 
-// The overlap 409 is a confirm gate. The apply must stop and name the knob that
-// clears it, and it must never acknowledge the overlap by itself.
+// The overlap 409 is a confirm gate. The apply stops and names the knob that
+// clears it. The provider never acknowledges the overlap by itself.
 func TestVpcResourcePlanSurfacesOverlapRefusal(t *testing.T) {
 	t.Parallel()
 	mock := startVpcPlanMockServer(t)
