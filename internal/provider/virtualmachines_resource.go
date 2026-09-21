@@ -567,7 +567,8 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	}
 
 	// A start that fails is the only report the user gets. It follows the diagnostics
-	// of the step that fails. The change is not in state, so the next apply retries it.
+	// of the step that fails. The change is not in state. An earlier step can still have
+	// succeeded, so the remedy sends the user to the next plan.
 	for _, updateStep := range updateSteps {
 		resp.Diagnostics.Append(updateStep()...)
 		if !resp.Diagnostics.HasError() {

@@ -1678,7 +1678,7 @@ func TestVirtualMachineLeftStoppedBytes(t *testing.T) {
 		{
 			name:     "retry detail",
 			actual:   ErrDetailVMLeftStoppedRetry,
-			expected: "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal; the change was not recorded, so the next apply retries it.",
+			expected: "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform plan and check the proposed changes before applying.",
 		},
 	}
 

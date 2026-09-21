@@ -47,11 +47,12 @@ const (
 // A start that fails after the provider stopped the machine leaves it stopped. The
 // remedy differs by path. Create taints the machine, so the next apply replaces it.
 // The tail of Update writes state, so a second apply changes nothing. A failure between
-// the stop and the state write records nothing, so the next apply retries the change.
+// the stop and the state write records nothing. Earlier steps of that update can still
+// have succeeded, so the user reads the next plan before applying it.
 const (
 	ErrDetailVMLeftStoppedCreate = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform untaint on it; otherwise the next apply replaces the machine."
 	ErrDetailVMLeftStoppedUpdate = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal."
-	ErrDetailVMLeftStoppedRetry  = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal; the change was not recorded, so the next apply retries it."
+	ErrDetailVMLeftStoppedRetry  = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform plan and check the proposed changes before applying."
 )
 
 // Warning detail message templates

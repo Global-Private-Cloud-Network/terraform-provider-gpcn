@@ -1290,7 +1290,7 @@ func TestVirtualMachineResourcePlanReportsLeftStoppedWhenTheStartAlsoFails(t *te
 			},
 			{
 				Config:      vmSegmentListPlanTestConfig(server.URL, "vm-plan-left-stopped-update", vmPlanTestSegmentID),
-				ExpectError: regexp.MustCompile(`(?s)Error\s+updating\s+network\s+interfaces.*Virtual\s+machine\s+left\s+stopped.*did\s+not\s+start\s+again.*the\s+change\s+was\s+not\s+recorded,\s+so\s+the\s+next\s+apply\s+retries\s+it\.`),
+				ExpectError: regexp.MustCompile(`(?s)Error\s+updating\s+network\s+interfaces.*Virtual\s+machine\s+left\s+stopped.*did\s+not\s+start\s+again.*then\s+run\s+terraform\s+plan\s+and\s+check\s+the\s+proposed\s+changes\s+before\s+applying\.`),
 			},
 			{
 				RefreshState:       true,
