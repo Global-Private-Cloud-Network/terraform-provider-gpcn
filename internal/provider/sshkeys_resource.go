@@ -52,10 +52,10 @@ func (r *sshKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"name": schema.StringAttribute{
-				Description: "Human-readable name for the SSH key. Must be 1-30 characters",
+				Description: "Human-readable name for the SSH key: 1 to 30 characters drawn from letters, numbers, spaces, periods, hyphens and the symbols _ ( ) ' #, beginning and ending with a letter or number",
 				Required:    true,
 				Validators: []validator.String{
-					stringvalidator.LengthBetween(1, 30),
+					sshkeys.NameValidator{},
 				},
 			},
 			"public_key": schema.StringAttribute{
