@@ -554,8 +554,8 @@ func TestDatacentersDataSourceMapsCapabilityFlags(t *testing.T) {
 func TestDatacentersDataSourceFiltersVpcCapableServerSide(t *testing.T) {
 	t.Parallel()
 
-	// The row contradicts both filters. A client-side filter would drop it, so
-	// the row proves the provider trusts the server.
+	// The row contradicts both filters, so a client-side filter on either one
+	// would drop it.
 	server, rec := startDatacenterPlanMockServer(t, func(_ *http.Request) map[string]any {
 		return datacenterPlanTestBody([]map[string]any{
 			datacenterPlanTestCapabilityRow("dc-1", "Chicago", datacenterPlanTestRegionAlpha, true, false, true),

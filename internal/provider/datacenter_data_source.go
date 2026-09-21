@@ -247,7 +247,7 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		otherFilters += "&search=" + url.QueryEscape(state.Name.ValueString())
 	}
 	// The capability filters join the other server-side filters. The
-	// gpu_enabled explanation below then names the one value that matches none.
+	// gpu_enabled explanation below then stays correct.
 	if !state.VPCCapable.IsNull() {
 		otherFilters += "&vpcCapable=" + strconv.FormatBool(state.VPCCapable.ValueBool())
 	}
