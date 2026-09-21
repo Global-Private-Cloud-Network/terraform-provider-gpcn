@@ -1,9 +1,10 @@
 
-# Example: Creating GPCN Networks
+# gpcn_network is deprecated in favour of gpcn_vpc, gpcn_vpc_subnet and gpcn_l2_segment.
 #
-# This example demonstrates creating both standard and custom network types.
-# Standard networks include DHCP, DNS, and SNAT configuration.
-# Custom networks provide more flexibility for advanced networking setups.
+# Example: Reading and updating a GPCN Network
+#
+# New networks can no longer be created. This example shows the shape of a network that
+# already exists, which Terraform reaches with terraform import.
 
 terraform {
   required_providers {
@@ -25,7 +26,7 @@ data "gpcn_datacenters" "central_us" {
   name         = "Chicago"
 }
 
-# Example 1: Standard Network with DHCP and DNS
+# A standard network with DHCP and DNS
 resource "gpcn_network" "example_standard" {
   name          = "terraform-demo-standard"
   network_type  = "standard"
@@ -49,17 +50,4 @@ resource "gpcn_network" "example_standard" {
 
 output "gpcn_network_example_standard" {
   value = gpcn_network.example_standard
-}
-
-# Example 2: Custom Network
-resource "gpcn_network" "example_custom" {
-  name          = "terraform-demo-custom"
-  network_type  = "custom"
-  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-
-  description = "Custom network for advanced networking configuration"
-}
-
-output "gpcn_network_example_custom" {
-  value = gpcn_network.example_custom
 }
