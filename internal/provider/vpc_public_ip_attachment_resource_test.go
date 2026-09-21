@@ -72,8 +72,8 @@ resource "gpcn_vpc_public_ip_attachment" "test" {
 */
 
 // TestVPCPublicIpAttachmentResourceRefusesImportUnit pins the refusal byte for
-// byte. The listing names the machine an address serves and never the
-// interface, so an imported attachment could not know its nic_id.
+// byte. The listing names the machine an address serves, never the interface.
+// An imported attachment could not know its nic_id.
 func TestVPCPublicIpAttachmentResourceRefusesImportUnit(t *testing.T) {
 	t.Parallel()
 

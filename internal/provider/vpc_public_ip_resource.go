@@ -130,8 +130,8 @@ func (r *vpcPublicIpResource) Create(ctx context.Context, req resource.CreateReq
 			return
 		}
 		// The address exists, so state must name it. Terraform taints a
-		// resource whose Create reports an error beside state, and the next
-		// apply then releases the address instead of orphaning it.
+		// resource whose Create reports an error beside state. The next apply
+		// then releases the address instead of orphaning it.
 		resp.Diagnostics.Append(resp.State.Set(ctx, vpcpublicips.MapAcquiredIdToModel(publicIpID, plan))...)
 		resp.Diagnostics.AddError(
 			vpcpublicips.ErrSummaryUnableToAcquirePublicIp,

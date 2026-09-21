@@ -466,8 +466,8 @@ func TestVPCPublicIpResourcePlanKeepsTheIdWhenTheAcquireJobFails(t *testing.T) {
 }
 
 // checkPublicIpDestroyReleasedTheAddress proves the failed create wrote the id
-// to state. The mock routes the release by that id, so a create that kept the
-// id to itself leaves the destroy with nothing to release.
+// to state. The mock routes the release by that id. A create that keeps the id
+// to itself leaves the destroy nothing to release.
 func checkPublicIpDestroyReleasedTheAddress(row *publicIpPlanTestRow) func(*terraform.State) error {
 	return func(*terraform.State) error {
 		if row.releaseCallCount() == 0 {

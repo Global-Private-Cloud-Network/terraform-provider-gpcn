@@ -63,9 +63,8 @@ resource "gpcn_vpc_public_ip" "test" {
 */
 
 // TestVPCPublicIpResourceSchemaWarnsAboutReleasingAnAttachedAddress pins the
-// warning byte for byte. GPCN releases an attached address without asking for
-// a detach, so a destroy can cut a live machine off and the schema has to say
-// so.
+// warning byte for byte. GPCN releases an attached address and asks for no
+// detach first. A destroy can therefore cut a live machine off.
 func TestVPCPublicIpResourceSchemaWarnsAboutReleasingAnAttachedAddress(t *testing.T) {
 	t.Parallel()
 
