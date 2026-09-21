@@ -1560,6 +1560,155 @@ func TestDetermineIfVMNeedsStoppedSkipsAMachineWithHotplug(t *testing.T) {
 	}
 }
 
+// DEV sends a null skuId for a machine whose SKU it cannot resolve, and the provider
+// reads that null as an empty string. Live drift alone must never stop a machine. A
+// rename would otherwise stop and start such a machine on every apply.
+func TestDetermineIfVMNeedsStoppedSkipsARenameOfAnUnresolvedSku(t *testing.T) {
+	state := vmStopDecisionModel(false, vmPlanTestSizeID)
+	plan := vmStopDecisionModel(false, vmPlanTestSizeID)
+
+	live := vmStopDecisionDetail("")
+
+	if determineIfVMNeedsStopped(state, plan, live, vmStopDecisionInterfaces()) {
+		t.Error("Expected no stop for a rename of a machine whose SKU is unresolved")
+	}
+}
+
+// A segment the platform attached out of band leaves the live set ahead of state. The
+// configuration asks for no segment change here, so the machine needs no stop.
+func TestDetermineIfVMNeedsStoppedSkipsARenameOfADriftedSegmentSet(t *testing.T) {
+	state := vmStopDecisionModel(false, vmPlanTestSizeID, vmPlanTestSegmentID)
+	plan := vmStopDecisionModel(false, vmPlanTestSizeID, vmPlanTestSegmentID)
+
+	live := vmStopDecisionDetail(vmPlanTestSizeID)
+	liveInterfaces := vmStopDecisionInterfaces(vmPlanTestSegmentID, vmPlanTestSegmentID2)
+
+	if determineIfVMNeedsStopped(state, plan, live, liveInterfaces) {
+		t.Error("Expected no stop for a rename of a machine whose live segments drifted")
+	}
+}
+
+// vmPlanTestReadBodyWithUnresolvedSku reports a machine whose SKU GPCN cannot resolve.
+// DEV sends a null skuId and placeholder values for such a machine.
+func vmPlanTestReadBodyWithUnresolvedSku(name, status string, hotplug int) map[string]any {
+	body := vmPlanTestReadBodyWithHotplug(name, status, "", hotplug)
+	configuration := body["data"].(map[string]any)["configuration"].(map[string]any)
+	configuration["skuId"] = nil
+	configuration["skuCode"] = nil
+	configuration["name"] = "Unknown"
+	configuration["cpu"] = 0
+	configuration["ram"] = 0
+	configuration["disk"] = 0
+	configuration["degradedReason"] = "sku_retired"
+	return body
+}
+
+// startVirtualMachineUnresolvedSkuMockServer reports a machine whose SKU GPCN cannot
+// resolve and an image that takes no network hotplug. The returned function lists the
+// stops and the starts the provider issues.
+func startVirtualMachineUnresolvedSkuMockServer(t *testing.T) (*httptest.Server, func() []string) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	birthSubnetID := ""
+	status := virtualmachines.VMStatusRunning.String()
+	var events []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			birthSubnetID, _ = body["subnetId"].(string)
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mu.Lock()
+			currentSubnet := birthSubnetID
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmSegmentPlanTestNetworkInterfacesBody(currentSubnet, nil))
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			events = append(events, "stop")
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/start":
+			mu.Lock()
+			events = append(events, "start")
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithUnresolvedSku(currentName, currentStatus, 0))
+		case r.Method == http.MethodPut && r.URL.Path == vmPlanTestPath:
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			if updated, ok := body["name"].(string); ok {
+				name = updated
+			}
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	recorded := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), events...)
+	}
+
+	return server, recorded
+}
+
+// A machine whose SKU GPCN cannot resolve reports a null skuId on every read. The rename
+// asks for no size change, so the machine keeps running through it.
+func TestVirtualMachineResourcePlanRenameOfAnUnresolvedSkuStopsNothing(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachineUnresolvedSkuMockServer(t)
+
+	afterCreate := 0
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmPlanTestConfig(server.URL, "vm-plan-unresolved-sku"),
+				Check: func(*terraform.State) error {
+					afterCreate = len(recorded())
+					return nil
+				},
+			},
+			{
+				Config: vmPlanTestConfig(server.URL, "vm-plan-unresolved-sku-renamed"),
+				Check: func(*terraform.State) error {
+					if rename := recorded()[afterCreate:]; len(rename) != 0 {
+						return fmt.Errorf("expected the rename to stop and start nothing, got %v", rename)
+					}
+					return nil
+				},
+			},
+		},
+	})
+}
+
 // startVirtualMachineSegmentRefusedMockServer counts the starts the provider issues. The
 // machine reports the given network hotplug value, so a test chooses whether an update
 // stops it first. The segment attach is refused unless getFailsAfterStop is set, because

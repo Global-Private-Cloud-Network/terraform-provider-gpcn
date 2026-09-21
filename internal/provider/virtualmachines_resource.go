@@ -845,10 +845,11 @@ func (r *virtualMachinesResource) ModifyPlan(ctx context.Context, req resource.M
 
 /*
 A stop and a start cost the user real time. The provider takes them only where GPCN
-needs them. The machine needs a stop when the image takes no network hotplug and one
-of the following is true:
-  - the live segment set differs from the planned one
-  - the live SKU differs from the planned size_id
+needs them. The image of the machine must take no network hotplug. The decision then
+asks two questions of each attribute below. Does the configuration ask for a change?
+Does the machine still lack that change?
+  - l2_segment_ids against the live segment set
+  - size_id against the live SKU
 */
 func determineIfVMNeedsStopped(state, plan virtualmachines.ResourceModel, live *virtualmachines.ReadVirtualMachinesResponse, liveInterfaces []networks.ReadVirtualMachineNetworkDataResponseTF) bool {
 	// If network hotplug is enabled, the VM does not need to be stopped
@@ -856,9 +857,12 @@ func determineIfVMNeedsStopped(state, plan virtualmachines.ResourceModel, live *
 		return false
 	}
 
-	// If network hotplug is disabled, the VM needs to be stopped for a few scenarios
-	return !slices.Equal(liveSegmentIds(liveInterfaces), sortedSegmentIds(plan.L2SegmentIds)) ||
+	segmentsOutstanding := !plan.L2SegmentIds.Equal(state.L2SegmentIds) &&
+		!slices.Equal(liveSegmentIds(liveInterfaces), sortedSegmentIds(plan.L2SegmentIds))
+	sizeOutstanding := !state.SizeId.Equal(plan.SizeId) &&
 		live.Data.Configuration.SkuId != plan.SizeId.ValueString()
+
+	return segmentsOutstanding || sizeOutstanding
 }
 
 // liveSegmentIds reads the segments the machine carries now. It renders them the way
