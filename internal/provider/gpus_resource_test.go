@@ -222,7 +222,7 @@ func TestGPUResourceNoAvailability(t *testing.T) {
 			resource "gpcn_gpu" "test" {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				series_code   = "nvidia-a100_series"
+				series_code   = "nvidia-a100-series"
 				gpu_count     = 4
 				image_name    = "ubuntu-22.04"
 				initial_auth = {
