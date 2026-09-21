@@ -23,6 +23,14 @@ type vpcDeleteMock struct {
 	deletes     int
 }
 
+// deleteCount reads the counter the handler goroutine writes. The mutex orders
+// the two, because the race detector fails a build on an unguarded read.
+func (m *vpcDeleteMock) deleteCount() int {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	return m.deletes
+}
+
 func (m *vpcDeleteMock) handler(t *testing.T) func(http.ResponseWriter, *http.Request) {
 	t.Helper()
 
@@ -84,8 +92,8 @@ func TestVpcDeleteWaitsForTheCreateJobAndRetriesOnce(t *testing.T) {
 	if err := DeleteVpc(gpcnClient, context.Background(), vpcUnitTestID); err != nil {
 		t.Fatalf("Expected the retried delete to succeed, got %v", err)
 	}
-	if mock.deletes != 2 {
-		t.Errorf("DELETE count = %d, want 2", mock.deletes)
+	if count := mock.deleteCount(); count != 2 {
+		t.Errorf("DELETE count = %d, want 2", count)
 	}
 }
 
@@ -104,7 +112,7 @@ func TestVpcDeleteDoesNotRetryWhenNoJobOwnsTheVpc(t *testing.T) {
 	if !client.HasErrorCode(err, ERROR_CODE_VPC_NOT_ACTIVE) {
 		t.Errorf("Expected a VPC_NOT_ACTIVE error, got %v", err)
 	}
-	if mock.deletes != 1 {
-		t.Errorf("DELETE count = %d, want 1", mock.deletes)
+	if count := mock.deleteCount(); count != 1 {
+		t.Errorf("DELETE count = %d, want 1", count)
 	}
 }
