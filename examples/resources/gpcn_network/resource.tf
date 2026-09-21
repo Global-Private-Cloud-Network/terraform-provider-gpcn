@@ -1,10 +1,10 @@
-
 # gpcn_network is deprecated in favour of gpcn_vpc, gpcn_vpc_subnet and gpcn_l2_segment.
 #
-# Example: Reading and updating a GPCN Network
+# Example: Adopting an existing GPCN Network into Terraform
 #
-# New networks can no longer be created. This example shows the shape of a network that
-# already exists, which Terraform reaches with terraform import.
+# New networks can no longer be created, so this example never declares one. It brings a
+# network that already exists under Terraform with an import block, and then reads,
+# renames and destroys it.
 
 terraform {
   required_providers {
@@ -26,8 +26,15 @@ data "gpcn_datacenters" "central_us" {
   name         = "Chicago"
 }
 
-# A standard network with DHCP and DNS
-resource "gpcn_network" "example_standard" {
+# The id of the network that GPCN already serves.
+import {
+  to = gpcn_network.existing
+  id = "<network-id>"
+}
+
+# The block the import fills. Every value must match what GPCN reports for the network,
+# or the first plan proposes a change.
+resource "gpcn_network" "existing" {
   name          = "terraform-demo-standard"
   network_type  = "standard"
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
@@ -48,6 +55,6 @@ resource "gpcn_network" "example_standard" {
   dns_servers = ["8.8.8.8"]
 }
 
-output "gpcn_network_example_standard" {
-  value = gpcn_network.example_standard
+output "gpcn_network_existing" {
+  value = gpcn_network.existing
 }
