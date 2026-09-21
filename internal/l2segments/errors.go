@@ -26,8 +26,8 @@ const (
 	ErrDetailUnableToUpdateL2SegmentWithID = "Unable to update GPCN L2 Segment with ID '%s'"
 	ErrDetailUnableToDeleteL2SegmentWithID = "Unable to delete GPCN L2 Segment with ID '%s'"
 
-	// The count is what the user acts on, so it is repeated at the end of the
-	// sentence where a reader looks for the number.
+	// The count is what the user acts on. The template repeats it at the end of
+	// the sentence, where a reader looks for a number.
 	ErrDetailAttachedNicCount = " (%d attached network interface(s))"
 
 	ErrDetailNoSegmentIDInJob = "the create job reported no segment ID"
@@ -48,7 +48,7 @@ const (
 )
 
 // FailedSegmentWarning explains a parked segment. The platform can park a row
-// with no reason recorded, and a sentence with an empty clause in it reads as a
+// with no reason recorded. A sentence with an empty clause in it reads as a
 // provider bug.
 func FailedSegmentWarning(segmentID, failureReason string) diag.Diagnostic {
 	if failureReason == "" {

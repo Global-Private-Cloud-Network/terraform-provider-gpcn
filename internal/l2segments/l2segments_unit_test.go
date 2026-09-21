@@ -40,8 +40,8 @@ func unitTestResponse() *readL2SegmentResponse {
 	}
 }
 
-// An import starts from a model whose every configured attribute is null, so the
-// mapper is the only thing that can fill them.
+// An import starts from a model whose every configured attribute is null.
+// The mapper is the only thing that can fill them.
 func TestMapL2SegmentResponseToModelFillsNullAttributesUnit(t *testing.T) {
 	t.Parallel()
 
@@ -160,8 +160,8 @@ func TestRefreshL2SegmentModelNormalizesNullDescriptionUnit(t *testing.T) {
 	}
 }
 
-// The create body is strict at the wire, so a key the schema does not name is a
-// 422 rather than an ignored field.
+// The create body is strict at the wire. A key the schema does not name is a
+// 422, not an ignored field.
 func TestCreateL2SegmentRequestBodyUnit(t *testing.T) {
 	t.Parallel()
 
@@ -279,8 +279,8 @@ func httpErrorFor(t *testing.T, status int, body string) error {
 	return err
 }
 
-// The in-use refusal is the one delete failure a user can act on, so the count it
-// carries is repeated where the reader looks for it.
+// The in-use refusal is the one delete failure a user can act on. The detail
+// repeats the count where the reader looks for it.
 func TestL2SegmentDeleteRefusalDetailRendersAttachedCountUnit(t *testing.T) {
 	t.Parallel()
 
@@ -328,7 +328,7 @@ func TestL2SegmentFailedWarningUnit(t *testing.T) {
 	}
 }
 
-// The platform can park a row failed with no reason recorded, and a sentence with
+// The platform can park a row failed with no reason recorded. A sentence with
 // an empty clause in it reads as a provider bug.
 func TestL2SegmentFailedWarningWithoutReasonUnit(t *testing.T) {
 	t.Parallel()

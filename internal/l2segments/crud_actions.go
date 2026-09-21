@@ -126,7 +126,7 @@ func GetL2Segment(gpcnClient *client.GpcnClient, ctx context.Context, segmentID 
 }
 
 // UpdateL2Segment writes the changed keys. The update is a database write that
-// never reaches the cloud provider, so it answers with the detail and no job.
+// never reaches the cloud provider. It answers with the detail and no job.
 func UpdateL2Segment(gpcnClient *client.GpcnClient, ctx context.Context, segmentID string, plan, state ResourceModel) (*readL2SegmentResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateL2SegmentWithID, segmentID))
 

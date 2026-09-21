@@ -10,8 +10,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
-// l2SegmentTestDatacenterEnvVar names an L2-capable datacenter. Only the provider
-// module decides L2 capability, so the case takes the datacenter from the
+// l2SegmentTestDatacenterEnvVar names an L2-capable datacenter. Only the
+// provider module decides L2 capability. The case takes the datacenter from the
 // environment rather than guessing one from a listing.
 const l2SegmentTestDatacenterEnvVar = "GPCN_TEST_L2_DATACENTER_ID"
 
@@ -63,8 +63,8 @@ func TestL2SegmentResource(t *testing.T) {
 				),
 			},
 			{
-				// The timestamps are derived from the detail by the same mapper
-				// the import path runs, so an import reproduces them exactly.
+				// The same mapper derives the timestamps from the detail on a
+				// read and on an import. An import reproduces them exactly.
 				ResourceName:      gpcnL2SegmentTest,
 				ImportState:       true,
 				ImportStateVerify: true,

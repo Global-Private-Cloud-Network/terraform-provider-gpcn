@@ -92,8 +92,8 @@ type l2PlanTestServer struct {
 	nicCount         int64
 	attachedOnUpdate *int64
 	// refusalsLeft counts the deletes that answer with the in-use refusal. The
-	// test framework destroys once more after a failed step, and that destroy
-	// has to succeed or the run leaves the case red for the wrong reason.
+	// test framework destroys once more after a failed step. That destroy must
+	// succeed, or the run leaves the case red for the wrong reason.
 	refusalsLeft int
 }
 
@@ -218,8 +218,8 @@ resource "gpcn_l2_segment" "test" {
 `, host, name, datacenterID)
 }
 
-// The segment is created from a job that names it only once it completes, read
-// back through the detail, renamed in place and destroyed.
+// A job creates the segment and names it only once the job completes. The case
+// then reads the detail, renames the segment in place and destroys it.
 func TestL2SegmentResourcePlanCreateRenameDestroy(t *testing.T) {
 	t.Parallel()
 	server, state := startL2SegmentPlanMockServer(t)

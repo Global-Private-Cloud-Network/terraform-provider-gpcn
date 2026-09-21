@@ -4,9 +4,9 @@ package l2segments
 // the trailing slash, and every per-segment route appends the segment ID.
 var BASE_URL_V1 string = "/v1/resource/l2-segments/"
 
-// ErrorCodeL2SegmentInUse is the only typed code a delete refusal carries. Every
-// other refusal on the route carries the generic conflict code, so the provider
-// must not branch on a code to identify them.
+// ErrorCodeL2SegmentInUse is the only typed code a delete refusal carries.
+// Every other refusal on the route carries the generic conflict code.
+// The provider must not branch on a code to identify them.
 const ErrorCodeL2SegmentInUse = "L2_SEGMENT_IN_USE"
 
 // DetailKeyAttachedNicCount names the count the in-use refusal carries.
