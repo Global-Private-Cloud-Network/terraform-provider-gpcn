@@ -26,6 +26,10 @@ func TestVpcResource(t *testing.T) {
 	rName := acctest.RandString(8)
 	vpcName := fmt.Sprintf("vpc-basic-%s", rName)
 	vpcNameUpdated := fmt.Sprintf("vpc-basic-updated-%s", rName)
+	// The overlap check covers the whole entity and the repo has no sweepers.
+	// One fixed range fails every run after the first.
+	n := acctest.RandIntRange(0, 64)
+	vpcCidr := fmt.Sprintf("10.%d.0.0/16", 64+n)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -42,10 +46,10 @@ func TestVpcResource(t *testing.T) {
 			resource "gpcn_vpc" "test" {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				cidr          = "10.60.0.0/16"
+				cidr          = "%s"
 				description   = "terraform acceptance"
 			}
-			`, vpcName),
+			`, vpcName, vpcCidr),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVpcTest, plancheck.ResourceActionCreate),
@@ -57,7 +61,7 @@ func TestVpcResource(t *testing.T) {
 					resource.TestCheckResourceAttrSet(gpcnVpcTest, "last_updated"),
 					resource.TestCheckResourceAttrSet(gpcnVpcTest, "dns_nameservers.0"),
 					resource.TestCheckResourceAttr(gpcnVpcTest, "name", vpcName),
-					resource.TestCheckResourceAttr(gpcnVpcTest, "cidr", "10.60.0.0/16"),
+					resource.TestCheckResourceAttr(gpcnVpcTest, "cidr", vpcCidr),
 					resource.TestCheckResourceAttr(gpcnVpcTest, "description", "terraform acceptance"),
 					resource.TestCheckResourceAttr(gpcnVpcTest, "status", "active"),
 				),
@@ -81,10 +85,10 @@ func TestVpcResource(t *testing.T) {
 			resource "gpcn_vpc" "test" {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				cidr          = "10.60.0.0/16"
+				cidr          = "%s"
 				description   = "terraform acceptance, renamed"
 			}
-			`, vpcNameUpdated),
+			`, vpcNameUpdated, vpcCidr),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVpcTest, plancheck.ResourceActionUpdate),
