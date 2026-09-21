@@ -845,14 +845,14 @@ func (r *virtualMachinesResource) ModifyPlan(ctx context.Context, req resource.M
 
 /*
 A stop and a start cost the user real time. The provider takes them only where GPCN
-needs them. The image of the machine must take no network hotplug. The decision then
-asks two questions of each attribute below. Does the configuration ask for a change?
-Does the machine still lack that change?
+needs them. The image of the machine must take no network hotplug. State reports that
+capability, because the image of a machine does not drift. The decision then asks two
+questions of each attribute below. Does the configuration ask for a change? Does the
+machine still lack that change?
   - l2_segment_ids against the live segment set
   - size_id against the live SKU
 */
 func determineIfVMNeedsStopped(state, plan virtualmachines.ResourceModel, live *virtualmachines.ReadVirtualMachinesResponse, liveInterfaces []networks.ReadVirtualMachineNetworkDataResponseTF) bool {
-	// If network hotplug is enabled, the VM does not need to be stopped
 	if state.NetworkHotplug.ValueBool() {
 		return false
 	}

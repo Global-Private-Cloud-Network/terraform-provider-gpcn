@@ -313,7 +313,7 @@ func RemoveNetworkInterfaceByNetworkId(gpcnClient *client.GpcnClient, ctx contex
 			networkInterfaceId = inter.ID.ValueString()
 		}
 	}
-	// If the networkId doesn't have a corresponding interface, something went wrong
+	// A networkId with no matching interface means the detach cannot proceed.
 	if networkInterfaceId == "" {
 		return fmt.Errorf(ErrDetailRemoveNetworkInterfaceFailed, networkId)
 	}

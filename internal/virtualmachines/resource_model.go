@@ -106,7 +106,7 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 		model.Configuration = types.MapNull(types.StringType)
 	}
 
-	// If model doesn't already have these populated, set them
+	// Fill only the values the model does not already carry.
 	model, diags = setModelValuesNotPresent(ctx, gpcnClient, response, model)
 	allDiags.Append(diags...)
 
