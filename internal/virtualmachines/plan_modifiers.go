@@ -10,15 +10,19 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-// publicIpPlanModifier marks public_ip as unknown when allocate_public_ip changes
+// PublicIpPlanModifier marks public_ip as unknown when the machine is about to take on
+// or give up an address. Either way of asking for one changes the address the birth
+// interface carries. Only the apply learns what it becomes.
 type PublicIpPlanModifier struct{}
 
+const publicIpPlanModifierDescription = "Marks public_ip as unknown when allocate_public_ip or public_ip_id changes"
+
 func (m PublicIpPlanModifier) Description(_ context.Context) string {
-	return "Marks public_ip as unknown when allocate_public_ip changes"
+	return publicIpPlanModifierDescription
 }
 
 func (m PublicIpPlanModifier) MarkdownDescription(_ context.Context) string {
-	return "Marks public_ip as unknown when allocate_public_ip changes"
+	return publicIpPlanModifierDescription
 }
 
 func (m PublicIpPlanModifier) PlanModifyString(ctx context.Context, req planmodifier.StringRequest, resp *planmodifier.StringResponse) {
@@ -32,8 +36,12 @@ func (m PublicIpPlanModifier) PlanModifyString(ctx context.Context, req planmodi
 	req.State.GetAttribute(ctx, path.Root("allocate_public_ip"), &stateAllocatePublicIp)
 	req.Plan.GetAttribute(ctx, path.Root("allocate_public_ip"), &planAllocatePublicIp)
 
-	// If allocate_public_ip is changing, mark public_ip as unknown
-	if !stateAllocatePublicIp.Equal(planAllocatePublicIp) {
+	var statePublicIpId, planPublicIpId types.String
+	req.State.GetAttribute(ctx, path.Root("public_ip_id"), &statePublicIpId)
+	req.Plan.GetAttribute(ctx, path.Root("public_ip_id"), &planPublicIpId)
+
+	// If either way of asking for an address is changing, mark public_ip as unknown
+	if !stateAllocatePublicIp.Equal(planAllocatePublicIp) || !statePublicIpId.Equal(planPublicIpId) {
 		resp.PlanValue = types.StringUnknown()
 		return
 	}
@@ -42,17 +50,19 @@ func (m PublicIpPlanModifier) PlanModifyString(ctx context.Context, req planmodi
 	resp.PlanValue = req.StateValue
 }
 
-// NetworkInterfacesPlanModifier marks network_interfaces as unknown when
-// network_ids or allocate_public_ip changes. Both inputs change the interface
-// set or its contents, so the value must refresh after apply.
+// NetworkInterfacesPlanModifier marks network_interfaces as unknown when any attribute
+// that shapes the interface set changes. Each one adds, removes or re-addresses an
+// interface, so the value must refresh after apply.
 type NetworkInterfacesPlanModifier struct{}
 
+const networkInterfacesPlanModifierDescription = "Marks network_interfaces as unknown when subnet_id, l2_segment_ids, allocate_public_ip or public_ip_id changes"
+
 func (m NetworkInterfacesPlanModifier) Description(_ context.Context) string {
-	return "Marks network_interfaces as unknown when network_ids or allocate_public_ip changes"
+	return networkInterfacesPlanModifierDescription
 }
 
 func (m NetworkInterfacesPlanModifier) MarkdownDescription(_ context.Context) string {
-	return "Marks network_interfaces as unknown when network_ids or allocate_public_ip changes"
+	return networkInterfacesPlanModifierDescription
 }
 
 func (m NetworkInterfacesPlanModifier) PlanModifyList(ctx context.Context, req planmodifier.ListRequest, resp *planmodifier.ListResponse) {
@@ -61,16 +71,25 @@ func (m NetworkInterfacesPlanModifier) PlanModifyList(ctx context.Context, req p
 		return
 	}
 
-	var stateNetworkIds, planNetworkIds types.List
-	req.State.GetAttribute(ctx, path.Root("network_ids"), &stateNetworkIds)
-	req.Plan.GetAttribute(ctx, path.Root("network_ids"), &planNetworkIds)
+	changed := false
+	for _, name := range []string{"subnet_id", "public_ip_id"} {
+		var stateValue, planValue types.String
+		req.State.GetAttribute(ctx, path.Root(name), &stateValue)
+		req.Plan.GetAttribute(ctx, path.Root(name), &planValue)
+		if !stateValue.Equal(planValue) {
+			changed = true
+		}
+	}
+
+	var stateSegmentIds, planSegmentIds types.List
+	req.State.GetAttribute(ctx, path.Root("l2_segment_ids"), &stateSegmentIds)
+	req.Plan.GetAttribute(ctx, path.Root("l2_segment_ids"), &planSegmentIds)
 
 	var stateAllocatePublicIp, planAllocatePublicIp types.Bool
 	req.State.GetAttribute(ctx, path.Root("allocate_public_ip"), &stateAllocatePublicIp)
 	req.Plan.GetAttribute(ctx, path.Root("allocate_public_ip"), &planAllocatePublicIp)
 
-	// If either input changes, mark network_interfaces as unknown so it refreshes
-	if !stateNetworkIds.Equal(planNetworkIds) || !stateAllocatePublicIp.Equal(planAllocatePublicIp) {
+	if changed || !stateSegmentIds.Equal(planSegmentIds) || !stateAllocatePublicIp.Equal(planAllocatePublicIp) {
 		resp.PlanValue = types.ListUnknown(types.ObjectType{AttrTypes: networks.ReadVirtualMachineNetworkDataResponseTF{}.AttrTypes()})
 		return
 	}
