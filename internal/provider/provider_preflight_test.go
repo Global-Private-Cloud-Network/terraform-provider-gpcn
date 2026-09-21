@@ -97,6 +97,20 @@ func TestConfigurePreflightRejectsRevokedKey(t *testing.T) {
 	}
 }
 
+// TestConfigurePreflightRejectionBytes pins the sentence the 401 answers with.
+// The API never says which cause applies, so the list of causes is the whole
+// value of the diagnostic.
+func TestConfigurePreflightRejectionBytes(t *testing.T) {
+	const want = "GPCN answered 401 to GET /v1/auth/check. The key in GPCN_API_KEY was revoked, " +
+		"expired, disabled, never bound to an entity, its owner left the entity, the entity is " +
+		"deactivated, or the key has exceeded its hourly request limit (1000 per hour). " +
+		"Mint a new key in the portal or wait for the limit to reset."
+
+	if ErrDetailAPIKeyRejected != want {
+		t.Errorf("ErrDetailAPIKeyRejected =\n%q\nwant\n%q", ErrDetailAPIKeyRejected, want)
+	}
+}
+
 // TestConfigurePreflightWarnsOnExpiry proves a key that is close to expiry only
 // warns. A configure error here would stop an apply that the key can still
 // complete.
