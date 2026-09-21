@@ -5,11 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"terraform-provider-gpcn/internal/provider"
 	"terraform-provider-gpcn/internal/sshkeys"
 
-	"github.com/hashicorp/terraform-plugin-framework/resource"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
@@ -38,6 +35,7 @@ func TestSSHKeyNameValidator(t *testing.T) {
 		{name: "trailing_space", input: "demo-key ", wantDetail: whitespaceDetail},
 		{name: "empty", input: "", wantDetail: requiredDetail},
 		{name: "unicode_letter", input: "café", wantDetail: charactersDetail},
+		{name: "interior_unicode_letter", input: "café-key", wantDetail: charactersDetail},
 	}
 
 	v := sshkeys.NameValidator{}
@@ -82,27 +80,4 @@ func TestSSHKeyNameValidatorSkipsNullAndUnknown(t *testing.T) {
 			t.Errorf("expected %v to be skipped, got: %v", value, resp.Diagnostics)
 		}
 	}
-}
-
-// The validator changes nothing until the schema carries it. The attachment
-// therefore needs a guard of its own.
-func TestSSHKeyResourceSchemaAttachesNameValidator(t *testing.T) {
-	t.Parallel()
-
-	var resp resource.SchemaResponse
-	provider.NewSSHKeyResource().Schema(context.Background(), resource.SchemaRequest{}, &resp)
-	if resp.Diagnostics.HasError() {
-		t.Fatalf("schema returned diagnostics: %v", resp.Diagnostics)
-	}
-
-	attribute, ok := resp.Schema.Attributes["name"].(schema.StringAttribute)
-	if !ok {
-		t.Fatalf("name is %T, want schema.StringAttribute", resp.Schema.Attributes["name"])
-	}
-	for _, v := range attribute.Validators {
-		if _, ok := v.(sshkeys.NameValidator); ok {
-			return
-		}
-	}
-	t.Errorf("name carries %d validators, none of them sshkeys.NameValidator", len(attribute.Validators))
 }

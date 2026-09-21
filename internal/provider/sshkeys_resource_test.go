@@ -1,9 +1,14 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"testing"
 
+	"terraform-provider-gpcn/internal/sshkeys"
+
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	fwschema "github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
@@ -95,4 +100,27 @@ resource "gpcn_ssh_key" "test" {
 			},
 		},
 	})
+}
+
+// The validator changes nothing until the schema carries it. The attachment
+// therefore needs a guard of its own.
+func TestSSHKeyResourceSchemaAttachesNameValidator(t *testing.T) {
+	t.Parallel()
+
+	var resp fwresource.SchemaResponse
+	NewSSHKeyResource().Schema(context.Background(), fwresource.SchemaRequest{}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("schema returned diagnostics: %v", resp.Diagnostics)
+	}
+
+	attribute, ok := resp.Schema.Attributes["name"].(fwschema.StringAttribute)
+	if !ok {
+		t.Fatalf("name is %T, want schema.StringAttribute", resp.Schema.Attributes["name"])
+	}
+	for _, v := range attribute.Validators {
+		if _, ok := v.(sshkeys.NameValidator); ok {
+			return
+		}
+	}
+	t.Errorf("name carries %d validators, none of them sshkeys.NameValidator", len(attribute.Validators))
 }
