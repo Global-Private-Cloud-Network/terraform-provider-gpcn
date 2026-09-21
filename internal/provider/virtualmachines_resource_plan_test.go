@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,8 @@ import (
 	"terraform-provider-gpcn/internal/testutil"
 	"terraform-provider-gpcn/internal/virtualmachines"
 
+	"github.com/hashicorp/terraform-plugin-framework/providerserver"
+	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
@@ -470,4 +473,53 @@ func TestVirtualMachineResourcePlanImportsVpcIdentity(t *testing.T) {
 			},
 		},
 	})
+}
+
+// A state file written by 1.3.0 carries network_ids, and the attribute is gone. Terraform
+// hands that state to UpgradeResourceState before anything else reads it, and the
+// framework unmarshals it with IgnoreUndefinedAttributes
+// (fwserver/server_upgraderesourcestate.go:60-65), so the retired attribute is dropped
+// rather than refused. A refusal here would strand every machine already in state.
+func TestVirtualMachineResourcePlanLoadsPriorStateWithNetworkIds(t *testing.T) {
+	priorState := `{
+		"id": "` + vmPlanTestID + `",
+		"name": "vm-prior",
+		"datacenter_id": "` + vmPlanTestDatacenterID + `",
+		"size_id": "` + vmPlanTestSizeID + `",
+		"image_id": "` + vmPlanTestImageID + `",
+		"allocate_public_ip": false,
+		"public_ip": "",
+		"network_ids": ["net-1", "net-2"],
+		"network_hotplug": true,
+		"network_interfaces": [
+			{"id": "nic-1", "network_interface": 0, "is_primary": true, "public_ip": "",
+			 "public_ip_id": "", "private_ip": "10.0.0.5", "network_name": "net-standard",
+			 "network_id": "net-1", "cidr_block": "10.0.0.0/24", "gateway_ip": "10.0.0.1",
+			 "network_type": "standard"}
+		],
+		"resource_group_id": null,
+		"initial_auth": {"ssh_key_id": "` + vmPlanTestSshKeyID + `", "username": "` + vmPlanTestUsername + `", "password": null}
+	}`
+
+	server, err := providerserver.NewProtocol6WithError(New("test")())()
+	if err != nil {
+		t.Fatalf("building the provider server failed: %v", err)
+	}
+
+	resp, err := server.UpgradeResourceState(context.Background(), &tfprotov6.UpgradeResourceStateRequest{
+		TypeName: "gpcn_virtualmachine",
+		Version:  0,
+		RawState: &tfprotov6.RawState{JSON: []byte(priorState)},
+	})
+	if err != nil {
+		t.Fatalf("UpgradeResourceState returned an error: %v", err)
+	}
+	for _, diagnostic := range resp.Diagnostics {
+		if diagnostic.Severity == tfprotov6.DiagnosticSeverityError {
+			t.Errorf("Expected no error diagnostic, got '%s': %s", diagnostic.Summary, diagnostic.Detail)
+		}
+	}
+	if resp.UpgradedState == nil {
+		t.Fatal("Expected the upgraded state to be returned")
+	}
 }
