@@ -1236,3 +1236,32 @@ func TestCheckInventoryRefusesAnEmptySeriesMockHTTP(t *testing.T) {
 		})
 	}
 }
+
+// An outage empties the series list, and the fallback resolves no code for a
+// series the provider no longer lists. The refusal must still name the series
+// the configuration asks for.
+func TestCheckInventoryEmptySeriesNamesTheConfiguredSeriesMockHTTP(t *testing.T) {
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/inventory") {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(inventoryJSONNoSeries))
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	model := createTestGPUModel("test-gpu", "NVIDIA L40 Series", "", testImageName, 1)
+
+	_, _, err := CheckInventory(gpcnClient, context.Background(), model)
+	if err == nil {
+		t.Fatal("Expected an error for an empty inventory, got nil")
+	}
+	want := fmt.Sprintf(ErrDetailNoInventoryAvailable, "NVIDIA L40 Series", testDatacenterID, 1)
+	if err.Error() != want {
+		t.Errorf("Expected error %q, got %q", want, err.Error())
+	}
+}

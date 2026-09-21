@@ -219,7 +219,13 @@ func CheckInventory(gpcnClient *client.GpcnClient, ctx context.Context, model Re
 
 	inventory := flattenInventory(invResp, datacenterId, seriesCode, gpuCount)
 	if len(inventory) == 0 {
-		return nil, "", fmt.Errorf(ErrDetailNoInventoryAvailable, seriesCode, datacenterId, gpuCount)
+		// An empty series list leaves the resolved code empty or unreliable.
+		// The refusal then names the series as the configuration spells it.
+		reported := seriesCode
+		if len(invResp.Data.Series) == 0 {
+			reported = requested
+		}
+		return nil, "", fmt.Errorf(ErrDetailNoInventoryAvailable, reported, datacenterId, gpuCount)
 	}
 
 	tflog.Info(ctx, fmt.Sprintf(LogInventoryAvailable, seriesCode, datacenterId, gpuCount))
