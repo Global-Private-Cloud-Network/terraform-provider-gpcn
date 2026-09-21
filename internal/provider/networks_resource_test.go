@@ -1,10 +1,12 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"testing"
 
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
@@ -162,6 +164,22 @@ func TestNetworksResource(t *testing.T) {
 ----- Unit tests -----
 *
 */
+
+// TestNetworkResourceSchemaCarriesDeprecation pins the deprecation notice byte for byte.
+// Terraform prints it on every plan that names the resource, so a reworded notice is a
+// user-facing change and must be a deliberate one.
+func TestNetworkResourceSchemaCarriesDeprecation(t *testing.T) {
+	t.Parallel()
+
+	schemaResponse := &fwresource.SchemaResponse{}
+	NewNetworksResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
+
+	const want = "gpcn_network is deprecated: GPCN networking is VPC-based. Use gpcn_vpc, gpcn_vpc_subnet and gpcn_l2_segment. Existing networks can still be read and destroyed."
+	if got := schemaResponse.Schema.DeprecationMessage; got != want {
+		t.Errorf("DeprecationMessage = %q, want %q", got, want)
+	}
+}
+
 func TestNetworksResourceInvalidType(t *testing.T) {
 	t.Run("invalid_network_type", func(t *testing.T) {
 		t.Parallel()

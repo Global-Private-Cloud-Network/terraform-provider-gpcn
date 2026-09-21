@@ -44,10 +44,15 @@ func (r *networksResource) Metadata(_ context.Context, req resource.MetadataRequ
 	resp.TypeName = req.ProviderTypeName + "_network"
 }
 
+// networkDeprecationMessage names the three resources that replace gpcn_network, because a
+// deprecation notice with no destination leaves the reader to guess which one to move to.
+const networkDeprecationMessage = "gpcn_network is deprecated: GPCN networking is VPC-based. Use gpcn_vpc, gpcn_vpc_subnet and gpcn_l2_segment. Existing networks can still be read and destroyed."
+
 // Schema defines the schema for the resource.
 func (r *networksResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a private network to connect virtual machines within the same datacenter",
+		Description:        "Manages a private network to connect virtual machines within the same datacenter",
+		DeprecationMessage: networkDeprecationMessage,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the network in UUID format",
