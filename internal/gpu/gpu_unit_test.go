@@ -1295,9 +1295,14 @@ func TestCheckInventoryEmptySeriesKeepsTheCodeWordMockHTTP(t *testing.T) {
 	}
 }
 
-// The two details must differ only in the word that names the value. A rewording of
-// one alone would tell the user a name is a code, or a code is a name.
+// The two details differ only in the word that names the value. A rewording of one
+// alone tells the user a name is a code, or a code is a name.
 func TestNoInventoryDetailsStayCoupledUnit(t *testing.T) {
+	// A missing substring makes strings.Replace a no-op, and the comparison below vacuous.
+	if !strings.Contains(ErrDetailNoInventoryAvailable, "series code %s") {
+		t.Fatalf("Expected ErrDetailNoInventoryAvailable to carry \"series code %%s\", got %q", ErrDetailNoInventoryAvailable)
+	}
+
 	want := strings.Replace(ErrDetailNoInventoryAvailable, "series code %s", "series %s", 1)
 	if ErrDetailNoInventoryAvailableByName != want {
 		t.Errorf("Expected ErrDetailNoInventoryAvailableByName %q, got %q", want, ErrDetailNoInventoryAvailableByName)

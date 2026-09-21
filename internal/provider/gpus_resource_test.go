@@ -55,6 +55,7 @@ func TestGPUCreateRefusalRegexpMatchesEmittedDiagnostics(t *testing.T) {
 	emitted := []string{
 		gpu.ErrSummaryUnableToCreateGPU,
 		fmt.Sprintf(gpu.ErrDetailNoInventoryAvailable, "nvidia-a100-series", "dc-1", 4),
+		fmt.Sprintf(gpu.ErrDetailNoInventoryAvailableByName, "NVIDIA A100 Series", "dc-1", 4),
 		fmt.Sprintf(gpu.ErrDetailUnknownGPUSeries, "nvidia-a100-series", "dc-1", "nvidia-h200-series (NVIDIA H200 Series)"),
 	}
 

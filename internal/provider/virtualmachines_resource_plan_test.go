@@ -982,9 +982,12 @@ func TestVirtualMachineResourcePlanStartsAgainWhenAnUpdateStepFailsAfterTheStop(
 	shortenVirtualMachinePolling(t)
 	server, startCount := startVirtualMachineAttachRefusedMockServer(t, true, 0, false)
 
+	errorCheckRan := false
+
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		ErrorCheck: func(err error) error {
+			errorCheckRan = true
 			if !vmPlanTestAttachErrorPattern.MatchString(err.Error()) {
 				t.Errorf("Expected the attach error, got '%s'", err.Error())
 			}
@@ -1005,6 +1008,11 @@ func TestVirtualMachineResourcePlanStartsAgainWhenAnUpdateStepFailsAfterTheStop(
 			},
 		},
 	})
+
+	// A passing apply never calls ErrorCheck, so the assertions inside it would vanish.
+	if !errorCheckRan {
+		t.Error("Expected ErrorCheck to run on the failed apply, but it did not")
+	}
 
 	if starts := startCount(); starts != 1 {
 		t.Errorf("Expected exactly 1 start, got %d", starts)
@@ -1028,7 +1036,13 @@ func TestVirtualMachineResourcePlanReportsLeftStoppedWhenTheStartAlsoFails(t *te
 			},
 			{
 				Config:      vmNetworkListPlanTestConfig(server.URL, "vm-plan-left-stopped-update", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
-				ExpectError: regexp.MustCompile(`(?s)Error\s+updating\s+network\s+interfaces.*Virtual\s+machine\s+left\s+stopped.*did\s+not\s+start\s+again.*the\s+change\s+was\s+not\s+recorded,\s+so\s+the\s+next\s+apply\s+retries\s+it\.`),
+				ExpectError: regexp.MustCompile(`(?s)Error\s+updating\s+network\s+interfaces.*Virtual\s+machine\s+left\s+stopped.*did\s+not\s+start\s+again.*then\s+run\s+terraform\s+plan\s+and\s+check\s+the\s+proposed\s+changes\s+before\s+applying\.`),
+			},
+			// The attach was refused, so a recorded change would show two networks.
+			{
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check:              resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_ids.#", "1"),
 			},
 		},
 	})
