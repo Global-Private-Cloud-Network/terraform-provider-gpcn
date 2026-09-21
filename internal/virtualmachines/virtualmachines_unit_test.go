@@ -1358,3 +1358,64 @@ func TestVirtualMachineCreatedAttachFailedDetailBytes(t *testing.T) {
 		t.Errorf("Expected detail '%s', got '%s'", expected, ErrDetailVMCreatedAttachFailed)
 	}
 }
+
+// The API sends these status bytes, and the provider waits for them by value. A changed
+// byte makes a poller wait for a status that never arrives.
+func TestVirtualMachineStatusBytes(t *testing.T) {
+	tests := []struct {
+		status   VMStatus
+		expected string
+	}{
+		{VMStatusRunning, "Running"},
+		{VMStatusStopped, "Stopped"},
+		{VMStatusProvisioning, "Provisioning"},
+		{VMStatusResizing, "Resizing"},
+		{VMStatusStarting, "Starting"},
+		{VMStatusStopping, "Stopping"},
+		{VMStatusDeleting, "Deleting"},
+		{VMStatusDestroyed, "Destroyed"},
+		{VMStatusShutoff, "Shutoff"},
+		{VMStatusRescue, "Rescue"},
+		{VMStatusRescuing, "Rescuing"},
+		{VMStatusUnrescuing, "Unrescuing"},
+		{VMStatusUnknown, "Unknown"},
+		{VMStatusError, "Error"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.expected, func(t *testing.T) {
+			if tc.status.String() != tc.expected {
+				t.Errorf("Expected status '%s', got '%s'", tc.expected, tc.status.String())
+			}
+		})
+	}
+}
+
+// A failed start leaves a stopped machine, and these bytes are the only report of it.
+// The release pins them, and the compiler accepts any rewording.
+func TestVirtualMachineLeftStoppedBytes(t *testing.T) {
+	tests := []struct {
+		name     string
+		actual   string
+		expected string
+	}{
+		{
+			name:     "summary",
+			actual:   ErrSummaryVMLeftStopped,
+			expected: "Virtual machine left stopped",
+		},
+		{
+			name:     "detail",
+			actual:   ErrDetailVMLeftStopped,
+			expected: "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal or run terraform apply again.",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.actual != tc.expected {
+				t.Errorf("Expected %s '%s', got '%s'", tc.name, tc.expected, tc.actual)
+			}
+		})
+	}
+}
