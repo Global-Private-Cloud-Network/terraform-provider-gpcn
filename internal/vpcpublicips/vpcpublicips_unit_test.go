@@ -185,6 +185,9 @@ func TestAttachPublicIpSendsNicIdMockHTTP(t *testing.T) {
 	if got, _ := decoded["nicId"].(string); got != testNicID {
 		t.Fatalf("Expected attach body nicId %q, got %q", testNicID, got)
 	}
+	if _, ok := rec.bodyFor(http.MethodPost, "/v1/resource/jobs/"); !ok {
+		t.Fatalf("Expected the attach to poll its job, got no job request")
+	}
 }
 
 // Detach is a bodiless POST. A body carrying keys is refused by the strict
@@ -222,6 +225,9 @@ func TestDetachPublicIpSendsEmptyBodyMockHTTP(t *testing.T) {
 	}
 	if body != "" {
 		t.Fatalf("Expected an empty detach body, got %q", body)
+	}
+	if _, ok := rec.bodyFor(http.MethodPost, "/v1/resource/jobs/"); !ok {
+		t.Fatalf("Expected the detach to poll its job, got no job request")
 	}
 }
 
