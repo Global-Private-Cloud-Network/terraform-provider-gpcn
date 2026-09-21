@@ -40,7 +40,7 @@ const (
 // A virtual machine in one of these statuses never reaches a different one.
 // The poller stops immediately instead of waiting for the timeout.
 // Unknown is absent, because that status can be transient.
-var VM_TERMINAL_FAILURE_STATUSES = []VMStatus{VMStatusError, VMStatusDestroyed}
+var vmTerminalFailureStatuses = []VMStatus{VMStatusError, VMStatusDestroyed}
 
 // String returns the string representation of VMStatus
 func (s VMStatus) String() string {

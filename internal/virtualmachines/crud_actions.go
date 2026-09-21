@@ -242,9 +242,8 @@ func UpdateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, vi
 	return nil
 }
 
-// Reports whether the virtual machine holds a status that it never leaves.
 func isTerminalFailureStatus(status string) bool {
-	return slices.ContainsFunc(VM_TERMINAL_FAILURE_STATUSES, func(terminal VMStatus) bool {
+	return slices.ContainsFunc(vmTerminalFailureStatuses, func(terminal VMStatus) bool {
 		return strings.EqualFold(status, terminal.String())
 	})
 }
