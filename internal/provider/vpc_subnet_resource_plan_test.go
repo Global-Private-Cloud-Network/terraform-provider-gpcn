@@ -714,6 +714,67 @@ func TestVpcSubnetResourcePlanFillsPrefixWithoutEitherKey(t *testing.T) {
 	})
 }
 
+// An import block plans against the imported state, which the import command
+// never does. Only that arm shows a configuration shape whose prefix the
+// mapper left null. The kind excludes ImportStateVerify, so it needs a test of
+// its own beside the two import-command cases.
+func TestVpcSubnetResourcePlanImportBlockIsANoOpForEveryShape(t *testing.T) {
+	t.Parallel()
+
+	shapes := []struct {
+		name       string
+		carvedCIDR string
+		config     func(host string) string
+	}{
+		{
+			name:       "cidr only",
+			carvedCIDR: subnetPlanTestCIDR,
+			config:     func(host string) string { return subnetPlanTestConfig(host, "subnet-plan-a", "") },
+		},
+		{
+			name:       "prefix only",
+			carvedCIDR: "10.50.1.0/26",
+			config: func(host string) string {
+				return subnetPlanTestConfigWithoutCidr(host, "subnet-plan-a", "prefix = 26")
+			},
+		},
+		{
+			name:       "neither",
+			carvedCIDR: subnetPlanTestCIDR,
+			config:     func(host string) string { return subnetPlanTestConfigWithoutCidr(host, "subnet-plan-a", "") },
+		},
+	}
+
+	for _, shape := range shapes {
+		t.Run(shape.name, func(t *testing.T) {
+			t.Parallel()
+			server, state := startSubnetPlanMockServer(t)
+
+			state.mu.Lock()
+			state.cidr = shape.carvedCIDR
+			state.mu.Unlock()
+
+			config := shape.config(server.URL)
+
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config: config,
+					},
+					{
+						Config:          config,
+						ResourceName:    gpcnVpcSubnetTest,
+						ImportState:     true,
+						ImportStateKind: resource.ImportBlockWithID,
+						ImportStateId:   subnetPlanTestVpcID + "/" + subnetPlanTestID,
+					},
+				},
+			})
+		})
+	}
+}
+
 // A prefix that differs from the mask of the block GPCN carved asks for
 // another block. GPCN cannot re-carve one in place. The plan therefore
 // replaces the subnet rather than proposing an update the API refuses.
