@@ -1521,3 +1521,42 @@ func TestSetNetworkModelValuesNotPresentFillsVpcIdentityOnImportUnit(t *testing.
 		t.Errorf("Expected l2_segment_ids %v, got %v", want, segments)
 	}
 }
+
+// A failed start leaves a stopped machine, and these bytes are the only report of it.
+// The release pins them, and the compiler accepts any rewording.
+func TestVirtualMachineLeftStoppedBytes(t *testing.T) {
+	tests := []struct {
+		name     string
+		actual   string
+		expected string
+	}{
+		{
+			name:     "summary",
+			actual:   ErrSummaryVMLeftStopped,
+			expected: "Virtual machine left stopped",
+		},
+		{
+			name:     "update detail",
+			actual:   ErrDetailVMLeftStoppedUpdate,
+			expected: "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal.",
+		},
+		{
+			name:     "create detail",
+			actual:   ErrDetailVMLeftStoppedCreate,
+			expected: "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform untaint on it; otherwise the next apply replaces the machine.",
+		},
+		{
+			name:     "retry detail",
+			actual:   ErrDetailVMLeftStoppedRetry,
+			expected: "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal; the change was not recorded, so the next apply retries it.",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.actual != tc.expected {
+				t.Errorf("Expected %s '%s', got '%s'", tc.name, tc.expected, tc.actual)
+			}
+		})
+	}
+}
