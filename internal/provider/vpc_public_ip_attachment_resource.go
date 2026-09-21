@@ -121,9 +121,12 @@ func (r *vpcPublicIpAttachmentResource) Create(ctx context.Context, req resource
 
 	publicIp, err := vpcpublicips.GetPublicIp(r.client, ctx, vpcID, publicIpID)
 	if err != nil {
+		// The binding exists whatever the read-back says, so state must hold
+		// it. GPCN refuses a second attach until the address detaches.
+		resp.Diagnostics.Append(resp.State.Set(ctx, vpcpublicips.MapAttachedIdToAttachmentModel(plan))...)
 		resp.Diagnostics.AddError(
 			vpcpublicips.ErrSummaryUnableToGetPublicIp,
-			fmt.Sprintf(vpcpublicips.ErrDetailUnableToGetPublicIpWithID, publicIpID, vpcID)+": "+err.Error(),
+			fmt.Sprintf(vpcpublicips.ErrDetailAttachedPublicIpReadFailed, publicIpID, nicID, err.Error()),
 		)
 		return
 	}

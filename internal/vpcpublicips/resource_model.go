@@ -74,6 +74,14 @@ func MapAcquiredIdToModel(publicIpID string, model ResourceModel) ResourceModel 
 	return model
 }
 
+// MapAttachedIdToAttachmentModel records the binding the attach made. The
+// address itself is not read yet, so the machine it serves stays null.
+func MapAttachedIdToAttachmentModel(model AttachmentResourceModel) AttachmentResourceModel {
+	model.ID = model.PublicIpID
+	model.VirtualMachineID = types.StringNull()
+	return model
+}
+
 // MapPublicIpResponseToAttachmentModel records the machine the address now
 // serves. The attachment carries no other state of its own.
 func MapPublicIpResponseToAttachmentModel(publicIp *PublicIp, model AttachmentResourceModel) AttachmentResourceModel {

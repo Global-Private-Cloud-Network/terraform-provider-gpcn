@@ -15,6 +15,10 @@ import (
 // per-interface address. The provider forwards its sentence unchanged.
 var regexpPublicIpsAttachToVPCInterfacesOnly = regexp.MustCompile(`Public\s+IPs\s+attach\s+to\s+VPC\s+interfaces\s+only`)
 
+// A read-back that fails names both the address and the interface it bound.
+// The operator needs both to undo the binding by hand.
+var regexpPublicIpAttachedButReadBackFailed = regexp.MustCompile(`public\s+IP\s+` + vpcPublicIpPlanTestID + `\s+was\s+attached\s+to\s+network\s+interface\s+` + vpcPublicIpPlanTestNicID + `\s+and\s+is\s+in\s+state`)
+
 func vpcPublicIpAttachmentPlanTestConfig(host string) string {
 	return vpcPublicIpAttachmentPlanTestConfigForNic(host, vpcPublicIpPlanTestNicID)
 }
@@ -32,6 +36,24 @@ resource "gpcn_vpc_public_ip_attachment" "test" {
   nic_id       = %q
 }
 `, host, vpcPublicIpPlanTestVpcID, vpcPublicIpPlanTestID, nicID)
+}
+
+// vpcPublicIpAttachmentPlanTestConfigWithoutRetries turns the client retries
+// off, so one refused listing is one failed read rather than four.
+func vpcPublicIpAttachmentPlanTestConfigWithoutRetries(host string) string {
+	return fmt.Sprintf(`
+provider "gpcn" {
+  host        = %q
+  api_key     = "test-key"
+  max_retries = 0
+}
+
+resource "gpcn_vpc_public_ip_attachment" "test" {
+  vpc_id       = %q
+  public_ip_id = %q
+  nic_id       = %q
+}
+`, host, vpcPublicIpPlanTestVpcID, vpcPublicIpPlanTestID, vpcPublicIpPlanTestNicID)
 }
 
 // The attach names the interface, and the state records the machine the
@@ -187,4 +209,47 @@ func TestVPCPublicIpAttachmentResourcePlanSurfacesAttachRefusal(t *testing.T) {
 			},
 		},
 	})
+}
+
+// DEV refuses a second attach until the address detaches. A binding the
+// read-back could not confirm must still reach state. The destroy then
+// detaches it instead of wedging every later apply.
+func TestVpcPublicIpAttachmentResourcePlanKeepsBindingWhenReadBackFails(t *testing.T) {
+	t.Parallel()
+	server, row := startVPCPublicIpPlanMockServer(t)
+	row.becomeReady()
+	row.failListingGets()
+
+	config := vpcPublicIpAttachmentPlanTestConfigWithoutRetries(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexpPublicIpAttachedButReadBackFailed,
+			},
+			{
+				PreConfig: row.healListingGets,
+				Config:    config,
+				Destroy:   true,
+				Check:     checkAttachmentDestroySentOneDetach(row),
+			},
+		},
+	})
+}
+
+// checkAttachmentDestroySentOneDetach proves the failed read-back wrote the
+// binding to state. A create that keeps it to itself leaves the destroy
+// nothing to detach. The address then stays bound outside Terraform.
+func checkAttachmentDestroySentOneDetach(row *publicIpPlanTestRow) func(*terraform.State) error {
+	return func(*terraform.State) error {
+		if got := row.detachCallCount(); got != 1 {
+			return fmt.Errorf("expected the destroy to send exactly one detach, got %d", got)
+		}
+		if got := row.releaseCallCount(); got != 0 {
+			return fmt.Errorf("expected the destroy to send no release, got %d", got)
+		}
+		return nil
+	}
 }
