@@ -314,6 +314,45 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
+	var networkIds []string
+	if !plan.NetworkIds.IsNull() {
+		listDiags := plan.NetworkIds.ElementsAs(ctx, &networkIds, true)
+		resp.Diagnostics.Append(listDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+	// GPCN creates the machine on one birth network. The state above already holds the
+	// machine, so a refused attach below reports a repairable failure instead of leaking
+	// a machine Terraform does not know about.
+	if len(networkIds) > 1 {
+		var attachErr error
+		failedNetworkId := ""
+		for _, networkId := range networkIds[1:] {
+			attachErr = networks.AddNetworkInterface(r.client, ctx, plan.ID.ValueString(), networkId)
+			if attachErr != nil {
+				failedNetworkId = networkId
+				break
+			}
+		}
+
+		plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
+		resp.Diagnostics.Append(mapDiags...)
+		diags = resp.State.Set(ctx, plan)
+		resp.Diagnostics.Append(diags...)
+
+		if attachErr != nil {
+			resp.Diagnostics.AddError(
+				virtualmachines.ErrSummaryVMCreatedAttachFailed,
+				fmt.Sprintf(virtualmachines.ErrDetailVMCreatedAttachFailed, plan.ID.ValueString(), failedNetworkId, attachErr.Error()),
+			)
+			return
+		}
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
 	tflog.Info(ctx, virtualmachines.LogSuccessfullyFinishedCreateGPCNVirtualMachine)
 }
 

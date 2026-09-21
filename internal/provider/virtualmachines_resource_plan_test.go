@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"sync"
 	"testing"
 	"time"
@@ -92,7 +93,9 @@ func vmPlanTestReadBody(name, status, skuId string) map[string]any {
 	}
 }
 
-func vmPlanTestNetworkInterfacesBody() map[string]any {
+// The birth network comes from the create body, so the interface the API reports is the
+// one the provider asked for rather than a fixture that agrees by coincidence.
+func vmPlanTestNetworkInterfacesBody(birthNetworkID string) map[string]any {
 	return map[string]any{
 		"success": true,
 		"message": "ok",
@@ -104,7 +107,7 @@ func vmPlanTestNetworkInterfacesBody() map[string]any {
 			"publicIpId":       "",
 			"privateIp":        "10.0.0.5",
 			"networkName":      "net-standard",
-			"networkId":        vmPlanTestNetworkID,
+			"networkId":        birthNetworkID,
 			"cidrBlock":        "10.0.0.0/24",
 			"gatewayIp":        "10.0.0.1",
 			"networkType":      "standard",
@@ -122,6 +125,7 @@ func startVirtualMachinePlanMockServer(t *testing.T) (*httptest.Server, func(str
 
 	var mu sync.Mutex
 	name := ""
+	birthNetworkID := ""
 	skuId := vmPlanTestSizeID
 	status := virtualmachines.VMStatusRunning.String()
 
@@ -135,6 +139,7 @@ func startVirtualMachinePlanMockServer(t *testing.T) (*httptest.Server, func(str
 			body := testutil.ReadRequestBody(r)
 			mu.Lock()
 			name, _ = body["name"].(string)
+			birthNetworkID, _ = body["networkId"].(string)
 			mu.Unlock()
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
@@ -145,7 +150,10 @@ func startVirtualMachinePlanMockServer(t *testing.T) (*httptest.Server, func(str
 			mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodGet && r.URL.Path == vmPath+"/network-interfaces":
-			testutil.WriteJSONResponse(w, vmPlanTestNetworkInterfacesBody())
+			mu.Lock()
+			currentNetwork := birthNetworkID
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestNetworkInterfacesBody(currentNetwork))
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
 			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
 		case r.Method == http.MethodGet && r.URL.Path == vmPath:
@@ -275,6 +283,191 @@ func TestVirtualMachineResourcePlanIgnoresOutOfBandResize(t *testing.T) {
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "size_id", vmPlanTestSizeID),
+				),
+			},
+		},
+	})
+}
+
+const vmPlanTestSecondNetworkID = "net-2"
+
+// vmAttachPlanTestNetworkInterfacesBody lists the birth interface and one row per
+// network that attached, so the state a failed attach leaves behind is observable.
+func vmAttachPlanTestNetworkInterfacesBody(birthNetworkID string, attached []string) map[string]any {
+	rows := make([]map[string]any, 0, 1+len(attached))
+	rows = append(rows, map[string]any{
+		"id":               "nic-1",
+		"networkInterface": 0,
+		"isPrimary":        1,
+		"publicIp":         "",
+		"publicIpId":       "",
+		"privateIp":        "10.0.0.5",
+		"networkName":      "net-standard",
+		"networkId":        birthNetworkID,
+		"cidrBlock":        "10.0.0.0/24",
+		"gatewayIp":        "10.0.0.1",
+		"networkType":      "standard",
+	})
+	for index, networkID := range attached {
+		rows = append(rows, map[string]any{
+			"id":               fmt.Sprintf("nic-%d", index+2),
+			"networkInterface": index + 1,
+			"isPrimary":        0,
+			"publicIp":         "",
+			"publicIpId":       "",
+			"privateIp":        "10.0.1.5",
+			"networkName":      "net-extra",
+			"networkId":        networkID,
+			"cidrBlock":        "10.0.1.0/24",
+			"gatewayIp":        "10.0.1.1",
+			"networkType":      "standard",
+		})
+	}
+	return map[string]any{"success": true, "message": "ok", "data": rows}
+}
+
+// startVirtualMachineAttachMockServer refuses the post-create attach until the returned
+// function heals it. The refusal is a 500 and the provider configuration asks for no
+// retries, so the attach fails on the first call.
+func startVirtualMachineAttachMockServer(t *testing.T) (*httptest.Server, func()) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	birthNetworkID := ""
+	attachFails := true
+	status := virtualmachines.VMStatusRunning.String()
+	var attached []string
+
+	vmPath := "/v1/resource/virtual-machines/" + vmPlanTestID
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			birthNetworkID, _ = body["networkId"].(string)
+			attached = nil
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == vmPath+"/network-interfaces":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			refuse := attachFails
+			if !refuse {
+				networkID, _ := body["networkId"].(string)
+				attached = append(attached, networkID)
+			}
+			mu.Unlock()
+			if refuse {
+				w.WriteHeader(http.StatusInternalServerError)
+				testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "attach refused"})
+				return
+			}
+			testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+		case r.Method == http.MethodGet && r.URL.Path == vmPath+"/network-interfaces":
+			mu.Lock()
+			currentBirth := birthNetworkID
+			current := append([]string(nil), attached...)
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmAttachPlanTestNetworkInterfacesBody(currentBirth, current))
+		case r.Method == http.MethodPost && r.URL.Path == vmPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, vmPlanTestSizeID))
+		case r.Method == http.MethodPut && r.URL.Path == vmPath:
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			if updated, ok := body["name"].(string); ok {
+				name = updated
+			}
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodDelete && r.URL.Path == vmPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	heal := func() {
+		mu.Lock()
+		attachFails = false
+		mu.Unlock()
+	}
+
+	return server, heal
+}
+
+func vmAttachPlanTestConfig(host, name string) string {
+	return fmt.Sprintf(`
+provider "gpcn" {
+  host        = %q
+  api_key     = "test-key"
+  max_retries = 0
+}
+
+resource "gpcn_virtualmachine" "test" {
+  name               = %q
+  datacenter_id      = %q
+  size_id            = %q
+  image_id           = %q
+  allocate_public_ip = false
+  network_ids        = [%q, %q]
+  initial_auth = {
+    ssh_key_id = %q
+    username   = %q
+  }
+}
+`, host, name, vmPlanTestDatacenterID, vmPlanTestSizeID, vmPlanTestImageID, vmPlanTestNetworkID, vmPlanTestSecondNetworkID, vmPlanTestSshKeyID, vmPlanTestUsername)
+}
+
+// A failed attach must not orphan the machine: it exists at the API, so it belongs in
+// state. Terraform taints a resource whose create returned an error, so the second step
+// plans a replacement. A machine absent from state would plan a bare create instead, with
+// nothing to destroy. The second step also proves the attach loop attaches every network
+// after the birth one.
+func TestVirtualMachineResourcePlanCreateWritesStateWhenAttachFails(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, heal := startVirtualMachineAttachMockServer(t)
+
+	config := vmAttachPlanTestConfig(server.URL, "vm-plan-attach")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexp.MustCompile(`attaching .* failed`),
+			},
+			{
+				PreConfig: heal,
+				Config:    config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionReplace),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "id"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.#", "2"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.0.network_id", vmPlanTestNetworkID),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.1.network_id", vmPlanTestSecondNetworkID),
 				),
 			},
 		},
