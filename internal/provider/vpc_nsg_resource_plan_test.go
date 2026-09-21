@@ -472,12 +472,24 @@ func TestVpcNsgResourcePlanRefusesOuterWhitespace(t *testing.T) {
 	t.Parallel()
 	server, _ := startNsgPlanMockServer(t)
 
+	whitespaceRule := `
+  rule {
+    direction   = "ingress"
+    protocol    = "icmp"
+    remote_cidr = "10.60.0.0/16"
+    description = "ping "
+  }`
+
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
 				Config:      nsgPlanTestConfig(server.URL, "nsg-plan-a ", nsgPlanTestRuleHTTPS),
 				ExpectError: regexp.MustCompile(strings.ReplaceAll(regexp.QuoteMeta("name must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"), " ", `\s+`)),
+			},
+			{
+				Config:      nsgPlanTestConfig(server.URL, "nsg-plan-a", whitespaceRule),
+				ExpectError: regexp.MustCompile(strings.ReplaceAll(regexp.QuoteMeta("description must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"), " ", `\s+`)),
 			},
 		},
 	})
