@@ -492,3 +492,113 @@ func TestVolumeResourcePlanRefusesDivergentSpelling(t *testing.T) {
 		})
 	}
 }
+
+const volPlanTestThirdClassName = "Ultra"
+
+// startThirdClassVolumePlanMockServer answers for a storage class outside the
+// two built-in ones. The volume reports a resolved code, and the catalog
+// offers that code, so a configuration can name it.
+func startThirdClassVolumePlanMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	volumePath := "/v1/resource/volumes/" + volPlanTestID
+
+	readBody := map[string]any{
+		"success": true,
+		"message": "ok",
+		"data": map[string]any{
+			"id":     volPlanTestID,
+			"name":   volPlanTestName,
+			"sizeGb": volPlanTestSizeGb,
+			"volumeType": map[string]any{
+				"code":        volPlanTestUnknownComponent,
+				"name":        volPlanTestThirdClassName,
+				"description": "Ultra fast drive",
+			},
+			"datacenter": map[string]any{
+				"id":          volPlanTestDatacenterID,
+				"name":        "Kansas",
+				"region":      "central",
+				"countryAbbr": "US",
+				"country":     "United States",
+			},
+			"virtualMachineId": "",
+			"createdAt":        volPlanTestTimestamp,
+			"updatedAt":        volPlanTestTimestamp,
+		},
+	}
+
+	sizesBody := map[string]any{
+		"success": true,
+		"message": "ok",
+		"data": map[string]any{
+			"datacenterId": volPlanTestDatacenterID,
+			"volumeTypes": []map[string]any{{
+				"componentCode": volPlanTestUnknownComponent,
+				"name":          volPlanTestThirdClassName,
+				"availableSizes": []map[string]any{
+					{"skuId": "sku-ultra-256", "sizeGb": volPlanTestSizeGb, "displayName": "Ultra 256 GB"},
+				},
+			}},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+volPlanTestDatacenterID+"/volume-sizes":
+			testutil.WriteJSONResponse(w, sizesBody)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/volumes/":
+			testutil.HandleCreateJobResponse(w, "job-1", "create issued")
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", volPlanTestID, true)
+		case r.Method == http.MethodGet && r.URL.Path == volumePath:
+			testutil.WriteJSONResponse(w, readBody)
+		case r.Method == http.MethodDelete && r.URL.Path == volumePath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	return server
+}
+
+// The alias rewrite serves the two built-in classes. A third class must keep
+// the code the API reports, because the configuration names the code itself.
+// Only terraform shows that the round trip plans nothing.
+func TestVolumeResourcePlanImportKeepsAThirdClassCode(t *testing.T) {
+	t.Parallel()
+	server := startThirdClassVolumePlanMockServer(t)
+
+	config := volPlanTestConfigWithType(server.URL, volPlanTestUnknownComponent)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type", volPlanTestUnknownComponent),
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type_code", volPlanTestUnknownComponent),
+				),
+			},
+			{
+				Config:          config,
+				ResourceName:    gpcnVolumeTest,
+				ImportStateKind: resource.ImportBlockWithID,
+				ImportState:     true,
+			},
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionNoop),
+					},
+				},
+			},
+		},
+	})
+}

@@ -74,7 +74,7 @@ func (r *volumesResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"volume_type": schema.StringAttribute{
-				Description: "Type of storage: 'SSD', 'NVMe', or a storage component code such as 'vol-add-ultra'. Use \"SSD\" or \"NVMe\" for the built-in storage classes and the component code for any other class. The datacenter decides which codes it offers, and a code it does not offer is refused with the list of codes it does offer. Changing this value requires replacing the volume. A volume whose SKU the platform cannot resolve reads \"Unknown\"; after the platform repairs it, remove the volume from state and import it again so the code is recorded.",
+				Description: "Type of storage: 'SSD', 'NVMe', or a storage component code such as 'vol-add-ultra'. Use \"SSD\" or \"NVMe\" for the built-in storage classes and the component code for any other class. The datacenter decides which codes it offers, and a code it does not offer is refused with the list of codes it does offer. Changing this value requires replacing the volume. A volume whose SKU the platform cannot resolve reads \"Unknown\"; after the platform repairs it, remove the volume from state and import it again so the code is recorded. The built-in codes vol-add-ssd and vol-add-nvme are refused at plan time; write SSD or NVMe instead.",
 				Required:    true,
 				Validators: []validator.String{
 					stringvalidator.LengthAtLeast(1),

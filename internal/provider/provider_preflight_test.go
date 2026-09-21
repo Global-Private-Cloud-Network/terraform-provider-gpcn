@@ -88,7 +88,7 @@ func TestConfigurePreflightRejectsRevokedKey(t *testing.T) {
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{{
 			Config:      preflightConfig(server.URL),
-			ExpectError: regexp.MustCompile(`API key rejected[\s\S]*hourly\s+request\s+limit\s+\(1000\s+per\s+hour\)`),
+			ExpectError: regexp.MustCompile(`API key rejected[\s\S]*hourly\s+request\s+limit\s+\(1000\s+per\s+hour\s+by\s+default\)`),
 		}},
 	})
 
@@ -103,7 +103,7 @@ func TestConfigurePreflightRejectsRevokedKey(t *testing.T) {
 func TestConfigurePreflightRejectionBytes(t *testing.T) {
 	const want = "GPCN answered 401 to GET /v1/auth/check. The key in GPCN_API_KEY was revoked, " +
 		"expired, disabled, never bound to an entity, its owner left the entity, the entity is " +
-		"deactivated, or the key has exceeded its hourly request limit (1000 per hour). " +
+		"deactivated, or the key has exceeded its hourly request limit (1000 per hour by default). " +
 		"Mint a new key in the portal or wait for the limit to reset."
 
 	if ErrDetailAPIKeyRejected != want {
@@ -223,10 +223,10 @@ func TestConfigurePreflightWarningBytes(t *testing.T) {
 	}
 }
 
-// TestConfigurePreflightNamesHostOnRouteNotFound proves a wrong host is named as
-// such. A host that points at something else answers the bare route-not-found
-// body, never a 401. A key diagnostic would then send the user to the wrong
-// setting.
+// TestConfigurePreflightNamesHostOnRouteNotFound proves the provider names a
+// wrong host. A host that points at something else answers the bare
+// route-not-found body, never a 401. A key diagnostic then sends the user to
+// the wrong setting.
 func TestConfigurePreflightNamesHostOnRouteNotFound(t *testing.T) {
 	server, _ := startPreflightServer(t, func(w http.ResponseWriter) {
 		w.WriteHeader(http.StatusNotFound)

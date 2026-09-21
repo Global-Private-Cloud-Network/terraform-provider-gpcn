@@ -1294,3 +1294,12 @@ func TestCheckInventoryEmptySeriesKeepsTheCodeWordMockHTTP(t *testing.T) {
 		t.Errorf("Expected error %q, got %q", want, err.Error())
 	}
 }
+
+// The two details must differ only in the word that names the value. A rewording of
+// one alone would tell the user a name is a code, or a code is a name.
+func TestNoInventoryDetailsStayCoupledUnit(t *testing.T) {
+	want := strings.Replace(ErrDetailNoInventoryAvailable, "series code %s", "series %s", 1)
+	if ErrDetailNoInventoryAvailableByName != want {
+		t.Errorf("Expected ErrDetailNoInventoryAvailableByName %q, got %q", want, ErrDetailNoInventoryAvailableByName)
+	}
+}

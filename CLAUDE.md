@@ -82,7 +82,7 @@ Resource schema definitions live in `internal/provider/{resource}_resource.go`.
 5. **API Versioning**: All endpoints use versioned paths (e.g., `/v1/resource/virtual-machines/`), defined in each resource's `constants.go`
 6. **Internal import direction**: `client` and `helpers` are leaves; `networks` builds on them, `virtualmachines` on `networks`, `volumeattachments` on `volumes` and `client` only. Keep it acyclic
 7. **Plan-test mocks serve the preflight**: `Configure` calls `GET /v1/auth/check` before any resource work, so every `httptest` mock behind a `resource.UnitTest` must answer it with `testutil.HandleAuthCheck`, or every step fails with `Cannot reach the GPCN API`
-8. **`gpcn_network` is deprecated**: `ModifyPlan` refuses a create (prior state null) with `ErrDetailNetworkCreateRetired`; existing networks still read, update and destroy. GPU series are validated against the live inventory (`CheckInventory`), never a fixed list. `volume_type` accepts `SSD`, `NVMe` or a storage component code; import writes the alias for the built-in classes
+8. **`gpcn_network` is deprecated**: `ModifyPlan` refuses a create (prior state null) with `ErrDetailNetworkCreateRetired`; existing networks still read, update and destroy. GPU series are validated against the live inventory (`CheckInventory`), never a fixed list. `volume_type` accepts `SSD`, `NVMe` or a storage component code; the built-in codes `vol-add-ssd` and `vol-add-nvme` are refused at plan in favour of the alias; import writes the alias for the built-in classes
 
 ### Virtual Machine Specifics
 
@@ -116,6 +116,7 @@ five longer names that start with it.
 
 - **Unit tests**: `testutil.SetupMockServerWithGpcnClient` (`internal/testutil/mock_http.go`) serves mocked HTTP. It bypasses `authTransport`, so not-found and `HTTPError` paths cannot be tested through it — use `testutil.SetupMockServerWithRealTransport`, or `client.NewGpcnClient` against an `httptest` server, for those. Run with `make test`.
 - **Acceptance tests**: Create real resources, and there are no sweepers, so a failed run leaves them behind. Run with `make testacc`. Run individual tests to iterate faster. The network and virtual machine cases read `GPCN_TEST_NETWORK_ID` (an existing network the key can see) and skip when it is unset, because the provider refuses to create a `gpcn_network`.
+- `TestCase.ErrorCheck` never runs for a step that sets `ExpectError`; assert an error's absence in `ErrorCheck` on a step without `ExpectError`.
 
 ## Documentation
 
@@ -175,7 +176,7 @@ Read `.claude/rules/commit-conventions.md` before you commit, push, or open a pu
 
 To prepare a new release:
 
-1. Update `CHANGELOG.md` with the new version and release notes
+1. Update `CHANGELOG.md` with the new version and release notes, and replace `(Unreleased)` with the release date
 2. Update the provider version in all example `.tf` files under `examples/`:
    - `examples/resources/gpcn_*/resource.tf`
    - `examples/data-sources/gpcn_*/data-source.tf`

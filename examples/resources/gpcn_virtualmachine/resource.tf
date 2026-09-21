@@ -2,7 +2,7 @@
 # Example: Creating GPCN Virtual Machines
 #
 # This example demonstrates creating a virtual machine on an existing network,
-# with a volume attached. From 1.5.0 networks are created as gpcn_vpc_subnet resources.
+# with a volume attached. GPCN networking is VPC-based: create a gpcn_vpc and a gpcn_vpc_subnet first.
 
 terraform {
   required_providers {

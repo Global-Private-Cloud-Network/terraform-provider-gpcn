@@ -218,7 +218,7 @@ func CheckInventory(gpcnClient *client.GpcnClient, ctx context.Context, model Re
 			if model.SeriesCode.ValueString() == "" {
 				// The reported value is then the configured name. The sentence
 				// must not call a name a code.
-				detail = strings.Replace(detail, "series code %s", "series %s", 1)
+				detail = ErrDetailNoInventoryAvailableByName
 			}
 		}
 		return nil, "", fmt.Errorf(detail, reported, datacenterId, gpuCount)

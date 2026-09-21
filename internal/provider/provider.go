@@ -33,7 +33,7 @@ var (
 //nolint:gosec // G101: These are diagnostic sentences about a key, not a key.
 const (
 	ErrSummaryAPIKeyRejected = "API key rejected"
-	ErrDetailAPIKeyRejected  = "GPCN answered 401 to GET /v1/auth/check. The key in GPCN_API_KEY was revoked, expired, disabled, never bound to an entity, its owner left the entity, the entity is deactivated, or the key has exceeded its hourly request limit (1000 per hour). Mint a new key in the portal or wait for the limit to reset."
+	ErrDetailAPIKeyRejected  = "GPCN answered 401 to GET /v1/auth/check. The key in GPCN_API_KEY was revoked, expired, disabled, never bound to an entity, its owner left the entity, the entity is deactivated, or the key has exceeded its hourly request limit (1000 per hour by default). Mint a new key in the portal or wait for the limit to reset."
 
 	ErrSummaryAPIUnreachable = "Cannot reach the GPCN API"
 	ErrDetailAPIUnreachable  = "GET %s/v1/auth/check failed: %s. Check GPCN_HOST."
