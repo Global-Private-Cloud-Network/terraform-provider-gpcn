@@ -20,4 +20,5 @@ const (
 	ErrDetailUnableToAttachPublicIpWithID  = "Unable to attach GPCN VPC public IP with ID '%s' to network interface '%s'"
 	ErrDetailUnableToDetachPublicIpWithID  = "Unable to detach GPCN VPC public IP with ID '%s'"
 	ErrDetailPublicIpNotFound              = "Public IP not found"
+	ErrDetailPublicIpListingTruncated      = "the public IP listing of VPC '%[2]s' still reported more rows after %[1]d pages, so the address could not be found or ruled out"
 )

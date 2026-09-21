@@ -105,12 +105,15 @@ func GetPublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, publ
 			}
 		}
 
+		// Only a listing that reported its last page proves the address is
+		// gone. Stopping at the cap says nothing, and a not-found there would
+		// drop a live address out of state.
 		if !listResponse.Meta.HasNextPage {
-			break
+			return nil, &client.HTTPError{StatusCode: http.StatusNotFound, Message: ErrDetailPublicIpNotFound}
 		}
 	}
 
-	return nil, &client.HTTPError{StatusCode: http.StatusNotFound, Message: ErrDetailPublicIpNotFound}
+	return nil, fmt.Errorf(ErrDetailPublicIpListingTruncated, PUBLIC_IP_LIST_MAX_PAGES, vpcID)
 }
 
 func listPublicIps(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string, page int) (*listPublicIpsResponse, error) {
@@ -158,7 +161,11 @@ func AttachPublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, p
 		return err
 	}
 
-	if err := issueJobAndPoll(gpcnClient, ctx, request, ActionAttachPublicIp, LogIssuedAttachPublicIpJob); err != nil {
+	jobID, err := issueJob(gpcnClient, ctx, request, LogIssuedAttachPublicIpJob)
+	if err != nil {
+		return err
+	}
+	if err := pollJob(gpcnClient, ctx, ActionAttachPublicIp, jobID); err != nil {
 		return err
 	}
 
@@ -177,7 +184,11 @@ func DetachPublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, p
 		return err
 	}
 
-	if err := issueJobAndPoll(gpcnClient, ctx, request, ActionDetachPublicIp, LogIssuedDetachPublicIpJob); err != nil {
+	jobID, err := issueJob(gpcnClient, ctx, request, LogIssuedDetachPublicIpJob)
+	if err != nil {
+		return err
+	}
+	if err := pollJob(gpcnClient, ctx, ActionDetachPublicIp, jobID); err != nil {
 		return err
 	}
 
@@ -195,7 +206,10 @@ func ReleasePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 		return err
 	}
 
-	err = issueJobAndPoll(gpcnClient, ctx, request, ActionReleasePublicIp, LogIssuedReleasePublicIpJob)
+	// Only the release request itself can report that the address is already
+	// gone. A 404 from the job poll is a routing failure, not an answer about
+	// the address.
+	jobID, err := issueJob(gpcnClient, ctx, request, LogIssuedReleasePublicIpJob)
 	if client.IsNotFound(err) {
 		tflog.Info(ctx, LogPublicIpAlreadyReleased)
 		return nil
@@ -203,34 +217,40 @@ func ReleasePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 	if err != nil {
 		return err
 	}
+	if err := pollJob(gpcnClient, ctx, ActionReleasePublicIp, jobID); err != nil {
+		return err
+	}
 
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyReleasedPublicIp, publicIpID))
 	return nil
 }
 
-// issueJobAndPoll sends a request whose 202 carries a job id, then waits for
-// that job. Attach, detach and release differ only in their route and verb.
-func issueJobAndPoll(gpcnClient *client.GpcnClient, ctx context.Context, request *http.Request, action, issuedMessage string) error {
+// issueJob sends a request whose 202 carries a job id and returns that id.
+// Attach, detach and release differ only in their route and verb.
+func issueJob(gpcnClient *client.GpcnClient, ctx context.Context, request *http.Request, issuedMessage string) (string, error) {
 	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer response.Body.Close()
 	tflog.Info(ctx, issuedMessage)
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	var jobResponse client.JobStatusSingularResponse
 	if err := json.Unmarshal(body, &jobResponse); err != nil {
-		return err
+		return "", err
 	}
 
-	if _, err := client.PerformLongPolling(gpcnClient, ctx, action, jobResponse.Data.JobID); err != nil {
+	return jobResponse.Data.JobID, nil
+}
+
+func pollJob(gpcnClient *client.GpcnClient, ctx context.Context, action, jobID string) error {
+	if _, err := client.PerformLongPolling(gpcnClient, ctx, action, jobID); err != nil {
 		return fmt.Errorf("%s polling failed: %w", action, err)
 	}
-
 	return nil
 }

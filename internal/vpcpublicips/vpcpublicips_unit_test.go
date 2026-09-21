@@ -396,3 +396,62 @@ func TestMapPublicIpResponseToModelFillsAttachedMachineUnit(t *testing.T) {
 		t.Fatalf("Expected held to be false for an attached address")
 	}
 }
+
+// Only the release itself can report that the address is already gone. A 404
+// from the job poll is a routing failure, and reporting success there would
+// leave a billable address behind.
+func TestReleasePublicIpReportsNotFoundFromTheJobPollMockHTTP(t *testing.T) {
+	t.Parallel()
+	releasePath := "/v1/resource/vpcs/" + testVpcID + "/public-ips/" + testPublicIpID
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodDelete && r.URL.Path == releasePath {
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"message": "Operation initiated successfully",
+					"data":    map[string]any{"jobId": testJobID},
+				})
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+			testutil.WriteJSONResponse(w, map[string]any{
+				"success": false,
+				"message": "Not Found",
+				"error":   map[string]any{"code": "RESOURCE_NOT_FOUND", "statusCode": 404, "details": nil},
+			})
+		},
+	})
+
+	if err := ReleasePublicIp(gpcnClient, context.Background(), testVpcID, testPublicIpID); err == nil {
+		t.Fatalf("Expected an error when the job poll answers 404, got none")
+	}
+}
+
+// A listing that always claims another page must not read as an absent address.
+// A not-found there would drop a live address out of state.
+func TestGetPublicIpFailsRatherThanReportNotFoundAtThePageCapMockHTTP(t *testing.T) {
+	t.Parallel()
+	listPath := "/v1/resource/vpcs/" + testVpcID + "/public-ips"
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodGet || r.URL.Path != listPath {
+				testutil.LogUnexpectedRequest(t, w, r)
+				return
+			}
+			body := listBody([]map[string]any{publicIpRow("other-id", nil, nil)}, 1, 2)
+			meta, _ := body["meta"].(map[string]any)
+			meta["hasNextPage"] = true
+			testutil.WriteJSONResponse(w, body)
+		},
+	})
+
+	_, err := GetPublicIp(gpcnClient, context.Background(), testVpcID, testPublicIpID)
+	if err == nil {
+		t.Fatalf("Expected an error when the listing never ends, got none")
+	}
+	if client.IsNotFound(err) {
+		t.Fatalf("Expected an error that is not a not-found, got: %v", err)
+	}
+}
