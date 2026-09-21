@@ -287,6 +287,10 @@ func TestVpcSubnetResourcePlanCreateReadRenameRebind(t *testing.T) {
 				ImportState:       true,
 				ImportStateId:     subnetPlanTestVpcID + "/" + subnetPlanTestID,
 				ImportStateVerify: true,
+				// R69 fills the prefix from the imported CIDR, and this subnet
+				// named its CIDR, so the import adds a prefix the create left
+				// null. The steward holds an open ruling on that cost.
+				ImportStateVerifyIgnore: []string{"prefix"},
 			},
 		},
 	})
