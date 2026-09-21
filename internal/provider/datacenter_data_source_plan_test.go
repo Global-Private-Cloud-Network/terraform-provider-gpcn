@@ -51,6 +51,10 @@ func (rec *datacenterPlanTestRecorder) snapshot() (paths []string, queries []str
 }
 
 func datacenterPlanTestRow(id, name, regionName string, gpuEnabled bool) map[string]any {
+	return datacenterPlanTestCapabilityRow(id, name, regionName, gpuEnabled, true, true)
+}
+
+func datacenterPlanTestCapabilityRow(id, name, regionName string, gpuEnabled, vpcCapable, l2Capable bool) map[string]any {
 	return map[string]any{
 		"id":                  id,
 		"name":                name,
@@ -63,9 +67,9 @@ func datacenterPlanTestRow(id, name, regionName string, gpuEnabled bool) map[str
 		"continentCode":       "NA",
 		"continentName":       "North America",
 		"gpuEnabled":          gpuEnabled,
-		"vpcCapable":          true,
+		"vpcCapable":          vpcCapable,
 		"customImages":        true,
-		"l2Capable":           true,
+		"l2Capable":           l2Capable,
 	}
 }
 
@@ -514,4 +518,101 @@ func TestDatacentersGetDatacentersFlagsTruncation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDatacentersDataSourceMapsCapabilityFlags(t *testing.T) {
+	t.Parallel()
+
+	// The two rows disagree on both flags, so a mapping that reads the wrong key
+	// cannot pass by accident.
+	server, rec := startDatacenterPlanMockServer(t, func(_ *http.Request) map[string]any {
+		return datacenterPlanTestBody([]map[string]any{
+			datacenterPlanTestCapabilityRow("dc-1", "Chicago", datacenterPlanTestRegionAlpha, true, true, false),
+			datacenterPlanTestCapabilityRow("dc-2", "Dallas", datacenterPlanTestRegionBeta, true, false, true),
+		}, 1, 1)
+	})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: datacenterPlanTestConfig(server.URL, ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.#", "2"),
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.0.vpc_capable", "true"),
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.0.l2_capable", "false"),
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.1.vpc_capable", "false"),
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.1.l2_capable", "true"),
+				),
+			},
+		},
+	})
+
+	datacenterPlanTestAssertOnlyListPath(t, rec)
+}
+
+func TestDatacentersDataSourceFiltersVpcCapableServerSide(t *testing.T) {
+	t.Parallel()
+
+	// The row contradicts both filters, so a client-side filter on either one
+	// would drop it.
+	server, rec := startDatacenterPlanMockServer(t, func(_ *http.Request) map[string]any {
+		return datacenterPlanTestBody([]map[string]any{
+			datacenterPlanTestCapabilityRow("dc-1", "Chicago", datacenterPlanTestRegionAlpha, true, false, true),
+		}, 1, 1)
+	})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: datacenterPlanTestConfig(server.URL, "  vpc_capable = true\n  l2_capable  = false\n"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.#", "1"),
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.0.id", "dc-1"),
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.0.vpc_capable", "false"),
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.0.l2_capable", "true"),
+				),
+			},
+		},
+	})
+
+	datacenterPlanTestAssertOnlyListPath(t, rec)
+
+	_, queries := rec.snapshot()
+	for _, query := range queries {
+		if !strings.Contains(query, "vpcCapable=true") {
+			t.Errorf("query %q does not carry vpcCapable=true", query)
+		}
+		if !strings.Contains(query, "l2Capable=false") {
+			t.Errorf("query %q does not carry l2Capable=false", query)
+		}
+	}
+}
+
+func TestDatacentersDataSourceDoesNotBlameGpuEnabledForCapabilityMiss(t *testing.T) {
+	t.Parallel()
+
+	// Only vpc_capable matches no row. The probe must carry it, or the
+	// suggestion accuses gpu_enabled of a miss it did not cause.
+	server, rec := startDatacenterPlanMockServer(t, func(r *http.Request) map[string]any {
+		if r.URL.Query().Get("vpcCapable") != "" {
+			return datacenterPlanTestBody([]map[string]any{}, 1, 1)
+		}
+		return datacenterPlanTestBody([]map[string]any{
+			datacenterPlanTestCapabilityRow("dc-1", "Chicago", datacenterPlanTestRegionAlpha, true, false, true),
+		}, 1, 1)
+	})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      datacenterPlanTestConfig(server.URL, "  gpu_enabled = true\n  vpc_capable = true\n"),
+				ExpectError: regexp.MustCompile("(?s)Some possible.*values are.*" + datacenterPlanTestRegionAlpha),
+			},
+		},
+	})
+
+	datacenterPlanTestAssertOnlyListPath(t, rec)
 }

@@ -49,6 +49,16 @@ data "gpcn_datacenters" "custom_image_capable" {
   custom_images = true
 }
 
+# Example 7: Query datacenters that offer VPC networking
+data "gpcn_datacenters" "vpc_capable" {
+  vpc_capable = true
+}
+
+# Example 8: Query datacenters that offer layer-2 segments
+data "gpcn_datacenters" "l2_capable" {
+  l2_capable = true
+}
+
 # Output the first datacenter ID from East US
 output "east_us_datacenter_id" {
   description = "ID of the first datacenter in East US"
@@ -77,4 +87,16 @@ output "gpu_capable_datacenter_ids" {
 output "custom_image_datacenter_ids" {
   description = "IDs of all datacenters that support custom images"
   value       = [for dc in data.gpcn_datacenters.custom_image_capable.datacenters : dc.id]
+}
+
+# Output all datacenters that offer VPC networking
+output "vpc_capable_datacenter_ids" {
+  description = "IDs of all datacenters that offer VPC networking"
+  value       = [for dc in data.gpcn_datacenters.vpc_capable.datacenters : dc.id]
+}
+
+# Output all datacenters that offer layer-2 segments
+output "l2_capable_datacenter_ids" {
+  description = "IDs of all datacenters that offer layer-2 segments"
+  value       = [for dc in data.gpcn_datacenters.l2_capable.datacenters : dc.id]
 }
