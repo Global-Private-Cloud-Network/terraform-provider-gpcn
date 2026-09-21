@@ -36,11 +36,11 @@ const (
 
 // l2PlanTestDetailBody answers with the detail projection. The description is the
 // one nullable field the provider normalizes, so the fixture leaves it null.
-func l2PlanTestDetailBody(name string, description any) map[string]any {
-	return l2PlanTestDetailBodyInState(name, description, "ready", nil)
+func l2PlanTestDetailBody(name string, description any, nicCount int64) map[string]any {
+	return l2PlanTestDetailBodyInState(name, description, "ready", nil, nicCount)
 }
 
-func l2PlanTestDetailBodyInState(name string, description any, segmentState string, failureReason any) map[string]any {
+func l2PlanTestDetailBodyInState(name string, description any, segmentState string, failureReason any, nicCount int64) map[string]any {
 	return map[string]any{
 		"success": true,
 		"message": "",
@@ -54,7 +54,7 @@ func l2PlanTestDetailBodyInState(name string, description any, segmentState stri
 			"state":            segmentState,
 			"offering":         "plain",
 			"failureReason":    failureReason,
-			"attachedNicCount": 0,
+			"attachedNicCount": nicCount,
 			"createdAt":        l2PlanTestTimestamp,
 			"updatedAt":        l2PlanTestTimestamp,
 		},
@@ -87,6 +87,10 @@ type l2PlanTestServer struct {
 	// segmentState and failureReason are what the platform parked on the row.
 	segmentState  string
 	failureReason any
+	// nicCount is the live interface count the platform reports. attachedOnUpdate
+	// is an attach that lands while the apply runs, after the plan was made.
+	nicCount         int64
+	attachedOnUpdate *int64
 	// refusalsLeft counts the deletes that answer with the in-use refusal. The
 	// test framework destroys once more after a failed step, and that destroy
 	// has to succeed or the run leaves the case red for the wrong reason.
@@ -111,6 +115,14 @@ func (s *l2PlanTestServer) parkFailed(reason string) {
 	defer s.mu.Unlock()
 	s.segmentState = l2PlanTestFailedState
 	s.failureReason = reason
+}
+
+// attachNicDuringUpdate moves the count between the plan and the apply. Only the
+// update answer carries the new count, so the plan cannot have seen it.
+func (s *l2PlanTestServer) attachNicDuringUpdate(count int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.attachedOnUpdate = &count
 }
 
 func (s *l2PlanTestServer) setName(name string) {
@@ -145,8 +157,9 @@ func startL2SegmentPlanMockServer(t *testing.T) (*httptest.Server, *l2PlanTestSe
 			state.mu.Lock()
 			name, description := state.name, state.description
 			segmentState, failureReason := state.segmentState, state.failureReason
+			nicCount := state.nicCount
 			state.mu.Unlock()
-			testutil.WriteJSONResponse(w, l2PlanTestDetailBodyInState(name, description, segmentState, failureReason))
+			testutil.WriteJSONResponse(w, l2PlanTestDetailBodyInState(name, description, segmentState, failureReason, nicCount))
 		case r.Method == http.MethodPut && r.URL.Path == segmentPath:
 			body := testutil.ReadRequestBody(r)
 			state.mu.Lock()
@@ -157,9 +170,13 @@ func startL2SegmentPlanMockServer(t *testing.T) (*httptest.Server, *l2PlanTestSe
 			if description, present := body["description"]; present {
 				state.description = description
 			}
-			name, description := state.name, state.description
+			if state.attachedOnUpdate != nil {
+				state.nicCount = *state.attachedOnUpdate
+				state.attachedOnUpdate = nil
+			}
+			name, description, nicCount := state.name, state.description, state.nicCount
 			state.mu.Unlock()
-			testutil.WriteJSONResponse(w, l2PlanTestDetailBody(name, description))
+			testutil.WriteJSONResponse(w, l2PlanTestDetailBody(name, description, nicCount))
 		case r.Method == http.MethodDelete && r.URL.Path == segmentPath:
 			state.mu.Lock()
 			refuse := state.refusalsLeft > 0
@@ -257,6 +274,37 @@ func TestL2SegmentResourcePlanCreateRenameDestroy(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnL2SegmentTest, "name", l2PlanTestRenamedName),
 					checkUpdateBody,
+				),
+			},
+		},
+	})
+}
+
+// The interface count is live. A NIC that lands between the plan and the apply
+// must not fail the apply, so the attribute plans unknown.
+func TestL2SegmentResourcePlanAcceptsNicCountMovedDuringApply(t *testing.T) {
+	t.Parallel()
+	server, state := startL2SegmentPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: l2PlanTestConfig(server.URL, l2PlanTestName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnL2SegmentTest, "attached_nic_count", "0"),
+				),
+			},
+			{
+				PreConfig: func() { state.attachNicDuringUpdate(2) },
+				Config:    l2PlanTestConfig(server.URL, l2PlanTestRenamedName),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnL2SegmentTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnL2SegmentTest, "attached_nic_count", "2"),
 				),
 			},
 		},
@@ -375,7 +423,7 @@ func TestL2SegmentReadWarnsOnFailedSegmentUnit(t *testing.T) {
 		T: t,
 		Handler: func(w http.ResponseWriter, _ *http.Request) {
 			testutil.WriteJSONResponse(w, l2PlanTestDetailBodyInState(
-				l2PlanTestName, nil, l2PlanTestFailedState, l2PlanTestFailedReason,
+				l2PlanTestName, nil, l2PlanTestFailedState, l2PlanTestFailedReason, 0,
 			))
 		},
 	})

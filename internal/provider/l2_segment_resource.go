@@ -11,7 +11,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/int64planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
@@ -96,11 +95,10 @@ func (r *l2SegmentResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Computed:    true,
 			},
 			"attached_nic_count": schema.Int64Attribute{
+				// The count is live, and it carries no plan modifier. A pinned
+				// count that moves during the apply fails the apply.
 				Description: "The number of live network interfaces currently attached to this L2 segment",
 				Computed:    true,
-				PlanModifiers: []planmodifier.Int64{
-					int64planmodifier.UseStateForUnknown(),
-				},
 			},
 			"created_time": schema.StringAttribute{
 				Description: "Timestamp when the L2 segment was created",
