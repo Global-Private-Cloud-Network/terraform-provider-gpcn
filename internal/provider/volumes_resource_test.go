@@ -65,12 +65,10 @@ func TestVolumesResource(t *testing.T) {
 			},
 			// ImportState testing
 			{
-				ResourceName:      gpcnVolumeTest,
-				ImportState:       true,
-				ImportStateVerify: true,
-				// An import writes the component code, and this configuration
-				// spells the same storage class by its display name.
-				ImportStateVerifyIgnore: []string{"created_time", "last_updated", "volume_type"},
+				ResourceName:            gpcnVolumeTest,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"created_time", "last_updated"},
 			},
 			// Update and Read testing with little changes
 			// Increasing the size does not result in a replace
