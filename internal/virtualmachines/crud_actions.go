@@ -242,6 +242,25 @@ func UpdateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, vi
 	return nil
 }
 
+// The Delete path must separate a dead virtual machine from every other poll
+// failure. A typed error carries that fact, so no caller reads the message bytes.
+type terminalStatusError struct {
+	vmID    string
+	status  string
+	targets []string
+}
+
+func (e *terminalStatusError) Error() string {
+	return fmt.Sprintf(ErrDetailVMTerminalStatus, e.vmID, e.status, strings.Join(e.targets, ", "))
+}
+
+// IsTerminalStatusError reports whether the poller gave up because the virtual
+// machine reached a status it never leaves.
+func IsTerminalStatusError(err error) bool {
+	var terminalErr *terminalStatusError
+	return errors.As(err, &terminalErr)
+}
+
 func isTerminalFailureStatus(status string) bool {
 	return slices.ContainsFunc(vmTerminalFailureStatuses, func(terminal VMStatus) bool {
 		return strings.EqualFold(status, terminal.String())
@@ -285,7 +304,7 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 			break
 		}
 		if isTerminalFailureStatus(getResp.Data.Status) {
-			pollErr = fmt.Errorf(ErrDetailVMTerminalStatus, virtualMachineId, getResp.Data.Status, strings.Join(targetStatuses, ", "))
+			pollErr = &terminalStatusError{vmID: virtualMachineId, status: getResp.Data.Status, targets: targetStatuses}
 			break
 		}
 		time.Sleep(VM_STATUS_POLL_INTERVAL)

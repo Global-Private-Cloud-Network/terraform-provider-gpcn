@@ -979,6 +979,71 @@ func TestPollForVirtualMachineStatusKeepsPollingOnUnknown(t *testing.T) {
 	}
 }
 
+func TestIsTerminalStatusError(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	const vmID = "vm-terminal-check-123"
+
+	terminalServer, terminalClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			resp := newVMResponse(vmID, "test-vm")
+			resp.Data.Status = VMStatusDestroyed.String()
+			testutil.WriteJSONResponse(w, resp)
+		},
+	})
+	defer terminalServer.Close()
+
+	_, terminalErr := PollForVirtualMachineStatus(terminalClient, context.Background(), vmID, []string{VMStatusRunning.String()}, 3, 0)
+	if terminalErr == nil {
+		t.Fatal("Expected a terminal status error, got nil")
+	}
+	if !IsTerminalStatusError(terminalErr) {
+		t.Errorf("Expected IsTerminalStatusError to report the poller's terminal error, got false for '%v'", terminalErr)
+	}
+	if !IsTerminalStatusError(fmt.Errorf("stop virtual machine: %w", terminalErr)) {
+		t.Error("Expected IsTerminalStatusError to see through a wrapping error")
+	}
+	expectedMessage := fmt.Sprintf(ErrDetailVMTerminalStatus, vmID, VMStatusDestroyed.String(), VMStatusRunning.String())
+	if terminalErr.Error() != expectedMessage {
+		t.Errorf("Expected error '%s', got '%s'", expectedMessage, terminalErr.Error())
+	}
+
+	stuckServer, stuckClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			resp := newVMResponse(vmID, "test-vm")
+			resp.Data.Status = VMStatusProvisioning.String()
+			testutil.WriteJSONResponse(w, resp)
+		},
+	})
+	defer stuckServer.Close()
+
+	_, timeoutErr := PollForVirtualMachineStatus(stuckClient, context.Background(), vmID, []string{VMStatusRunning.String()}, 1, 0)
+	if timeoutErr == nil {
+		t.Fatal("Expected a timeout error, got nil")
+	}
+	if IsTerminalStatusError(timeoutErr) {
+		t.Errorf("Expected IsTerminalStatusError to reject the timeout error, got true for '%v'", timeoutErr)
+	}
+
+	missingServer, missingClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"virtual machine not found"}`))
+		},
+	})
+	defer missingServer.Close()
+
+	_, notFoundErr := PollForVirtualMachineStatus(missingClient, context.Background(), vmID, []string{VMStatusRunning.String()}, 3, 0)
+	if notFoundErr == nil {
+		t.Fatal("Expected a not found error, got nil")
+	}
+	if IsTerminalStatusError(fmt.Errorf("stop virtual machine: %w", notFoundErr)) {
+		t.Errorf("Expected IsTerminalStatusError to reject a wrapped not found error, got true for '%v'", notFoundErr)
+	}
+}
+
 func TestStopVirtualMachineAcceptsStopped(t *testing.T) {
 	useFastVMStatusPollInterval(t)
 	useNetworkTimeout(t, 2)
