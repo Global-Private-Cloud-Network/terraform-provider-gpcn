@@ -15,8 +15,8 @@ Manages a virtual machine instance with configurable compute resources, networki
 ```terraform
 # Example: Creating GPCN Virtual Machines
 #
-# This example demonstrates creating a virtual machine on an existing network,
-# with a volume attached. GPCN networking is VPC-based: create a gpcn_vpc and a gpcn_vpc_subnet first.
+# This example demonstrates creating a virtual machine on a VPC subnet,
+# with a volume attached.
 
 terraform {
   required_providers {
@@ -29,11 +29,6 @@ terraform {
 
 provider "gpcn" {
   host = "https://api.gpcn.com"
-}
-
-# The network the virtual machine is born on
-variable "network_id" {
-  type = string
 }
 
 # Lookup datacenter in Central US region
@@ -68,6 +63,19 @@ resource "gpcn_resource_group" "group_example" {
   name = "terraform-demo-group"
 }
 
+# The VPC and the subnet the virtual machine is born on
+resource "gpcn_vpc" "example" {
+  name          = "terraform-demo-vpc"
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+  cidr          = "10.112.0.0/16"
+}
+
+resource "gpcn_vpc_subnet" "example" {
+  vpc_id = gpcn_vpc.example.id
+  name   = "terraform-demo-subnet"
+  cidr   = "10.112.1.0/24"
+}
+
 # Create storage volume for the VM
 resource "gpcn_volume" "vm_storage" {
   name          = "vm-storage-primary"
@@ -87,9 +95,13 @@ resource "gpcn_virtualmachine" "example" {
 
   # Networking
   allocate_public_ip = false
-  network_ids = [
-    var.network_id
-  ]
+  subnet_id          = gpcn_vpc_subnet.example.id
+
+  # Needs a gpcn_l2_segment resource in this configuration:
+  # l2_segment_ids = [gpcn_l2_segment.example.id]
+
+  # Needs a held gpcn_vpc_public_ip resource in this configuration:
+  # public_ip_id   = gpcn_vpc_public_ip.example.id
 
   # Resource Group
   resource_group_id = gpcn_resource_group.group_example.id
@@ -113,16 +125,18 @@ resource "gpcn_volume_attachment" "vm_storage_attachment" {
 
 ### Required
 
-- `allocate_public_ip` (Boolean) Whether to allocate a public IP address for the virtual machine
 - `datacenter_id` (String) Unique identifier of the datacenter where the virtual machine will be created. Changing this value requires replacing the virtual machine
 - `image_id` (String) Unique identifier of the operating system image to use for the virtual machine. Use the gpcn_virtualmachine_images data source to look up the image ID. Changing this value requires replacing the virtual machine
 - `initial_auth` (Attributes) Initial authentication configuration for the virtual machine. Either ssh_key_id or password must be specified. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine (see [below for nested schema](#nestedatt--initial_auth))
 - `name` (String) Human-readable name for the virtual machine. Must be 1-60 characters, starting and ending with an alphanumeric character, containing only letters, digits, spaces, periods, and hyphens
 - `size_id` (String) Unique identifier (SKU ID) of the size to use for the virtual machine. Use the gpcn_virtualmachine_sizes data source to look up the size ID. Changing to a non-upgradeable size requires replacing the virtual machine
+- `subnet_id` (String) Unique identifier of the VPC subnet the virtual machine is born on. Use the gpcn_vpc_subnet resource to create one. A machine lives in exactly one VPC, so changing this value requires replacing the virtual machine
 
 ### Optional
 
-- `network_ids` (List of String) List of network IDs to attach to the virtual machine. Maximum of 5 networks allowed. The first in the list is considered the 'primary' and if removed, the next will take its place
+- `allocate_public_ip` (Boolean) Whether to acquire an elastic public IP on the VPC that holds the birth interface and attach it to that interface. Changing this value in place needs the vpc-public-ip:create, vpc-public-ip:update and vpc-public-ip:delete permissions. Destroying the virtual machine releases an address acquired this way. Never inferred on import: an imported machine records its address as public_ip_id, so destroying it leaves the address held
+- `l2_segment_ids` (List of String) IDs of the L2 segments the virtual machine carries. They attach after the machine is created, and the machine is stopped for a change unless its image supports network hotplug. Maximum of 4, because the birth subnet interface holds one of the five interfaces GPCN allows
+- `public_ip_id` (String) ID of a held gpcn_vpc_public_ip to attach to the primary interface. Cannot be set together with allocate_public_ip. The address outlives the virtual machine, because the operator holds it. An import fills this from the address the primary interface carries. Name this address in the configuration after an import; otherwise the next apply detaches it. Import that address as a gpcn_vpc_public_ip too when Terraform should own its release
 - `resource_group_id` (String) Optional ID of the resource group to assign this virtual machine to
 
 ### Read-Only
@@ -134,7 +148,7 @@ resource "gpcn_volume_attachment" "vm_storage_attachment" {
 - `location` (Map of String) Location details including datacenter, region, and country information
 - `network_hotplug` (Boolean) Whether the virtual machine supports hot modifications without the virtual machine being in Shutoff status
 - `network_interfaces` (Attributes List) The network interfaces attached to the virtual machine, one per attached network (see [below for nested schema](#nestedatt--network_interfaces))
-- `public_ip` (String) The public IP address, if allocate_public_ip is True
+- `public_ip` (String) The public IP address on the primary interface. Null while the machine holds no address
 
 <a id="nestedatt--initial_auth"></a>
 ### Nested Schema for `initial_auth`
@@ -154,17 +168,25 @@ Optional:
 
 Read-Only:
 
-- `cidr_block` (String) The CIDR block of the attached network
-- `gateway_ip` (String) The gateway IP address of the attached network
+- `cidr_block` (String) The CIDR block of the attached legacy network or VPC subnet. Null when world is 'l2'
+- `gateway_ip` (String) The gateway IP address of the attached legacy network. Null unless world is 'legacy'
 - `id` (String) The ID of the network interface
 - `is_primary` (Boolean) Whether this is the primary interface
-- `network_id` (String) The ID of the attached network
+- `l2_segment_id` (String) The ID of the L2 segment the interface attaches to. Null unless world is 'l2'
+- `l2_segment_name` (String) The name of the L2 segment the interface attaches to. Null unless world is 'l2'
+- `mac_address` (String) The MAC address of the interface. Null while the platform has not materialized the port
+- `network_id` (String) The ID of the attached legacy network. Null unless world is 'legacy'
 - `network_interface` (Number) The interface index on the virtual machine
-- `network_name` (String) The name of the attached network
-- `network_type` (String) The type of the attached network
-- `private_ip` (String) The private IP address on the interface
+- `network_name` (String) The name of the attached legacy network. Null unless world is 'legacy'
+- `network_type` (String) The type of the attached legacy network. Null unless world is 'legacy'
+- `private_ip` (String) The private IP address on the interface. Null when world is 'l2', because a segment has no subnet to draw an address from
 - `public_ip` (String) The public IP address on the interface, if one is allocated
-- `public_ip_id` (String) The ID of the allocated public IP address, if one is allocated
+- `public_ip_id` (String) The ID of the allocated public IP address, if one is allocated. On a 'vpc' interface this is a gpcn_vpc_public_ip ID
+- `subnet_name` (String) The name of the VPC subnet the interface attaches to. Null unless world is 'vpc'
+- `vpc_id` (String) The ID of the VPC that holds the subnet. Null unless world is 'vpc'
+- `vpc_name` (String) The name of the VPC that holds the subnet. Null unless world is 'vpc'
+- `vpc_subnet_id` (String) The ID of the VPC subnet the interface attaches to. Null unless world is 'vpc'
+- `world` (String) The kind of network the interface attaches to: 'legacy', 'vpc' or 'l2'. The identity attributes below are per world
 
 ## Import
 
