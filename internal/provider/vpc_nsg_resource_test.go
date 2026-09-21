@@ -12,7 +12,9 @@ import (
 
 // vpcNsgAccTestConfig builds a group inside a VPC the same configuration
 // creates. A group has no datacenter of its own, so the VPC is what places it.
-func vpcNsgAccTestConfig(vpcName, nsgName, rules string) string {
+// The caller draws the range, because the overlap check covers the whole
+// entity.
+func vpcNsgAccTestConfig(vpcName, vpcCidr, nsgName, rules string) string {
 	return providerConfig + fmt.Sprintf(`
 data "gpcn_datacenters" "test" {
   name = "Chicago"
@@ -21,7 +23,7 @@ data "gpcn_datacenters" "test" {
 resource "gpcn_vpc" "test" {
   name          = %q
   datacenter_id = data.gpcn_datacenters.test.datacenters[0].id
-  cidr          = "10.61.0.0/16"
+  cidr          = %q
 }
 
 resource "gpcn_vpc_nsg" "test" {
@@ -30,7 +32,7 @@ resource "gpcn_vpc_nsg" "test" {
   description = "Created by acceptance tests"
 %s
 }
-`, vpcName, nsgName, rules)
+`, vpcName, vpcCidr, nsgName, rules)
 }
 
 const (
@@ -43,13 +45,18 @@ const (
     remote_cidr    = "0.0.0.0/0"
     description    = "https"
   }`
-	vpcNsgAccTestRulePing = `
+)
+
+// vpcNsgAccTestRulePing admits ping from inside the VPC, so it needs the range
+// the case drew.
+func vpcNsgAccTestRulePing(vpcCidr string) string {
+	return fmt.Sprintf(`
   rule {
     direction   = "ingress"
     protocol    = "icmp"
-    remote_cidr = "10.61.0.0/16"
-  }`
-)
+    remote_cidr = %q
+  }`, vpcCidr)
+}
 
 func TestVpcNsgResource(t *testing.T) {
 	t.Parallel()
@@ -57,12 +64,16 @@ func TestVpcNsgResource(t *testing.T) {
 	vpcName := fmt.Sprintf("tf-vpc-%s", suffix)
 	nsgName := fmt.Sprintf("tf-nsg-%s", suffix)
 	nsgNameUpdated := fmt.Sprintf("tf-nsg-updated-%s", suffix)
+	// This test function owns the window at base 96.
+	n := acctest.RandIntRange(0, 16)
+	vpcCidr := fmt.Sprintf("10.%d.0.0/16", 96+n)
+	pingRule := vpcNsgAccTestRulePing(vpcCidr)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: vpcNsgAccTestConfig(vpcName, nsgName, vpcNsgAccTestRuleHTTPS),
+				Config: vpcNsgAccTestConfig(vpcName, vpcCidr, nsgName, vpcNsgAccTestRuleHTTPS),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVpcNsgTest, plancheck.ResourceActionCreate),
@@ -81,7 +92,7 @@ func TestVpcNsgResource(t *testing.T) {
 			{
 				// One apply carries a rename and a rule addition. The rename is
 				// synchronous, and the rules replace runs as a job.
-				Config: vpcNsgAccTestConfig(vpcName, nsgNameUpdated, vpcNsgAccTestRuleHTTPS+vpcNsgAccTestRulePing),
+				Config: vpcNsgAccTestConfig(vpcName, vpcCidr, nsgNameUpdated, vpcNsgAccTestRuleHTTPS+pingRule),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVpcNsgTest, plancheck.ResourceActionUpdate),
@@ -95,7 +106,7 @@ func TestVpcNsgResource(t *testing.T) {
 			},
 			{
 				// Dropping a rule proves the replace carries the whole set.
-				Config: vpcNsgAccTestConfig(vpcName, nsgNameUpdated, vpcNsgAccTestRulePing),
+				Config: vpcNsgAccTestConfig(vpcName, vpcCidr, nsgNameUpdated, pingRule),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "rule.#", "1"),
 					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "rule_count", "1"),

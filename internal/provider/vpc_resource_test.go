@@ -27,8 +27,9 @@ func TestVpcResource(t *testing.T) {
 	vpcName := fmt.Sprintf("vpc-basic-%s", rName)
 	vpcNameUpdated := fmt.Sprintf("vpc-basic-updated-%s", rName)
 	// The overlap check covers the whole entity and the repo has no sweepers.
-	// One fixed range fails every run after the first.
-	n := acctest.RandIntRange(0, 64)
+	// One fixed range fails every run after the first. Each test function draws
+	// inside its own 16-wide window, so parallel cases never collide.
+	n := acctest.RandIntRange(0, 16)
 	vpcCidr := fmt.Sprintf("10.%d.0.0/16", 64+n)
 
 	resource.Test(t, resource.TestCase{

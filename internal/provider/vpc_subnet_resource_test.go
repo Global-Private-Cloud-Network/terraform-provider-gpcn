@@ -41,9 +41,11 @@ func TestVpcSubnetResource(t *testing.T) {
 	vpcName := fmt.Sprintf("tf-vpc-%s", suffix)
 	subnetName := fmt.Sprintf("tf-subnet-%s", suffix)
 	subnetNameUpdated := fmt.Sprintf("tf-subnet-updated-%s", suffix)
-	n := acctest.RandIntRange(0, 64)
-	vpcCidr := fmt.Sprintf("10.%d.0.0/16", 64+n)
-	subnetCidr := fmt.Sprintf("10.%d.1.0/24", 64+n)
+	// This test function owns the window at base 80. The overlap check covers
+	// the whole entity, so each function draws inside its own window.
+	n := acctest.RandIntRange(0, 16)
+	vpcCidr := fmt.Sprintf("10.%d.0.0/16", 80+n)
+	subnetCidr := fmt.Sprintf("10.%d.1.0/24", 80+n)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
