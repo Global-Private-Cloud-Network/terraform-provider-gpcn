@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -673,7 +674,23 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 		}
 	}
 
-	request, err := http.NewRequestWithContext(ctx, "DELETE", virtualmachines.BASE_URL_V1+state.ID.ValueString(), nil)
+	// GPCN keeps the addresses a deleted machine carried unless the delete asks for
+	// them back. Terraform destroys the address it acquired and leaves a held
+	// public_ip_id to the operator who holds it.
+	var deleteRequestBody io.Reader
+	if state.AllocatePublicIp.ValueBool() {
+		jsonDeleteRequestBody, err := json.Marshal(map[string]any{"releasePublicIps": true})
+		if err != nil {
+			resp.Diagnostics.AddError(
+				virtualmachines.ErrSummaryUnableToCreateDeleteRequest,
+				err.Error(),
+			)
+			return
+		}
+		deleteRequestBody = bytes.NewBuffer(jsonDeleteRequestBody)
+	}
+
+	request, err := http.NewRequestWithContext(ctx, "DELETE", virtualmachines.BASE_URL_V1+state.ID.ValueString(), deleteRequestBody)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToCreateDeleteRequest,

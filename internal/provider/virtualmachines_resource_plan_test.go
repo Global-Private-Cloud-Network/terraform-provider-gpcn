@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -1559,4 +1560,121 @@ func TestVirtualMachineResourcePlanAttachesAndDetachesAHeldAddress(t *testing.T)
 			},
 		},
 	})
+}
+
+// startVirtualMachineDestroyBodyMockServer keeps whichever address the create asked for
+// and records the body of the delete. A test then reads what the destroy asked GPCN to
+// do with that address.
+func startVirtualMachineDestroyBodyMockServer(t *testing.T) (*httptest.Server, func() (string, bool)) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	status := virtualmachines.VMStatusRunning.String()
+	boundID := ""
+	boundAddress := ""
+	deleteBody := ""
+	deleted := false
+
+	addressesPath := "/v1/resource/vpcs/" + vmPlanTestVpcID + "/public-ips"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			status = virtualmachines.VMStatusRunning.String()
+			if acquire, ok := body["acquirePublicIp"].(bool); ok && acquire {
+				boundID, boundAddress = vmPlanTestAcquiredIpID, vmPlanTestAcquiredIpAddress
+			}
+			if held, ok := body["publicIpId"].(string); ok && held != "" {
+				boundID, boundAddress = held, vmPlanTestHeldIpAddress
+			}
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case strings.HasPrefix(r.URL.Path, addressesPath):
+			t.Errorf("Expected no address verb during the destroy, got %s %s", r.Method, r.URL.Path)
+			testutil.HandleCreateJobResponse(w, "job-ip", "address issued")
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mu.Lock()
+			currentID, currentAddress := boundID, boundAddress
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPublicIpPlanTestInterfacesBody(currentID, currentAddress))
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, vmPlanTestSizeID))
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			raw, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			deleteBody = string(raw)
+			deleted = true
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	recorded := func() (string, bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		return deleteBody, deleted
+	}
+
+	return server, recorded
+}
+
+// A destroy gives back only what Terraform acquired. An address the operator holds
+// survives the machine, so the delete that carries one names no disposition at all and
+// GPCN keeps it.
+func TestVirtualMachineResourcePlanDestroyReleasesAcquiredIp(t *testing.T) {
+	tests := []struct {
+		name       string
+		allocate   bool
+		publicIpID string
+		wantBody   string
+	}{
+		{"an acquired address is released", true, "", `{"releasePublicIps":true}`},
+		{"a held address is kept", false, vmPlanTestHeldIpID, ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			shortenVirtualMachinePolling(t)
+			server, recorded := startVirtualMachineDestroyBodyMockServer(t)
+
+			config := vmPublicIpPlanTestConfig(server.URL, "vm-plan-destroy-address", tc.allocate, tc.publicIpID)
+
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{Config: config},
+					{Config: config, Destroy: true},
+				},
+			})
+
+			body, deleted := recorded()
+			if !deleted {
+				t.Fatal("Expected the machine to be deleted")
+			}
+			if body != tc.wantBody {
+				t.Errorf("Expected the delete body '%s', got '%s'", tc.wantBody, body)
+			}
+		})
+	}
 }
