@@ -27,6 +27,7 @@ const (
 	vmPlanTestID           = "vm-1"
 	vmPlanTestDatacenterID = "dc-1"
 	vmPlanTestSizeID       = "sku-1"
+	vmPlanTestSizeID2      = "sku-2"
 	vmPlanTestSizeCode     = "G-Small-1"
 	vmPlanTestImageID      = "img-1"
 	vmPlanTestImageName    = "ubuntu-22.04"
@@ -324,6 +325,153 @@ func TestVirtualMachineResourcePlanIgnoresOutOfBandResize(t *testing.T) {
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "size_id", vmPlanTestSizeID),
+				),
+			},
+		},
+	})
+}
+
+// startVirtualMachineSizeMockServer keeps the SKU that the machine detail reports and
+// counts the resize calls. A test moves the live SKU to stand for a resize that the
+// platform already took. The sizes arm reports no upgrade target, which is the answer
+// GPCN gives once the machine carries the planned SKU.
+func startVirtualMachineSizeMockServer(t *testing.T) (*httptest.Server, func(string), func() int) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	birthSubnetID := ""
+	skuId := vmPlanTestSizeID
+	resizeCount := 0
+	status := virtualmachines.VMStatusRunning.String()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			birthSubnetID, _ = body["subnetId"].(string)
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPut && r.URL.Path == vmPlanTestPath+"/size":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			resizeCount++
+			if requested, ok := body["skuId"].(string); ok {
+				skuId = requested
+			}
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-5", "resize issued")
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mu.Lock()
+			currentSubnet := birthSubnetID
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestNetworkInterfacesBody(currentSubnet))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus, currentSku := name, status, skuId
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, currentSku))
+		case r.Method == http.MethodPut && r.URL.Path == vmPlanTestPath:
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			if updated, ok := body["name"].(string); ok {
+				name = updated
+			}
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	setSkuId := func(newSkuId string) {
+		mu.Lock()
+		skuId = newSkuId
+		mu.Unlock()
+	}
+
+	resizes := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return resizeCount
+	}
+
+	return server, setSkuId, resizes
+}
+
+// vmSizePlanTestConfig names the SKU the configuration asks for.
+func vmSizePlanTestConfig(host, name, sizeID string) string {
+	return fmt.Sprintf(`
+provider "gpcn" {
+  host        = %q
+  api_key     = "test-key"
+  max_retries = 0
+}
+
+resource "gpcn_virtualmachine" "test" {
+  name               = %q
+  datacenter_id      = %q
+  size_id            = %q
+  image_id           = %q
+  allocate_public_ip = false
+  subnet_id          = %q
+  initial_auth = {
+    ssh_key_id = %q
+    username   = %q
+  }
+}
+`, host, name, vmPlanTestDatacenterID, sizeID, vmPlanTestImageID, vmPlanTestSubnetID, vmPlanTestSshKeyID, vmPlanTestUsername)
+}
+
+// A resize that the platform took before a failed read-back leaves state behind the
+// machine. GPCN keeps the current SKU out of its own upgrade list, so the next plan
+// proposed a replacement. The live SKU now answers the question, and the apply that
+// follows sends no resize.
+func TestVirtualMachineResourcePlanTreatsAnAppliedResizeAsDone(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, setSkuId, resizes := startVirtualMachineSizeMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmSizePlanTestConfig(server.URL, "vm-plan-applied-resize", vmPlanTestSizeID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "size_id", vmPlanTestSizeID),
+				),
+			},
+			{
+				PreConfig: func() { setSkuId(vmPlanTestSizeID2) },
+				Config:    vmSizePlanTestConfig(server.URL, "vm-plan-applied-resize", vmPlanTestSizeID2),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "size_id", vmPlanTestSizeID2),
+					func(*terraform.State) error {
+						if count := resizes(); count != 0 {
+							return fmt.Errorf("expected no resize call, got %d", count)
+						}
+						return nil
+					},
 				),
 			},
 		},

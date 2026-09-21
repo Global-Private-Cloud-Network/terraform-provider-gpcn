@@ -44,6 +44,7 @@ const (
 	LogSuccessfullyFinishedReadGPCNVirtualMachine   = "Successfully finished Read GPCN Virtual Machine"
 	LogStartingUpdateGPCNVirtualMachine             = "Starting Update GPCN Virtual Machine"
 	LogPerformingVirtualMachineResize               = "Performing Virtual Machine resize"
+	LogVirtualMachineAlreadyCarriesTheSize          = "The Virtual Machine already carries the planned size, skipping the resize"
 	LogAttributesChangedUpdatingVirtualMachine      = "Attributes have changed, updating Virtual Machine"
 	LogAllVMUpdateOpsCompleteRetrievingLatestInfo   = "All Virtual Machine update operations are completed, performing GET calls to retrieve latest info"
 	LogRetrievedLatestVMInfoMappingToModel          = "Retrieved latest Virtual Machine info, now mapping to model"

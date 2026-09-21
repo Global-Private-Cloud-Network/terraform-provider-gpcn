@@ -793,6 +793,15 @@ func (r *virtualMachinesResource) ModifyPlan(ctx context.Context, req resource.M
 		return
 	}
 
+	// A read-back that failed after a resize leaves state behind the machine. GPCN keeps
+	// the current SKU out of its own upgrade list, so the list alone would answer with a
+	// replacement. A machine that already carries the planned SKU needs no change. An
+	// unreadable detail falls through to the list, which fails the plan on its own.
+	detail, detailErr := virtualmachines.GetVirtualMachine(r.client, ctx, state.ID.ValueString())
+	if detailErr == nil && detail.Data.Configuration.SkuId == plan.SizeId.ValueString() {
+		return
+	}
+
 	// Fetch only the sizes that are valid in-place upgrade targets for this VM
 	upgradeable, err := virtualmachinesizes.FetchSizes(r.client, ctx, state.DatacenterId.ValueString(), state.ID.ValueString())
 	if err != nil {

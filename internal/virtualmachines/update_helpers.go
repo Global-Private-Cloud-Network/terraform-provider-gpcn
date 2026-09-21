@@ -220,6 +220,14 @@ func UpdateSizeIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmI
 		return diags
 	}
 
+	// The machine can already carry the planned SKU when a read-back failed after an
+	// earlier resize. GPCN answers 400 for a resize to the size the machine has.
+	live, liveErr := GetVirtualMachine(gpcnClient, ctx, vmID)
+	if liveErr == nil && live.Data.Configuration.SkuId == plan.SizeId.ValueString() {
+		tflog.Info(ctx, LogVirtualMachineAlreadyCarriesTheSize)
+		return diags
+	}
+
 	tflog.Info(ctx, LogPerformingVirtualMachineResize)
 	err := UpdateVirtualMachineSize(gpcnClient, ctx, vmID, plan.SizeId.ValueString())
 	if err != nil {
