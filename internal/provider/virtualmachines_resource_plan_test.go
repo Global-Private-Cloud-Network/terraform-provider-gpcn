@@ -292,7 +292,10 @@ func TestVirtualMachineResourcePlanIgnoresOutOfBandResize(t *testing.T) {
 	})
 }
 
-const vmPlanTestSecondNetworkID = "net-2"
+const (
+	vmPlanTestSecondNetworkID = "net-2"
+	vmPlanTestThirdNetworkID  = "net-3"
+)
 
 // vmAttachPlanTestNetworkInterfacesBody lists the birth interface and one row per
 // network that attached. A test can then observe the state a failed attach leaves behind.
@@ -673,10 +676,13 @@ func TestVirtualMachineResourcePlanCreateStopsForAttachWithoutHotplug(t *testing
 	tests := []struct {
 		name          string
 		hotplug       int
+		networkIDs    []string
 		expectStopped bool
 	}{
-		{"without hotplug the machine stops around the attach", 0, true},
-		{"with hotplug the machine stays running", 1, false},
+		// Three networks mean two attaches. A start after the first attach then differs
+		// from a start after the last one.
+		{"without hotplug the machine stops around the attach", 0, []string{vmPlanTestNetworkID, vmPlanTestSecondNetworkID, vmPlanTestThirdNetworkID}, true},
+		{"with hotplug the machine stays running", 1, []string{vmPlanTestNetworkID, vmPlanTestSecondNetworkID}, false},
 	}
 
 	for _, tc := range tests {
@@ -688,7 +694,7 @@ func TestVirtualMachineResourcePlanCreateStopsForAttachWithoutHotplug(t *testing
 				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 				Steps: []resource.TestStep{
 					{
-						Config: vmAttachPlanTestConfig(server.URL, "vm-plan-hotplug"),
+						Config: vmNetworkListPlanTestConfig(server.URL, "vm-plan-hotplug", tc.networkIDs...),
 						Check: func(*terraform.State) error {
 							sequence := recorded()
 							attach := indexOfRequest(sequence, "POST "+vmPlanTestPath+"/network-interfaces")
@@ -798,9 +804,9 @@ func startVirtualMachineFailedRestartMockServer(t *testing.T) *httptest.Server {
 	return server
 }
 
-// vmRestartPlanTestConfig asks for no retries, so the refused start fails on the first
-// call.
-func vmRestartPlanTestConfig(host, name string, networkIDs ...string) string {
+// vmNetworkListPlanTestConfig takes any number of networks, so a test can observe the
+// attach loop. It asks for no retries, so a refused call fails on the first attempt.
+func vmNetworkListPlanTestConfig(host, name string, networkIDs ...string) string {
 	quoted := make([]string, 0, len(networkIDs))
 	for _, networkID := range networkIDs {
 		quoted = append(quoted, fmt.Sprintf("%q", networkID))
@@ -839,7 +845,7 @@ func TestVirtualMachineResourcePlanCreateReportsFailedRestart(t *testing.T) {
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config:      vmRestartPlanTestConfig(server.URL, "vm-plan-restart-create", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
+				Config:      vmNetworkListPlanTestConfig(server.URL, "vm-plan-restart-create", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
 				ExpectError: regexp.MustCompile(`(?s)left\s+stopped.*did not start again`),
 			},
 			{
@@ -864,13 +870,13 @@ func TestVirtualMachineResourcePlanUpdateReportsFailedRestart(t *testing.T) {
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
-				Config: vmRestartPlanTestConfig(server.URL, "vm-plan-restart-update", vmPlanTestNetworkID),
+				Config: vmNetworkListPlanTestConfig(server.URL, "vm-plan-restart-update", vmPlanTestNetworkID),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
 				),
 			},
 			{
-				Config:      vmRestartPlanTestConfig(server.URL, "vm-plan-restart-update", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
+				Config:      vmNetworkListPlanTestConfig(server.URL, "vm-plan-restart-update", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
 				ExpectError: regexp.MustCompile(`(?s)left\s+stopped.*did not start again`),
 			},
 			{
