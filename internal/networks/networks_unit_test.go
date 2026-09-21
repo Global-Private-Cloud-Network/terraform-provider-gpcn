@@ -12,6 +12,7 @@ import (
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -1130,5 +1131,25 @@ func TestUpdateNetworkOmitsEmptyCIDRBlockMockHTTP(t *testing.T) {
 				t.Errorf("Expected cidrBlock '%v', got '%v'", testCase.want, got)
 			}
 		})
+	}
+}
+
+// TestCustomNetworkGoneWarningUnit pins the adoption warning byte for byte. The test harness
+// cannot observe a warning diagnostic, so this is the only guard on the text a user reads
+// after the platform adopts their custom network into an L2 segment.
+func TestCustomNetworkGoneWarningUnit(t *testing.T) {
+	const networkID = "network-adopted-123"
+
+	warning := CustomNetworkGoneWarning(networkID)
+
+	if got, want := warning.Severity(), diag.SeverityWarning; got != want {
+		t.Errorf("Expected severity %v, got %v", want, got)
+	}
+	if got, want := warning.Summary(), "Network removed from state"; got != want {
+		t.Errorf("Expected summary '%s', got '%s'", want, got)
+	}
+	want := "Network network-adopted-123 was not found. If it was adopted into an L2 segment by the platform, remove it from state and import the segment as gpcn_l2_segment: terraform state rm network-adopted-123 && terraform import gpcn_l2_segment.<name> <segment-id>."
+	if got := warning.Detail(); got != want {
+		t.Errorf("Expected detail '%s', got '%s'", want, got)
 	}
 }

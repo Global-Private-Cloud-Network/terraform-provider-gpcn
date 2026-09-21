@@ -260,6 +260,12 @@ func (r *networksResource) Read(ctx context.Context, req resource.ReadRequest, r
 	if err != nil {
 		// Resource was deleted outside of Terraform
 		if client.IsNotFound(err) {
+			// The platform answers the same 404 for a custom network it adopted into an L2
+			// segment as for an id that never existed, so a silent removal here loses a live
+			// carrier. A standard network keeps the silent removal.
+			if state.NetworkType.ValueString() == networks.NETWORK_TYPE_CUSTOM {
+				resp.Diagnostics.Append(networks.CustomNetworkGoneWarning(state.ID.ValueString()))
+			}
 			tflog.Info(ctx, networks.LogNetworkNotFoundRemovingFromState)
 			resp.State.RemoveResource(ctx)
 			return

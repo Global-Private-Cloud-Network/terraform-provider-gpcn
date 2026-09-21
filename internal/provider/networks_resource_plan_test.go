@@ -231,6 +231,21 @@ type customNetworkPlanMock struct {
 	mu          sync.Mutex
 	description string
 	lastPutBody map[string]any
+	gone        bool
+}
+
+// setGone makes the network answer the 404 that the platform serves for a row it adopted
+// into an L2 segment. The body is the one the backend renders, byte for byte.
+func (m *customNetworkPlanMock) setGone() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.gone = true
+}
+
+func (m *customNetworkPlanMock) isGone() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.gone
 }
 
 func (m *customNetworkPlanMock) readBody() map[string]any {
@@ -289,6 +304,12 @@ func startCustomNetworkPlanMockServer(t *testing.T) (*httptest.Server, *customNe
 		case r.Method == http.MethodGet && r.URL.Path == networkPath+"/virtual-machines":
 			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "ok", "data": []map[string]any{}})
 		case r.Method == http.MethodGet && r.URL.Path == networkPath:
+			if mock.isGone() {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"success":false,"message":"Network not found","error":{"code":"Resource Not Found","statusCode":404,"details":null}}`)
+				return
+			}
 			testutil.WriteJSONResponse(w, mock.readBody())
 		case r.Method == http.MethodDelete && r.URL.Path == networkPath:
 			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
@@ -354,6 +375,35 @@ func TestNetworkResourcePlanUpdatesExistingCustomWithoutCidrBlock(t *testing.T) 
 						return nil
 					},
 				),
+			},
+		},
+	})
+}
+
+// TestNetworkResourcePlanWarnsWhenCustomNetworkGone pins what a refresh does with a custom
+// network the platform adopted: the row leaves state, so the next plan proposes a create and
+// the create refusal answers. The warning the refresh also emits is pinned by
+// TestCustomNetworkGoneWarningUnit, because this harness cannot observe a warning diagnostic.
+func TestNetworkResourcePlanWarnsWhenCustomNetworkGone(t *testing.T) {
+	t.Parallel()
+	server, mock := startCustomNetworkPlanMockServer(t)
+
+	config := customNetworkPlanTestConfig(server.URL, "before")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:             config,
+				ResourceName:       gpcnNetworkTest,
+				ImportState:        true,
+				ImportStateId:      networkPlanTestCustomID,
+				ImportStatePersist: true,
+			},
+			{
+				PreConfig:   func() { mock.setGone() },
+				Config:      config,
+				ExpectError: regexp.MustCompile("Network creation is no longer supported"),
 			},
 		},
 	})

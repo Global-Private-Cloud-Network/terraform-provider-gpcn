@@ -1,5 +1,11 @@
 package networks
 
+import (
+	"fmt"
+
+	"github.com/hashicorp/terraform-plugin-framework/diag"
+)
+
 // Error summary constants
 const (
 	ErrSummaryMissingRequiredAttr     = "Missing required attribute"
@@ -33,3 +39,19 @@ const (
 	ErrDetailReplacePrimaryInterfaceFailed  = "error replacing primary interface: %w"
 	ErrDetailRefreshNetworkInterfacesFailed = "error refreshing the network interfaces of virtual machine ID '%s' before promoting a primary: %w"
 )
+
+// Warning strings for a custom network the platform adopted into an L2 segment
+const (
+	WarnSummaryNetworkRemovedFromState = "Network removed from state"
+	WarnDetailCustomNetworkGone        = "Network %s was not found. If it was adopted into an L2 segment by the platform, remove it from state and import the segment as gpcn_l2_segment: terraform state rm %s && terraform import gpcn_l2_segment.<name> <segment-id>."
+)
+
+// CustomNetworkGoneWarning builds the diagnostic a vanished custom network earns. The
+// platform answers the same 404 for an adopted network as for a typo, so the message must
+// name both readings and the move that resolves the first one.
+func CustomNetworkGoneWarning(networkID string) diag.Diagnostic {
+	return diag.NewWarningDiagnostic(
+		WarnSummaryNetworkRemovedFromState,
+		fmt.Sprintf(WarnDetailCustomNetworkGone, networkID, networkID),
+	)
+}
