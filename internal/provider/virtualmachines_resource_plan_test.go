@@ -1094,6 +1094,41 @@ func TestVirtualMachineResourcePlanAttachesAndDetachesSegments(t *testing.T) {
 	})
 }
 
+// GPCN gives the interfaces of a machine no order, so a reordered segment list asks for
+// nothing. A machine without network hotplug stops for a segment change, and stopping it
+// for a list that carries the same segments costs the user the whole downtime.
+func TestVirtualMachineResourcePlanReorderedSegmentsChangeNothing(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachineSegmentUpdateMockServer(t, 0)
+
+	afterCreate := 0
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmSegmentListPlanTestConfig(server.URL, "vm-plan-reorder", vmPlanTestSegmentID, vmPlanTestSegmentID2),
+				Check: func(*terraform.State) error {
+					afterCreate = len(recorded())
+					return nil
+				},
+			},
+			{
+				Config: vmSegmentListPlanTestConfig(server.URL, "vm-plan-reorder", vmPlanTestSegmentID2, vmPlanTestSegmentID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "l2_segment_ids.0", vmPlanTestSegmentID2),
+					func(*terraform.State) error {
+						if reordered := recorded()[afterCreate:]; len(reordered) != 0 {
+							return fmt.Errorf("expected the reorder to call nothing, got %v", reordered)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
 // startVirtualMachineSegmentRefusedMockServer counts the starts the provider issues. The
 // machine reports the given network hotplug value, so a test chooses whether an update
 // stops it first. The segment attach is refused unless getFailsAfterStop is set, because

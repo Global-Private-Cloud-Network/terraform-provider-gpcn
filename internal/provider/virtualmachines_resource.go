@@ -816,7 +816,7 @@ func (r *virtualMachinesResource) ModifyPlan(ctx context.Context, req resource.M
 Some actions can be done without stopping the VM. Since it's a heavy time investment to start and stop, determine that and use it for the rest of the update logic.
 Cases where VM needs to be stopped:
   - NetworkHotplug is disabled AND one of the below
-  - l2_segment_ids change
+  - the l2_segment_ids set changes
   - size_id changes
 */
 func determineIfVMNeedsStopped(state, plan virtualmachines.ResourceModel) bool {
@@ -826,6 +826,18 @@ func determineIfVMNeedsStopped(state, plan virtualmachines.ResourceModel) bool {
 	}
 
 	// If network hotplug is disabled, the VM needs to be stopped for a few scenarios
-	return (!slices.Equal(plan.L2SegmentIds.Elements(), state.L2SegmentIds.Elements())) ||
+	return !slices.Equal(sortedSegmentIds(state.L2SegmentIds), sortedSegmentIds(plan.L2SegmentIds)) ||
 		!state.SizeId.Equal(plan.SizeId)
+}
+
+// sortedSegmentIds reads a segment list in a stable order. GPCN gives the interfaces of a
+// machine no order, so a reordered list carries the same segments and asks for nothing.
+// An unknown element sorts under its own rendering and therefore still asks for a stop.
+func sortedSegmentIds(list types.List) []string {
+	segmentIds := make([]string, 0, len(list.Elements()))
+	for _, element := range list.Elements() {
+		segmentIds = append(segmentIds, element.String())
+	}
+	slices.Sort(segmentIds)
+	return segmentIds
 }
