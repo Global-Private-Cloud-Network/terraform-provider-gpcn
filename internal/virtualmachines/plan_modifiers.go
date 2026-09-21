@@ -11,8 +11,8 @@ import (
 )
 
 // PublicIpPlanModifier marks public_ip as unknown when the machine is about to take on
-// or give up an address. Each of the two ways to ask for one changes the address the
-// birth interface carries, and only the apply learns what it becomes.
+// or give up an address. Either way of asking for one changes the address the birth
+// interface carries. Only the apply learns what it becomes.
 type PublicIpPlanModifier struct{}
 
 const publicIpPlanModifierDescription = "Marks public_ip as unknown when allocate_public_ip or public_ip_id changes"

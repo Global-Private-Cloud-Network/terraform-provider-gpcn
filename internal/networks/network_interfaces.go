@@ -32,9 +32,9 @@ const (
 	NicWorldL2     = "l2"
 )
 
-// Every string except the world discriminator is a pointer, because the API sends JSON
-// null for a column that the interface's own world does not populate. A bare string
-// would land in state as an empty string, which reads as a value GPCN never sent.
+// Every string except the world discriminator is a pointer. The API sends JSON null for
+// a column that the interface's own world does not populate. A bare string would land in
+// state as an empty string, which reads as a value GPCN never sent.
 type ReadVirtualMachineNetworkDataResponse struct {
 	ID               string  `json:"id"`
 	NetworkInterface int64   `json:"networkInterface"`

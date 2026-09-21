@@ -26,9 +26,9 @@ func readSegmentIds(ctx context.Context, list types.List) ([]string, diag.Diagno
 }
 
 // UpdateL2SegmentsIfChanged makes the machine carry the configured segments. It detaches
-// first, because GPCN caps a machine at five interfaces and a swap would otherwise need
-// a free slot it does not have. The birth subnet interface is the primary one and is
-// never a candidate: GPCN refuses to detach a primary interface.
+// first, because GPCN caps a machine at five interfaces. A swap would otherwise need a
+// free slot the machine does not have. The birth subnet interface is the primary one and
+// is never a candidate: GPCN refuses to detach a primary interface.
 // Returns diagnostics if any errors occurred.
 func UpdateL2SegmentsIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, state, plan ResourceModel) diag.Diagnostics {
 	var diags diag.Diagnostics
@@ -107,9 +107,9 @@ func UpdateL2SegmentsIfChanged(gpcnClient *client.GpcnClient, ctx context.Contex
 // UpdatePublicIPIfChanged binds and unbinds the address on the birth interface through
 // the VPC verbs. The legacy per-interface routes answer 409 on a VPC interface, so they
 // have no part here. An address Terraform acquired is released when the machine gives it
-// up; a held address only detaches, because the operator owns it.
-// The interfaces are read here rather than passed in, because an earlier step may have
-// changed the list and with it the interface ids.
+// up. A held address only detaches, because the operator owns it. The interfaces are
+// read here rather than passed in. An earlier step can change the list, and the
+// interface ids with it.
 // Returns diagnostics if any errors occurred.
 func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, state, plan ResourceModel) diag.Diagnostics {
 	var diags diag.Diagnostics
@@ -144,8 +144,8 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 	}
 
 	primary := networkInterfaces[interfaceIdx]
-	// The VM detail projection carries no VPC, so the interface row is the only place
-	// that names the VPC the address is acquired on.
+	// The VM detail projection carries no VPC. The interface row is the only place that
+	// names the VPC the address is acquired on.
 	if primary.World.ValueString() != networks.NicWorldVpc || primary.VpcID.IsNull() {
 		diags.AddError(
 			ErrSummaryUnableToUpdatePublicIPConfiguration,
@@ -156,8 +156,8 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 	vpcID := primary.VpcID.ValueString()
 	primaryNetworkInterfaceId := primary.ID.ValueString()
 
-	// The machine gives up what it no longer asks for before it takes anything on: one
-	// machine carries one address, so an exchange has to free the interface first.
+	// The machine gives up what it no longer asks for before it takes anything on. One
+	// machine carries one address, so an exchange must free the interface first.
 	if acquireChanged && state.AllocatePublicIp.ValueBool() && !primary.PublicIPID.IsNull() {
 		acquiredID := primary.PublicIPID.ValueString()
 		if err := vpcpublicips.DetachPublicIp(gpcnClient, ctx, vpcID, acquiredID); err != nil {
@@ -174,8 +174,8 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 	}
 
 	if acquireChanged && plan.AllocatePublicIp.ValueBool() {
-		// The API inserts the address row before it dispatches the job, so the id comes
-		// back even from a failed acquisition.
+		// The API inserts the address row before it dispatches the job. The id comes back
+		// even from a failed acquisition.
 		acquiredID, err := vpcpublicips.AcquirePublicIp(gpcnClient, ctx, vpcID)
 		if err != nil {
 			return publicIpFailure(diags, err)
@@ -193,8 +193,8 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 	return diags
 }
 
-// publicIpFailure frames every refusal of an address verb under one summary, because
-// each one leaves the machine's address exactly as the last successful verb left it.
+// publicIpFailure frames every refusal of an address verb under one summary. Each one
+// leaves the machine's address exactly as the last successful verb left it.
 func publicIpFailure(diags diag.Diagnostics, err error) diag.Diagnostics {
 	diags.AddError(
 		ErrSummaryUnableToUpdatePublicIPConfiguration,

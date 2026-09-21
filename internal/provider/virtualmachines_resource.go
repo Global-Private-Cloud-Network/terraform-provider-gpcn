@@ -374,8 +374,9 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 }
 
 // The create body carries no segment, so every segment attaches after the machine
-// exists. State already holds the machine, and it holds the segments that attached, so a
-// refused attach leaves nothing outside Terraform and leaves a later plan work to do.
+// exists. State already holds the machine, and it holds the segments that attached. A
+// refused attach therefore leaves nothing outside Terraform, and leaves a later plan
+// work to do.
 func (r *virtualMachinesResource) attachSegmentsAfterCreate(ctx context.Context, response *virtualmachines.ReadVirtualMachinesResponse, plan virtualmachines.ResourceModel, resp *resource.CreateResponse) diag.Diagnostics {
 	var diags diag.Diagnostics
 
@@ -585,9 +586,9 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	}
 
 	tflog.Info(ctx, virtualmachines.LogRetrievedLatestVMInfoMappingToModel)
-	// The plan modifier pins the interface list to state when no network input changed,
-	// and Terraform refuses a state that differs from that plan. The platform can fill a
-	// late column, such as a MAC address, inside this apply, so the read-back is kept
+	// The plan modifier pins the interface list to state when no network input changed.
+	// Terraform refuses a state that differs from that plan. The platform can fill a late
+	// column, such as a MAC address, inside this apply. The read-back is therefore kept
 	// only where the plan asked for a fresh list. The next refresh records the rest.
 	plannedNetworkInterfaces := plan.NetworkInterfaces
 	var mapDiags diag.Diagnostics

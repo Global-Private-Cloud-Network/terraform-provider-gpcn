@@ -1232,7 +1232,7 @@ func TestVirtualMachineCreatedAttachFailedDetailBytes(t *testing.T) {
 	}
 }
 
-// The create body is .strict() at GPCN, so an extra key is a 400 and a missing one is a
+// The create body is .strict() at GPCN. An extra key is a 400, and a missing one is a
 // refusal. The assertion is the exact key set, not a subset.
 func TestCreateVirtualMachineSendsSubnetIdBodyMockHTTP(t *testing.T) {
 	useFastVMStatusPollInterval(t)
@@ -1458,7 +1458,7 @@ func TestMapNICNullsStayNullUnit(t *testing.T) {
 }
 
 // An import starts with no configuration. The birth subnet and the attached segments are
-// readable only through the interface list, so the mapper fills them from it.
+// readable only through the interface list. The mapper fills them from it.
 func TestSetNetworkModelValuesNotPresentFillsVpcIdentityOnImportUnit(t *testing.T) {
 	const vmID = "vm-import-vpc"
 

@@ -3,7 +3,6 @@ package virtualmachines
 // Error summary constants
 const (
 	ErrSummaryUnexpectedConfigureType             = "Unexpected Data Source Configure Type"
-	ErrSummaryUnableToCompletePlan                = "Unable to complete plan"
 	ErrSummaryUnableToCreateVM                    = "Unable to create GPCN Virtual Machine"
 	ErrSummaryRetrievingVMInfoFailed              = "Retrieving information about the Virtual Machine failed"
 	ErrSummaryErrorUpdatingVMSize                 = "Error updating Virtual Machine size"
@@ -13,7 +12,6 @@ const (
 	ErrSummaryUnableToCreateDeleteRequest         = "Unable to create a request for deleting a new GPCN Virtual Machine"
 	ErrSummaryUnableToDeleteVM                    = "Unable to delete GPCN Virtual Machine"
 	ErrSummaryUnableToUpdateVM                    = "Unable to update GPCN Virtual Machine"
-	ErrSummaryUnableToStopVM                      = "Unable to stop GPCN Virtual Machine"
 	ErrSummaryErrorReadingDeleteBody              = "Error reading body response GPCN Virtual Machine - Delete"
 	ErrSummaryErrorUnmarshalingDelete             = "Error unmarshaling GPCN Virtual Machine - Delete"
 	ErrSummaryEncounteredErrorGettingJobInfo      = "Encountered an error getting job info"
@@ -34,14 +32,12 @@ const (
 // Error detail message templates
 const (
 	ErrDetailExpectedGpcnClient              = "Expected *client.GpcnClient, got: %T. Please report this issue to the provider developers."
-	ErrDetailNetworkInterfacesForNewVM       = "Error retrieving network interfaces for newly created virtual machine with ID %s"
 	ErrDetailNetworkInterfacesForVM          = "Error retrieving network interfaces for virtual machine with ID %s"
 	ErrDetailVMInfoFailedCanImport           = "Retrieving information about the Virtual Machine failed. The job was successful, but Terraform could not read more information about its value. You can import the id to repair the state with terraform import"
 	ErrDetailUnableToDeleteVMWithID          = "Unable to delete GPCN Virtual Machine with ID %s"
 	ErrDetailUnmarshalingDeleteWithID        = "Error unmarshaling GPCN Virtual Machine - Delete with ID %s"
 	ErrDetailJobInfoCheckDashboard           = "Encountered an error getting job info. The request may still have succeeded. Check the GPCN dashboard for more information"
 	ErrDetailStoppingVM                      = "Error stopping virtual machine with ID %s"
-	ErrDetailStartingVM                      = "Error starting virtual machine with ID %s"
 	ErrDetailPublicIpIdConflictsWithAllocate = "public_ip_id and allocate_public_ip are mutually exclusive"
 	ErrDetailFetchUpgradeSizesFailed         = "The provider could not fetch the valid upgrade targets for this Virtual Machine, so it cannot tell whether the size_id change is an in-place upgrade. This error is often transient. Re-run the plan. Underlying error: %s"
 	ErrDetailNoPrimaryNetworkInterface       = "No network interface on virtual machine with ID %s is marked primary, so the public IP cannot be changed"

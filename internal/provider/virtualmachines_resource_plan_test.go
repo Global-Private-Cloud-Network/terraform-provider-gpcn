@@ -450,8 +450,8 @@ resource "gpcn_virtualmachine" "test" {
 }
 
 // An import reads the machine and its interfaces, and nothing else. subnet_id,
-// l2_segment_ids, allocate_public_ip and public_ip live only on the interface list, so an
-// import that misses it would hand back a state a plan cannot reconcile.
+// l2_segment_ids, allocate_public_ip and public_ip live only on the interface list. An
+// import that misses it hands back a state a plan cannot reconcile.
 func TestVirtualMachineResourcePlanImportsVpcIdentity(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server, _, _ := startVirtualMachinePlanMockServer(t)
@@ -484,8 +484,8 @@ func TestVirtualMachineResourcePlanImportsVpcIdentity(t *testing.T) {
 }
 
 // A state file written by 1.3.0 carries network_ids, and the attribute is gone. Terraform
-// hands that state to UpgradeResourceState before anything else reads it, and the
-// framework unmarshals it with IgnoreUndefinedAttributes
+// hands that state to UpgradeResourceState before anything else reads it. The framework
+// unmarshals it with IgnoreUndefinedAttributes
 // (fwserver/server_upgraderesourcestate.go:60-65), so the retired attribute is dropped
 // rather than refused. A refusal here would strand every machine already in state.
 func TestVirtualMachineResourcePlanLoadsPriorStateWithNetworkIds(t *testing.T) {
@@ -571,8 +571,8 @@ func vmPlanTestReadBodyWithHotplug(name, status string, hotplug int) map[string]
 	return body
 }
 
-// vmSegmentNic pairs an interface id with the segment it carries, so a mock keeps the id
-// stable while the list around it changes.
+// vmSegmentNic pairs an interface id with the segment it carries. A mock then keeps the
+// id stable while the list around it changes.
 type vmSegmentNic struct {
 	nicID     string
 	segmentID string
@@ -895,9 +895,9 @@ func lastIndexOfRequest(sequence []string, request string) int {
 	return -1
 }
 
-// GPCN refuses an add-NIC on a running machine whose image has no network hotplug, so
-// the provider stops the machine around the whole loop and starts it after the last
-// attach.
+// GPCN refuses an add-NIC on a running machine whose image has no network hotplug. The
+// provider therefore stops the machine around the whole loop and starts it after the
+// last attach.
 func TestVirtualMachineResourcePlanCreateStopsForASegmentAttachWithoutHotplug(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -953,7 +953,7 @@ func TestVirtualMachineResourcePlanCreateStopsForASegmentAttachWithoutHotplug(t 
 
 // startVirtualMachineSegmentUpdateMockServer keeps one interface row per attached
 // segment and gives each a stable id. It records the segment verbs in the order they
-// arrive, so a test reads what the provider changed and what it left alone.
+// arrive. A test then reads what the provider changed and what it left alone.
 func startVirtualMachineSegmentUpdateMockServer(t *testing.T, hotplug int) (*httptest.Server, func() []string) {
 	t.Helper()
 
@@ -1457,9 +1457,10 @@ resource "gpcn_virtualmachine" "test" {
 `, host, name, vmPlanTestDatacenterID, vmPlanTestSizeID, vmPlanTestImageID, vmPlanTestSubnetID, allocate, held, vmPlanTestSshKeyID, vmPlanTestUsername)
 }
 
-// GPCN answers 409 when the legacy per-interface allocate addresses a VPC interface, so
-// an address the machine asks for is acquired on the VPC and attached to the interface.
-// Giving it up detaches it and then releases it, because Terraform acquired it.
+// GPCN answers 409 when the legacy per-interface allocate addresses a VPC interface. An
+// address the machine asks for is therefore acquired on the VPC and attached to the
+// interface. Giving it up detaches it and then releases it, because Terraform acquired
+// it.
 func TestVirtualMachineResourcePlanTogglesPublicIpViaVpcVerbs(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server, recorded := startVirtualMachinePublicIpMockServer(t)
@@ -1640,7 +1641,7 @@ func startVirtualMachineDestroyBodyMockServer(t *testing.T) (*httptest.Server, f
 }
 
 // A destroy gives back only what Terraform acquired. An address the operator holds
-// survives the machine, so the delete that carries one names no disposition at all and
+// survives the machine. The delete that carries one names no disposition at all, and
 // GPCN keeps it.
 func TestVirtualMachineResourcePlanDestroyReleasesAcquiredIp(t *testing.T) {
 	tests := []struct {
@@ -1753,8 +1754,8 @@ func startVirtualMachineLateMacMockServer(t *testing.T) *httptest.Server {
 }
 
 // A rename changes no network input, so the plan pins network_interfaces to state.
-// Terraform refuses a state that differs from that plan, and the platform can fill a
-// late column in the same apply. The update writes the pinned list, and the next refresh
+// Terraform refuses a state that differs from that plan. The platform can fill a late
+// column in the same apply. The update writes the pinned list, and the next refresh
 // records the column.
 func TestVirtualMachineResourcePlanRenameKeepsThePinnedInterfaceList(t *testing.T) {
 	shortenVirtualMachinePolling(t)
