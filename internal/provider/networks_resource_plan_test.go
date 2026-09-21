@@ -221,3 +221,140 @@ func TestNetworkResourcePlanDetectsOutOfBandRename(t *testing.T) {
 		},
 	})
 }
+
+const networkPlanTestCustomID = "net-custom-1"
+
+// customNetworkPlanMock serves one grandfathered custom network. The API stores an empty
+// cidrBlock for every custom row, so the mock returns one and records the update body the
+// provider sends back.
+type customNetworkPlanMock struct {
+	mu          sync.Mutex
+	description string
+	lastPutBody map[string]any
+}
+
+func (m *customNetworkPlanMock) readBody() map[string]any {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return map[string]any{
+		"success": true,
+		"message": "ok",
+		"data": map[string]any{
+			"id":              networkPlanTestCustomID,
+			"name":            "net-custom-a",
+			"description":     m.description,
+			"createdAt":       networkPlanTestTimestamp,
+			"updatedAt":       networkPlanTestTimestamp,
+			"snat":            "false",
+			"cidrBlock":       "",
+			"gatewayIp":       "",
+			"connectedVms":    "0",
+			"networkType":     "custom",
+			"dnsNameservers":  "",
+			"allocationPools": []map[string]any{},
+			"datacenter": map[string]any{
+				"id":          networkPlanTestDatacenterID,
+				"name":        "Kansas",
+				"region":      "central",
+				"countryAbbr": "US",
+				"country":     "United States",
+			},
+		},
+	}
+}
+
+func (m *customNetworkPlanMock) updateBody() map[string]any {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastPutBody
+}
+
+func startCustomNetworkPlanMockServer(t *testing.T) (*httptest.Server, *customNetworkPlanMock) {
+	t.Helper()
+
+	mock := &customNetworkPlanMock{description: "before"}
+	networkPath := "/v1/resource/networks/" + networkPlanTestCustomID
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", networkPlanTestCustomID, true)
+		case r.Method == http.MethodPut && r.URL.Path == networkPath:
+			body := testutil.ReadRequestBody(r)
+			mock.mu.Lock()
+			mock.lastPutBody = body
+			mock.description, _ = body["description"].(string)
+			mock.mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == networkPath+"/virtual-machines":
+			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "ok", "data": []map[string]any{}})
+		case r.Method == http.MethodGet && r.URL.Path == networkPath:
+			testutil.WriteJSONResponse(w, mock.readBody())
+		case r.Method == http.MethodDelete && r.URL.Path == networkPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	return server, mock
+}
+
+func customNetworkPlanTestConfig(host, description string) string {
+	return fmt.Sprintf(`
+provider "gpcn" {
+  host    = %q
+  api_key = "test-key"
+}
+
+resource "gpcn_network" "test" {
+  name          = "net-custom-a"
+  datacenter_id = %q
+  network_type  = "custom"
+  description   = %q
+}
+`, host, networkPlanTestDatacenterID, description)
+}
+
+// TestNetworkResourcePlanUpdatesExistingCustomWithoutCidrBlock guards the whole path a
+// grandfathered custom network takes through a rename: its stored cidrBlock is "", and the
+// update body must not carry that value back, or the API answers 422.
+func TestNetworkResourcePlanUpdatesExistingCustomWithoutCidrBlock(t *testing.T) {
+	t.Parallel()
+	server, mock := startCustomNetworkPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:             customNetworkPlanTestConfig(server.URL, "before"),
+				ResourceName:       gpcnNetworkTest,
+				ImportState:        true,
+				ImportStateId:      networkPlanTestCustomID,
+				ImportStatePersist: true,
+			},
+			{
+				Config: customNetworkPlanTestConfig(server.URL, "after"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnNetworkTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnNetworkTest, "description", "after"),
+					func(*terraform.State) error {
+						body := mock.updateBody()
+						if body == nil {
+							return fmt.Errorf("expected the update endpoint to be called")
+						}
+						if value, present := body["cidrBlock"]; present {
+							return fmt.Errorf("expected cidrBlock to be absent from the update body, got %q", value)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}

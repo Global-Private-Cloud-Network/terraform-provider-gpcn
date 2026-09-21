@@ -1068,3 +1068,67 @@ func TestUpdateNetworkInterfacesSkipsRefreshWhenPrimaryIsUnchangedUnit(t *testin
 		}
 	}
 }
+
+// TestUpdateNetworkOmitsEmptyCIDRBlockMockHTTP guards the update body against an empty
+// cidrBlock. The API stores "" for every custom network and its update schema validates the
+// key against a CIDR pattern, so echoing the stored "" back turns a rename into a 422.
+func TestUpdateNetworkOmitsEmptyCIDRBlockMockHTTP(t *testing.T) {
+	const networkID = "network-cidr-guard"
+
+	cases := []struct {
+		name      string
+		cidrBlock types.String
+		want      any
+	}{
+		{name: "null", cidrBlock: types.StringNull(), want: nil},
+		{name: "empty", cidrBlock: types.StringValue(""), want: nil},
+		{name: "set", cidrBlock: types.StringValue("10.0.0.0/24"), want: "10.0.0.0/24"},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var putBody map[string]any
+
+			server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+				T: t,
+				Handler: func(w http.ResponseWriter, r *http.Request) {
+					switch {
+					case r.Method == "PUT" && strings.Contains(r.URL.Path, "/networks/"+networkID):
+						putBody = testutil.ReadRequestBody(r)
+						testutil.WriteJSONResponse(w, map[string]bool{"success": true})
+					case r.Method == "GET" && strings.Contains(r.URL.Path, "/networks/"+networkID):
+						testutil.WriteJSONResponse(w, newNetworkResponse(networkID, "custom-network", "custom"))
+					default:
+						testutil.LogUnexpectedRequest(t, w, r)
+					}
+				},
+			})
+			defer server.Close()
+
+			model := createTestResourceModel("custom", "", "", "", "")
+			model.ID = types.StringValue(networkID)
+			model.Name = types.StringValue("custom-network")
+			model.CIDRBlock = testCase.cidrBlock
+
+			if _, err := UpdateNetwork(gpcnClient, context.Background(), networkID, model); err != nil {
+				t.Fatalf("UpdateNetwork failed: %v", err)
+			}
+			if putBody == nil {
+				t.Fatal("Expected the update endpoint to be called")
+			}
+			got, present := putBody["cidrBlock"]
+			if testCase.want == nil {
+				if present {
+					t.Errorf("Expected cidrBlock to be absent from the update body, got '%v'", got)
+				}
+				return
+			}
+			if !present {
+				t.Fatalf("Expected cidrBlock '%v' in the update body, got no key", testCase.want)
+			}
+			if got != testCase.want {
+				t.Errorf("Expected cidrBlock '%v', got '%v'", testCase.want, got)
+			}
+		})
+	}
+}
