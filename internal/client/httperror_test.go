@@ -176,6 +176,15 @@ func TestHTTPErrorRendersCodeAndMessage(t *testing.T) {
 			want: "HTTP 404: Route Not Found",
 		},
 		{
+			name: "a code without a message keeps the raw form",
+			err: &client.HTTPError{
+				StatusCode: 500,
+				Body:       `{"success":false,"error":{"code":"Internal Error"}}`,
+				Code:       "Internal Error",
+			},
+			want: `HTTP error 500: {"success":false,"error":{"code":"Internal Error"}}`,
+		},
+		{
 			name: "unparseable body keeps the raw form",
 			err:  &client.HTTPError{StatusCode: 502, Body: "<html>502</html>"},
 			want: "HTTP error 502: <html>502</html>",

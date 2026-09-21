@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"sync"
 	"testing"
 
@@ -347,5 +348,33 @@ func TestGPUResourcePlanAcceptsCatalogSeriesCode(t *testing.T) {
 				),
 			},
 		},
+	})
+}
+
+// An empty series_code satisfies ConflictsWith, so only the length rule
+// refuses it. The inventory request then carries no filter, and the read
+// lists every series the datacenter offers.
+func TestGPUInventoryDataSourcePlanRefusesEmptySeriesCode(t *testing.T) {
+	t.Parallel()
+	server, _, _ := startGPUPlanMockServer(t)
+
+	config := fmt.Sprintf(`
+provider "gpcn" {
+  host    = %q
+  api_key = "test-key"
+}
+
+data "gpcn_gpu_inventory" "test" {
+  datacenter_id = %q
+  series_code   = ""
+}
+`, server.URL, gpuPlanTestDatacenterID)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config:      config,
+			ExpectError: regexp.MustCompile(`(?s)Invalid Attribute Value Length`),
+		}},
 	})
 }

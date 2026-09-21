@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"terraform-provider-gpcn/internal/client"
+	"terraform-provider-gpcn/internal/datacenters"
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -252,6 +253,60 @@ func TestDatacentersDataSourceNamesGpuEnabledWhenNoRowMatches(t *testing.T) {
 	})
 
 	datacenterPlanTestAssertOnlyListPath(t, rec)
+}
+
+// The gpu_enabled refusal needs three reads when another filter is set: the
+// filtered read that matched none, the unfiltered read that proves the key sees
+// datacenters, and the read without gpuEnabled that isolates the cause.
+func TestDatacentersDataSourceNamesGpuEnabledBesideAnotherFilter(t *testing.T) {
+	t.Parallel()
+
+	server, rec := startDatacenterPlanMockServer(t, func(r *http.Request) map[string]any {
+		if r.URL.Query().Get("gpuEnabled") != "" {
+			return datacenterPlanTestBody([]map[string]any{}, 1, 1)
+		}
+		return datacenterPlanTestBody([]map[string]any{
+			datacenterPlanTestRow("dc-1", "Chicago", datacenterPlanTestRegionAlpha, false),
+		}, 1, 1)
+	})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: datacenterPlanTestConfig(server.URL,
+					fmt.Sprintf("  country_name = %q\n  gpu_enabled  = true\n", datacenterPlanTestCountryName)),
+				ExpectError: datacenterPlanTestWrappedRegexp(
+					fmt.Sprintf(datacenters.ErrDetailDatacenterNoGPUEnabled, true)),
+			},
+		},
+	})
+
+	datacenterPlanTestAssertOnlyListPath(t, rec)
+
+	_, queries := rec.snapshot()
+	if len(queries) != 3 {
+		t.Fatalf("the data source made %d requests, want 3: %v", len(queries), queries)
+	}
+	if !strings.Contains(queries[0], "gpuEnabled=true") || !strings.Contains(queries[0], "countryName=") {
+		t.Errorf("first query = %q, want both filters", queries[0])
+	}
+	if strings.Contains(queries[1], "countryName=") || strings.Contains(queries[1], "gpuEnabled=") {
+		t.Errorf("second query = %q, want no filter", queries[1])
+	}
+	if strings.Contains(queries[2], "gpuEnabled=") || !strings.Contains(queries[2], "countryName=") {
+		t.Errorf("third query = %q, want the other filters without gpuEnabled", queries[2])
+	}
+}
+
+// Terraform wraps a diagnostic across lines, so the pin matches the sentence
+// with any run of whitespace between its words.
+func datacenterPlanTestWrappedRegexp(sentence string) *regexp.Regexp {
+	words := strings.Fields(sentence)
+	for i, word := range words {
+		words[i] = regexp.QuoteMeta(word)
+	}
+	return regexp.MustCompile("(?s)" + strings.Join(words, `\s+`))
 }
 
 func TestDatacentersDataSourceSuggestsWhenAnotherFilterMatchesNone(t *testing.T) {

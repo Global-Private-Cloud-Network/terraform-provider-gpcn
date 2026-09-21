@@ -18,17 +18,20 @@ type JobStatusSingularResponse struct {
 	Data    JobResponse `json:"data"`
 }
 type JobResponse struct {
-	JobID              string `json:"jobId"`
-	Stage              string `json:"stage"`
-	IsCompleted        bool   `json:"isCompleted"`
-	IsTerminal         bool   `json:"isTerminal"`
-	HasFailed          bool   `json:"hasFailed"`
-	ProgressPercentage int    `json:"progressPercentage"`
-	Message            string `json:"message"`
-	ErrorMessage       string `json:"errorMessage"`
-	ResourceId         string `json:"resourceId"`
-	ResourceName       string `json:"resourceName"`
-	ResourceType       string `json:"resourceType"`
+	JobID       string `json:"jobId"`
+	Stage       string `json:"stage"`
+	IsCompleted bool   `json:"isCompleted"`
+	IsTerminal  bool   `json:"isTerminal"`
+	HasFailed   bool   `json:"hasFailed"`
+	// A job percentage decodes as a float, so a platform that starts sending
+	// fractions does not break the poll. An integer field rejects the whole
+	// envelope.
+	ProgressPercentage float64 `json:"progressPercentage"`
+	Message            string  `json:"message"`
+	ErrorMessage       string  `json:"errorMessage"`
+	ResourceId         string  `json:"resourceId"`
+	ResourceName       string  `json:"resourceName"`
+	ResourceType       string  `json:"resourceType"`
 }
 
 // JobStageCancelled is the stage an operator cancel leaves a job in. It is
