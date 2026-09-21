@@ -351,9 +351,9 @@ func TestGPUResourcePlanAcceptsCatalogSeriesCode(t *testing.T) {
 	})
 }
 
-// An empty series_code passes ExactlyOneOf, so only the length rule refuses it.
-// The inventory request then carries no filter, and the read lists every series
-// the datacenter offers.
+// An empty series_code satisfies ConflictsWith, so only the length rule
+// refuses it. The inventory request then carries no filter, and the read
+// lists every series the datacenter offers.
 func TestGPUInventoryDataSourcePlanRefusesEmptySeriesCode(t *testing.T) {
 	t.Parallel()
 	server, _, _ := startGPUPlanMockServer(t)

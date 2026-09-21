@@ -23,8 +23,9 @@ type JobResponse struct {
 	IsCompleted bool   `json:"isCompleted"`
 	IsTerminal  bool   `json:"isTerminal"`
 	HasFailed   bool   `json:"hasFailed"`
-	// The field is a float, because a percentage the platform computes can
-	// arrive fractional. An integer field rejects the whole envelope.
+	// A job percentage decodes as a float, so a platform that starts sending
+	// fractions does not break the poll. An integer field rejects the whole
+	// envelope.
 	ProgressPercentage float64 `json:"progressPercentage"`
 	Message            string  `json:"message"`
 	ErrorMessage       string  `json:"errorMessage"`
