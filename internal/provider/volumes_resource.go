@@ -74,19 +74,28 @@ func (r *volumesResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				},
 			},
 			"volume_type": schema.StringAttribute{
-				Description: "Type of storage: either 'SSD' or 'NVMe'. Changing this value requires replacing the volume. Note that not all volume types are available for every datacenter",
+				Description: "Type of storage: 'SSD', 'NVMe', or a storage component code such as 'vol-add-nvme'. Use \"SSD\" or \"NVMe\" for the built-in storage classes and the component code for any other class. The datacenter decides which codes it offers, and a code it does not offer is refused with the list of codes it does offer. Changing this value requires replacing the volume. A volume whose SKU the platform cannot resolve reads \"Unknown\" and cannot be resized until the platform repairs it.",
 				Required:    true,
 				Validators: []validator.String{
-					stringvalidator.OneOf("SSD", "NVMe"),
+					stringvalidator.LengthAtLeast(1),
 				},
 				PlanModifiers: []planmodifier.String{
 					// Changing the volume_type requires us to destroy and create a new volume
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
-			"volume_type_id": schema.Int64Attribute{
-				Description: "Internal identifier for the volume type",
+			"volume_type_code": schema.StringAttribute{
+				Description: "Component code of the storage class, for example 'vol-add-ssd'. This is the identifier the API uses for a volume type",
 				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					// A resize cannot change the storage class, so the known code survives it
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"volume_type_id": schema.Int64Attribute{
+				Description:        "Always null. The API identifies a volume type by code",
+				Computed:           true,
+				DeprecationMessage: "volume_type_id is deprecated and always null: the API identifies a volume type by code. Use volume_type_code.",
 				PlanModifiers: []planmodifier.Int64{
 					int64planmodifier.UseStateForUnknown(),
 				},

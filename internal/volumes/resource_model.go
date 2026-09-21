@@ -10,22 +10,29 @@ import (
 )
 
 type ResourceModel struct {
-	ID           types.String `tfsdk:"id"`
-	Name         types.String `tfsdk:"name"`
-	DatacenterId types.String `tfsdk:"datacenter_id"`
-	VolumeType   types.String `tfsdk:"volume_type"`
-	VolumeTypeId types.Int64  `tfsdk:"volume_type_id"`
-	SizeGb       types.Int64  `tfsdk:"size_gb"`
-	CreatedTime  types.String `tfsdk:"created_time"`
-	LastUpdated  types.String `tfsdk:"last_updated"`
-	Location     types.Map    `tfsdk:"location"`
+	ID             types.String `tfsdk:"id"`
+	Name           types.String `tfsdk:"name"`
+	DatacenterId   types.String `tfsdk:"datacenter_id"`
+	VolumeType     types.String `tfsdk:"volume_type"`
+	VolumeTypeCode types.String `tfsdk:"volume_type_code"`
+	VolumeTypeId   types.Int64  `tfsdk:"volume_type_id"`
+	SizeGb         types.Int64  `tfsdk:"size_gb"`
+	CreatedTime    types.String `tfsdk:"created_time"`
+	LastUpdated    types.String `tfsdk:"last_updated"`
+	Location       types.Map    `tfsdk:"location"`
 }
 
 // Update the plan or state with new values from the GET response
 func MapVolumeResponseToModel(ctx context.Context, response *readVolumesResponse, model ResourceModel) ResourceModel {
 	// Construct most of the data object
 	model.ID = types.StringValue(response.Data.ID)
-	model.VolumeTypeId = types.Int64Value(response.Data.VolumeType.ID)
+	// The API identifies a volume type by code and has never sent an id.
+	model.VolumeTypeId = types.Int64Null()
+	if response.Data.VolumeType.Code == "" {
+		model.VolumeTypeCode = types.StringNull()
+	} else {
+		model.VolumeTypeCode = types.StringValue(response.Data.VolumeType.Code)
+	}
 
 	// Construct time entries
 	createdTime, err := time.Parse(time.RFC3339, response.Data.CreatedAt)
@@ -70,19 +77,48 @@ func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel
 	if model.SizeGb.IsNull() && response.Data.SizeGb != 0 {
 		model.SizeGb = types.Int64Value(response.Data.SizeGb)
 	}
-	// The API can send the volume type in a different case. The canonical key keeps
-	// the configured value from planning a replacement.
-	if model.VolumeType.IsNull() && response.Data.VolumeType.Name != "" {
-		model.VolumeType = types.StringValue(canonicalVolumeType(response.Data.VolumeType.Name))
+	if model.VolumeType.IsNull() {
+		model.VolumeType = importedVolumeType(response.Data.VolumeType)
 	}
 	return model
 }
 
+// A volume can have no code, and the API names such a volume "Unknown".
+func importedVolumeType(volumeType volumeTypeResponse) types.String {
+	if volumeType.Code != "" {
+		return types.StringValue(volumeTypeAliasForCode(volumeType.Code))
+	}
+	if volumeType.Name != "" {
+		return types.StringValue(volumeType.Name)
+	}
+	return types.StringNull()
+}
+
+// A configuration spells a built-in storage class by its alias. An import that
+// writes the code instead plans a replacement.
+func volumeTypeAliasForCode(code string) string {
+	for alias, aliasCode := range volumeTypeMapping {
+		if aliasCode == code {
+			return alias
+		}
+	}
+	return code
+}
+
+// An alias can arrive in any case. The mapping lookup takes the normalised key.
 func canonicalVolumeType(name string) string {
-	for key := range volumeTypeMapping {
-		if strings.EqualFold(key, name) {
-			return key
+	for alias := range volumeTypeMapping {
+		if strings.EqualFold(alias, name) {
+			return alias
 		}
 	}
 	return name
+}
+
+// A display name becomes its code, and a code is already one.
+func componentCodeForVolumeType(volumeType string) string {
+	if code, known := volumeTypeMapping[canonicalVolumeType(volumeType)]; known {
+		return code
+	}
+	return volumeType
 }

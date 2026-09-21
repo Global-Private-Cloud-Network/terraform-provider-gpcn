@@ -14,6 +14,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
+type volumeTypeResponse struct {
+	Code        string `json:"code"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+}
+
 type readVolumesResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
@@ -24,11 +30,7 @@ type readVolumesResponse struct {
 		Configuration struct {
 			SkuId string `json:"skuId"`
 		} `json:"configuration"`
-		VolumeType struct {
-			ID          int64  `json:"id"`
-			Name        string `json:"name"`
-			Description string `json:"description"`
-		} `json:"volumeType"`
+		VolumeType volumeTypeResponse `json:"volumeType"`
 		Datacenter struct {
 			ID          string `json:"id"`
 			Name        string `json:"name"`
@@ -45,7 +47,7 @@ type readVolumesResponse struct {
 
 func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*readVolumesResponse, error) {
 	tflog.Info(ctx, LogStartingCreateVolume)
-	componentCode := volumeTypeMapping[model.VolumeType.ValueString()]
+	componentCode := componentCodeForVolumeType(model.VolumeType.ValueString())
 
 	tflog.Info(ctx, LogLookingUpVolumeSkuId)
 	skuId, err := GetVolumeSkuId(gpcnClient, ctx, model.DatacenterId.ValueString(), componentCode, model.SizeGb.ValueInt64())
@@ -145,7 +147,7 @@ func GetVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId stri
 
 func UpdateVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId string, model ResourceModel) (*readVolumesResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateVolumeWithID, volumeId))
-	componentCode := volumeTypeMapping[model.VolumeType.ValueString()]
+	componentCode := componentCodeForVolumeType(model.VolumeType.ValueString())
 
 	tflog.Info(ctx, LogValidatingVolumeSkuIdForUpdate)
 

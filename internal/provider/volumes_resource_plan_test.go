@@ -5,6 +5,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"slices"
 	"sync"
 	"testing"
@@ -12,7 +13,9 @@ import (
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 const (
@@ -54,7 +57,7 @@ func volPlanTestReadBody(name string, sizeGb int64) map[string]any {
 			"name":   name,
 			"sizeGb": sizeGb,
 			"volumeType": map[string]any{
-				"id":          1,
+				"code":        volPlanTestComponent,
 				"name":        volPlanTestVolumeType,
 				"description": "Solid state drive",
 			},
@@ -135,6 +138,18 @@ func startVolumePlanMockServer(t *testing.T) (*httptest.Server, func(string), fu
 }
 
 func volPlanTestConfig(host string) string {
+	return volPlanTestConfigWithSize(host, volPlanTestSizeGb)
+}
+
+func volPlanTestConfigWithSize(host string, sizeGb int64) string {
+	return volPlanTestConfigFor(host, volPlanTestVolumeType, sizeGb)
+}
+
+func volPlanTestConfigWithType(host, volumeType string) string {
+	return volPlanTestConfigFor(host, volumeType, volPlanTestSizeGb)
+}
+
+func volPlanTestConfigFor(host, volumeType string, sizeGb int64) string {
 	return fmt.Sprintf(`
 provider "gpcn" {
   host    = %q
@@ -147,7 +162,28 @@ resource "gpcn_volume" "test" {
   volume_type   = %q
   size_gb       = %d
 }
-`, host, volPlanTestName, volPlanTestDatacenterID, volPlanTestVolumeType, volPlanTestSizeGb)
+`, host, volPlanTestName, volPlanTestDatacenterID, volumeType, sizeGb)
+}
+
+// The schema no longer rules on the spelling of a volume type. The datacenter
+// catalog is the gate, and its refusal names the codes the datacenter offers.
+func TestVolumeResourcePlanRefusesUnknownTypeAtLookup(t *testing.T) {
+	t.Parallel()
+	server, _, _ := startVolumePlanMockServer(t)
+
+	for _, volumeType := range []string{"vol-add-ultra", "vm-root-disk-ssd"} {
+		t.Run(volumeType, func(t *testing.T) {
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config:      volPlanTestConfigWithType(server.URL, volumeType),
+						ExpectError: regexp.MustCompile("not available for this datacenter"),
+					},
+				},
+			})
+		})
+	}
 }
 
 // Read keeps the configured name and size_gb instead of refreshing them.
@@ -256,6 +292,169 @@ func TestVolumeResourcePlanIgnoresOutOfBandGrow(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVolumeTest, "size_gb", fmt.Sprint(volPlanTestSizeGb)),
 				),
+			},
+		},
+	})
+}
+
+// A plan that changes anything marks every computed attribute with a null
+// configuration value as unknown. The storage class cannot change in place, so a
+// resize must not offer the code as known after apply.
+func TestVolumeResourcePlanKeepsTypeCodeOnResize(t *testing.T) {
+	t.Parallel()
+	server, _, _ := startVolumePlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithSize(server.URL, 128),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type_code", volPlanTestComponent),
+				),
+			},
+			{
+				Config: volPlanTestConfigWithSize(server.URL, volPlanTestSizeGb),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionUpdate),
+						plancheck.ExpectKnownValue(gpcnVolumeTest, tfjsonpath.New("volume_type_code"), knownvalue.StringExact(volPlanTestComponent)),
+					},
+				},
+			},
+		},
+	})
+}
+
+const (
+	volPlanTestUnknownComponent = "vol-add-ultra"
+	volPlanTestUnknownName      = "Unknown"
+)
+
+// startUnknownVolumeTypePlanMockServer answers for a volume whose SKU the
+// platform cannot resolve.
+func startUnknownVolumeTypePlanMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	volumePath := "/v1/resource/volumes/" + volPlanTestID
+
+	readBody := map[string]any{
+		"success": true,
+		"message": "ok",
+		"data": map[string]any{
+			"id":     volPlanTestID,
+			"name":   volPlanTestName,
+			"sizeGb": volPlanTestSizeGb,
+			"volumeType": map[string]any{
+				"code":        nil,
+				"name":        volPlanTestUnknownName,
+				"description": "",
+			},
+			"datacenter": map[string]any{
+				"id":          volPlanTestDatacenterID,
+				"name":        "Kansas",
+				"region":      "central",
+				"countryAbbr": "US",
+				"country":     "United States",
+			},
+			"virtualMachineId": "",
+			"createdAt":        volPlanTestTimestamp,
+			"updatedAt":        volPlanTestTimestamp,
+		},
+	}
+
+	sizesBody := map[string]any{
+		"success": true,
+		"message": "ok",
+		"data": map[string]any{
+			"datacenterId": volPlanTestDatacenterID,
+			"volumeTypes": []map[string]any{{
+				"componentCode": volPlanTestUnknownComponent,
+				"name":          volPlanTestUnknownName,
+				"description":   nil,
+				"availableSizes": []map[string]any{
+					{"skuId": "sku-ultra-256", "sizeGb": volPlanTestSizeGb, "displayName": "Ultra 256 GB"},
+				},
+			}},
+		},
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+volPlanTestDatacenterID+"/volume-sizes":
+			testutil.WriteJSONResponse(w, sizesBody)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/volumes/":
+			testutil.HandleCreateJobResponse(w, "job-1", "create issued")
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", volPlanTestID, true)
+		case r.Method == http.MethodGet && r.URL.Path == volumePath:
+			testutil.WriteJSONResponse(w, readBody)
+		case r.Method == http.MethodDelete && r.URL.Path == volumePath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	return server
+}
+
+func TestVolumeResourcePlanImportsUnknownTypeName(t *testing.T) {
+	t.Parallel()
+	server := startUnknownVolumeTypePlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithType(server.URL, volPlanTestUnknownComponent),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type", volPlanTestUnknownComponent),
+					resource.TestCheckNoResourceAttr(gpcnVolumeTest, "volume_type_code"),
+					resource.TestCheckNoResourceAttr(gpcnVolumeTest, "volume_type_id"),
+				),
+			},
+			{
+				ResourceName:    gpcnVolumeTest,
+				ImportState:     true,
+				ImportStateKind: resource.ImportBlockWithID,
+				Config:          volPlanTestConfigWithType(server.URL, volPlanTestUnknownName),
+			},
+		},
+	})
+}
+
+// Only terraform can show that the alias round trip plans nothing.
+func TestVolumeResourcePlanImportAliasPlansEmpty(t *testing.T) {
+	t.Parallel()
+	server, _, _ := startVolumePlanMockServer(t)
+
+	config := volPlanTestConfig(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type", volPlanTestVolumeType),
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type_code", volPlanTestComponent),
+				),
+			},
+			{
+				Config:            config,
+				ResourceName:      gpcnVolumeTest,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionNoop),
+					},
+				},
 			},
 		},
 	})
