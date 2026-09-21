@@ -172,3 +172,20 @@ func TestPollFailsFastOnInvisibleJob(t *testing.T) {
 		t.Errorf("poll calls = %d, want exactly 1", got)
 	}
 }
+
+// TestPollDecodesFractionalProgress proves a fractional percentage still
+// decodes. An integer field rejects the whole envelope, and the poll then fails
+// on a job that is healthy.
+func TestPollDecodesFractionalProgress(t *testing.T) {
+	gpcnClient, _ := jobsServer(t, `{"success":true,"message":"Job progress retrieved successfully",`+
+		`"data":{"jobs":[{"jobId":"job-1","stage":"completed","progressPercentage":12.5,`+
+		`"message":"Working","isCompleted":true,"isTerminal":true,"hasFailed":false}]}}`)
+
+	response, err := client.PerformLongPollingWithConfig(gpcnClient, t.Context(), pollTestAction, pollTestJobID, fastPollingConfig())
+	if err != nil {
+		t.Fatalf("expected a fractional progress to decode, got: %v", err)
+	}
+	if got := response.Data.Jobs[0].ProgressPercentage; got != 12.5 {
+		t.Errorf("ProgressPercentage = %v, want 12.5", got)
+	}
+}
