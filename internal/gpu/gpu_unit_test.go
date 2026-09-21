@@ -1052,8 +1052,8 @@ func TestCheckInventoryResolvesSeriesNameMockHTTP(t *testing.T) {
 	}
 }
 
-// The backend applies the GPU-count filter to the same query that produces the
-// series rows, so a filtered response hides every series without that count.
+// The backend applies the GPU-count filter to the query that produces the
+// series rows. A filtered response then hides every series without that count.
 const inventoryJSONCountFiltered = `{
   "data": {
     "series": [

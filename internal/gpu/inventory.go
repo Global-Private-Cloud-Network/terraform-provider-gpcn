@@ -60,9 +60,9 @@ type FlatInventory struct {
 	SkuCode    string
 }
 
-// flattenInventory returns one entry per available SKU in the datacenter. When
-// seriesCode is not empty it keeps only that series, and when gpuCount is not
-// zero it keeps only the SKUs with that count.
+// flattenInventory returns one entry per available SKU in the datacenter. A
+// series code keeps only that series. A GPU count keeps only the SKUs with that
+// count. An empty value skips the filter.
 func flattenInventory(invResp *inventoryResp, datacenterId, seriesCode string, gpuCount int64) []FlatInventory {
 	var inventory []FlatInventory
 	for _, series := range invResp.Data.Series {
@@ -96,9 +96,8 @@ func flattenInventory(invResp *inventoryResp, datacenterId, seriesCode string, g
 }
 
 // getInventory sends the inventory GET and returns the parsed response. It asks
-// for the whole datacenter. The series and count filters both prune the series
-// list, and a refusal must tell the user which series the datacenter offers and
-// whether the count is what is missing.
+// for the whole datacenter. The series filter and the count filter both prune
+// the series list. A refusal must name every series the datacenter offers.
 func getInventory(gpcnClient *client.GpcnClient, ctx context.Context, datacenterId string) (*inventoryResp, error) {
 	u, err := url.Parse(BASE_URL_V1 + "inventory")
 	if err != nil {
@@ -139,8 +138,8 @@ func getInventory(gpcnClient *client.GpcnClient, ctx context.Context, datacenter
 // the response lists. A configured code must be one of them, and a configured
 // name resolves to that entry's code. The name comparison ignores case and
 // surrounding space, because the catalog name is prose. A response with no
-// series at all means the catalog is unreachable, so the name map answers
-// instead and the caller reports the availability error.
+// series at all means the catalog is unreachable. The name map then answers,
+// and the caller reports the availability error.
 func resolveSeriesCodeFromInventory(invResp *inventoryResp, datacenterId, seriesCode, seriesName string) (string, error) {
 	if len(invResp.Data.Series) == 0 {
 		if seriesCode != "" {
@@ -212,7 +211,7 @@ func CheckInventory(gpcnClient *client.GpcnClient, ctx context.Context, model Re
 
 // FetchInventory lists every available SKU for the datacenter, filtered by the
 // optional series and GPU count. A series the datacenter does not offer is an
-// error, but an offered series with nothing available is an empty result.
+// error. An offered series with nothing available is an empty result.
 func FetchInventory(gpcnClient *client.GpcnClient, ctx context.Context, datacenterId, seriesCode, seriesName string, gpuCount int64) ([]FlatInventory, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingFetchInventory, datacenterId, seriesCode, gpuCount))
 

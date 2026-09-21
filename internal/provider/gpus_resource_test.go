@@ -350,7 +350,7 @@ func TestGPUResourceInvalidSeries(t *testing.T) {
 		wantErr     string
 	}{
 		// An unknown series is no longer a configuration error. The inventory
-		// response decides which series a datacenter offers, so the refusal
+		// response decides which series a datacenter offers. The refusal
 		// arrives during apply.
 		{
 			name:        "both_code_and_name",
