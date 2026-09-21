@@ -13,10 +13,13 @@ import (
 	"testing"
 	"time"
 
+	"terraform-provider-gpcn/internal/networks"
 	"terraform-provider-gpcn/internal/testutil"
 	"terraform-provider-gpcn/internal/virtualmachines"
 
+	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
@@ -69,6 +72,39 @@ func vmPlanTestSizesBody() map[string]any {
 		"data": map[string]any{
 			"datacenterId": vmPlanTestDatacenterID,
 			"categories":   []map[string]any{},
+		},
+	}
+}
+
+// vmPlanTestUpgradeSizesBody lists every size but the one the machine carries. GPCN
+// keeps the current SKU out of the upgrade list, so a size the list names is an in-place
+// resize.
+func vmPlanTestUpgradeSizesBody(currentSkuId string) map[string]any {
+	sizes := []map[string]any{}
+	for index, skuId := range []string{vmPlanTestSizeID, vmPlanTestSizeID2} {
+		if skuId == currentSkuId {
+			continue
+		}
+		sizes = append(sizes, map[string]any{
+			"skuId":   skuId,
+			"name":    fmt.Sprintf("G-Small-%d", index+1),
+			"skuCode": fmt.Sprintf("g-small-%d", index+1),
+			"cpu":     2 * (index + 1),
+			"ram":     4 * (index + 1),
+			"disk":    80,
+		})
+	}
+
+	return map[string]any{
+		"success": true,
+		"message": "ok",
+		"data": map[string]any{
+			"datacenterId": vmPlanTestDatacenterID,
+			"categories": []map[string]any{{
+				"code":  "general-purpose",
+				"name":  "General Purpose",
+				"sizes": sizes,
+			}},
 		},
 	}
 }
@@ -332,17 +368,17 @@ func TestVirtualMachineResourcePlanIgnoresOutOfBandResize(t *testing.T) {
 }
 
 // startVirtualMachineSizeMockServer keeps the SKU that the machine detail reports and
-// counts the resize calls. A test moves the live SKU to stand for a resize that the
-// platform already took. The sizes arm reports no upgrade target, which is the answer
-// GPCN gives once the machine carries the planned SKU.
-func startVirtualMachineSizeMockServer(t *testing.T) (*httptest.Server, func(string), func() int) {
+// records the size verbs in the order they arrive. A test moves the live SKU to stand
+// for a resize that the platform already took. The sizes arm keeps the SKU the machine
+// carries out of its own upgrade list, which is what GPCN does.
+func startVirtualMachineSizeMockServer(t *testing.T, hotplug int) (*httptest.Server, func(string), func() []string) {
 	t.Helper()
 
 	var mu sync.Mutex
 	name := ""
 	birthSubnetID := ""
 	skuId := vmPlanTestSizeID
-	resizeCount := 0
+	var events []string
 	status := virtualmachines.VMStatusRunning.String()
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -361,7 +397,7 @@ func startVirtualMachineSizeMockServer(t *testing.T) (*httptest.Server, func(str
 		case r.Method == http.MethodPut && r.URL.Path == vmPlanTestPath+"/size":
 			body := testutil.ReadRequestBody(r)
 			mu.Lock()
-			resizeCount++
+			events = append(events, "resize")
 			if requested, ok := body["skuId"].(string); ok {
 				skuId = requested
 			}
@@ -369,7 +405,14 @@ func startVirtualMachineSizeMockServer(t *testing.T) (*httptest.Server, func(str
 			testutil.HandleCreateJobResponse(w, "job-5", "resize issued")
 		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
 			mu.Lock()
+			events = append(events, "stop")
 			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/start":
+			mu.Lock()
+			events = append(events, "start")
+			status = virtualmachines.VMStatusRunning.String()
 			mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
@@ -378,12 +421,15 @@ func startVirtualMachineSizeMockServer(t *testing.T) (*httptest.Server, func(str
 			mu.Unlock()
 			testutil.WriteJSONResponse(w, vmPlanTestNetworkInterfacesBody(currentSubnet))
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
-			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+			mu.Lock()
+			currentSku := skuId
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestUpgradeSizesBody(currentSku))
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
 			mu.Lock()
 			currentName, currentStatus, currentSku := name, status, skuId
 			mu.Unlock()
-			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, currentSku))
+			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, currentSku, hotplug))
 		case r.Method == http.MethodPut && r.URL.Path == vmPlanTestPath:
 			body := testutil.ReadRequestBody(r)
 			mu.Lock()
@@ -406,13 +452,13 @@ func startVirtualMachineSizeMockServer(t *testing.T) (*httptest.Server, func(str
 		mu.Unlock()
 	}
 
-	resizes := func() int {
+	recorded := func() []string {
 		mu.Lock()
 		defer mu.Unlock()
-		return resizeCount
+		return append([]string(nil), events...)
 	}
 
-	return server, setSkuId, resizes
+	return server, setSkuId, recorded
 }
 
 // vmSizePlanTestConfig names the SKU the configuration asks for.
@@ -445,7 +491,7 @@ resource "gpcn_virtualmachine" "test" {
 // follows sends no resize.
 func TestVirtualMachineResourcePlanTreatsAnAppliedResizeAsDone(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	server, setSkuId, resizes := startVirtualMachineSizeMockServer(t)
+	server, setSkuId, recorded := startVirtualMachineSizeMockServer(t, 1)
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -467,12 +513,66 @@ func TestVirtualMachineResourcePlanTreatsAnAppliedResizeAsDone(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "size_id", vmPlanTestSizeID2),
 					func(*terraform.State) error {
-						if count := resizes(); count != 0 {
-							return fmt.Errorf("expected no resize call, got %d", count)
+						if events := recorded(); slices.Contains(events, "resize") {
+							return fmt.Errorf("expected no resize call, got %v", events)
 						}
 						return nil
 					},
 				),
+			},
+		},
+	})
+}
+
+// A resize the platform took before a failed read-back leaves state behind the machine.
+// The next apply asks for the SKU the machine already carries. The stop decision reads
+// the live SKU, so that retry costs the user no downtime.
+func TestVirtualMachineResourcePlanSizeRetryStopsNothing(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, setSkuId, recorded := startVirtualMachineSizeMockServer(t, 0)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmSizePlanTestConfig(server.URL, "vm-plan-size-retry", vmPlanTestSizeID),
+			},
+			{
+				PreConfig: func() { setSkuId(vmPlanTestSizeID2) },
+				Config:    vmSizePlanTestConfig(server.URL, "vm-plan-size-retry", vmPlanTestSizeID2),
+				Check: func(*terraform.State) error {
+					if events := recorded(); len(events) != 0 {
+						return fmt.Errorf("expected the retry to call nothing, got %v", events)
+					}
+					return nil
+				},
+			},
+		},
+	})
+}
+
+// An image without network hotplug takes a resize only on a stopped machine. The live
+// SKU still differs from the plan here, so the provider stops the machine, resizes it,
+// and starts it again.
+func TestVirtualMachineResourcePlanResizeStopsTheMachine(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, _, recorded := startVirtualMachineSizeMockServer(t, 0)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmSizePlanTestConfig(server.URL, "vm-plan-size-stop", vmPlanTestSizeID),
+			},
+			{
+				Config: vmSizePlanTestConfig(server.URL, "vm-plan-size-stop", vmPlanTestSizeID2),
+				Check: func(*terraform.State) error {
+					want := []string{"stop", "resize", "start"}
+					if events := recorded(); !slices.Equal(events, want) {
+						return fmt.Errorf("expected %v, got %v", want, events)
+					}
+					return nil
+				},
 			},
 		},
 	})
@@ -713,8 +813,8 @@ resource "gpcn_virtualmachine" "test" {
 	})
 }
 
-func vmPlanTestReadBodyWithHotplug(name, status string, hotplug int) map[string]any {
-	body := vmPlanTestReadBody(name, status, vmPlanTestSizeID)
+func vmPlanTestReadBodyWithHotplug(name, status, skuId string, hotplug int) map[string]any {
+	body := vmPlanTestReadBody(name, status, skuId)
 	body["data"].(map[string]any)["networkHotplug"] = hotplug
 	return body
 }
@@ -1018,7 +1118,7 @@ func startVirtualMachineSegmentHotplugMockServer(t *testing.T, hotplug int, star
 			mu.Lock()
 			currentName, currentStatus := name, status
 			mu.Unlock()
-			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, hotplug))
+			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, vmPlanTestSizeID, hotplug))
 		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
 			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
 		default:
@@ -1107,8 +1207,10 @@ func TestVirtualMachineResourcePlanCreateStopsForASegmentAttachWithoutHotplug(t 
 
 // startVirtualMachineSegmentUpdateMockServer keeps one interface row per attached
 // segment and gives each a stable id. It records the segment verbs in the order they
-// arrive. A test then reads what the provider changed and what it left alone.
-func startVirtualMachineSegmentUpdateMockServer(t *testing.T, hotplug int) (*httptest.Server, func() []string) {
+// arrive. A test then reads what the provider changed and what it left alone. The
+// second returned function attaches a segment without recording a verb, which stands
+// for work the platform took before a failed read-back.
+func startVirtualMachineSegmentUpdateMockServer(t *testing.T, hotplug int) (*httptest.Server, func(string), func() []string) {
 	t.Helper()
 
 	var mu sync.Mutex
@@ -1173,7 +1275,7 @@ func startVirtualMachineSegmentUpdateMockServer(t *testing.T, hotplug int) (*htt
 			mu.Lock()
 			currentName, currentStatus := name, status
 			mu.Unlock()
-			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, hotplug))
+			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, vmPlanTestSizeID, hotplug))
 		case r.Method == http.MethodPut && r.URL.Path == vmPlanTestPath:
 			body := testutil.ReadRequestBody(r)
 			mu.Lock()
@@ -1190,13 +1292,20 @@ func startVirtualMachineSegmentUpdateMockServer(t *testing.T, hotplug int) (*htt
 	}))
 	t.Cleanup(server.Close)
 
+	attachOutOfBand := func(segmentID string) {
+		mu.Lock()
+		defer mu.Unlock()
+		attached = append(attached, vmSegmentNic{nicID: fmt.Sprintf("nic-%d", nextNic), segmentID: segmentID})
+		nextNic++
+	}
+
 	recorded := func() []string {
 		mu.Lock()
 		defer mu.Unlock()
 		return append([]string(nil), events...)
 	}
 
-	return server, recorded
+	return server, attachOutOfBand, recorded
 }
 
 // A segment list changes in place. The provider detaches the interface that carries the
@@ -1204,7 +1313,7 @@ func startVirtualMachineSegmentUpdateMockServer(t *testing.T, hotplug int) (*htt
 // with network hotplug takes the change while the machine runs.
 func TestVirtualMachineResourcePlanAttachesAndDetachesSegments(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	server, recorded := startVirtualMachineSegmentUpdateMockServer(t, 1)
+	server, _, recorded := startVirtualMachineSegmentUpdateMockServer(t, 1)
 
 	var afterCreate []string
 
@@ -1247,7 +1356,7 @@ func TestVirtualMachineResourcePlanAttachesAndDetachesSegments(t *testing.T) {
 // list that carries the same segments costs the user the whole downtime.
 func TestVirtualMachineResourcePlanReorderedSegmentsChangeNothing(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	server, recorded := startVirtualMachineSegmentUpdateMockServer(t, 0)
+	server, _, recorded := startVirtualMachineSegmentUpdateMockServer(t, 0)
 
 	afterCreate := 0
 
@@ -1275,6 +1384,180 @@ func TestVirtualMachineResourcePlanReorderedSegmentsChangeNothing(t *testing.T) 
 			},
 		},
 	})
+}
+
+// A read-back that failed after an attach leaves state behind the machine. The next
+// apply asks for a segment the machine already carries. The stop decision reads the live
+// interfaces, so that retry costs the user no downtime.
+func TestVirtualMachineResourcePlanSegmentRetryStopsNothing(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, attachOutOfBand, recorded := startVirtualMachineSegmentUpdateMockServer(t, 0)
+
+	afterCreate := 0
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmSegmentListPlanTestConfig(server.URL, "vm-plan-segment-retry", vmPlanTestSegmentID),
+				Check: func(*terraform.State) error {
+					afterCreate = len(recorded())
+					return nil
+				},
+			},
+			{
+				PreConfig: func() { attachOutOfBand(vmPlanTestSegmentID2) },
+				Config:    vmSegmentListPlanTestConfig(server.URL, "vm-plan-segment-retry", vmPlanTestSegmentID, vmPlanTestSegmentID2),
+				Check: func(*terraform.State) error {
+					if retry := recorded()[afterCreate:]; len(retry) != 0 {
+						return fmt.Errorf("expected the retry to call nothing, got %v", retry)
+					}
+					return nil
+				},
+			},
+		},
+	})
+}
+
+// An image without network hotplug takes a new interface only on a stopped machine. The
+// live interfaces still lack the segment here, so the provider stops the machine,
+// attaches it, and starts the machine again.
+func TestVirtualMachineResourcePlanSegmentChangeStopsTheMachine(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, _, recorded := startVirtualMachineSegmentUpdateMockServer(t, 0)
+
+	afterCreate := 0
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmSegmentListPlanTestConfig(server.URL, "vm-plan-segment-stop"),
+				Check: func(*terraform.State) error {
+					afterCreate = len(recorded())
+					return nil
+				},
+			},
+			{
+				Config: vmSegmentListPlanTestConfig(server.URL, "vm-plan-segment-stop", vmPlanTestSegmentID),
+				Check: func(*terraform.State) error {
+					update := recorded()[afterCreate:]
+					want := []string{"stop", "attach " + vmPlanTestSegmentID, "start"}
+					if !slices.Equal(update, want) {
+						return fmt.Errorf("expected %v, got %v", want, update)
+					}
+					return nil
+				},
+			},
+		},
+	})
+}
+
+// vmStopDecisionModel carries the three attributes the stop decision reads.
+func vmStopDecisionModel(hotplug bool, sizeId string, segmentIds ...string) virtualmachines.ResourceModel {
+	elements := make([]attr.Value, 0, len(segmentIds))
+	for _, segmentId := range segmentIds {
+		elements = append(elements, types.StringValue(segmentId))
+	}
+
+	return virtualmachines.ResourceModel{
+		NetworkHotplug: types.BoolValue(hotplug),
+		SizeId:         types.StringValue(sizeId),
+		L2SegmentIds:   types.ListValueMust(types.StringType, elements),
+	}
+}
+
+// vmStopDecisionDetail reports the SKU the machine carries now.
+func vmStopDecisionDetail(skuId string) *virtualmachines.ReadVirtualMachinesResponse {
+	detail := &virtualmachines.ReadVirtualMachinesResponse{}
+	detail.Data.Configuration.SkuId = skuId
+	return detail
+}
+
+// vmStopDecisionInterfaces lists the birth interface and one L2 interface per segment
+// the machine carries now.
+func vmStopDecisionInterfaces(segmentIds ...string) []networks.ReadVirtualMachineNetworkDataResponseTF {
+	interfaces := make([]networks.ReadVirtualMachineNetworkDataResponseTF, 0, 1+len(segmentIds))
+	interfaces = append(interfaces, networks.ReadVirtualMachineNetworkDataResponseTF{
+		ID:        types.StringValue("nic-1"),
+		IsPrimary: types.BoolValue(true),
+		World:     types.StringValue(networks.NicWorldVpc),
+	})
+	for index, segmentId := range segmentIds {
+		interfaces = append(interfaces, networks.ReadVirtualMachineNetworkDataResponseTF{
+			ID:          types.StringValue(fmt.Sprintf("nic-%d", index+2)),
+			IsPrimary:   types.BoolValue(false),
+			World:       types.StringValue(networks.NicWorldL2),
+			L2SegmentID: types.StringValue(segmentId),
+		})
+	}
+
+	return interfaces
+}
+
+// The machine already carries the planned segments, so the change is done. A stop for
+// work the platform took costs the user the whole downtime.
+func TestDetermineIfVMNeedsStoppedSkipsAnAppliedSegmentChange(t *testing.T) {
+	state := vmStopDecisionModel(false, vmPlanTestSizeID, vmPlanTestSegmentID)
+	plan := vmStopDecisionModel(false, vmPlanTestSizeID, vmPlanTestSegmentID, vmPlanTestSegmentID2)
+
+	live := vmStopDecisionDetail(vmPlanTestSizeID)
+	liveInterfaces := vmStopDecisionInterfaces(vmPlanTestSegmentID, vmPlanTestSegmentID2)
+
+	if determineIfVMNeedsStopped(state, plan, live, liveInterfaces) {
+		t.Error("Expected no stop for a segment list the machine already carries")
+	}
+}
+
+// GPCN refuses an add-NIC on a running machine without network hotplug. A segment the
+// live interfaces lack therefore needs a stop.
+func TestDetermineIfVMNeedsStoppedStopsForASegmentTheMachineLacks(t *testing.T) {
+	state := vmStopDecisionModel(false, vmPlanTestSizeID, vmPlanTestSegmentID)
+	plan := vmStopDecisionModel(false, vmPlanTestSizeID, vmPlanTestSegmentID, vmPlanTestSegmentID2)
+
+	live := vmStopDecisionDetail(vmPlanTestSizeID)
+	liveInterfaces := vmStopDecisionInterfaces(vmPlanTestSegmentID)
+
+	if !determineIfVMNeedsStopped(state, plan, live, liveInterfaces) {
+		t.Error("Expected a stop for a segment the machine lacks")
+	}
+}
+
+// The machine already carries the planned SKU, so the resize is done. State lags the
+// machine after a failed read-back, and state is not the question.
+func TestDetermineIfVMNeedsStoppedSkipsAnAppliedResize(t *testing.T) {
+	state := vmStopDecisionModel(false, vmPlanTestSizeID)
+	plan := vmStopDecisionModel(false, vmPlanTestSizeID2)
+
+	live := vmStopDecisionDetail(vmPlanTestSizeID2)
+
+	if determineIfVMNeedsStopped(state, plan, live, vmStopDecisionInterfaces()) {
+		t.Error("Expected no stop for a SKU the machine already carries")
+	}
+}
+
+// GPCN resizes a stopped machine only, so a SKU the machine lacks needs a stop.
+func TestDetermineIfVMNeedsStoppedStopsForAResize(t *testing.T) {
+	state := vmStopDecisionModel(false, vmPlanTestSizeID)
+	plan := vmStopDecisionModel(false, vmPlanTestSizeID2)
+
+	live := vmStopDecisionDetail(vmPlanTestSizeID)
+
+	if !determineIfVMNeedsStopped(state, plan, live, vmStopDecisionInterfaces()) {
+		t.Error("Expected a stop for a SKU the machine lacks")
+	}
+}
+
+// An image with network hotplug takes every change while the machine runs.
+func TestDetermineIfVMNeedsStoppedSkipsAMachineWithHotplug(t *testing.T) {
+	state := vmStopDecisionModel(true, vmPlanTestSizeID)
+	plan := vmStopDecisionModel(true, vmPlanTestSizeID2, vmPlanTestSegmentID)
+
+	live := vmStopDecisionDetail(vmPlanTestSizeID)
+
+	if determineIfVMNeedsStopped(state, plan, live, vmStopDecisionInterfaces()) {
+		t.Error("Expected no stop for a machine whose image takes network hotplug")
+	}
 }
 
 // startVirtualMachineSegmentRefusedMockServer counts the starts the provider issues. The
@@ -1353,7 +1636,7 @@ func startVirtualMachineSegmentRefusedMockServer(t *testing.T, startSucceeds boo
 				testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "read-back refused"})
 				return
 			}
-			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, hotplug))
+			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, vmPlanTestSizeID, hotplug))
 		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
 			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
 		default:

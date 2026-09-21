@@ -519,8 +519,29 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		return
 	}
 
+	// The stop decision and the steps after it read the machine once here. State can lag
+	// the platform after a failed read-back. A retry then asks for work the machine
+	// already carries, and a stop for that work costs the user the whole downtime.
+	liveDetail, detailErr := virtualmachines.GetVirtualMachine(r.client, ctx, state.ID.ValueString())
+	if detailErr != nil {
+		resp.Diagnostics.AddError(
+			virtualmachines.ErrSummaryRetrievingVMInfoFailed,
+			fmt.Errorf("%s: %w", virtualmachines.ErrDetailVMInfoFailedCanImport, detailErr).Error(),
+		)
+		return
+	}
+
+	liveInterfaces, interfacesErr := networks.GetNetworkInterfaces(r.client, ctx, state.ID.ValueString())
+	if interfacesErr != nil {
+		resp.Diagnostics.AddError(
+			virtualmachines.ErrSummaryErrorRetrievingNetworkIfaces,
+			interfacesErr.Error(),
+		)
+		return
+	}
+
 	// Controls stopping the VM. Since this is time-expensive, we only need to do this in a few cases
-	needStopVM := determineIfVMNeedsStopped(state, plan)
+	needStopVM := determineIfVMNeedsStopped(state, plan, liveDetail, liveInterfaces)
 
 	// Before proceeding with update, conditionally stop the virtual machine
 	if needStopVM {
@@ -540,13 +561,13 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	var getVirtualMachineResponse *virtualmachines.ReadVirtualMachinesResponse
 	updateSteps := []func() diag.Diagnostics{
 		func() diag.Diagnostics {
-			return virtualmachines.UpdateL2SegmentsIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+			return virtualmachines.UpdateL2SegmentsIfChanged(r.client, ctx, state.ID.ValueString(), state, plan, liveInterfaces)
 		},
 		func() diag.Diagnostics {
 			return virtualmachines.UpdatePublicIPIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
 		},
 		func() diag.Diagnostics {
-			return virtualmachines.UpdateSizeIfChanged(r.client, ctx, plan.ID.ValueString(), state, plan)
+			return virtualmachines.UpdateSizeIfChanged(r.client, ctx, plan.ID.ValueString(), state, plan, liveDetail)
 		},
 		func() diag.Diagnostics {
 			return virtualmachines.UpdateChangeableAttributesIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
@@ -829,15 +850,30 @@ Cases where VM needs to be stopped:
   - the l2_segment_ids set changes
   - size_id changes
 */
-func determineIfVMNeedsStopped(state, plan virtualmachines.ResourceModel) bool {
+func determineIfVMNeedsStopped(state, plan virtualmachines.ResourceModel, live *virtualmachines.ReadVirtualMachinesResponse, liveInterfaces []networks.ReadVirtualMachineNetworkDataResponseTF) bool {
 	// If network hotplug is enabled, the VM does not need to be stopped
 	if state.NetworkHotplug.ValueBool() {
 		return false
 	}
 
 	// If network hotplug is disabled, the VM needs to be stopped for a few scenarios
-	return !slices.Equal(sortedSegmentIds(state.L2SegmentIds), sortedSegmentIds(plan.L2SegmentIds)) ||
-		!state.SizeId.Equal(plan.SizeId)
+	return !slices.Equal(liveSegmentIds(liveInterfaces), sortedSegmentIds(plan.L2SegmentIds)) ||
+		live.Data.Configuration.SkuId != plan.SizeId.ValueString()
+}
+
+// liveSegmentIds reads the segments the machine carries now. It renders them the way
+// sortedSegmentIds renders a planned element. An unknown planned element therefore
+// matches no live segment and still asks for a stop.
+func liveSegmentIds(liveInterfaces []networks.ReadVirtualMachineNetworkDataResponseTF) []string {
+	segmentIds := make([]string, 0, len(liveInterfaces))
+	for _, liveInterface := range liveInterfaces {
+		if liveInterface.World.ValueString() != networks.NicWorldL2 || liveInterface.L2SegmentID.IsNull() {
+			continue
+		}
+		segmentIds = append(segmentIds, liveInterface.L2SegmentID.String())
+	}
+	slices.Sort(segmentIds)
+	return segmentIds
 }
 
 // sortedSegmentIds reads a segment list in a stable order. GPCN gives the interfaces of

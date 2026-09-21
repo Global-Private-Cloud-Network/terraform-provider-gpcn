@@ -1178,24 +1178,31 @@ func segmentModelWithIds(segmentIds ...string) ResourceModel {
 	return model
 }
 
-// l2SegmentNicRows renders a primary VPC interface plus one L2 interface per segment.
-func l2SegmentNicRows(segmentIds ...string) []map[string]any {
-	rows := []map[string]any{{
-		"id": "nic-primary", "networkInterface": 1, "isPrimary": 1,
-		"world": "vpc", "vpcId": "vpc-1", "vpcSubnetId": "subnet-uuid-test",
+// l2SegmentNics renders a primary VPC interface plus one L2 interface per segment. It
+// stands for the live list the caller of UpdateL2SegmentsIfChanged reads.
+func l2SegmentNics(segmentIds ...string) []networks.ReadVirtualMachineNetworkDataResponseTF {
+	nics := []networks.ReadVirtualMachineNetworkDataResponseTF{{
+		ID:               types.StringValue("nic-primary"),
+		NetworkInterface: types.Int64Value(1),
+		IsPrimary:        types.BoolValue(true),
+		World:            types.StringValue(networks.NicWorldVpc),
+		VpcID:            types.StringValue("vpc-1"),
+		VpcSubnetID:      types.StringValue("subnet-uuid-test"),
 	}}
 	for index, segmentId := range segmentIds {
-		rows = append(rows, map[string]any{
-			"id": fmt.Sprintf("nic-%s", segmentId), "networkInterface": index + 2, "isPrimary": 0,
-			"world": "l2", "l2SegmentId": segmentId,
+		nics = append(nics, networks.ReadVirtualMachineNetworkDataResponseTF{
+			ID:               types.StringValue(fmt.Sprintf("nic-%s", segmentId)),
+			NetworkInterface: types.Int64Value(int64(index + 2)),
+			IsPrimary:        types.BoolValue(false),
+			World:            types.StringValue(networks.NicWorldL2),
+			L2SegmentID:      types.StringValue(segmentId),
 		})
 	}
-	return rows
+	return nics
 }
 
-// segmentUpdateMockServer answers the interface list with the given rows and records
-// every attach body.
-func segmentUpdateMockServer(t *testing.T, vmID string, rows []map[string]any) (*httptest.Server, *client.GpcnClient, *[]string) {
+// segmentUpdateMockServer records every attach body.
+func segmentUpdateMockServer(t *testing.T, vmID string) (*httptest.Server, *client.GpcnClient, *[]string) {
 	t.Helper()
 
 	attached := []string{}
@@ -1203,10 +1210,6 @@ func segmentUpdateMockServer(t *testing.T, vmID string, rows []map[string]any) (
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
-			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/network-interfaces"):
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true, "message": "Network interfaces retrieved", "data": rows,
-				})
 			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/network-interfaces"):
 				body := testutil.ReadRequestBody(r)
 				segmentId, _ := body["l2SegmentId"].(string)
@@ -1229,13 +1232,13 @@ func segmentUpdateMockServer(t *testing.T, vmID string, rows []map[string]any) (
 func TestUpdateL2SegmentsIfChangedSkipsASegmentTheMachineCarries(t *testing.T) {
 	const vmID = "vm-live-segments-123"
 
-	server, gpcnClient, attached := segmentUpdateMockServer(t, vmID, l2SegmentNicRows("segment-a", "segment-b"))
+	server, gpcnClient, attached := segmentUpdateMockServer(t, vmID)
 	defer server.Close()
 
 	state := segmentModelWithIds("segment-a")
 	plan := segmentModelWithIds("segment-a", "segment-b")
 
-	diags := UpdateL2SegmentsIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	diags := UpdateL2SegmentsIfChanged(gpcnClient, context.Background(), vmID, state, plan, l2SegmentNics("segment-a", "segment-b"))
 	if diags.HasError() {
 		t.Fatalf("Expected no error diagnostic, got %v", diags.Errors())
 	}
@@ -1249,13 +1252,13 @@ func TestUpdateL2SegmentsIfChangedSkipsASegmentTheMachineCarries(t *testing.T) {
 func TestUpdateL2SegmentsIfChangedAttachesASegmentTheMachineLacks(t *testing.T) {
 	const vmID = "vm-missing-segment-123"
 
-	server, gpcnClient, attached := segmentUpdateMockServer(t, vmID, l2SegmentNicRows("segment-a"))
+	server, gpcnClient, attached := segmentUpdateMockServer(t, vmID)
 	defer server.Close()
 
 	state := segmentModelWithIds("segment-a")
 	plan := segmentModelWithIds("segment-a", "segment-b")
 
-	diags := UpdateL2SegmentsIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	diags := UpdateL2SegmentsIfChanged(gpcnClient, context.Background(), vmID, state, plan, l2SegmentNics("segment-a"))
 	if diags.HasError() {
 		t.Fatalf("Expected no error diagnostic, got %v", diags.Errors())
 	}

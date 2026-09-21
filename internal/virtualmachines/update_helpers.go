@@ -29,10 +29,10 @@ func readSegmentIds(ctx context.Context, list types.List) ([]string, diag.Diagno
 // first, because GPCN caps a machine at five interfaces. A swap would otherwise need a
 // free slot the machine does not have. The birth subnet interface is the primary one and
 // is never a candidate: GPCN refuses to detach a primary interface. Both halves of the
-// change read the live interface list. State can lag the platform after a failed
-// read-back, and GPCN refuses a second interface on one segment.
+// change read the live interface list the caller passes in. State can lag the platform
+// after a failed read-back, and GPCN refuses a second interface on one segment.
 // Returns diagnostics if any errors occurred.
-func UpdateL2SegmentsIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, state, plan ResourceModel) diag.Diagnostics {
+func UpdateL2SegmentsIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, state, plan ResourceModel, networkInterfaces []networks.ReadVirtualMachineNetworkDataResponseTF) diag.Diagnostics {
 	var diags diag.Diagnostics
 
 	if plan.L2SegmentIds.Equal(state.L2SegmentIds) {
@@ -62,15 +62,6 @@ func UpdateL2SegmentsIfChanged(gpcnClient *client.GpcnClient, ctx context.Contex
 		return diags
 	}
 
-	networkInterfaces, err := networks.GetNetworkInterfaces(gpcnClient, ctx, vmID)
-	if err != nil {
-		diags.AddError(
-			ErrSummaryErrorRetrievingNetworkIfaces,
-			err.Error(),
-		)
-		return diags
-	}
-
 	for _, segmentId := range removed {
 		interfaceIdx := slices.IndexFunc(networkInterfaces, func(inter networks.ReadVirtualMachineNetworkDataResponseTF) bool {
 			return !inter.IsPrimary.ValueBool() &&
@@ -82,8 +73,7 @@ func UpdateL2SegmentsIfChanged(gpcnClient *client.GpcnClient, ctx context.Contex
 		if interfaceIdx < 0 {
 			continue
 		}
-		err = networks.RemoveNetworkInterface(gpcnClient, ctx, vmID, networkInterfaces[interfaceIdx].ID.ValueString())
-		if err != nil {
+		if err := networks.RemoveNetworkInterface(gpcnClient, ctx, vmID, networkInterfaces[interfaceIdx].ID.ValueString()); err != nil {
 			diags.AddError(
 				ErrSummaryErrorUpdatingNetworkInterfaces,
 				err.Error(),
@@ -99,8 +89,7 @@ func UpdateL2SegmentsIfChanged(gpcnClient *client.GpcnClient, ctx context.Contex
 		}) {
 			continue
 		}
-		err = networks.AddL2SegmentInterface(gpcnClient, ctx, vmID, segmentId)
-		if err != nil {
+		if err := networks.AddL2SegmentInterface(gpcnClient, ctx, vmID, segmentId); err != nil {
 			diags.AddError(
 				ErrSummaryErrorUpdatingNetworkInterfaces,
 				err.Error(),
@@ -211,9 +200,10 @@ func publicIpFailure(diags diag.Diagnostics, err error) diag.Diagnostics {
 	return diags
 }
 
-// UpdateSizeIfChanged handles VM size updates during VM update.
+// UpdateSizeIfChanged handles VM size updates during VM update. The caller passes the
+// live detail it already read.
 // Returns diagnostics if any errors occurred.
-func UpdateSizeIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, state, plan ResourceModel) diag.Diagnostics {
+func UpdateSizeIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, state, plan ResourceModel, live *ReadVirtualMachinesResponse) diag.Diagnostics {
 	var diags diag.Diagnostics
 
 	if plan.SizeId.Equal(state.SizeId) {
@@ -222,8 +212,7 @@ func UpdateSizeIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmI
 
 	// The machine can already carry the planned SKU when a read-back failed after an
 	// earlier resize. GPCN answers 400 for a resize to the size the machine has.
-	live, liveErr := GetVirtualMachine(gpcnClient, ctx, vmID)
-	if liveErr == nil && live.Data.Configuration.SkuId == plan.SizeId.ValueString() {
+	if live.Data.Configuration.SkuId == plan.SizeId.ValueString() {
 		tflog.Info(ctx, LogVirtualMachineAlreadyCarriesTheSize)
 		return diags
 	}
