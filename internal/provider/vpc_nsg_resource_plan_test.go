@@ -471,3 +471,49 @@ func TestVpcNsgResourcePlanRefusesOuterWhitespace(t *testing.T) {
 		},
 	})
 }
+
+// GPCN stages the platform posture in the VPC's own default group as ordinary
+// rule rows, and the rules route replaces the whole set. An apply against that
+// group must still send every rule the configuration keeps.
+func TestVpcNsgResourcePlanReplacesRulesOnDefaultGroup(t *testing.T) {
+	t.Parallel()
+	server, state := startNsgPlanMockServer(t)
+
+	lastRulesPutCount := func(want int) resource.TestCheckFunc {
+		return func(*terraform.State) error {
+			state.mu.Lock()
+			defer state.mu.Unlock()
+			sent, ok := state.lastRulesPut["rules"].([]any)
+			if !ok {
+				return fmt.Errorf("expected a rules array in the body, got %T", state.lastRulesPut["rules"])
+			}
+			if len(sent) != want {
+				return fmt.Errorf("expected the complete set of %d rules, got %d", want, len(sent))
+			}
+			return nil
+		}
+	}
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: nsgPlanTestConfig(server.URL, "default", nsgPlanTestRuleHTTPS),
+				Check:  resource.TestCheckResourceAttr(gpcnVpcNsgTest, "is_default", "false"),
+			},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					state.isDefault = true
+				},
+				Config: nsgPlanTestConfig(server.URL, "default", nsgPlanTestRuleHTTPS+nsgPlanTestRulePing),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "is_default", "true"),
+					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "rule.#", "2"),
+					lastRulesPutCount(2),
+				),
+			},
+		},
+	})
+}

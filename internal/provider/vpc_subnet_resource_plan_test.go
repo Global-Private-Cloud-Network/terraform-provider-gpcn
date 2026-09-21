@@ -29,14 +29,18 @@ const (
 // subnetPlanTestServerState is the row the mock keeps between requests. A read
 // after an apply must agree with the configuration, or every step plans a diff.
 type subnetPlanTestServerState struct {
-	mu           sync.Mutex
-	name         string
-	description  string
-	nsgID        string
-	nsgName      string
-	nicCount     int64
-	deleted      bool
-	refuseDelete bool
+	mu          sync.Mutex
+	name        string
+	description string
+	nsgID       string
+	nsgName     string
+	nicCount    int64
+	rowState    string
+	// failureReason stands for the sentence GPCN files against a carve it gave
+	// up on. An empty value reads back as the API's null.
+	failureReason string
+	deleted       bool
+	refuseDelete  bool
 	// nicCountOnRename stands for an interface that attaches between the
 	// refresh and the apply. Zero leaves the census alone.
 	nicCountOnRename int64
@@ -48,16 +52,20 @@ type subnetPlanTestServerState struct {
 }
 
 func (s *subnetPlanTestServerState) row() map[string]any {
+	var failureReason any
+	if s.failureReason != "" {
+		failureReason = s.failureReason
+	}
 	return map[string]any{
 		"id":               subnetPlanTestID,
 		"name":             s.name,
 		"description":      nil,
 		"cidr":             subnetPlanTestCIDR,
-		"state":            "ready",
+		"state":            s.rowState,
 		"nsgId":            s.nsgID,
 		"nsgName":          s.nsgName,
 		"attachedNicCount": s.nicCount,
-		"failureReason":    nil,
+		"failureReason":    failureReason,
 		"activeJobId":      nil,
 		"createdAt":        subnetPlanTestTimestamp,
 		"updatedAt":        subnetPlanTestTimestamp,
@@ -67,7 +75,7 @@ func (s *subnetPlanTestServerState) row() map[string]any {
 func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestServerState) {
 	t.Helper()
 
-	state := &subnetPlanTestServerState{nsgID: subnetPlanTestDefaultNsg, nsgName: "default"}
+	state := &subnetPlanTestServerState{nsgID: subnetPlanTestDefaultNsg, nsgName: "default", rowState: "ready"}
 
 	collection := "/v1/resource/vpcs/" + subnetPlanTestVpcID + "/subnets/"
 	subnetPath := collection + subnetPlanTestID
@@ -498,6 +506,41 @@ func TestVpcSubnetResourcePlanRefusesOuterWhitespace(t *testing.T) {
 			{
 				Config:      subnetPlanTestConfig(server.URL, " subnet-plan-a", ""),
 				ExpectError: regexp.MustCompile(strings.ReplaceAll(regexp.QuoteMeta("name must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)"), " ", `\s+`)),
+			},
+		},
+	})
+}
+
+// A carve GPCN gave up on still reads back cleanly. The operator learns of it
+// through the state and the reason the API files against the row.
+func TestVpcSubnetResourcePlanReadsFailedSubnet(t *testing.T) {
+	t.Parallel()
+	server, state := startSubnetPlanMockServer(t)
+
+	config := subnetPlanTestConfig(server.URL, "subnet-plan-a", "")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "state", "ready"),
+					resource.TestCheckNoResourceAttr(gpcnVpcSubnetTest, "failure_reason"),
+				),
+			},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					state.rowState = "failed"
+					state.failureReason = "the provider rejected the allocation"
+				},
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "state", "failed"),
+					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "failure_reason", "the provider rejected the allocation"),
+				),
 			},
 		},
 	})
