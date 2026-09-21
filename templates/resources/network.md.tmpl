@@ -58,7 +58,7 @@ Find the segment id by the first route that works:
 
 - the adoption CLI log line `adopted as segment <uuid>`, or `repaired as segment <uuid>` when a re-run finished the network;
 - the network interface list of a virtual machine that was on the network, where the interface now reports `l2SegmentId`;
-- the `platform.l2segment.adopt` audit event, whose target is the segment and whose `metadata.change.networkId` is the old network id. This route needs the `audit-log:read` permission (`audit-log:manage` also admits).
+- the `platform.l2segment.adopt` audit event, whose target is the segment and whose `metadata.change.networkId` is the old network id. This route needs the `audit-log:manage` permission. A key that holds only `audit-log:read` gets the list without this event, because the event is in the `admin` category.
 
 Rewrite the block as `gpcn_l2_segment`, keeping `name`, `datacenter_id` and `description`, and delete the L3 attributes (`network_type`, `cidr_block`, `gateway_ip`, `dns_servers`, `dhcp_start_address`, `dhcp_end_address`). A block still written as `gpcn_network` plans a create, and a create is refused.
 
@@ -71,6 +71,6 @@ terraform import gpcn_l2_segment.<name> <segment-id>
 
 Re-point every `gpcn_network.<name>.id` reference in outputs and modules. In a `gpcn_virtualmachine` block, move the id from `network_ids` to `l2_segment_ids`, which is where a segment attaches.
 
-Run `terraform state rm` if the row is still in state; a refresh after the adoption has already removed it. Remove the row with `terraform state rm`, not with a destroy. The segment carries live traffic, and a destroy tears the carrier down.
+The row stays in state after the adoption. A plan warns and proposes a create, which the provider refuses, so nothing persists. Remove the row with `terraform state rm`, not with a destroy. The segment carries live traffic, and a destroy tears the carrier down.
 
 The adoption deduplicates a segment name that your account already uses in that datacenter, by appending `-2`, `-3` and so on. If the name of your network was deduplicated, write the deduplicated name (`<name>-2`) into the `gpcn_l2_segment` block. Otherwise the first apply plans a rename that you did not ask for.
