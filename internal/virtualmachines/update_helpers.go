@@ -12,50 +12,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-// UpdateNetworkInterfacesIfChanged handles network interface updates during VM update.
-// Returns diagnostics if any errors occurred.
-func UpdateNetworkInterfacesIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, state, plan ResourceModel) diag.Diagnostics {
-	var diags diag.Diagnostics
-
-	if slices.Equal(plan.NetworkIds.Elements(), state.NetworkIds.Elements()) {
-		return diags
-	}
-
-	networkInterfaces, err := networks.GetNetworkInterfaces(gpcnClient, ctx, vmID)
-	if err != nil {
-		diags.AddError(
-			ErrSummaryErrorRetrievingNetworkIfaces,
-			err.Error(),
-		)
-		return diags
-	}
-
-	var oldNetworksList, newNetworksList []string
-	state.NetworkIds.ElementsAs(ctx, &oldNetworksList, true)
-	plan.NetworkIds.ElementsAs(ctx, &newNetworksList, true)
-
-	// Validate new network interface size will not increase beyond network cap
-	err = ValidateNetworkInterfacesDoesNotExceedCap(oldNetworksList, newNetworksList, networkInterfaces)
-	if err != nil {
-		diags.AddError(
-			ErrSummaryErrorUpdatingNetworkInterfaces,
-			err.Error(),
-		)
-		return diags
-	}
-
-	err = networks.UpdateNetworkInterfaces(gpcnClient, ctx, vmID, oldNetworksList, newNetworksList, networkInterfaces)
-	if err != nil {
-		diags.AddError(
-			ErrSummaryErrorUpdatingNetworkInterfaces,
-			err.Error(),
-		)
-		return diags
-	}
-
-	return diags
-}
-
 // UpdatePublicIPIfChanged handles public IP allocation/release during VM update.
 // Returns diagnostics if any errors occurred.
 //

@@ -2,7 +2,6 @@ package provider
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"testing"
 
@@ -16,13 +15,22 @@ import (
 
 var gpcnVirtualMachineTest = "gpcn_virtualmachine.test"
 
-// skipWithoutTestNetwork stops a case that has no network to attach. GPCN no longer
-// creates networks, so these cases cannot mint the network the machine is born on.
-func skipWithoutTestNetwork(t *testing.T, networkID string) {
-	t.Helper()
-	if networkID == "" {
-		t.Skipf("%s is not set: name an existing GPCN network for the virtual machine", networkTestIDEnvVar)
-	}
+// vpcAndSubnet returns the VPC and the subnet a virtual machine is born on. A machine
+// lives in exactly one VPC, so every case that creates one creates these two first.
+func vpcAndSubnet() string {
+	return `
+resource "gpcn_vpc" "vm_vpc" {
+	name          = "terraform-demo-vpc"
+	datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+	cidr          = "10.60.0.0/16"
+}
+
+resource "gpcn_vpc_subnet" "vm_subnet" {
+	vpc_id = gpcn_vpc.vm_vpc.id
+	name   = "terraform-demo-subnet"
+	cidr   = "10.60.1.0/24"
+}
+`
 }
 
 // dataCenterImagesAndSize returns the common datacenter, image, and size datasource lookup blocks for Chicago.
@@ -51,18 +59,16 @@ func TestVirtualMachinesResource(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
 	sshKeyName := fmt.Sprintf("vm-basic-key-%s", rName)
-	networkID := os.Getenv(networkTestIDEnvVar)
 	volumeName := fmt.Sprintf("vm-basic-vol-%s", rName)
 	vmName := fmt.Sprintf("vm-basic-%s", rName)
 	vmNameUpdated := fmt.Sprintf("vm-basic-updated-%s", rName)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { skipWithoutTestNetwork(t, networkID) },
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create and Read testing
 			{
-				Config: providerConfig + dataCenterImagesAndSize() + fmt.Sprintf(`
+				Config: providerConfig + dataCenterImagesAndSize() + vpcAndSubnet() + fmt.Sprintf(`
 			resource "gpcn_resource_group" "vm_group" {
 				name = "terraform-demo-group"
 			}
@@ -87,9 +93,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 				image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 
 				allocate_public_ip = false
-				network_ids = [
-					%q
-				]
+				subnet_id          = gpcn_vpc_subnet.vm_subnet.id
 
 				resource_group_id = gpcn_resource_group.vm_group.id
 
@@ -98,7 +102,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 					username   = "testuser"
 				}
 			}
-			`, sshKeyName, volumeName, vmName, networkID),
+			`, sshKeyName, volumeName, vmName),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction("gpcn_resource_group.vm_group", plancheck.ResourceActionCreate),
@@ -118,7 +122,8 @@ func TestVirtualMachinesResource(t *testing.T) {
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.ram"),
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.base_storage"),
 					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.#", "1"),
-					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "network_interfaces.0.network_id"),
+					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "network_interfaces.0.vpc_subnet_id"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.0.world", "vpc"),
 				),
 			},
 			// ImportState testing
@@ -130,7 +135,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 			},
 			// Update and Read testing
 			{
-				Config: providerConfig + dataCenterImagesAndSize() + fmt.Sprintf(`
+				Config: providerConfig + dataCenterImagesAndSize() + vpcAndSubnet() + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -142,15 +147,13 @@ func TestVirtualMachinesResource(t *testing.T) {
 				size_id  = data.gpcn_virtualmachine_sizes.vm_size.sizes[0].id
 				image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 				allocate_public_ip = false
-				network_ids = [
-					%q
-				]
+				subnet_id          = gpcn_vpc_subnet.vm_subnet.id
 				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
 					username   = "testuser"
 				}
 			}
-			`, sshKeyName, vmNameUpdated, networkID),
+			`, sshKeyName, vmNameUpdated),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "name", vmNameUpdated),
 				),
@@ -161,7 +164,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 					},
 				},
 				ConfigStateChecks: []statecheck.StateCheck{
-					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("network_ids"), knownvalue.ListSizeExact(1)),
+					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("l2_segment_ids"), knownvalue.ListSizeExact(0)),
 					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("network_interfaces"), knownvalue.ListSizeExact(1)),
 					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("resource_group_id"), knownvalue.Null()),
 				},
@@ -183,7 +186,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 				category      = "general-purpose"
 				min_cpu       = 2
 			}
-			` + fmt.Sprintf(`
+			` + vpcAndSubnet() + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -195,15 +198,13 @@ func TestVirtualMachinesResource(t *testing.T) {
 				size_id  = data.gpcn_virtualmachine_sizes.vm_size.sizes[0].id
 				image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 				allocate_public_ip = false
-				network_ids = [
-					%q
-				]
+				subnet_id          = gpcn_vpc_subnet.vm_subnet.id
 				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
 					username   = "testuser"
 				}
 			}
-			`, sshKeyName, vmNameUpdated, networkID),
+			`, sshKeyName, vmNameUpdated),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "image_id"),
 				),
@@ -221,11 +222,10 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
 	sshKeyName := fmt.Sprintf("vm-public-ip-key-%s", rName)
-	networkID := os.Getenv(networkTestIDEnvVar)
 	vmName := fmt.Sprintf("vm-public-ip-%s", rName)
 
-	vmConfig := func(sshKey, networkID, vm string, allocatePublicIp bool) string {
-		return providerConfig + dataCenterImagesAndSize() + fmt.Sprintf(`
+	vmConfig := func(sshKey, vm string, allocatePublicIp bool) string {
+		return providerConfig + dataCenterImagesAndSize() + vpcAndSubnet() + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -237,24 +237,21 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			  size_id  = data.gpcn_virtualmachine_sizes.vm_size.sizes[0].id
 			  image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 			  allocate_public_ip = %t
-			  network_ids = [
-			    %q
-			  ]
+			  subnet_id          = gpcn_vpc_subnet.vm_subnet.id
 			  initial_auth = {
 				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
     			username   = "testuser"
 			  }
 			}
-			`, sshKey, vm, allocatePublicIp, networkID)
+			`, sshKey, vm, allocatePublicIp)
 	}
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { skipWithoutTestNetwork(t, networkID) },
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Set baseline
 			{
-				Config: vmConfig(sshKeyName, networkID, vmName, false),
+				Config: vmConfig(sshKeyName, vmName, false),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionCreate),
@@ -263,7 +260,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			},
 			// Update allocate_public_ip to true
 			{
-				Config: vmConfig(sshKeyName, networkID, vmName, true),
+				Config: vmConfig(sshKeyName, vmName, true),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
@@ -275,7 +272,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			},
 			// Release the IP
 			{
-				Config: vmConfig(sshKeyName, networkID, vmName, false),
+				Config: vmConfig(sshKeyName, vmName, false),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
@@ -293,10 +290,9 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
 	sshKeyName := fmt.Sprintf("vm-size-upgrade-key-%s", rName)
-	networkID := os.Getenv(networkTestIDEnvVar)
 	vmName := fmt.Sprintf("vm-size-upgrade-%s", rName)
 
-	vmConfig := func(sshKey, networkID, vm, sizeDataSource string) string {
+	vmConfig := func(sshKey, vm, sizeDataSource string) string {
 		return providerConfig + `
 			data "gpcn_datacenters" "central_us" {
 				country_name = "United States"
@@ -308,7 +304,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 				image_name    = "Alma Linux 8"
 			}
-		` + sizeDataSource + fmt.Sprintf(`
+		` + sizeDataSource + vpcAndSubnet() + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -320,15 +316,13 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 			  size_id  = data.gpcn_virtualmachine_sizes.vm_size.sizes[0].id
 			  image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 			  allocate_public_ip = false
-			  network_ids = [
-			    %q
-			  ]
+			  subnet_id          = gpcn_vpc_subnet.vm_subnet.id
 			  initial_auth = {
 				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
     			username   = "testuser"
 			  }
 			}
-			`, sshKey, vm, networkID)
+			`, sshKey, vm)
 	}
 
 	microSize := `
@@ -348,12 +342,11 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 	`
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { skipWithoutTestNetwork(t, networkID) },
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create VM with micro size
 			{
-				Config: vmConfig(sshKeyName, networkID, vmName, microSize),
+				Config: vmConfig(sshKeyName, vmName, microSize),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionCreate),
@@ -365,7 +358,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 			},
 			// Upgrade to a larger size - should update in place
 			{
-				Config: vmConfig(sshKeyName, networkID, vmName, smallSize),
+				Config: vmConfig(sshKeyName, vmName, smallSize),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
@@ -377,7 +370,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 			},
 			// Downgrade back to micro - should require replacement
 			{
-				Config: vmConfig(sshKeyName, networkID, vmName, microSize),
+				Config: vmConfig(sshKeyName, vmName, microSize),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionReplace),
@@ -397,7 +390,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 	vmName := fmt.Sprintf("vm-vol-attach-%s", rName)
 
 	vmBase := func(sshKey, vol1, vol2, vm string) string {
-		return providerConfig + dataCenterImagesAndSize() + fmt.Sprintf(`
+		return providerConfig + dataCenterImagesAndSize() + vpcAndSubnet() + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -423,6 +416,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 			  size_id  = data.gpcn_virtualmachine_sizes.vm_size.sizes[0].id
 			  image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 			  allocate_public_ip = false
+			  subnet_id          = gpcn_vpc_subnet.vm_subnet.id
 			  initial_auth = {
 			    ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
 			    username   = "testuser"
@@ -502,16 +496,14 @@ func TestVirtualMachinesAuth(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
 	sshKeyName := fmt.Sprintf("vm-auth-key-%s", rName)
-	networkID := os.Getenv(networkTestIDEnvVar)
 	vmName := fmt.Sprintf("vm-auth-%s", rName)
 
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { skipWithoutTestNetwork(t, networkID) },
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create with ssh_key_id and username
 			{
-				Config: providerConfig + dataCenterImagesAndSize() + fmt.Sprintf(`
+				Config: providerConfig + dataCenterImagesAndSize() + vpcAndSubnet() + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -525,16 +517,14 @@ func TestVirtualMachinesAuth(t *testing.T) {
 				image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 
 				allocate_public_ip = false
-				network_ids = [
-					%q
-				]
+				subnet_id          = gpcn_vpc_subnet.vm_subnet.id
 
 				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
 					username   = "testuser"
 				}
 			}
-			`, sshKeyName, vmName, networkID),
+			`, sshKeyName, vmName),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionCreate),
@@ -547,7 +537,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 			},
 			// Changing initial_auth is a no-op - state is updated with new config values but no API calls are made
 			{
-				Config: providerConfig + dataCenterImagesAndSize() + fmt.Sprintf(`
+				Config: providerConfig + dataCenterImagesAndSize() + vpcAndSubnet() + fmt.Sprintf(`
 
 			resource "gpcn_virtualmachine" "test" {
 				name          = "%s"
@@ -557,16 +547,14 @@ func TestVirtualMachinesAuth(t *testing.T) {
 				image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 
 				allocate_public_ip = false
-				network_ids = [
-					%q
-				]
+				subnet_id          = gpcn_vpc_subnet.vm_subnet.id
 
 				initial_auth = {
 					password = "Test1Password!"
 					username = "newuser"
 				}
 			}
-			`, vmName, networkID),
+			`, vmName),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
@@ -591,6 +579,7 @@ func TestVirtualMachinesMissingSizeId(t *testing.T) {
 		  name          = "terraform-volume-test-vm"
 		  datacenter_id = "any-datacenter-id"
 		  image_id           = "eb7da49d-cc71-480a-968d-fbf2841bedf7"
+		  subnet_id          = "subnet-abc-123"
 		  allocate_public_ip = false
 		  initial_auth = {
 		    ssh_key_id = "ssh-key-123"
@@ -618,6 +607,7 @@ func TestVirtualMachinesInvalidAuth(t *testing.T) {
 		  datacenter_id = "any-datacenter-id"
 		  size_id            = "sku-abc-123"
 		  image_id         = "eb7da49d-cc71-480a-968d-fbf2841bedf7"
+		  subnet_id          = "subnet-abc-123"
 		  allocate_public_ip = false
 		  initial_auth = {
 		    username = "testuser"

@@ -2,26 +2,43 @@ package virtualmachines
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"regexp"
 
-	"terraform-provider-gpcn/internal/helpers"
-	"terraform-provider-gpcn/internal/networks"
-
+	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
-func ValidateAllNetworksAreNotRemoved(oldNetworksList, newNetworksList types.List) error {
-	if oldNetworksList.IsNull() {
-		return nil
+// PublicIpIdConflictsValidator refuses a held address beside a request for a new one.
+type PublicIpIdConflictsValidator struct{}
+
+var _ validator.String = PublicIpIdConflictsValidator{}
+
+func (v PublicIpIdConflictsValidator) Description(_ context.Context) string {
+	return "public_ip_id must not be set when allocate_public_ip is true"
+}
+
+func (v PublicIpIdConflictsValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+// GPCN refuses the two together, because one create cannot both claim a held address and
+// mint a new one. The provider says so at plan time instead of paying for a round trip.
+func (v PublicIpIdConflictsValidator) ValidateString(ctx context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
 	}
-	// If old networks is not nil and new networks is, that's a problem
-	if newNetworksList.IsNull() {
-		return errors.New(ErrDetailCannotRemoveLastNetwork)
+
+	var allocatePublicIp types.Bool
+	diags := req.Config.GetAttribute(ctx, path.Root("allocate_public_ip"), &allocatePublicIp)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
-	return nil
+
+	if allocatePublicIp.ValueBool() {
+		resp.Diagnostics.AddAttributeError(req.Path, ErrSummaryPublicIpConflict, ErrDetailPublicIpIdConflictsWithAllocate)
+	}
 }
 
 // PasswordValidator validates the VM auth password meets complexity requirements.
@@ -66,14 +83,4 @@ func (v PasswordValidator) ValidateString(_ context.Context, req validator.Strin
 	if !regexp.MustCompile(`[!@#%\-_.]`).MatchString(val) {
 		resp.Diagnostics.AddAttributeError(req.Path, "Password missing symbol", "Password must contain at least one symbol (! @ # % - _ .)")
 	}
-}
-
-// Determines if the new networks to be added will cause the network interfaces size to exceed its cap
-func ValidateNetworkInterfacesDoesNotExceedCap(oldNetworksList, newNetworksList []string, networkInterfaces []networks.ReadVirtualMachineNetworkDataResponseTF) error {
-	// Get newly added values
-	addedValues, _ := helpers.CheckListForDifferences(oldNetworksList, newNetworksList)
-	if len(addedValues)+len(networkInterfaces) > MAX_NETWORKS_ATTACHED_ALLOWED {
-		return fmt.Errorf(ErrDetailAddedNetworksExceedsMax, MAX_NETWORKS_ATTACHED_ALLOWED)
-	}
-	return nil
 }

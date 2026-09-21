@@ -10,10 +10,8 @@ import (
 	"io"
 	"net/http"
 	"slices"
-	"strings"
 
 	"terraform-provider-gpcn/internal/client"
-	"terraform-provider-gpcn/internal/helpers"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -25,6 +23,14 @@ type readVirtualMachineNetworkResponse struct {
 	Message string                                  `json:"message"`
 	Data    []ReadVirtualMachineNetworkDataResponse `json:"data"`
 }
+
+// The world discriminator the interface projection carries. It names which linkage kind
+// an interface has, and therefore which identity attributes are live.
+const (
+	NicWorldLegacy = "legacy"
+	NicWorldVpc    = "vpc"
+	NicWorldL2     = "l2"
+)
 
 // Every string except the world discriminator is a pointer, because the API sends JSON
 // null for a column that the interface's own world does not populate. A bare string
@@ -254,64 +260,6 @@ func AddNetworkInterface(gpcnClient *client.GpcnClient, ctx context.Context, vir
 	return nil
 }
 
-// The caller passes only the candidates that survive the update.
-// The preferred network ID names the primary that the practitioner configured.
-func SetNextNetworkInterfaceToPrimary(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineID, preferredNetworkID string, candidateNetworkInterfaces []ReadVirtualMachineNetworkDataResponseTF) error {
-	tflog.Info(ctx, fmt.Sprintf(LogStartingSetNextNetworkInterfaceToPrimary, virtualMachineID))
-
-	networkInterfaceIdx := -1
-	if preferredNetworkID != "" {
-		networkInterfaceIdx = slices.IndexFunc(candidateNetworkInterfaces, func(networkInterface ReadVirtualMachineNetworkDataResponseTF) bool {
-			return strings.EqualFold(networkInterface.NetworkID.ValueString(), preferredNetworkID)
-		})
-	}
-	if networkInterfaceIdx < 0 {
-		// The backend promotes a replacement primary on its own. Accept that choice, because
-		// the practitioner named no interface of their own.
-		if slices.ContainsFunc(candidateNetworkInterfaces, func(networkInterface ReadVirtualMachineNetworkDataResponseTF) bool {
-			return networkInterface.IsPrimary.ValueBool()
-		}) {
-			tflog.Info(ctx, fmt.Sprintf(LogNetworkInterfaceAlreadyPrimary, virtualMachineID))
-			return nil
-		}
-		networkInterfaceIdx = slices.IndexFunc(candidateNetworkInterfaces, func(networkInterface ReadVirtualMachineNetworkDataResponseTF) bool {
-			return !networkInterface.IsPrimary.ValueBool()
-		})
-	}
-	if networkInterfaceIdx < 0 {
-		return errors.New(ErrDetailNoCandidateNetworkInterface)
-	}
-	if candidateNetworkInterfaces[networkInterfaceIdx].IsPrimary.ValueBool() {
-		tflog.Info(ctx, fmt.Sprintf(LogNetworkInterfaceAlreadyPrimary, virtualMachineID))
-		return nil
-	}
-
-	updateNetworkInterfaceRequestBody := map[string]bool{
-		"setPrimary": true,
-	}
-
-	jsonUpdateNetworkInterfaceRequestBody, err := json.Marshal(updateNetworkInterfaceRequestBody)
-	if err != nil {
-		return errors.New("error marshaling the json request body GPCN Virtual Machines - Update Primary Interface")
-	}
-
-	nextPrimaryNetworkInterfaceID := candidateNetworkInterfaces[networkInterfaceIdx].ID.ValueString()
-	tflog.Info(ctx, fmt.Sprintf(LogSettingNetworkInterfaceAsPrimary, nextPrimaryNetworkInterfaceID))
-	request, err := http.NewRequestWithContext(ctx, "PUT", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineID+"/network-interfaces/"+nextPrimaryNetworkInterfaceID, bytes.NewBuffer(jsonUpdateNetworkInterfaceRequestBody))
-	if err != nil {
-		return err
-	}
-
-	response, err := gpcnClient.DoWithRetry(request)
-	if err != nil {
-		return err
-	}
-	defer response.Body.Close()
-
-	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullySetNetworkInterfaceAsPrimary, nextPrimaryNetworkInterfaceID))
-	return nil
-}
-
 // Remove a network interface from the virtual machine
 func RemoveNetworkInterface(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId, networkInterfaceId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingRemoveNetworkInterfaceWithIDs, virtualMachineId, networkInterfaceId))
@@ -446,111 +394,4 @@ func ReleasePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, virtual
 
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyReleasedPublicIp, virtualMachineId, networkInterfaceId))
 	return nil
-}
-
-// Helper function to consolidate logic for adding and removing network interfaces for a virtual machine
-func UpdateNetworkInterfaces(gpcnClient *client.GpcnClient, ctx context.Context, vmId string, oldNetworksList, newNetworksList []string, networkInterfaces []ReadVirtualMachineNetworkDataResponseTF) error {
-	tflog.Info(ctx, "NetworkIds have changed, performing detaches and attaches in that order")
-
-	addedValues, removedValues := helpers.CheckListForDifferences(oldNetworksList, newNetworksList)
-	tflog.Info(ctx, fmt.Sprintf("NetworkIds to be removed are: [%s]", strings.Join(removedValues, ", ")))
-	tflog.Info(ctx, fmt.Sprintf("NetworkIds to be added are: [%s]", strings.Join(addedValues, ", ")))
-
-	// The practitioner configures the first network ID as the primary.
-	preferredNetworkID := ""
-	if len(newNetworksList) > 0 {
-		preferredNetworkID = newNetworksList[0]
-	}
-
-	isRemoved := func(data ReadVirtualMachineNetworkDataResponseTF) bool {
-		return slices.ContainsFunc(removedValues, func(val string) bool {
-			return namesNetwork(data, val)
-		})
-	}
-
-	primaryIsRemoved := slices.ContainsFunc(networkInterfaces, func(data ReadVirtualMachineNetworkDataResponseTF) bool {
-		return data.IsPrimary.ValueBool() && isRemoved(data)
-	})
-
-	// A promotion must not land on an interface that this call removes moments later.
-	handoffIsComplete := false
-	if primaryIsRemoved && len(newNetworksList) > 0 {
-		var survivingInterfaces []ReadVirtualMachineNetworkDataResponseTF
-		for _, data := range networkInterfaces {
-			if !isRemoved(data) {
-				survivingInterfaces = append(survivingInterfaces, data)
-			}
-		}
-		// The configured primary keeps its interface only when the network survives.
-		if slices.ContainsFunc(survivingInterfaces, func(data ReadVirtualMachineNetworkDataResponseTF) bool {
-			return namesNetwork(data, preferredNetworkID)
-		}) {
-			err := SetNextNetworkInterfaceToPrimary(gpcnClient, ctx, vmId, preferredNetworkID, survivingInterfaces)
-			if err != nil {
-				return fmt.Errorf(ErrDetailReplacePrimaryInterfaceFailed, err)
-			}
-			handoffIsComplete = true
-		}
-	}
-
-	// Do removals first, since there is a cap of 5 networks
-	for _, val := range removedValues {
-		interfaceIdx := slices.IndexFunc(networkInterfaces, func(data ReadVirtualMachineNetworkDataResponseTF) bool {
-			return namesNetwork(data, val)
-		})
-		if interfaceIdx < 0 {
-			continue
-		}
-		tflog.Info(ctx, fmt.Sprintf("Removing network interface for ID %s", val))
-		err := RemoveNetworkInterface(gpcnClient, ctx, vmId, networkInterfaces[interfaceIdx].ID.ValueString())
-		if err != nil {
-			return fmt.Errorf("error removing network interface with ID %s: %w", val, err)
-		}
-	}
-
-	// Add new network interfaces
-	for _, val := range addedValues {
-		tflog.Info(ctx, fmt.Sprintf("Adding network interface for ID %s", val))
-		err := AddNetworkInterface(gpcnClient, ctx, vmId, val)
-		if err != nil {
-			return fmt.Errorf("error adding network interface with ID %s: %w", val, err)
-		}
-	}
-
-	// The schema promises a handoff only when the removal takes the primary network away.
-	if !primaryIsRemoved || handoffIsComplete || len(newNetworksList) == 0 {
-		return nil
-	}
-	tflog.Info(ctx, fmt.Sprintf(LogPromotingAddedNetworkInterface, vmId))
-
-	refreshedInterfaces, err := GetNetworkInterfaces(gpcnClient, ctx, vmId)
-	if err != nil {
-		return fmt.Errorf(ErrDetailRefreshNetworkInterfacesFailed, vmId, err)
-	}
-	// A delete that is still in flight keeps a removed interface in the refreshed list.
-	var configuredInterfaces []ReadVirtualMachineNetworkDataResponseTF
-	for _, data := range refreshedInterfaces {
-		if slices.ContainsFunc(newNetworksList, func(val string) bool {
-			return namesNetwork(data, val)
-		}) {
-			configuredInterfaces = append(configuredInterfaces, data)
-		}
-	}
-	// An attach that the refresh misses leaves nothing to promote.
-	// Nothing retries this until the network_ids attribute changes again.
-	if len(configuredInterfaces) == 0 {
-		tflog.Warn(ctx, fmt.Sprintf(LogNoConfiguredNetworkInterfaceAfterRefresh, vmId))
-		return nil
-	}
-
-	err = SetNextNetworkInterfaceToPrimary(gpcnClient, ctx, vmId, preferredNetworkID, configuredInterfaces)
-	if err != nil {
-		return fmt.Errorf(ErrDetailReplacePrimaryInterfaceFailed, err)
-	}
-
-	return nil
-}
-
-func namesNetwork(data ReadVirtualMachineNetworkDataResponseTF, networkID string) bool {
-	return strings.EqualFold(data.NetworkID.ValueString(), networkID)
 }

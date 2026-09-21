@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -37,7 +39,8 @@ func createTestVMModel(name, image string, allocatePublicIP bool) ResourceModel 
 		ImageId:          types.StringValue(image),
 		SizeId:           types.StringValue("sku-uuid-test"),
 		AllocatePublicIp: types.BoolValue(allocatePublicIP),
-		NetworkIds:       types.ListNull(types.StringType),
+		SubnetId:         types.StringValue("subnet-uuid-test"),
+		L2SegmentIds:     types.ListValueMust(types.StringType, nil),
 		InitialAuth:      authObj,
 	}
 }
@@ -357,63 +360,11 @@ func TestPollForVirtualMachineStatusMockHTTP(t *testing.T) {
 	}
 }
 
-func TestValidatePublicIpValueMockHTTP(t *testing.T) {
-	tests := []struct {
-		name             string
-		networkType      string
-		allocatePublicIP bool
-		expectError      bool
-	}{
-		{"public IP with standard network - valid", "standard", true, false},
-		{"no public IP with custom network - valid", "custom", false, false},
-		{"public IP with custom network - invalid", "custom", true, true},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			networkID := "network-test-123"
-
-			server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-				T: t,
-				Handler: func(w http.ResponseWriter, r *http.Request) {
-					if r.Method == "GET" && strings.Contains(r.URL.Path, "/networks/"+networkID) {
-						testutil.WriteJSONResponse(w, map[string]any{
-							"success": true,
-							"message": "Network retrieved",
-							"data":    map[string]any{"id": networkID, "name": "test-network", "networkType": tc.networkType},
-						})
-					}
-				},
-			})
-			defer server.Close()
-
-			model := createTestVMModel("test-vm", testVMImage, tc.allocatePublicIP)
-			model.NetworkIds, _ = types.ListValueFrom(context.Background(), types.StringType, []string{networkID})
-
-			err := ValidatePublicIpValue(gpcnClient, context.Background(), model)
-
-			if tc.expectError && err == nil {
-				t.Error("Expected error but got none")
-			}
-			if !tc.expectError && err != nil {
-				t.Errorf("Expected no error but got: %v", err)
-			}
-			if tc.expectError && err != nil {
-				// The detail names the schema attribute, not the retired wire key.
-				const expected = "the prospective primary network (first in the list) is of type custom. allocate_public_ip can only be true when the primary network's network_type is standard"
-				if err.Error() != expected {
-					t.Errorf("Expected error '%s', got '%s'", expected, err.Error())
-				}
-			}
-		})
-	}
-}
-
 func TestSetNetworkModelValuesNotPresentWithPublicIP(t *testing.T) {
 	const (
-		vmID      = "vm-network-123"
-		publicIP  = "203.0.113.42"
-		networkID = "network-456"
+		vmID     = "vm-network-123"
+		publicIP = "203.0.113.42"
+		subnetID = "subnet-456"
 	)
 
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
@@ -423,10 +374,9 @@ func TestSetNetworkModelValuesNotPresentWithPublicIP(t *testing.T) {
 				testutil.WriteJSONResponse(w, map[string]any{
 					"success": true, "message": "Network interfaces retrieved",
 					"data": []map[string]any{{
-						"id": "interface-001", "networkInterface": 0, "isPrimary": 1,
+						"id": "interface-001", "networkInterface": 1, "isPrimary": 1,
 						"publicIp": publicIP, "publicIpId": "pubip-001", "privateIp": "10.0.0.5",
-						"networkName": "default-network", "networkId": networkID,
-						"cidrBlock": "10.0.0.0/24", "gatewayIp": "10.0.0.1", "networkType": "standard",
+						"world": "vpc", "cidrBlock": "10.0.0.0/24", "vpcSubnetId": subnetID,
 					}},
 				})
 			} else {
@@ -442,7 +392,8 @@ func TestSetNetworkModelValuesNotPresentWithPublicIP(t *testing.T) {
 		ImageId:          types.StringValue(testVMImage),
 		AllocatePublicIp: types.BoolNull(),
 		PublicIp:         types.StringNull(),
-		NetworkIds:       types.ListNull(types.StringType),
+		SubnetId:         types.StringNull(),
+		L2SegmentIds:     types.ListNull(types.StringType),
 	}
 
 	result, _ := setNetworkModelValuesNotPresent(context.Background(), gpcnClient, vmID, model)
@@ -453,8 +404,8 @@ func TestSetNetworkModelValuesNotPresentWithPublicIP(t *testing.T) {
 	if !result.AllocatePublicIp.ValueBool() {
 		t.Error("Expected AllocatePublicIp to be true when public IP exists")
 	}
-	if result.NetworkIds.IsNull() {
-		t.Error("Expected NetworkIds to be populated")
+	if result.SubnetId.ValueString() != subnetID {
+		t.Errorf("Expected subnet_id '%s', got '%s'", subnetID, result.SubnetId.ValueString())
 	}
 
 	var ifaces []networks.ReadVirtualMachineNetworkDataResponseTF
@@ -471,8 +422,8 @@ func TestSetNetworkModelValuesNotPresentWithPublicIP(t *testing.T) {
 
 func TestSetNetworkModelValuesNotPresentWithoutPublicIP(t *testing.T) {
 	const (
-		vmID      = "vm-network-789"
-		networkID = "network-789"
+		vmID     = "vm-network-789"
+		subnetID = "subnet-789"
 	)
 
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
@@ -482,10 +433,9 @@ func TestSetNetworkModelValuesNotPresentWithoutPublicIP(t *testing.T) {
 				testutil.WriteJSONResponse(w, map[string]any{
 					"success": true, "message": "Network interfaces retrieved",
 					"data": []map[string]any{{
-						"id": "interface-002", "networkInterface": 0, "isPrimary": 1,
-						"publicIp": "", "publicIpId": "", "privateIp": "10.0.0.10",
-						"networkName": "private-network", "networkId": networkID,
-						"cidrBlock": "10.0.0.0/24", "gatewayIp": "10.0.0.1", "networkType": "custom",
+						"id": "interface-002", "networkInterface": 1, "isPrimary": 1,
+						"publicIp": nil, "publicIpId": nil, "privateIp": "10.0.0.10",
+						"world": "vpc", "cidrBlock": "10.0.0.0/24", "vpcSubnetId": subnetID,
 					}},
 				})
 			} else {
@@ -501,13 +451,14 @@ func TestSetNetworkModelValuesNotPresentWithoutPublicIP(t *testing.T) {
 		ImageId:          types.StringValue(testVMImage),
 		AllocatePublicIp: types.BoolNull(),
 		PublicIp:         types.StringNull(),
-		NetworkIds:       types.ListNull(types.StringType),
+		SubnetId:         types.StringNull(),
+		L2SegmentIds:     types.ListNull(types.StringType),
 	}
 
 	result, _ := setNetworkModelValuesNotPresent(context.Background(), gpcnClient, vmID, model)
 
-	if result.PublicIp.ValueString() != "" {
-		t.Errorf("Expected empty public IP, got '%s'", result.PublicIp.ValueString())
+	if !result.PublicIp.IsNull() {
+		t.Errorf("Expected a null public IP, got '%s'", result.PublicIp.ValueString())
 	}
 	if result.AllocatePublicIp.ValueBool() {
 		t.Error("Expected AllocatePublicIp to be false when no public IP exists")
@@ -1270,16 +1221,28 @@ func TestRefreshVirtualMachineModelFromResponseKeepsValuesOnEmpty(t *testing.T) 
 	}
 }
 
-func TestCreateVirtualMachineSendsAcquirePublicIpAndSingleNetworkIdMockHTTP(t *testing.T) {
+// The detail is a user-facing string that the release pins. It tells the operator that
+// the machine is in state and tainted, so a re-run of apply replaces it unless the
+// operator untaints it first.
+func TestVirtualMachineCreatedAttachFailedDetailBytes(t *testing.T) {
+	const expected = "virtual machine %s was created and is in state, but attaching %s failed: %s. Terraform has marked the machine tainted: run terraform untaint on it and apply again to attach the remaining networks, or let the next apply replace it."
+
+	if ErrDetailVMCreatedAttachFailed != expected {
+		t.Errorf("Expected detail '%s', got '%s'", expected, ErrDetailVMCreatedAttachFailed)
+	}
+}
+
+// The create body is .strict() at GPCN, so an extra key is a 400 and a missing one is a
+// refusal. The assertion is the exact key set, not a subset.
+func TestCreateVirtualMachineSendsSubnetIdBodyMockHTTP(t *testing.T) {
 	useFastVMStatusPollInterval(t)
 	useNoInitialPollDelay(t)
 	const (
-		jobID    = "job-acquire-1"
-		vmID     = "vm-acquire-1"
+		jobID    = "job-subnet-1"
+		vmID     = "vm-subnet-1"
 		imageID  = "550e8400-e29b-41d4-a716-446655440000"
 		sizeID   = "sku-abc-123"
-		networkA = "11111111-1111-1111-1111-111111111111"
-		networkB = "22222222-2222-2222-2222-222222222222"
+		subnetID = "33333333-3333-3333-3333-333333333333"
 	)
 
 	var createBody map[string]any
@@ -1307,12 +1270,6 @@ func TestCreateVirtualMachineSendsAcquirePublicIpAndSingleNetworkIdMockHTTP(t *t
 				testutil.HandleJobResponse(w, jobID, vmID, true)
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
 				testutil.WriteJSONResponse(w, newVMResponse(vmID, "test-vm"))
-			case r.Method == "GET" && strings.Contains(r.URL.Path, "/networks/"+networkA):
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"message": "Network retrieved",
-					"data":    map[string]any{"id": networkA, "name": "birth-network", "networkType": "standard"},
-				})
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
 			}
@@ -1320,12 +1277,8 @@ func TestCreateVirtualMachineSendsAcquirePublicIpAndSingleNetworkIdMockHTTP(t *t
 	})
 	defer server.Close()
 
-	model := createTestVMModel("test-vm", testVMImage, true)
-	networkIds, listDiags := types.ListValueFrom(context.Background(), types.StringType, []string{networkA, networkB})
-	if listDiags.HasError() {
-		t.Fatalf("building the network id list failed: %v", listDiags)
-	}
-	model.NetworkIds = networkIds
+	model := createTestVMModel("test-vm", testVMImage, false)
+	model.SubnetId = types.StringValue(subnetID)
 
 	if _, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, model); err != nil {
 		t.Fatalf("CreateVirtualMachine failed: %v", err)
@@ -1334,98 +1287,237 @@ func TestCreateVirtualMachineSendsAcquirePublicIpAndSingleNetworkIdMockHTTP(t *t
 	if createBody == nil {
 		t.Fatal("Expected the create endpoint to be called")
 	}
-	if acquire, ok := createBody["acquirePublicIp"].(bool); !ok || !acquire {
-		t.Errorf("Expected acquirePublicIp true, got '%v'", createBody["acquirePublicIp"])
+	wantKeys := []string{"authMethod", "datacenterId", "imageId", "name", "skuId", "sshKeyId", "subnetId"}
+	gotKeys := make([]string, 0, len(createBody))
+	for key := range createBody {
+		gotKeys = append(gotKeys, key)
 	}
-	if _, present := createBody["allocatePublicIp"]; present {
-		t.Error("Expected allocatePublicIp to be absent from the create body")
+	slices.Sort(gotKeys)
+	if !slices.Equal(gotKeys, wantKeys) {
+		t.Fatalf("Expected the create body keys %v, got %v", wantKeys, gotKeys)
 	}
-	if _, present := createBody["networkInterfaces"]; present {
-		t.Error("Expected networkInterfaces to be absent from the create body")
-	}
-	if createBody["networkId"] != networkA {
-		t.Errorf("Expected networkId '%s', got '%v'", networkA, createBody["networkId"])
-	}
-}
-
-// The detail is a user-facing string that the release pins. It tells the
-// operator that the machine is in state and tainted. A re-run of apply then
-// replaces the machine, unless the operator untaints it first.
-func TestVirtualMachineCreatedAttachFailedDetailBytes(t *testing.T) {
-	const expected = "virtual machine %s was created and is in state, but attaching %s failed: %s. Terraform has marked the machine tainted: run terraform untaint on it and apply again to attach the remaining networks, or let the next apply replace it."
-
-	if ErrDetailVMCreatedAttachFailed != expected {
-		t.Errorf("Expected detail '%s', got '%s'", expected, ErrDetailVMCreatedAttachFailed)
+	if createBody["subnetId"] != subnetID {
+		t.Errorf("Expected subnetId '%s', got '%v'", subnetID, createBody["subnetId"])
 	}
 }
 
-// The API sends these status bytes, and the provider waits for them by value. A changed
-// byte makes a poller wait for a status that never arrives.
-func TestVirtualMachineStatusBytes(t *testing.T) {
-	tests := []struct {
-		status   VMStatus
-		expected string
-	}{
-		{VMStatusRunning, "Running"},
-		{VMStatusStopped, "Stopped"},
-		{VMStatusProvisioning, "Provisioning"},
-		{VMStatusResizing, "Resizing"},
-		{VMStatusStarting, "Starting"},
-		{VMStatusStopping, "Stopping"},
-		{VMStatusDeleting, "Deleting"},
-		{VMStatusDestroyed, "Destroyed"},
-		{VMStatusShutoff, "Shutoff"},
-		{VMStatusRescue, "Rescue"},
-		{VMStatusRescuing, "Rescuing"},
-		{VMStatusUnrescuing, "Unrescuing"},
-		{VMStatusUnknown, "Unknown"},
-		{VMStatusError, "Error"},
-	}
+// acquirePublicIp and publicIpId are mutually exclusive at GPCN, so a false flag must not
+// ride along beside a held address.
+func TestCreateVirtualMachineSendsPublicIpKeysMockHTTP(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	useNoInitialPollDelay(t)
+	const (
+		jobID       = "job-subnet-2"
+		vmID        = "vm-subnet-2"
+		imageID     = "550e8400-e29b-41d4-a716-446655440000"
+		sizeID      = "sku-abc-123"
+		subnetID    = "33333333-3333-3333-3333-333333333333"
+		publicIpID  = "44444444-4444-4444-4444-444444444444"
+		acquireKey  = "acquirePublicIp"
+		publicIpKey = "publicIpId"
+	)
 
-	for _, tc := range tests {
-		t.Run(tc.expected, func(t *testing.T) {
-			if tc.status.String() != tc.expected {
-				t.Errorf("Expected status '%s', got '%s'", tc.expected, tc.status.String())
-			}
+	newServer := func(t *testing.T, captured *map[string]any) (*httptest.Server, *client.GpcnClient) {
+		t.Helper()
+		return testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+			T: t,
+			Handler: func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+					body, err := io.ReadAll(r.Body)
+					if err != nil {
+						t.Fatalf("reading the create body failed: %v", err)
+					}
+					if err := json.Unmarshal(body, captured); err != nil {
+						t.Fatalf("unmarshaling the create body failed: %v", err)
+					}
+					testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
+						Success: true,
+						Message: "VM creation job started",
+						Data: client.JobStatusDataResponse{
+							Jobs: []client.JobResponse{{JobID: jobID, ResourceId: vmID}},
+						},
+					})
+				case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+					testutil.HandleJobResponse(w, jobID, vmID, true)
+				case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
+					testutil.WriteJSONResponse(w, newVMResponse(vmID, "test-vm"))
+				default:
+					testutil.LogUnexpectedRequest(t, w, r)
+				}
+			},
 		})
 	}
+
+	t.Run("acquire true sends the flag", func(t *testing.T) {
+		var createBody map[string]any
+		server, gpcnClient := newServer(t, &createBody)
+		defer server.Close()
+
+		model := createTestVMModel("test-vm", testVMImage, true)
+		model.SubnetId = types.StringValue(subnetID)
+		if _, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, model); err != nil {
+			t.Fatalf("CreateVirtualMachine failed: %v", err)
+		}
+		if acquire, ok := createBody[acquireKey].(bool); !ok || !acquire {
+			t.Errorf("Expected %s true, got '%v'", acquireKey, createBody[acquireKey])
+		}
+		if _, present := createBody[publicIpKey]; present {
+			t.Errorf("Expected %s to be absent", publicIpKey)
+		}
+	})
+
+	t.Run("a held address sends no acquire flag", func(t *testing.T) {
+		var createBody map[string]any
+		server, gpcnClient := newServer(t, &createBody)
+		defer server.Close()
+
+		model := createTestVMModel("test-vm", testVMImage, false)
+		model.SubnetId = types.StringValue(subnetID)
+		model.PublicIpId = types.StringValue(publicIpID)
+		if _, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, model); err != nil {
+			t.Fatalf("CreateVirtualMachine failed: %v", err)
+		}
+		if _, present := createBody[acquireKey]; present {
+			t.Errorf("Expected %s to be absent, got '%v'", acquireKey, createBody[acquireKey])
+		}
+		if createBody[publicIpKey] != publicIpID {
+			t.Errorf("Expected %s '%s', got '%v'", publicIpKey, publicIpID, createBody[publicIpKey])
+		}
+	})
 }
 
-// A failed start leaves a stopped machine, and these bytes are the only report of it.
-// The release pins them, and the compiler accepts any rewording.
-func TestVirtualMachineLeftStoppedBytes(t *testing.T) {
-	tests := []struct {
-		name     string
-		actual   string
-		expected string
-	}{
-		{
-			name:     "summary",
-			actual:   ErrSummaryVMLeftStopped,
-			expected: "Virtual machine left stopped",
+// A VPC interface carries null in every legacy column. The mapper must carry those nulls
+// into state, because an empty string reads as a value GPCN never sent.
+func TestMapNICNullsStayNullUnit(t *testing.T) {
+	const vmID = "vm-nic-nulls"
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces") {
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true, "message": "Network interfaces retrieved",
+					"data": []map[string]any{{
+						"id": "interface-vpc", "networkInterface": 1, "isPrimary": 1,
+						"macAddress": nil, "publicIp": nil, "publicIpId": nil, "privateIp": "10.20.0.7",
+						"world":       "vpc",
+						"networkName": nil, "networkId": nil, "cidrBlock": "10.20.0.0/24",
+						"gatewayIp": nil, "networkType": nil,
+						"vpcSubnetId": "subnet-1", "subnetName": "web", "vpcId": "vpc-1", "vpcName": "prod",
+						"l2SegmentId": nil, "l2SegmentName": nil,
+					}},
+				})
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
 		},
-		{
-			name:     "update detail",
-			actual:   ErrDetailVMLeftStoppedUpdate,
-			expected: "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal.",
-		},
-		{
-			name:     "create detail",
-			actual:   ErrDetailVMLeftStoppedCreate,
-			expected: "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform untaint on it; otherwise the next apply replaces the machine.",
-		},
-		{
-			name:     "retry detail",
-			actual:   ErrDetailVMLeftStoppedRetry,
-			expected: "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform plan and check the proposed changes before applying.",
-		},
+	})
+	defer server.Close()
+
+	model := ResourceModel{
+		SubnetId:         types.StringValue("subnet-1"),
+		AllocatePublicIp: types.BoolValue(false),
+		L2SegmentIds:     types.ListValueMust(types.StringType, nil),
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if tc.actual != tc.expected {
-				t.Errorf("Expected %s '%s', got '%s'", tc.name, tc.expected, tc.actual)
+	result, diags := setNetworkModelValuesNotPresent(context.Background(), gpcnClient, vmID, model)
+	if diags.HasError() {
+		t.Fatalf("setNetworkModelValuesNotPresent reported errors: %v", diags)
+	}
+
+	var ifaces []networks.ReadVirtualMachineNetworkDataResponseTF
+	if listDiags := result.NetworkInterfaces.ElementsAs(context.Background(), &ifaces, false); listDiags.HasError() {
+		t.Fatalf("Failed to read network interfaces: %v", listDiags)
+	}
+	if len(ifaces) != 1 {
+		t.Fatalf("Expected 1 network interface, got %d", len(ifaces))
+	}
+	nulls := map[string]types.String{
+		"mac_address":     ifaces[0].MacAddress,
+		"public_ip":       ifaces[0].PublicIP,
+		"public_ip_id":    ifaces[0].PublicIPID,
+		"network_name":    ifaces[0].NetworkName,
+		"network_id":      ifaces[0].NetworkID,
+		"gateway_ip":      ifaces[0].GatewayIP,
+		"network_type":    ifaces[0].NetworkType,
+		"l2_segment_id":   ifaces[0].L2SegmentID,
+		"l2_segment_name": ifaces[0].L2SegmentName,
+	}
+	for name, value := range nulls {
+		if !value.IsNull() {
+			t.Errorf("Expected %s to stay null, got '%s'", name, value.ValueString())
+		}
+	}
+	if ifaces[0].World.ValueString() != "vpc" {
+		t.Errorf("Expected world 'vpc', got '%s'", ifaces[0].World.ValueString())
+	}
+	if !result.PublicIp.IsNull() {
+		t.Errorf("Expected public_ip to stay null, got '%s'", result.PublicIp.ValueString())
+	}
+}
+
+// An import starts with no configuration. The birth subnet and the attached segments are
+// readable only through the interface list, so the mapper fills them from it.
+func TestSetNetworkModelValuesNotPresentFillsVpcIdentityOnImportUnit(t *testing.T) {
+	const vmID = "vm-import-vpc"
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces") {
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true, "message": "Network interfaces retrieved",
+					"data": []map[string]any{
+						{
+							"id": "interface-1", "networkInterface": 1, "isPrimary": 1,
+							"world": "vpc", "privateIp": "10.20.0.7", "publicIp": "203.0.113.9",
+							"vpcSubnetId": "subnet-1", "vpcId": "vpc-1",
+						},
+						{
+							"id": "interface-2", "networkInterface": 2, "isPrimary": 0,
+							"world": "l2", "l2SegmentId": "segment-a",
+						},
+						{
+							"id": "interface-3", "networkInterface": 3, "isPrimary": 0,
+							"world": "l2", "l2SegmentId": "segment-b",
+						},
+					},
+				})
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
 			}
-		})
+		},
+	})
+	defer server.Close()
+
+	model := ResourceModel{
+		SubnetId:         types.StringNull(),
+		L2SegmentIds:     types.ListNull(types.StringType),
+		AllocatePublicIp: types.BoolNull(),
+		PublicIp:         types.StringNull(),
+	}
+
+	result, diags := setNetworkModelValuesNotPresent(context.Background(), gpcnClient, vmID, model)
+	if diags.HasError() {
+		t.Fatalf("setNetworkModelValuesNotPresent reported errors: %v", diags)
+	}
+
+	if result.SubnetId.ValueString() != "subnet-1" {
+		t.Errorf("Expected subnet_id 'subnet-1', got '%s'", result.SubnetId.ValueString())
+	}
+	if !result.AllocatePublicIp.ValueBool() {
+		t.Error("Expected allocate_public_ip true when the primary interface holds an address")
+	}
+	if result.PublicIp.ValueString() != "203.0.113.9" {
+		t.Errorf("Expected public_ip '203.0.113.9', got '%s'", result.PublicIp.ValueString())
+	}
+	var segments []string
+	if listDiags := result.L2SegmentIds.ElementsAs(context.Background(), &segments, false); listDiags.HasError() {
+		t.Fatalf("Failed to read l2_segment_ids: %v", listDiags)
+	}
+	want := []string{"segment-a", "segment-b"}
+	if !slices.Equal(segments, want) {
+		t.Errorf("Expected l2_segment_ids %v, got %v", want, segments)
 	}
 }

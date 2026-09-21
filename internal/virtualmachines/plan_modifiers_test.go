@@ -125,27 +125,46 @@ func TestPublicIpPlanModifier(t *testing.T) {
 // Tests for NetworkInterfacesPlanModifier
 var testNetworkInterfacesSchema = schema.Schema{
 	Attributes: map[string]schema.Attribute{
-		"network_ids":        schema.ListAttribute{Required: true, ElementType: types.StringType},
+		"subnet_id":          schema.StringAttribute{Required: true},
+		"l2_segment_ids":     schema.ListAttribute{Required: true, ElementType: types.StringType},
 		"allocate_public_ip": schema.BoolAttribute{Required: true},
+		"public_ip_id":       schema.StringAttribute{Optional: true},
 	},
 }
 
 var interfaceElemType = types.ObjectType{AttrTypes: networks.ReadVirtualMachineNetworkDataResponseTF{}.AttrTypes()}
 
-func createNetworkRawValue(networkIds []string, allocatePublicIp bool) tftypes.Value {
-	ids := make([]tftypes.Value, len(networkIds))
-	for i, id := range networkIds {
+// networkInputs names the four attributes that shape the interface set.
+type networkInputs struct {
+	subnetID         string
+	segmentIDs       []string
+	allocatePublicIP bool
+	publicIPID       *string
+}
+
+func createNetworkRawValue(inputs networkInputs) tftypes.Value {
+	ids := make([]tftypes.Value, len(inputs.segmentIDs))
+	for i, id := range inputs.segmentIDs {
 		ids[i] = tftypes.NewValue(tftypes.String, id)
+	}
+
+	publicIPID := tftypes.NewValue(tftypes.String, nil)
+	if inputs.publicIPID != nil {
+		publicIPID = tftypes.NewValue(tftypes.String, *inputs.publicIPID)
 	}
 
 	return tftypes.NewValue(tftypes.Object{
 		AttributeTypes: map[string]tftypes.Type{
-			"network_ids":        tftypes.List{ElementType: tftypes.String},
+			"subnet_id":          tftypes.String,
+			"l2_segment_ids":     tftypes.List{ElementType: tftypes.String},
 			"allocate_public_ip": tftypes.Bool,
+			"public_ip_id":       tftypes.String,
 		},
 	}, map[string]tftypes.Value{
-		"network_ids":        tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, ids),
-		"allocate_public_ip": tftypes.NewValue(tftypes.Bool, allocatePublicIp),
+		"subnet_id":          tftypes.NewValue(tftypes.String, inputs.subnetID),
+		"l2_segment_ids":     tftypes.NewValue(tftypes.List{ElementType: tftypes.String}, ids),
+		"allocate_public_ip": tftypes.NewValue(tftypes.Bool, inputs.allocatePublicIP),
+		"public_ip_id":       publicIPID,
 	})
 }
 
@@ -153,16 +172,24 @@ func testInterfaceList(t *testing.T) types.List {
 	t.Helper()
 	list, diags := types.ListValueFrom(context.Background(), interfaceElemType, []networks.ReadVirtualMachineNetworkDataResponseTF{{
 		ID:               types.StringValue("interface-001"),
-		NetworkInterface: types.Int64Value(0),
+		NetworkInterface: types.Int64Value(1),
 		IsPrimary:        types.BoolValue(true),
-		PublicIP:         types.StringValue(""),
-		PublicIPID:       types.StringValue(""),
+		MacAddress:       types.StringValue("fa:16:3e:00:00:01"),
+		PublicIP:         types.StringNull(),
+		PublicIPID:       types.StringNull(),
 		PrivateIP:        types.StringValue("10.0.0.5"),
-		NetworkName:      types.StringValue("default-network"),
-		NetworkID:        types.StringValue("network-a"),
+		World:            types.StringValue(networks.NicWorldVpc),
+		NetworkName:      types.StringNull(),
+		NetworkID:        types.StringNull(),
 		CIDRBlock:        types.StringValue("10.0.0.0/24"),
-		GatewayIP:        types.StringValue("10.0.0.1"),
-		NetworkType:      types.StringValue("standard"),
+		GatewayIP:        types.StringNull(),
+		NetworkType:      types.StringNull(),
+		VpcSubnetID:      types.StringValue("subnet-a"),
+		SubnetName:       types.StringValue("web"),
+		VpcID:            types.StringValue("vpc-a"),
+		VpcName:          types.StringValue("prod"),
+		L2SegmentID:      types.StringNull(),
+		L2SegmentName:    types.StringNull(),
 	}})
 	if diags.HasError() {
 		t.Fatalf("failed to build interface list: %v", diags)
@@ -172,6 +199,8 @@ func testInterfaceList(t *testing.T) types.List {
 
 func TestNetworkInterfacesPlanModifier(t *testing.T) {
 	stateList := testInterfaceList(t)
+	baseline := networkInputs{subnetID: "subnet-a", segmentIDs: []string{"segment-a"}}
+	heldAddress := "address-1"
 
 	t.Run("on create leaves unknown", func(t *testing.T) {
 		req := planmodifier.ListRequest{
@@ -186,43 +215,39 @@ func TestNetworkInterfacesPlanModifier(t *testing.T) {
 		}
 	})
 
-	t.Run("network_ids change marks unknown", func(t *testing.T) {
-		req := planmodifier.ListRequest{
-			StateValue: stateList,
-			PlanValue:  stateList,
-			Path:       path.Root("network_interfaces"),
-			State:      tfsdk.State{Raw: createNetworkRawValue([]string{"network-a", "network-b"}, false), Schema: testNetworkInterfacesSchema},
-			Plan:       tfsdk.Plan{Raw: createNetworkRawValue([]string{"network-a"}, false), Schema: testNetworkInterfacesSchema},
-		}
-		resp := &planmodifier.ListResponse{PlanValue: req.PlanValue}
-		NetworkInterfacesPlanModifier{}.PlanModifyList(context.Background(), req, resp)
-		if !resp.PlanValue.IsUnknown() {
-			t.Errorf("expected unknown when network_ids changes, got %v", resp.PlanValue)
-		}
-	})
-
-	t.Run("allocate_public_ip change marks unknown", func(t *testing.T) {
-		req := planmodifier.ListRequest{
-			StateValue: stateList,
-			PlanValue:  stateList,
-			Path:       path.Root("network_interfaces"),
-			State:      tfsdk.State{Raw: createNetworkRawValue([]string{"network-a"}, false), Schema: testNetworkInterfacesSchema},
-			Plan:       tfsdk.Plan{Raw: createNetworkRawValue([]string{"network-a"}, true), Schema: testNetworkInterfacesSchema},
-		}
-		resp := &planmodifier.ListResponse{PlanValue: req.PlanValue}
-		NetworkInterfacesPlanModifier{}.PlanModifyList(context.Background(), req, resp)
-		if !resp.PlanValue.IsUnknown() {
-			t.Errorf("expected unknown when allocate_public_ip changes, got %v", resp.PlanValue)
-		}
-	})
+	changes := []struct {
+		name string
+		plan networkInputs
+	}{
+		{"subnet_id", networkInputs{subnetID: "subnet-b", segmentIDs: []string{"segment-a"}}},
+		{"l2_segment_ids", networkInputs{subnetID: "subnet-a", segmentIDs: []string{"segment-a", "segment-b"}}},
+		{"allocate_public_ip", networkInputs{subnetID: "subnet-a", segmentIDs: []string{"segment-a"}, allocatePublicIP: true}},
+		{"public_ip_id", networkInputs{subnetID: "subnet-a", segmentIDs: []string{"segment-a"}, publicIPID: &heldAddress}},
+	}
+	for _, change := range changes {
+		t.Run(change.name+" change marks unknown", func(t *testing.T) {
+			req := planmodifier.ListRequest{
+				StateValue: stateList,
+				PlanValue:  stateList,
+				Path:       path.Root("network_interfaces"),
+				State:      tfsdk.State{Raw: createNetworkRawValue(baseline), Schema: testNetworkInterfacesSchema},
+				Plan:       tfsdk.Plan{Raw: createNetworkRawValue(change.plan), Schema: testNetworkInterfacesSchema},
+			}
+			resp := &planmodifier.ListResponse{PlanValue: req.PlanValue}
+			NetworkInterfacesPlanModifier{}.PlanModifyList(context.Background(), req, resp)
+			if !resp.PlanValue.IsUnknown() {
+				t.Errorf("expected unknown when %s changes, got %v", change.name, resp.PlanValue)
+			}
+		})
+	}
 
 	t.Run("inputs unchanged preserves value", func(t *testing.T) {
 		req := planmodifier.ListRequest{
 			StateValue: stateList,
 			PlanValue:  types.ListUnknown(interfaceElemType),
 			Path:       path.Root("network_interfaces"),
-			State:      tfsdk.State{Raw: createNetworkRawValue([]string{"network-a"}, false), Schema: testNetworkInterfacesSchema},
-			Plan:       tfsdk.Plan{Raw: createNetworkRawValue([]string{"network-a"}, false), Schema: testNetworkInterfacesSchema},
+			State:      tfsdk.State{Raw: createNetworkRawValue(baseline), Schema: testNetworkInterfacesSchema},
+			Plan:       tfsdk.Plan{Raw: createNetworkRawValue(baseline), Schema: testNetworkInterfacesSchema},
 		}
 		resp := &planmodifier.ListResponse{PlanValue: req.PlanValue}
 		NetworkInterfacesPlanModifier{}.PlanModifyList(context.Background(), req, resp)

@@ -3,16 +3,12 @@ package virtualmachines
 // Log message constants for virtual machine operations
 const (
 	// CreateVirtualMachine messages
-	LogStartingCreateVirtualMachine               = "Starting CreateVirtualMachine"
-	LogValidatingPublicIPConfiguration            = "Validating public IP configuration"
-	LogValidatedPublicIPConfigurationSuccessfully = "Validated public IP configuration successfully"
-	LogNetworkIdsNotNull                          = "NetworkIds was not null. Naming the first network as the birth network of the create request"
-	LogNetworkIdsNullOrEmpty                      = "NetworkIds was null or empty in the Virtual Machine creation. VM will be created with a default network"
-	LogConstructedCreateVMRequest                 = "Constructed Create GPCN Virtual Machine request successfully"
-	LogIssuedCreateVMJob                          = "Successfully issued to job to create GPCN Virtual Machine. Beginning long-polling to check the status"
-	LogLongPollingCompletedCreateVM               = "Long polling completed for Create GPCN Virtual Machine - proceeding to poll for VM status"
-	LogSuccessfullyProcessedVMCreate              = "Successfully processed GPCN Virtual Machine - Create"
-	LogSuccessfullyCreatedVMMayNotBeRunning       = "Creating the Virtual Machine complete. The Virtual Machine was attempted to be started, but may not be running yet. Check the GPCN Dashboard for more information"
+	LogStartingCreateVirtualMachine         = "Starting CreateVirtualMachine"
+	LogConstructedCreateVMRequest           = "Constructed Create GPCN Virtual Machine request successfully"
+	LogIssuedCreateVMJob                    = "Successfully issued to job to create GPCN Virtual Machine. Beginning long-polling to check the status"
+	LogLongPollingCompletedCreateVM         = "Long polling completed for Create GPCN Virtual Machine - proceeding to poll for VM status"
+	LogSuccessfullyProcessedVMCreate        = "Successfully processed GPCN Virtual Machine - Create"
+	LogSuccessfullyCreatedVMMayNotBeRunning = "Creating the Virtual Machine complete. The Virtual Machine was attempted to be started, but may not be running yet. Check the GPCN Dashboard for more information"
 
 	// GetVirtualMachine messages
 	LogStartingGetVMWithID           = "Starting GetVirtualMachine for Virtual Machine ID %s"
@@ -29,13 +25,6 @@ const (
 	LogStartingLongPollingIteration  = "Starting long polling iteration %d for retrieving information about the Virtual Machine. Seconds spent: %d"
 	LogVMResponseStatus              = "Virtual Machine response status is: %s"
 	LogVMStatusProceedingToAttach    = "Virtual Machine with ID %s is '%s'. Proceeding to attach networks and volumes if possible"
-
-	// ValidatePublicIpValue messages
-	LogStartingValidatePublicIPValue          = "Starting ValidatePublicIpValue"
-	LogPublicIPNotAllocated                   = "Public IP not allocated, validation passed"
-	LogNoNetworksSpecified                    = "No networks specified, validation passed"
-	LogValidatingPublicIPSettingByNetworkType = "Validating public IP setting by checking primary network type"
-	LogPublicIPValidationPassed               = "Public IP validation passed"
 
 	// UpdateVirtualMachineSize messages
 	LogStartingUpdateVMSizeWithID = "Starting UpdateVirtualMachineSize for Virtual Machine ID %s"
