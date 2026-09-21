@@ -378,7 +378,7 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 		if startErr != nil {
 			resp.Diagnostics.AddError(
 				virtualmachines.ErrSummaryVMLeftStopped,
-				fmt.Sprintf(virtualmachines.ErrDetailVMLeftStopped, plan.ID.ValueString(), startErr.Error()),
+				fmt.Sprintf(virtualmachines.ErrDetailVMLeftStoppedCreate, plan.ID.ValueString(), startErr.Error()),
 			)
 		}
 
@@ -557,7 +557,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	if startErr != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryVMLeftStopped,
-			fmt.Sprintf(virtualmachines.ErrDetailVMLeftStopped, state.ID.ValueString(), startErr.Error()),
+			fmt.Sprintf(virtualmachines.ErrDetailVMLeftStoppedUpdate, state.ID.ValueString(), startErr.Error()),
 		)
 	}
 

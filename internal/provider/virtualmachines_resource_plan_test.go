@@ -823,7 +823,7 @@ func TestVirtualMachineResourcePlanCreateReportsFailedRestart(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config:      vmNetworkListPlanTestConfig(server.URL, "vm-plan-restart-create", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
-				ExpectError: regexp.MustCompile(`(?s)left\s+stopped.*did not start again`),
+				ExpectError: regexp.MustCompile(`(?s)left\s+stopped.*did not start again.*otherwise\s+the\s+next\s+apply\s+replaces\s+the\s+machine`),
 			},
 			{
 				RefreshState:       true,
@@ -854,7 +854,7 @@ func TestVirtualMachineResourcePlanUpdateReportsFailedRestart(t *testing.T) {
 			},
 			{
 				Config:      vmNetworkListPlanTestConfig(server.URL, "vm-plan-restart-update", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
-				ExpectError: regexp.MustCompile(`(?s)left\s+stopped.*did not start again`),
+				ExpectError: regexp.MustCompile(`(?s)left\s+stopped.*did not start again.*Start\s+it\s+in\s+the\s+portal\.`),
 			},
 			{
 				RefreshState: true,
