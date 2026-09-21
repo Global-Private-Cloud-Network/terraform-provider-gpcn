@@ -840,8 +840,8 @@ func determineIfVMNeedsStopped(state, plan virtualmachines.ResourceModel) bool {
 		!state.SizeId.Equal(plan.SizeId)
 }
 
-// sortedSegmentIds reads a segment list in a stable order. GPCN gives the interfaces of a
-// machine no order, so a reordered list carries the same segments and asks for nothing.
+// sortedSegmentIds reads a segment list in a stable order. GPCN gives the interfaces of
+// a machine no order. A reordered list carries the same segments and asks for nothing.
 // An unknown element sorts under its own rendering and therefore still asks for a stop.
 func sortedSegmentIds(list types.List) []string {
 	segmentIds := make([]string, 0, len(list.Elements()))

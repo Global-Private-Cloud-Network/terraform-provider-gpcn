@@ -1243,8 +1243,8 @@ func TestVirtualMachineResourcePlanAttachesAndDetachesSegments(t *testing.T) {
 }
 
 // GPCN gives the interfaces of a machine no order, so a reordered segment list asks for
-// nothing. A machine without network hotplug stops for a segment change, and stopping it
-// for a list that carries the same segments costs the user the whole downtime.
+// nothing. A machine without network hotplug stops for a segment change. A stop for a
+// list that carries the same segments costs the user the whole downtime.
 func TestVirtualMachineResourcePlanReorderedSegmentsChangeNothing(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server, recorded := startVirtualMachineSegmentUpdateMockServer(t, 0)

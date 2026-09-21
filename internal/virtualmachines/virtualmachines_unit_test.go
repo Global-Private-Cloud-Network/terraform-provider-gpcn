@@ -1244,8 +1244,8 @@ func TestUpdateL2SegmentsIfChangedSkipsASegmentTheMachineCarries(t *testing.T) {
 	}
 }
 
-// The live list is the only input the adds come from, so a segment the machine lacks
-// must still reach the attach route.
+// The live list is the only input the adds come from. A segment the machine lacks must
+// still reach the attach route.
 func TestUpdateL2SegmentsIfChangedAttachesASegmentTheMachineLacks(t *testing.T) {
 	const vmID = "vm-missing-segment-123"
 
@@ -1366,8 +1366,8 @@ func TestRefreshVirtualMachineModelFromResponseKeepsValuesOnEmpty(t *testing.T) 
 }
 
 // The detail is a user-facing string that the release pins. It tells the operator that
-// the machine is in state and tainted, so a re-run of apply replaces it unless the
-// operator untaints it first.
+// the machine is in state and tainted. A re-run of apply replaces it unless the operator
+// untaints it first.
 func TestVirtualMachineCreatedAttachFailedDetailBytes(t *testing.T) {
 	const expected = "virtual machine %s was created and is in state, but attaching %s failed: %s. Terraform has marked the machine tainted: run terraform untaint on it and apply again to attach the remaining networks, or let the next apply replace it."
 
