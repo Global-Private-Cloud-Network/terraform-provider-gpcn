@@ -212,21 +212,23 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 	}
 
 	// Construct request URL from values we have available
-	var additionalQueryString string
+	var otherFilters string
 	if !state.CountryName.IsNull() {
-		additionalQueryString += "&countryName=" + url.QueryEscape(state.CountryName.ValueString())
+		otherFilters += "&countryName=" + url.QueryEscape(state.CountryName.ValueString())
 	}
 	if !state.RegionName.IsNull() {
-		additionalQueryString += "&regionName=" + url.QueryEscape(state.RegionName.ValueString())
+		otherFilters += "&regionName=" + url.QueryEscape(state.RegionName.ValueString())
 	}
 	if !state.Name.IsNull() {
-		additionalQueryString += "&search=" + url.QueryEscape(state.Name.ValueString())
-	}
-	if !state.GPUEnabled.IsNull() {
-		additionalQueryString += "&gpuEnabled=" + strconv.FormatBool(state.GPUEnabled.ValueBool())
+		otherFilters += "&search=" + url.QueryEscape(state.Name.ValueString())
 	}
 
-	rows, err := d.getDatacenters(ctx, additionalQueryString)
+	query := otherFilters
+	if !state.GPUEnabled.IsNull() {
+		query += "&gpuEnabled=" + strconv.FormatBool(state.GPUEnabled.ValueBool())
+	}
+
+	rows, err := d.getDatacenters(ctx, query)
 	if err != nil {
 		// Big failure, no helpful error message
 		resp.Diagnostics.AddError(
@@ -256,9 +258,8 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 		}
 	}
 
-	// If no data centers found, list the locations this API key can see
 	if len(rows) < 1 {
-		d.addNoMatchError(ctx, resp)
+		d.addNoMatchError(ctx, state, otherFilters, resp)
 		return
 	}
 
@@ -295,10 +296,9 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 	}
 }
 
-// addNoMatchError suggests the countries and regions the API key can reach. The
-// suggestion comes from one unfiltered list call, because the API serves no
-// region route and no country route.
-func (d *datacenterDataSource) addNoMatchError(ctx context.Context, resp *datasource.ReadResponse) {
+// addNoMatchError explains an empty result. The API serves no region route and
+// no country route, so the suggestion comes from one unfiltered list call.
+func (d *datacenterDataSource) addNoMatchError(ctx context.Context, state datacenterDataSourceModel, otherFilters string, resp *datasource.ReadResponse) {
 	rows, err := d.getDatacenters(ctx, "")
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -314,6 +314,29 @@ func (d *datacenterDataSource) addNoMatchError(ctx context.Context, resp *dataso
 			datacenters.ErrDetailDatacenterNoneVisible,
 		)
 		return
+	}
+
+	if !state.GPUEnabled.IsNull() {
+		// The server applies gpuEnabled, so the same filters without it separate the
+		// two causes. Rows here mean gpu_enabled is the one value that matches none.
+		matched := rows
+		if otherFilters != "" {
+			matched, err = d.getDatacenters(ctx, otherFilters)
+			if err != nil {
+				resp.Diagnostics.AddError(
+					datacenters.ErrSummaryUnableGetDatacenters,
+					err.Error(),
+				)
+				return
+			}
+		}
+		if len(matched) > 0 {
+			resp.Diagnostics.AddError(
+				datacenters.ErrSummaryUnableGetDatacenters,
+				fmt.Sprintf(datacenters.ErrDetailDatacenterNoGPUEnabled, state.GPUEnabled.ValueBool()),
+			)
+			return
+		}
 	}
 
 	var countryAndRegion []string
@@ -334,8 +357,8 @@ func (d *datacenterDataSource) addNoMatchError(ctx context.Context, resp *dataso
 	)
 }
 
-// getDatacenters reads every page of the list. One page holds at most 100 rows,
-// so a filter that matches more than one page needs them all.
+// One page holds at most 100 rows, so a filter that matches more than one page
+// needs every page.
 func (d *datacenterDataSource) getDatacenters(ctx context.Context, queryString string) ([]datacenterRow, error) {
 	var rows []datacenterRow
 
@@ -368,7 +391,6 @@ func (d *datacenterDataSource) getDatacenterPage(ctx context.Context, page int, 
 	}
 	defer response.Body.Close()
 
-	// Read the response body and process it as datacenterResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err

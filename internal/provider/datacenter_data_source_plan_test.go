@@ -219,3 +219,114 @@ func TestDatacentersDataSourcePagesToTotal(t *testing.T) {
 
 	datacenterPlanTestAssertOnlyListPath(t, rec)
 }
+
+func TestDatacentersDataSourceNamesGpuEnabledWhenNoRowMatches(t *testing.T) {
+	t.Parallel()
+
+	server, rec := startDatacenterPlanMockServer(t, func(r *http.Request) map[string]any {
+		if r.URL.Query().Get("gpuEnabled") != "" {
+			return datacenterPlanTestBody([]map[string]any{}, 1, 1)
+		}
+		return datacenterPlanTestBody([]map[string]any{
+			datacenterPlanTestRow("dc-1", "Chicago", datacenterPlanTestRegionAlpha, false),
+		}, 1, 1)
+	})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      datacenterPlanTestConfig(server.URL, "  gpu_enabled = true\n"),
+				ExpectError: regexp.MustCompile("(?s)specified filters have.*gpu_enabled = true.*none matched that value"),
+			},
+		},
+	})
+
+	datacenterPlanTestAssertOnlyListPath(t, rec)
+}
+
+func TestDatacentersDataSourceSuggestsWhenAnotherFilterMatchesNone(t *testing.T) {
+	t.Parallel()
+
+	server, rec := startDatacenterPlanMockServer(t, func(r *http.Request) map[string]any {
+		if r.URL.Query().Get("countryName") != "" {
+			return datacenterPlanTestBody([]map[string]any{}, 1, 1)
+		}
+		return datacenterPlanTestBody([]map[string]any{
+			datacenterPlanTestRow("dc-1", "Chicago", datacenterPlanTestRegionAlpha, true),
+		}, 1, 1)
+	})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      datacenterPlanTestConfig(server.URL, "  country_name = \"Atlantis\"\n  gpu_enabled  = true\n"),
+				ExpectError: regexp.MustCompile("(?s)Some possible.*values are.*" + datacenterPlanTestRegionAlpha),
+			},
+		},
+	})
+
+	datacenterPlanTestAssertOnlyListPath(t, rec)
+}
+
+func TestDatacentersDataSourceReportsNoVisibleDatacenters(t *testing.T) {
+	t.Parallel()
+
+	server, rec := startDatacenterPlanMockServer(t, func(_ *http.Request) map[string]any {
+		return datacenterPlanTestBody([]map[string]any{}, 1, 1)
+	})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      datacenterPlanTestConfig(server.URL, "  country_name = \"Atlantis\"\n"),
+				ExpectError: regexp.MustCompile("(?s)this API key.*can see no datacenters at all"),
+			},
+		},
+	})
+
+	datacenterPlanTestAssertOnlyListPath(t, rec)
+}
+
+func TestDatacentersDataSourceSuggestsEachPairOnce(t *testing.T) {
+	t.Parallel()
+
+	server, rec := startDatacenterPlanMockServer(t, func(r *http.Request) map[string]any {
+		if r.URL.Query().Get("countryName") != "" {
+			return datacenterPlanTestBody([]map[string]any{}, 1, 1)
+		}
+		return datacenterPlanTestBody([]map[string]any{
+			datacenterPlanTestRow("dc-1", "Chicago", datacenterPlanTestRegionAlpha, true),
+			datacenterPlanTestRow("dc-2", "Dallas", datacenterPlanTestRegionBeta, true),
+			datacenterPlanTestRow("dc-3", "Aurora", datacenterPlanTestRegionAlpha, true),
+		}, 1, 1)
+	})
+
+	// ExpectError proves a match, never the absence of one, and the helper skips
+	// ErrorCheck for a step that sets it. ErrorCheck alone counts the pairs.
+	var checked bool
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		ErrorCheck: func(err error) error {
+			checked = true
+			repeated := strings.Count(err.Error(), datacenterPlanTestRegionAlpha)
+			once := strings.Count(err.Error(), datacenterPlanTestRegionBeta)
+			if once < 1 || repeated != once {
+				t.Errorf("the suggestion names %q %d times and %q %d times, want the same count",
+					datacenterPlanTestRegionAlpha, repeated, datacenterPlanTestRegionBeta, once)
+			}
+			return nil
+		},
+		Steps: []resource.TestStep{
+			{Config: datacenterPlanTestConfig(server.URL, "  country_name = \"Atlantis\"\n")},
+		},
+	})
+
+	if !checked {
+		t.Fatal("the data source returned no error, so the suggestion went unchecked")
+	}
+
+	datacenterPlanTestAssertOnlyListPath(t, rec)
+}
