@@ -420,29 +420,6 @@ func startVirtualMachineAttachMockServer(t *testing.T) (*httptest.Server, func()
 	return server, heal
 }
 
-func vmAttachPlanTestConfig(host, name string) string {
-	return fmt.Sprintf(`
-provider "gpcn" {
-  host        = %q
-  api_key     = "test-key"
-  max_retries = 0
-}
-
-resource "gpcn_virtualmachine" "test" {
-  name               = %q
-  datacenter_id      = %q
-  size_id            = %q
-  image_id           = %q
-  allocate_public_ip = false
-  network_ids        = [%q, %q]
-  initial_auth = {
-    ssh_key_id = %q
-    username   = %q
-  }
-}
-`, host, name, vmPlanTestDatacenterID, vmPlanTestSizeID, vmPlanTestImageID, vmPlanTestNetworkID, vmPlanTestSecondNetworkID, vmPlanTestSshKeyID, vmPlanTestUsername)
-}
-
 // A failed attach must not orphan the machine: it exists at the API, so it belongs in
 // state. State must also name only the networks that attached, or no later plan can
 // attach the rest. Terraform taints a resource whose create returned an error, so the
@@ -452,7 +429,7 @@ func TestVirtualMachineResourcePlanCreateWritesStateWhenAttachFails(t *testing.T
 	shortenVirtualMachinePolling(t)
 	server, heal := startVirtualMachineAttachMockServer(t)
 
-	config := vmAttachPlanTestConfig(server.URL, "vm-plan-attach")
+	config := vmNetworkListPlanTestConfig(server.URL, "vm-plan-attach", vmPlanTestNetworkID, vmPlanTestSecondNetworkID)
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
