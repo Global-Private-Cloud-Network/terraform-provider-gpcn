@@ -2,6 +2,7 @@ package vpcnsgs
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -78,6 +79,17 @@ func optionalInt64(raw *int64) types.Int64 {
 // leaves a null, and a Computed attribute reaches Create as unknown.
 func isUnset(value types.String) bool {
 	return value.IsNull() || value.IsUnknown()
+}
+
+// DefaultNsgRulesWarning reports what a replace costs on the VPC's own default
+// group. GPCN stages the platform posture there as ordinary rule rows and puts
+// no guard on the rules route, so the configured set silently replaces them.
+func DefaultNsgRulesWarning(isDefault bool, nsgID string) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if isDefault {
+		diags.AddWarning(WarnSummaryDefaultNsgRulesReplaced, fmt.Sprintf(WarnDetailDefaultNsgRulesReplaced, nsgID))
+	}
+	return diags
 }
 
 // RulesToSet converts the API's rules into the set the schema declares.

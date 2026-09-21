@@ -2,6 +2,7 @@ package vpcnsgs
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -338,5 +339,35 @@ func TestRulePortValidatorMessagesUnit(t *testing.T) {
 				t.Errorf("expected the detail %q, got %q", testCase.want, got)
 			}
 		})
+	}
+}
+
+// The rules PUT is a full replace and the backend puts no guard on the default
+// group, so an apply against it deletes the posture rows GPCN staged with the
+// VPC. The operator must read that before the rules are gone.
+func TestDefaultNsgRulesWarningUnit(t *testing.T) {
+	t.Parallel()
+
+	diags := DefaultNsgRulesWarning(true, unitTestNsgID)
+
+	if got := diags.WarningsCount(); got != 1 {
+		t.Fatalf("expected one warning, got %d", got)
+	}
+	warning := diags.Warnings()[0]
+	if got := warning.Summary(); got != WarnSummaryDefaultNsgRulesReplaced {
+		t.Errorf("expected the summary %q, got %q", WarnSummaryDefaultNsgRulesReplaced, got)
+	}
+	want := fmt.Sprintf(WarnDetailDefaultNsgRulesReplaced, unitTestNsgID)
+	if got := warning.Detail(); got != want {
+		t.Errorf("expected the detail %q, got %q", want, got)
+	}
+}
+
+// An ordinary group holds no platform posture, so a replace there is silent.
+func TestDefaultNsgRulesWarningSilentForOrdinaryGroupUnit(t *testing.T) {
+	t.Parallel()
+
+	if got := DefaultNsgRulesWarning(false, unitTestNsgID).WarningsCount(); got != 0 {
+		t.Errorf("expected no warning for an ordinary group, got %d", got)
 	}
 }

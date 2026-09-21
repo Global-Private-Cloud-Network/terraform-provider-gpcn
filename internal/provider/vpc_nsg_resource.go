@@ -291,6 +291,7 @@ func (r *vpcNsgResource) Update(ctx context.Context, req resource.UpdateRequest,
 		if resp.Diagnostics.HasError() {
 			return
 		}
+		resp.Diagnostics.Append(vpcnsgs.DefaultNsgRulesWarning(state.IsDefault.ValueBool(), nsgID)...)
 		if err := vpcnsgs.ReplaceNsgRules(r.client, ctx, vpcID, nsgID, rules); err != nil {
 			resp.Diagnostics.AddError(
 				vpcnsgs.ErrSummaryUnableToUpdateNsg,

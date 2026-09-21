@@ -54,7 +54,10 @@ type nsgPlanTestServerState struct {
 	rulesPuts    int
 	renamePuts   int
 	refuseDelete bool
-	deleted      bool
+	// missingOnDelete answers the DELETE with a 404, which is what a group
+	// another operator already removed answers.
+	missingOnDelete bool
+	deleted         bool
 }
 
 func (s *nsgPlanTestServerState) storeRules(body map[string]any) {
@@ -146,7 +149,15 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "", "data": detail["nsg"]})
 		case r.Method == http.MethodDelete && r.URL.Path == groupPath:
 			state.mu.Lock()
+			missing := state.missingOnDelete
 			refuse := state.refuseDelete
+			if missing {
+				state.mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"success":false,"message":"Security group not found","error":{"code":"RESOURCE_NOT_FOUND","statusCode":404,"details":null}}`)
+				return
+			}
 			if refuse {
 				state.refuseDelete = false
 			} else {
@@ -350,6 +361,65 @@ func TestVpcNsgResourcePlanSurfacesDefaultGroupRefusal(t *testing.T) {
 				Config:      nsgPlanTestConfig(server.URL, "default", nsgPlanTestRuleHTTPS),
 				Destroy:     true,
 				ExpectError: regexp.MustCompile(strings.ReplaceAll(`default security group cannot be deleted while it is the default`, " ", `\s+`)),
+			},
+		},
+	})
+}
+
+// A group deleted outside Terraform answers the read with a 404. Read drops it
+// from state, so the next plan proposes a create rather than an update against
+// a group that is gone.
+func TestVpcNsgResourcePlanRecreatesWhenAbsent(t *testing.T) {
+	t.Parallel()
+	server, state := startNsgPlanMockServer(t)
+
+	config := nsgPlanTestConfig(server.URL, "nsg-plan-a", nsgPlanTestRuleHTTPS)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+			},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					state.deleted = true
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcNsgTest, plancheck.ResourceActionCreate),
+					},
+				},
+			},
+		},
+	})
+}
+
+// A group another operator already removed answers the DELETE with a 404. The
+// destroy must finish, because the group is gone either way.
+func TestVpcNsgResourcePlanTreatsMissingNsgAsDeleted(t *testing.T) {
+	t.Parallel()
+	server, state := startNsgPlanMockServer(t)
+
+	config := nsgPlanTestConfig(server.URL, "nsg-plan-a", nsgPlanTestRuleHTTPS)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+			},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					state.missingOnDelete = true
+				},
+				Config:  config,
+				Destroy: true,
 			},
 		},
 	})
