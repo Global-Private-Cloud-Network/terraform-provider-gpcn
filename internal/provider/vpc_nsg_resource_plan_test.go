@@ -54,8 +54,8 @@ type nsgPlanTestServerState struct {
 	rulesPuts    int
 	renamePuts   int
 	refuseDelete bool
-	// missingOnDelete answers the DELETE with a 404, which is what a group
-	// another operator already removed answers.
+	// missingOnDelete answers the DELETE with a 404. A group another operator
+	// already removed gives that answer.
 	missingOnDelete bool
 	deleted         bool
 }
@@ -367,8 +367,8 @@ func TestVpcNsgResourcePlanSurfacesDefaultGroupRefusal(t *testing.T) {
 }
 
 // A group deleted outside Terraform answers the read with a 404. Read drops it
-// from state, so the next plan proposes a create rather than an update against
-// a group that is gone.
+// from state. The next plan then proposes a create rather than an update
+// against a group that is gone.
 func TestVpcNsgResourcePlanRecreatesWhenAbsent(t *testing.T) {
 	t.Parallel()
 	server, state := startNsgPlanMockServer(t)

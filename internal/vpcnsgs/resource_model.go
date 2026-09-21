@@ -82,8 +82,8 @@ func isUnset(value types.String) bool {
 }
 
 // DefaultNsgRulesWarning reports what a replace costs on the VPC's own default
-// group. GPCN stages the platform posture there as ordinary rule rows and puts
-// no guard on the rules route, so the configured set silently replaces them.
+// group. GPCN stages the platform posture there as ordinary rule rows. The
+// rules route holds no guard, so the configured set replaces them.
 func DefaultNsgRulesWarning(isDefault bool, nsgID string) diag.Diagnostics {
 	var diags diag.Diagnostics
 	if isDefault {

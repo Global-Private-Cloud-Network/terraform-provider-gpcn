@@ -54,8 +54,8 @@ func isUnsetInt64(value types.Int64) bool {
 }
 
 // SubnetFailedWarning reports a carve the platform gave up on. The row reads
-// back cleanly, so an apply that says nothing here leaves the operator with a
-// subnet that carries no network and no sign of it.
+// back cleanly, so the apply says nothing. The operator then holds a subnet
+// that carries no network.
 func SubnetFailedWarning(response *ApiSubnet) diag.Diagnostics {
 	var diags diag.Diagnostics
 	if response.State != StateFailed {
@@ -74,9 +74,8 @@ func SubnetFailedWarning(response *ApiSubnet) diag.Diagnostics {
 // configurable ones only when the caller chose no value, which is what an
 // import and a Create both leave behind. A configured CIDR must survive:
 // reconciling a drifted one would destroy a subnet that can hold live
-// interfaces. The NIC census is held the same way, because its plan value comes
-// from the prior state and an Update that wrote a fresher count would end with
-// a result the plan does not allow.
+// interfaces. The NIC census is held the same way. Its plan value comes from
+// the prior state, so an Update that wrote a fresher count breaks the apply.
 func MapSubnetResponseToModel(response *ApiSubnet, model ResourceModel) ResourceModel {
 	model.ID = types.StringValue(response.ID)
 	model.State = types.StringValue(response.State)
@@ -111,10 +110,10 @@ func MapSubnetResponseToModel(response *ApiSubnet, model ResourceModel) Resource
 }
 
 // RefreshSubnetModelFromResponse shows the changes Terraform reconciles in
-// place: a rename, a rebind to another security group, and the NIC census. The
-// CIDR is the allocator's reservation and the prefix is request-only, so
-// neither refreshes. Read calls this after the mapper; Create and Update keep
-// the planned values.
+// place: a rename, a rebind to another group, and the NIC census. The CIDR is
+// the allocator's reservation and the prefix is request-only, so neither
+// refreshes. Read calls this after the mapper; Create and Update keep the
+// planned values.
 func RefreshSubnetModelFromResponse(response *ApiSubnet, model ResourceModel) ResourceModel {
 	if response.Name != "" {
 		model.Name = types.StringValue(response.Name)

@@ -207,8 +207,8 @@ func unitTestListBody(rows []map[string]any, totalPages int) map[string]any {
 	}
 }
 
-// The update body carries the name and the description and no structural key,
-// because the API refuses an unknown key and needs at least one of the two.
+// The update body carries the name and the description and no structural key.
+// The API refuses an unknown key, and it needs at least one of the two.
 func TestUpdateSubnetSendsNameAndDescriptionUnit(t *testing.T) {
 	t.Parallel()
 
@@ -279,8 +279,8 @@ func TestMapSubnetResponseToModelFillsUnknownValuesUnit(t *testing.T) {
 	}
 }
 
-// A failed carve leaves a row Terraform reads without complaint, so the warning
-// is the only place the operator learns the subnet carries no network.
+// A failed carve leaves a row Terraform reads without complaint. The warning is
+// the only place the operator learns the subnet carries no network.
 func TestSubnetFailedWarningUnit(t *testing.T) {
 	t.Parallel()
 
@@ -304,8 +304,8 @@ func TestSubnetFailedWarningUnit(t *testing.T) {
 	}
 }
 
-// A failed subnet with no reason still warrants the warning, and the sentence
-// must stay readable where the reason would have been.
+// A failed subnet with no reason still needs the warning. The sentence must
+// stay readable where the reason would have been.
 func TestSubnetFailedWarningWithoutReasonUnit(t *testing.T) {
 	t.Parallel()
 
@@ -329,8 +329,8 @@ func TestSubnetFailedWarningSilentWhenReadyUnit(t *testing.T) {
 	}
 }
 
-// The plan pins attached_nic_count to the prior state, so an Update that wrote
-// a fresher census would end the apply with an inconsistent result. The mapper
+// The plan pins attached_nic_count to the prior state. An Update that wrote a
+// fresher census would end the apply with an inconsistent result. The mapper
 // must leave a count the caller already holds.
 func TestMapSubnetResponseToModelKeepsPlannedNicCountUnit(t *testing.T) {
 	t.Parallel()
@@ -351,7 +351,7 @@ func TestMapSubnetResponseToModelKeepsPlannedNicCountUnit(t *testing.T) {
 	}
 }
 
-// Read is where a fresher census belongs: reconciling a count destroys nothing.
+// Read is where a fresher census belongs. A reconciled count destroys nothing.
 func TestRefreshSubnetModelFromResponseUpdatesNicCountUnit(t *testing.T) {
 	t.Parallel()
 

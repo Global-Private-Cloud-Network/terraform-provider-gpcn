@@ -342,9 +342,9 @@ func TestRulePortValidatorMessagesUnit(t *testing.T) {
 	}
 }
 
-// The rules PUT is a full replace and the backend puts no guard on the default
-// group, so an apply against it deletes the posture rows GPCN staged with the
-// VPC. The operator must read that before the rules are gone.
+// The rules PUT is a full replace, and the backend puts no guard on the default
+// group. An apply against it deletes the posture rows GPCN staged with the VPC.
+// The operator must read that before the rules are gone.
 func TestDefaultNsgRulesWarningUnit(t *testing.T) {
 	t.Parallel()
 

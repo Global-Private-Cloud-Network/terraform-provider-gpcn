@@ -40,8 +40,8 @@ type subnetPlanTestServerState struct {
 	// nicCountOnRename stands for an interface that attaches between the
 	// refresh and the apply. Zero leaves the census alone.
 	nicCountOnRename int64
-	// missingOnDelete answers the DELETE with a 404, which is what a subnet
-	// another operator already removed answers.
+	// missingOnDelete answers the DELETE with a 404. A subnet another operator
+	// already removed gives that answer.
 	missingOnDelete bool
 	createBody      map[string]any
 	rebindBody      map[string]any
@@ -391,9 +391,9 @@ func TestVpcSubnetResourcePlanCarvesFromPrefix(t *testing.T) {
 	})
 }
 
-// A NIC can attach between the refresh and the apply, and the plan pins the
-// census to the value the refresh saw. An Update that wrote the fresher count
-// would end the apply with a result the plan does not allow.
+// A NIC can attach between the refresh and the apply. The plan pins the census
+// to the value the refresh saw. An Update that wrote the fresher count would
+// end the apply with a result the plan does not allow.
 func TestVpcSubnetResourcePlanKeepsNicCountThroughRename(t *testing.T) {
 	t.Parallel()
 	server, state := startSubnetPlanMockServer(t)
@@ -453,8 +453,8 @@ func TestVpcSubnetResourcePlanTreatsMissingSubnetAsDeleted(t *testing.T) {
 }
 
 // A chosen security group must reach the API on the create. The mapper keeps
-// the planned value, so a dropped key would write state that names a group the
-// subnet is not bound to.
+// the planned value. A dropped key then writes state that names the wrong
+// group.
 func TestVpcSubnetResourcePlanSendsChosenNsgOnCreate(t *testing.T) {
 	t.Parallel()
 	server, state := startSubnetPlanMockServer(t)
