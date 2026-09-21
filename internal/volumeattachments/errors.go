@@ -10,6 +10,11 @@ const (
 
 	ErrDetailExpectedGpcnClient    = "Expected *client.GpcnClient, got: %T. Please report this issue to the provider developers."
 	ErrDetailVolumeAlreadyAttached = "volume %s is already attached to virtual machine %s, which is different from the requested virtual machine %s"
-	ErrDetailVMStopFailed          = "virtual machine %s could not be stopped: %s"
-	ErrDetailVMStartFailed         = "virtual machine %s could not be started after volume operation: %s"
+	ErrDetailVMStopFailed          = "virtual machine %s could not be stopped: %w"
+	// The %w keeps a not-found read visible to client.IsNotFound, so Delete still treats
+	// a deleted VM as detached.
+	ErrDetailVMReadFailed = "virtual machine %s could not be read: %w"
+	// Delete reads a not-found error as "already detached". A restart failure must not
+	// wrap the cause. A wrapped 404 from the start call makes Delete report a false success.
+	ErrDetailVMStartFailed = "virtual machine %s could not be started after volume operation: %s"
 )

@@ -88,9 +88,14 @@ func setModelValuesNotPresent(ctx context.Context, response *readGPUResponse, mo
 	if model.GPUCount.IsNull() {
 		model.GPUCount = types.Int64Value(response.Data.Configuration.GPUCount)
 	}
+
+	// The API returns a longer image name than the user configures. A refresh here
+	// shows permanent drift.
 	if model.ImageName.IsNull() || model.ImageName.ValueString() == "" {
 		model.ImageName = types.StringValue(response.Data.Image)
 	}
+
+	// initial_auth changes the state only, so the API value must not win.
 	if model.InitialAuth.IsNull() && response.Data.SshKeyId != "" {
 		authObj, diags := types.ObjectValueFrom(ctx, ResourceModelInitialAuth{}.AttrTypes(), ResourceModelInitialAuth{
 			SshKeyId: types.StringValue(response.Data.SshKeyId),
@@ -98,6 +103,17 @@ func setModelValuesNotPresent(ctx context.Context, response *readGPUResponse, mo
 		if !diags.HasError() {
 			model.InitialAuth = authObj
 		}
+	}
+	return model
+}
+
+// Only the name can change out of band and reconcile in place. A refresh of any other
+// attribute risks a false diff that replaces the GPU.
+// setModelValuesNotPresent still fills those attributes when the state leaves them unset.
+// An empty name is an omission, not a rename.
+func RefreshGPUModelFromResponse(response *readGPUResponse, model ResourceModel) ResourceModel {
+	if response.Data.Name != "" {
+		model.Name = types.StringValue(response.Data.Name)
 	}
 	return model
 }

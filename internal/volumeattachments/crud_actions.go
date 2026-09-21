@@ -2,6 +2,7 @@ package volumeattachments
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -26,7 +27,7 @@ func GetAttachedVMId(gpcnClient *client.GpcnClient, ctx context.Context, volumeI
 func AttachVolume(gpcnClient *client.GpcnClient, ctx context.Context, vmId, volumeId string) error {
 	stopped, err := conditionallyStopVM(gpcnClient, ctx, vmId)
 	if err != nil {
-		return fmt.Errorf(ErrDetailVMStopFailed, vmId, err)
+		return err
 	}
 
 	if err = volumes.AddVolumeToVirtualMachine(gpcnClient, ctx, vmId, volumeId); err != nil {
@@ -51,7 +52,7 @@ func AttachVolume(gpcnClient *client.GpcnClient, ctx context.Context, vmId, volu
 func DetachVolume(gpcnClient *client.GpcnClient, ctx context.Context, vmId, volumeId string) error {
 	stopped, err := conditionallyStopVM(gpcnClient, ctx, vmId)
 	if err != nil {
-		return fmt.Errorf(ErrDetailVMStopFailed, vmId, err)
+		return err
 	}
 
 	if err = volumes.RemoveVolumeFromVirtualMachine(gpcnClient, ctx, volumeId); err != nil {
@@ -73,12 +74,13 @@ func DetachVolume(gpcnClient *client.GpcnClient, ctx context.Context, vmId, volu
 
 // conditionallyStopVM stops the VM only if network_hotplug is disabled and the VM is running.
 // Returns true if this call actually stopped the VM (meaning the caller should restart it).
+// Every error comes back already wrapped, so a failed read does not claim a failed stop.
 // Handles the concurrent-stop race: if a stop call fails because another process already
 // stopped the VM, we verify the status and return (false, nil) so the caller does NOT restart.
 func conditionallyStopVM(gpcnClient *client.GpcnClient, ctx context.Context, vmId string) (bool, error) {
 	vmResp, err := virtualmachines.GetVirtualMachine(gpcnClient, ctx, vmId)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf(ErrDetailVMReadFailed, vmId, err)
 	}
 
 	if vmResp.Data.NetworkHotplug == 1 {
@@ -95,14 +97,18 @@ func conditionallyStopVM(gpcnClient *client.GpcnClient, ctx context.Context, vmI
 	if err != nil {
 		// Stop failed — check if a concurrent operation already stopped the VM
 		checkResp, checkErr := virtualmachines.GetVirtualMachine(gpcnClient, ctx, vmId)
-		if checkErr != nil {
-			return false, err // return original error
-		}
-		if strings.EqualFold(checkResp.Data.Status, virtualmachines.VMStatusShutoff.String()) {
+		if checkErr == nil && strings.EqualFold(checkResp.Data.Status, virtualmachines.VMStatusShutoff.String()) {
 			tflog.Info(ctx, LogSkippingStopVMAlreadyStopped)
 			return false, nil // someone else stopped it; we should not start it
 		}
-		return false, err
+		if client.IsNotFound(checkErr) {
+			// The re-check proves the VM is gone, so Delete may drop the attachment.
+			// Only the re-check wraps, so IsNotFound reads the 404 and not the stop status.
+			return false, fmt.Errorf(ErrDetailVMStopFailed, vmId, fmt.Errorf("%s (re-check: %w)", err.Error(), checkErr))
+		}
+		// The re-check does not prove the VM is gone. The error must not read as
+		// not-found, or Delete drops the attachment without a detach.
+		return false, fmt.Errorf(ErrDetailVMStopFailed, vmId, errors.New(err.Error()))
 	}
 
 	return true, nil

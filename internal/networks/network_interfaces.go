@@ -210,9 +210,38 @@ func AddNetworkInterface(gpcnClient *client.GpcnClient, ctx context.Context, vir
 	return nil
 }
 
-// Attach a network interface to the virtual machine
-func SetNextNetworkInterfaceToPrimary(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineID string, allNetworkInterfaces []ReadVirtualMachineNetworkDataResponseTF) error {
+// The caller passes only the candidates that survive the update.
+// The preferred network ID names the primary that the practitioner configured.
+func SetNextNetworkInterfaceToPrimary(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineID, preferredNetworkID string, candidateNetworkInterfaces []ReadVirtualMachineNetworkDataResponseTF) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingSetNextNetworkInterfaceToPrimary, virtualMachineID))
+
+	networkInterfaceIdx := -1
+	if preferredNetworkID != "" {
+		networkInterfaceIdx = slices.IndexFunc(candidateNetworkInterfaces, func(networkInterface ReadVirtualMachineNetworkDataResponseTF) bool {
+			return strings.EqualFold(networkInterface.NetworkID.ValueString(), preferredNetworkID)
+		})
+	}
+	if networkInterfaceIdx < 0 {
+		// The backend promotes a replacement primary on its own. Accept that choice, because
+		// the practitioner named no interface of their own.
+		if slices.ContainsFunc(candidateNetworkInterfaces, func(networkInterface ReadVirtualMachineNetworkDataResponseTF) bool {
+			return networkInterface.IsPrimary.ValueBool()
+		}) {
+			tflog.Info(ctx, fmt.Sprintf(LogNetworkInterfaceAlreadyPrimary, virtualMachineID))
+			return nil
+		}
+		networkInterfaceIdx = slices.IndexFunc(candidateNetworkInterfaces, func(networkInterface ReadVirtualMachineNetworkDataResponseTF) bool {
+			return !networkInterface.IsPrimary.ValueBool()
+		})
+	}
+	if networkInterfaceIdx < 0 {
+		return errors.New(ErrDetailNoCandidateNetworkInterface)
+	}
+	if candidateNetworkInterfaces[networkInterfaceIdx].IsPrimary.ValueBool() {
+		tflog.Info(ctx, fmt.Sprintf(LogNetworkInterfaceAlreadyPrimary, virtualMachineID))
+		return nil
+	}
+
 	updateNetworkInterfaceRequestBody := map[string]bool{
 		"setPrimary": true,
 	}
@@ -221,14 +250,8 @@ func SetNextNetworkInterfaceToPrimary(gpcnClient *client.GpcnClient, ctx context
 	if err != nil {
 		return errors.New("error marshaling the json request body GPCN Virtual Machines - Update Primary Interface")
 	}
-	// Find the next interface in the list that is not the previous primary
-	networkInterfaceIdx := slices.IndexFunc(allNetworkInterfaces, func(networkInterface ReadVirtualMachineNetworkDataResponseTF) bool {
-		return !networkInterface.IsPrimary.ValueBool()
-	})
-	if networkInterfaceIdx < -1 {
-		return errors.New("no network interfaces found that were not marked as primary")
-	}
-	nextPrimaryNetworkInterfaceID := allNetworkInterfaces[networkInterfaceIdx].ID.ValueString()
+
+	nextPrimaryNetworkInterfaceID := candidateNetworkInterfaces[networkInterfaceIdx].ID.ValueString()
 	tflog.Info(ctx, fmt.Sprintf(LogSettingNetworkInterfaceAsPrimary, nextPrimaryNetworkInterfaceID))
 	request, err := http.NewRequestWithContext(ctx, "PUT", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineID+"/network-interfaces/"+nextPrimaryNetworkInterfaceID, bytes.NewBuffer(jsonUpdateNetworkInterfaceRequestBody))
 	if err != nil {
@@ -299,7 +322,7 @@ func RemoveNetworkInterfaceByNetworkId(gpcnClient *client.GpcnClient, ctx contex
 	}
 	// If the networkId doesn't have a corresponding interface, something went wrong
 	if networkInterfaceId == "" {
-		return errors.New(ErrDetailRemoveNetworkInterfaceFailed)
+		return fmt.Errorf(ErrDetailRemoveNetworkInterfaceFailed, networkId)
 	}
 
 	// If it does, remove it
@@ -389,25 +412,47 @@ func UpdateNetworkInterfaces(gpcnClient *client.GpcnClient, ctx context.Context,
 	tflog.Info(ctx, fmt.Sprintf("NetworkIds to be removed are: [%s]", strings.Join(removedValues, ", ")))
 	tflog.Info(ctx, fmt.Sprintf("NetworkIds to be added are: [%s]", strings.Join(addedValues, ", ")))
 
-	// Check if any interfaces slated to be removed are the primary interface. If so, make the next interface available the primary
-	for _, val := range removedValues {
-		interfaceIdx := slices.IndexFunc(networkInterfaces, func(data ReadVirtualMachineNetworkDataResponseTF) bool {
-			return strings.EqualFold(data.NetworkID.ValueString(), val)
+	// The practitioner configures the first network ID as the primary.
+	preferredNetworkID := ""
+	if len(newNetworksList) > 0 {
+		preferredNetworkID = newNetworksList[0]
+	}
+
+	isRemoved := func(data ReadVirtualMachineNetworkDataResponseTF) bool {
+		return slices.ContainsFunc(removedValues, func(val string) bool {
+			return namesNetwork(data, val)
 		})
-		if interfaceIdx > -1 && networkInterfaces[interfaceIdx].IsPrimary.ValueBool() {
-			// Issue a call to set the next interface to be the primary
-			err := SetNextNetworkInterfaceToPrimary(gpcnClient, ctx, vmId, networkInterfaces)
-			if err != nil {
-				return fmt.Errorf("error replacing primary interface: %w", err)
+	}
+
+	primaryIsRemoved := slices.ContainsFunc(networkInterfaces, func(data ReadVirtualMachineNetworkDataResponseTF) bool {
+		return data.IsPrimary.ValueBool() && isRemoved(data)
+	})
+
+	// A promotion must not land on an interface that this call removes moments later.
+	handoffIsComplete := false
+	if primaryIsRemoved && len(newNetworksList) > 0 {
+		var survivingInterfaces []ReadVirtualMachineNetworkDataResponseTF
+		for _, data := range networkInterfaces {
+			if !isRemoved(data) {
+				survivingInterfaces = append(survivingInterfaces, data)
 			}
-			break
+		}
+		// The configured primary keeps its interface only when the network survives.
+		if slices.ContainsFunc(survivingInterfaces, func(data ReadVirtualMachineNetworkDataResponseTF) bool {
+			return namesNetwork(data, preferredNetworkID)
+		}) {
+			err := SetNextNetworkInterfaceToPrimary(gpcnClient, ctx, vmId, preferredNetworkID, survivingInterfaces)
+			if err != nil {
+				return fmt.Errorf(ErrDetailReplacePrimaryInterfaceFailed, err)
+			}
+			handoffIsComplete = true
 		}
 	}
 
 	// Do removals first, since there is a cap of 5 networks
 	for _, val := range removedValues {
 		interfaceIdx := slices.IndexFunc(networkInterfaces, func(data ReadVirtualMachineNetworkDataResponseTF) bool {
-			return strings.EqualFold(data.NetworkID.ValueString(), val)
+			return namesNetwork(data, val)
 		})
 		if interfaceIdx < 0 {
 			continue
@@ -428,5 +473,40 @@ func UpdateNetworkInterfaces(gpcnClient *client.GpcnClient, ctx context.Context,
 		}
 	}
 
+	// The schema promises a handoff only when the removal takes the primary network away.
+	if !primaryIsRemoved || handoffIsComplete || len(newNetworksList) == 0 {
+		return nil
+	}
+	tflog.Info(ctx, fmt.Sprintf(LogPromotingAddedNetworkInterface, vmId))
+
+	refreshedInterfaces, err := GetNetworkInterfaces(gpcnClient, ctx, vmId)
+	if err != nil {
+		return fmt.Errorf(ErrDetailRefreshNetworkInterfacesFailed, vmId, err)
+	}
+	// A delete that is still in flight keeps a removed interface in the refreshed list.
+	var configuredInterfaces []ReadVirtualMachineNetworkDataResponseTF
+	for _, data := range refreshedInterfaces {
+		if slices.ContainsFunc(newNetworksList, func(val string) bool {
+			return namesNetwork(data, val)
+		}) {
+			configuredInterfaces = append(configuredInterfaces, data)
+		}
+	}
+	// An attach that the refresh misses leaves nothing to promote.
+	// Nothing retries this until the network_ids attribute changes again.
+	if len(configuredInterfaces) == 0 {
+		tflog.Warn(ctx, fmt.Sprintf(LogNoConfiguredNetworkInterfaceAfterRefresh, vmId))
+		return nil
+	}
+
+	err = SetNextNetworkInterfaceToPrimary(gpcnClient, ctx, vmId, preferredNetworkID, configuredInterfaces)
+	if err != nil {
+		return fmt.Errorf(ErrDetailReplacePrimaryInterfaceFailed, err)
+	}
+
 	return nil
+}
+
+func namesNetwork(data ReadVirtualMachineNetworkDataResponseTF, networkID string) bool {
+	return strings.EqualFold(data.NetworkID.ValueString(), networkID)
 }

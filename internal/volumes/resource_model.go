@@ -2,6 +2,7 @@ package volumes
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -57,18 +58,31 @@ func MapVolumeResponseToModel(ctx context.Context, response *readVolumesResponse
 	return model
 }
 
+// A refresh of name or size_gb from the API can destroy the volume, so this fills only null
+// values. A drifted name and a drifted grow both reconcile by replacement.
 func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel) ResourceModel {
 	if model.DatacenterId.IsNull() {
 		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
 	}
-	if model.Name.IsNull() {
+	if model.Name.IsNull() && response.Data.Name != "" {
 		model.Name = types.StringValue(response.Data.Name)
 	}
-	if model.SizeGb.IsNull() {
+	if model.SizeGb.IsNull() && response.Data.SizeGb != 0 {
 		model.SizeGb = types.Int64Value(response.Data.SizeGb)
 	}
-	if model.VolumeType.IsNull() {
-		model.VolumeType = types.StringValue(response.Data.VolumeType.Name)
+	// The API can send the volume type in a different case. The canonical key keeps
+	// the configured value from planning a replacement.
+	if model.VolumeType.IsNull() && response.Data.VolumeType.Name != "" {
+		model.VolumeType = types.StringValue(canonicalVolumeType(response.Data.VolumeType.Name))
 	}
 	return model
+}
+
+func canonicalVolumeType(name string) string {
+	for key := range volumeTypeMapping {
+		if strings.EqualFold(key, name) {
+			return key
+		}
+	}
+	return name
 }

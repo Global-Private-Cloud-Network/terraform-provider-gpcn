@@ -110,6 +110,18 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 	return model, allDiags
 }
 
+// Read calls this after MapVirtualMachineResponseToModel, so an out-of-band change shows
+// as drift. Create and Update must not call it, because a lagging API then overwrites the
+// planned values. Only the name refreshes, because Terraform reconciles a rename in place.
+// A refresh of any other attribute plans a replacement or discards a configured value.
+// An empty name is an omission, not a rename.
+func RefreshVirtualMachineModelFromResponse(response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
+	if response.Data.Name != "" {
+		model.Name = types.StringValue(response.Data.Name)
+	}
+	return model
+}
+
 func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient, response *ReadVirtualMachinesResponse, model ResourceModel) (ResourceModel, diag.Diagnostics) {
 	var allDiags diag.Diagnostics
 
@@ -238,7 +250,8 @@ func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.Gpc
 				model.PublicIp = iface.PublicIP
 			}
 		}
-		// Set the network IDs in the model
+		// network_ids holds the user's ordered intent, and element 0 names the primary interface.
+		// The API returns its own order, so it must not replace a configured list.
 		if model.NetworkIds.IsNull() {
 			var networkDiags diag.Diagnostics
 			model.NetworkIds, networkDiags = types.ListValueFrom(ctx, types.StringType, networkIds)
@@ -248,7 +261,8 @@ func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.Gpc
 			}
 		}
 
-		// Set AllocatePublicIp if it's currently null
+		// allocate_public_ip records the user's intent, and public_ip reports the observed value.
+		// Only a null intent takes its value from the observation.
 		if model.AllocatePublicIp.IsNull() {
 			model.AllocatePublicIp = types.BoolValue(hasPublicIp)
 		}

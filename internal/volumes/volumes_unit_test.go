@@ -343,3 +343,86 @@ func TestGetVolumeSkuIdInvalidSizeMockHTTP(t *testing.T) {
 		t.Errorf("Expected error to contain validation message, got '%s'", err.Error())
 	}
 }
+
+func TestMapVolumeResponseToModelImportCanonicalisesVolumeTypeUnit(t *testing.T) {
+	response := newVolumeResponse("volume-123", "imported-volume", 256, "sku-uuid-10")
+	response.Data.VolumeType.Name = "nvme"
+
+	result := MapVolumeResponseToModel(context.Background(), response, ResourceModel{})
+
+	if result.VolumeType.ValueString() != "NVMe" {
+		t.Errorf("Expected VolumeType 'NVMe', got '%s'", result.VolumeType.ValueString())
+	}
+}
+
+func TestMapVolumeResponseToModelImportUnknownVolumeTypeUnit(t *testing.T) {
+	response := newVolumeResponse("volume-123", "imported-volume", 256, "sku-uuid-10")
+	response.Data.VolumeType.Name = "Ultra-NVMe"
+
+	result := MapVolumeResponseToModel(context.Background(), response, ResourceModel{})
+
+	if result.VolumeType.ValueString() != "Ultra-NVMe" {
+		t.Errorf("Expected VolumeType 'Ultra-NVMe', got '%s'", result.VolumeType.ValueString())
+	}
+}
+
+func TestMapVolumeResponseToModelImportKeepsNullOnEmptyUnit(t *testing.T) {
+	response := newVolumeResponse("volume-123", "", 0, "sku-uuid-10")
+	response.Data.VolumeType.Name = ""
+
+	result := MapVolumeResponseToModel(context.Background(), response, ResourceModel{})
+
+	if !result.Name.IsNull() {
+		t.Errorf("Expected Name to stay null, got '%s'", result.Name.ValueString())
+	}
+	if !result.SizeGb.IsNull() {
+		t.Errorf("Expected SizeGb to stay null, got %d", result.SizeGb.ValueInt64())
+	}
+	if !result.VolumeType.IsNull() {
+		t.Errorf("Expected VolumeType to stay null, got '%s'", result.VolumeType.ValueString())
+	}
+}
+
+func TestMapVolumeResponseToModelImportPopulatesUnit(t *testing.T) {
+	response := newVolumeResponse("volume-123", "imported-volume", 256, "sku-uuid-10")
+	model := ResourceModel{}
+
+	result := MapVolumeResponseToModel(context.Background(), response, model)
+
+	if result.Name.ValueString() != "imported-volume" {
+		t.Errorf("Expected Name 'imported-volume', got '%s'", result.Name.ValueString())
+	}
+	if result.SizeGb.ValueInt64() != 256 {
+		t.Errorf("Expected SizeGb 256, got %d", result.SizeGb.ValueInt64())
+	}
+	if result.DatacenterId.ValueString() != testDatacenterID {
+		t.Errorf("Expected DatacenterId '%s', got '%s'", testDatacenterID, result.DatacenterId.ValueString())
+	}
+	if result.VolumeType.ValueString() != "SSD" {
+		t.Errorf("Expected VolumeType 'SSD', got '%s'", result.VolumeType.ValueString())
+	}
+}
+
+// Read, Create and Update all map over the model, so no API value replaces a configured one.
+// Reconciling a change to one of these attributes can destroy the volume.
+func TestMapVolumeResponseToModelKeepsPlanValuesUnit(t *testing.T) {
+	response := newVolumeResponse("volume-123", "renamed-in-portal", 512, "sku-uuid-11")
+	response.Data.Datacenter.ID = "datacenter-999"
+	response.Data.VolumeType.Name = "NVMe"
+	model := createTestVolumeModel("planned-name", "SSD", 128)
+
+	result := MapVolumeResponseToModel(context.Background(), response, model)
+
+	if result.Name.ValueString() != "planned-name" {
+		t.Errorf("Expected Name 'planned-name', got '%s'", result.Name.ValueString())
+	}
+	if result.SizeGb.ValueInt64() != 128 {
+		t.Errorf("Expected SizeGb 128, got %d", result.SizeGb.ValueInt64())
+	}
+	if result.DatacenterId.ValueString() != testDatacenterID {
+		t.Errorf("Expected DatacenterId '%s', got '%s'", testDatacenterID, result.DatacenterId.ValueString())
+	}
+	if result.VolumeType.ValueString() != "SSD" {
+		t.Errorf("Expected VolumeType 'SSD', got '%s'", result.VolumeType.ValueString())
+	}
+}

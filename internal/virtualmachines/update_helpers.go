@@ -2,6 +2,7 @@ package virtualmachines
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"terraform-provider-gpcn/internal/client"
@@ -88,8 +89,8 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 	// This means none are set to primary, which should be impossible
 	if interfaceIdx < 0 {
 		diags.AddError(
-			ErrSummaryErrorRetrievingNetworkIfaces,
-			ErrDetailNetworkInterfacesForVM,
+			ErrSummaryNoPrimaryNetworkInterface,
+			fmt.Sprintf(ErrDetailNoPrimaryNetworkInterface, vmID),
 		)
 		return diags
 	}

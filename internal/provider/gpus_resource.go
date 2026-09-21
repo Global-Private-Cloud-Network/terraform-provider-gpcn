@@ -88,6 +88,7 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				PlanModifiers: []planmodifier.String{
 					// Changing the series_name requires us to destroy and create a new GPU
 					stringplanmodifier.RequiresReplace(),
+					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
 			"series_code": schema.StringAttribute{
@@ -276,6 +277,7 @@ func (r *gpuResource) Read(ctx context.Context, req resource.ReadRequest, resp *
 	}
 
 	state = gpu.MapGPUResponseToModel(ctx, getGPUResponse, state)
+	state = gpu.RefreshGPUModelFromResponse(getGPUResponse, state)
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, state)
