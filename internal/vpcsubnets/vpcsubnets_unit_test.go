@@ -319,6 +319,15 @@ func TestSubnetFailedWarningWithoutReasonUnit(t *testing.T) {
 	if got := diags.Warnings()[0].Detail(); got != want {
 		t.Errorf("expected the detail %q, got %q", want, got)
 	}
+
+	// The platform can also record the reason as an empty string.
+	empty := ""
+	response.FailureReason = &empty
+
+	diags = SubnetFailedWarning(response)
+	if got := diags.Warnings()[0].Detail(); got != want {
+		t.Errorf("expected the detail %q for an empty reason, got %q", want, got)
+	}
 }
 
 // A ready subnet has nothing to warn about.
