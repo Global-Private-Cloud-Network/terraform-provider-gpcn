@@ -242,7 +242,7 @@ func newInventoryResponse(seriesID, seriesCode, datacenterID string, gpuCount, a
 
 func TestMapGPUResponseToModelUnit(t *testing.T) {
 	response := newGPUResponse("gpu-123", "test-gpu")
-	model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100_series", testImageName, 2)
+	model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100-series", testImageName, 2)
 
 	result := MapGPUResponseToModel(context.Background(), response, model)
 
@@ -420,7 +420,7 @@ func TestFetchInventoryEmptyMockHTTP(t *testing.T) {
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/inventory") {
-				testutil.WriteJSONResponse(w, newInventoryResponse("series-123", "nvidia-h100_series", testDatacenterID, 2, 0))
+				testutil.WriteJSONResponse(w, newInventoryResponse("series-123", "nvidia-h100-series", testDatacenterID, 2, 0))
 			} else {
 				testutil.LogUnexpectedRequest(t, w, r)
 			}
@@ -428,7 +428,7 @@ func TestFetchInventoryEmptyMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	items, err := FetchInventory(gpcnClient, context.Background(), testDatacenterID, "nvidia-h100_series", 2)
+	items, err := FetchInventory(gpcnClient, context.Background(), testDatacenterID, "nvidia-h100-series", 2)
 	if err != nil {
 		t.Fatalf("Expected no error for empty inventory, got: %v", err)
 	}
@@ -517,7 +517,7 @@ func TestMapGPUResponseToModelSkuCodeUnit(t *testing.T) {
 
 func TestCheckInventoryMockHTTP(t *testing.T) {
 	const (
-		seriesCode = "nvidia-h100_series"
+		seriesCode = "nvidia-h100-series"
 		gpuCount   = int64(2)
 	)
 
@@ -565,7 +565,7 @@ func TestCheckInventoryMockHTTP(t *testing.T) {
 
 func TestCheckInventoryNoAvailabilityMockHTTP(t *testing.T) {
 	const (
-		seriesCode = "nvidia-h100_series"
+		seriesCode = "nvidia-h100-series"
 		gpuCount   = int64(2)
 	)
 
@@ -651,7 +651,7 @@ func TestCreateGPUMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100_series", testImageName, 2)
+	model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100-series", testImageName, 2)
 
 	response, err := CreateGPU(gpcnClient, context.Background(), seriesID, model)
 	if err != nil {
@@ -792,7 +792,7 @@ func TestMapGPUResponseToModelRefreshesDriftUnit(t *testing.T) {
 	response := newGPUResponse("gpu-123", "renamed-in-portal")
 	response.Data.Datacenter.ID = "datacenter-456"
 	response.Data.Configuration.Name = "NVIDIA H100 Series"
-	response.Data.Configuration.Code = "nvidia-h100_series"
+	response.Data.Configuration.Code = "nvidia-h100-series"
 	response.Data.Configuration.SkuCode = "gpu_4x_h100"
 	response.Data.Configuration.GPUCount = 4
 
@@ -872,5 +872,45 @@ func TestRefreshGPUModelFromResponseKeepsValuesOnEmptyUnit(t *testing.T) {
 
 	if result.Name.ValueString() != "configured-name" {
 		t.Errorf("Expected Name 'configured-name', got '%s'", result.Name.ValueString())
+	}
+}
+
+// The six advertised series must carry the byte the catalog stores. The seeded
+// rows are db/seeds/sqlFiles/data/07-sku-catalog.mjs:3669-3760 on the backend.
+// The inventory query matches sku_series.code exactly, so one wrong byte makes a
+// series unusable.
+func TestGPUSeriesCodesMatchCatalog(t *testing.T) {
+	seeded := []struct {
+		name string
+		code string
+	}{
+		{"NVIDIA H200 Series", "nvidia-h200-series"},
+		{"NVIDIA H100 Series", "nvidia-h100-series"},
+		{"NVIDIA A100 Series", "nvidia-a100-series"},
+		{"NVIDIA RTX PRO 6000 Blackwell", "nvidia-rtx_pro_6000-series"},
+		{"NVIDIA RTX A6000 Series", "nvidia-rtx_a6000-series"},
+		{"NVIDIA L40 Series", "nvidia-l40-series"},
+	}
+
+	if len(GPUSeriesNames) != len(seeded) {
+		t.Fatalf("Expected %d advertised series names, got %d", len(seeded), len(GPUSeriesNames))
+	}
+	if len(GPUSeriesCodes) != len(seeded) {
+		t.Fatalf("Expected %d advertised series codes, got %d", len(seeded), len(GPUSeriesCodes))
+	}
+	if len(GPUSeriesNameToCode) != len(seeded) {
+		t.Fatalf("Expected %d name-to-code entries, got %d", len(seeded), len(GPUSeriesNameToCode))
+	}
+
+	for i, want := range seeded {
+		if GPUSeriesNames[i] != want.name {
+			t.Errorf("GPUSeriesNames[%d]: expected %q, got %q", i, want.name, GPUSeriesNames[i])
+		}
+		if GPUSeriesCodes[i] != want.code {
+			t.Errorf("GPUSeriesCodes[%d]: expected %q, got %q", i, want.code, GPUSeriesCodes[i])
+		}
+		if got := GPUSeriesNameToCode[want.name]; got != want.code {
+			t.Errorf("GPUSeriesNameToCode[%q]: expected %q, got %q", want.name, want.code, got)
+		}
 	}
 }
