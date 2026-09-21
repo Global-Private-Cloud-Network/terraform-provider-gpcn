@@ -426,9 +426,9 @@ func TestRefreshSubnetModelFromResponseUpdatesDescriptionUnit(t *testing.T) {
 	}
 }
 
-// The API never reports the prefix, so an import must read it from the carved
-// CIDR. Every other caller already holds the CIDR. A prefix written there
-// plans a replacement the configuration never asked for.
+// The API never reports the prefix. The mapper reads it from the carved
+// block's mask length when the model holds none. A configured prefix
+// survives, because reconciling one replaces the subnet.
 func TestMapSubnetResponseToModelFillsPrefixOnImportUnit(t *testing.T) {
 	t.Parallel()
 
@@ -440,13 +440,16 @@ func TestMapSubnetResponseToModelFillsPrefixOnImportUnit(t *testing.T) {
 		t.Errorf("expected the prefix 26 from the imported cidr, got %d", got)
 	}
 
-	created := MapSubnetResponseToModel(response, ResourceModel{CIDR: types.StringUnknown()})
-	if !created.Prefix.IsNull() {
-		t.Errorf("expected a create to leave the prefix null, got %v", created.Prefix)
+	created := MapSubnetResponseToModel(response, ResourceModel{
+		CIDR:   types.StringValue("10.50.1.0/26"),
+		Prefix: types.Int64Unknown(),
+	})
+	if got := created.Prefix.ValueInt64(); got != 26 {
+		t.Errorf("expected a create to fill the unknown prefix with 26, got %d", got)
 	}
 
-	read := MapSubnetResponseToModel(response, ResourceModel{CIDR: types.StringValue("10.50.1.0/26")})
-	if !read.Prefix.IsNull() {
-		t.Errorf("expected a read to leave the prefix null, got %v", read.Prefix)
+	configured := MapSubnetResponseToModel(response, ResourceModel{Prefix: types.Int64Value(27)})
+	if got := configured.Prefix.ValueInt64(); got != 27 {
+		t.Errorf("expected a configured prefix to survive, got %d", got)
 	}
 }

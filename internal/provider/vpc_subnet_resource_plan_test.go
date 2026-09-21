@@ -267,7 +267,9 @@ func TestVpcSubnetResourcePlanCreateReadRenameRebind(t *testing.T) {
 					// The API sends a null failure reason for a subnet that
 					// never failed, and the state must keep it null.
 					resource.TestCheckNoResourceAttr(gpcnVpcSubnetTest, "failure_reason"),
-					resource.TestCheckNoResourceAttr(gpcnVpcSubnetTest, "prefix"),
+					// The API never reports the prefix, so it comes from the
+					// carved block's mask length.
+					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "prefix", "24"),
 					checkCreateBody,
 				),
 			},
@@ -297,10 +299,11 @@ func TestVpcSubnetResourcePlanCreateReadRenameRebind(t *testing.T) {
 				ImportState:       true,
 				ImportStateId:     subnetPlanTestVpcID + "/" + subnetPlanTestID,
 				ImportStateVerify: true,
-				// R69 fills the prefix from the imported CIDR. This subnet names
-				// its CIDR. The import therefore adds a prefix the create left
-				// null. The steward holds an open ruling on that cost.
-				ImportStateVerifyIgnore: []string{"prefix"},
+			},
+			{
+				Config:             subnetPlanTestConfig(server.URL, "subnet-plan-b", fmt.Sprintf("nsg_id = %q", subnetPlanTestOtherNsg)),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
 			},
 		},
 	})
@@ -649,9 +652,9 @@ func TestVpcSubnetResourcePlanImportFillsPrefixFromCidr(t *testing.T) {
 }
 
 // A subnet that names neither a CIDR nor a prefix takes the allocator's
-// default. The prefix must stay null through the create and the rename. A
-// prefix written there plans a replacement the configuration never asked for.
-func TestVpcSubnetResourcePlanKeepsPrefixNullWithoutEitherKey(t *testing.T) {
+// default. The mask length of the carved block is the prefix. An import lands
+// on the same number, so the plan that follows it is empty.
+func TestVpcSubnetResourcePlanFillsPrefixWithoutEitherKey(t *testing.T) {
 	t.Parallel()
 	server, _ := startSubnetPlanMockServer(t)
 
@@ -662,7 +665,7 @@ func TestVpcSubnetResourcePlanKeepsPrefixNullWithoutEitherKey(t *testing.T) {
 				Config: subnetPlanTestConfigWithoutCidr(server.URL, "subnet-plan-a", ""),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "cidr", subnetPlanTestCIDR),
-					resource.TestCheckNoResourceAttr(gpcnVpcSubnetTest, "prefix"),
+					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "prefix", "24"),
 				),
 			},
 			{
@@ -672,7 +675,54 @@ func TestVpcSubnetResourcePlanKeepsPrefixNullWithoutEitherKey(t *testing.T) {
 						plancheck.ExpectResourceAction(gpcnVpcSubnetTest, plancheck.ResourceActionUpdate),
 					},
 				},
-				Check: resource.TestCheckNoResourceAttr(gpcnVpcSubnetTest, "prefix"),
+				Check: resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "prefix", "24"),
+			},
+			{
+				ResourceName:      gpcnVpcSubnetTest,
+				ImportState:       true,
+				ImportStateId:     subnetPlanTestVpcID + "/" + subnetPlanTestID,
+				ImportStateVerify: true,
+			},
+			{
+				Config:             subnetPlanTestConfigWithoutCidr(server.URL, "subnet-plan-b", ""),
+				PlanOnly:           true,
+				ExpectNonEmptyPlan: false,
+			},
+		},
+	})
+}
+
+// A prefix that differs from the mask of the block GPCN carved asks for
+// another block. GPCN cannot re-carve one in place, so the plan replaces the
+// subnet rather than proposing an update the API would refuse.
+func TestVpcSubnetResourcePlanReplacesOnChangedPrefix(t *testing.T) {
+	t.Parallel()
+	server, state := startSubnetPlanMockServer(t)
+
+	state.mu.Lock()
+	state.cidr = "10.50.1.0/26"
+	state.mu.Unlock()
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: subnetPlanTestConfigWithoutCidr(server.URL, "subnet-plan-a", "prefix = 26"),
+				Check:  resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "prefix", "26"),
+			},
+			{
+				ResourceName:      gpcnVpcSubnetTest,
+				ImportState:       true,
+				ImportStateId:     subnetPlanTestVpcID + "/" + subnetPlanTestID,
+				ImportStateVerify: true,
+			},
+			{
+				Config: subnetPlanTestConfigWithoutCidr(server.URL, "subnet-plan-a", "prefix = 27"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcSubnetTest, plancheck.ResourceActionReplace),
+					},
+				},
 			},
 		},
 	})

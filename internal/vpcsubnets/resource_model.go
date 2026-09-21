@@ -50,6 +50,12 @@ func isUnset(value types.String) bool {
 	return value.IsNull() || value.IsUnknown()
 }
 
+// isUnsetInt64 is isUnset for a number. A Computed prefix reaches Create as
+// unknown, and an import leaves it null.
+func isUnsetInt64(value types.Int64) bool {
+	return value.IsNull() || value.IsUnknown()
+}
+
 // prefixFromCIDR reads the mask length of the block the allocator carved. The
 // API never reports the prefix, so the mask is the only place it survives.
 func prefixFromCIDR(cidr string) types.Int64 {
@@ -103,10 +109,7 @@ func MapSubnetResponseToModel(response *ApiSubnet, model ResourceModel) Resource
 			model.Description = types.StringValue(*response.Description)
 		}
 	}
-	if model.Prefix.IsNull() && model.CIDR.IsNull() {
-		// A null CIDR names an import. Create leaves it unknown, and every
-		// other caller holds the value. A prefix written anywhere else would
-		// plan a replacement the configuration never asked for.
+	if isUnsetInt64(model.Prefix) {
 		model.Prefix = prefixFromCIDR(response.CIDR)
 	}
 	if isUnset(model.CIDR) {
