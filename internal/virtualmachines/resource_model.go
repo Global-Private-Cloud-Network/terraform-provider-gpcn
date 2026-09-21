@@ -252,10 +252,14 @@ func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.Gpc
 		if model.SubnetId.IsNull() {
 			model.SubnetId = primary.VpcSubnetID
 		}
-		// allocate_public_ip records the user's intent, and public_ip reports the observed
-		// value. Only a null intent takes its value from the observation.
+		// allocate_public_ip records an intent that the API never reports. GPCN stores an
+		// acquired address and a held one in the same row. An import therefore records the
+		// address as held, and a destroy leaves it with the operator.
 		if model.AllocatePublicIp.IsNull() {
-			model.AllocatePublicIp = types.BoolValue(!primary.PublicIP.IsNull())
+			model.AllocatePublicIp = types.BoolValue(false)
+			if model.PublicIpId.IsNull() && !primary.PublicIPID.IsNull() {
+				model.PublicIpId = primary.PublicIPID
+			}
 		}
 	}
 

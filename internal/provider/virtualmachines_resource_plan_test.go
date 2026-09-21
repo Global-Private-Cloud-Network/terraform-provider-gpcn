@@ -1333,7 +1333,8 @@ func vmPublicIpPlanTestInterfacesBody(addressID, address string) map[string]any 
 
 // startVirtualMachinePublicIpMockServer serves the VPC address verbs and records them in
 // order. The legacy per-NIC routes answer nothing but a test failure: GPCN refuses them
-// on a VPC interface, so the provider must never reach for one.
+// on a VPC interface, so the provider must never reach for one. A create that names an
+// address binds it, and the image list answers the import.
 func startVirtualMachinePublicIpMockServer(t *testing.T) (*httptest.Server, func() []string) {
 	t.Helper()
 
@@ -1355,10 +1356,18 @@ func startVirtualMachinePublicIpMockServer(t *testing.T) (*httptest.Server, func
 			mu.Lock()
 			name, _ = body["name"].(string)
 			status = virtualmachines.VMStatusRunning.String()
+			if acquire, ok := body["acquirePublicIp"].(bool); ok && acquire {
+				boundID, boundAddress = vmPlanTestAcquiredIpID, vmPlanTestAcquiredIpAddress
+			}
+			if held, ok := body["publicIpId"].(string); ok && held != "" {
+				boundID, boundAddress = held, vmPlanTestHeldIpAddress
+			}
 			mu.Unlock()
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-images":
+			testutil.WriteJSONResponse(w, vmPlanTestImagesBody())
 		case r.Method == http.MethodPost && r.URL.Path == addressesPath:
 			mu.Lock()
 			events = append(events, "acquire")
@@ -1564,6 +1573,47 @@ func TestVirtualMachineResourcePlanAttachesAndDetachesAHeldAddress(t *testing.T)
 						return nil
 					},
 				),
+			},
+		},
+	})
+}
+
+// GPCN reports one address row whether Terraform acquired the address or the operator
+// holds it. An import therefore records what it finds as a held address. An inferred
+// allocate_public_ip would release an address the operator owns on the next destroy.
+func TestVirtualMachineResourcePlanImportRecordsAHeldAddress(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, _ := startVirtualMachinePublicIpMockServer(t)
+
+	config := vmPublicIpPlanTestConfig(server.URL, "vm-plan-import-address", false, vmPlanTestHeldIpID)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "public_ip", vmPlanTestHeldIpAddress),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "public_ip_id", vmPlanTestHeldIpID),
+				),
+			},
+			{
+				ResourceName:      gpcnVirtualMachineTest,
+				ImportState:       true,
+				ImportStateVerify: true,
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported state, got %d", len(states))
+					}
+					attributes := states[0].Attributes
+					if attributes["allocate_public_ip"] != "false" {
+						return fmt.Errorf("expected allocate_public_ip 'false', got '%s'", attributes["allocate_public_ip"])
+					}
+					if attributes["public_ip_id"] != vmPlanTestHeldIpID {
+						return fmt.Errorf("expected public_ip_id '%s', got '%s'", vmPlanTestHeldIpID, attributes["public_ip_id"])
+					}
+					return nil
+				},
 			},
 		},
 	})

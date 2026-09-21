@@ -401,8 +401,11 @@ func TestSetNetworkModelValuesNotPresentWithPublicIP(t *testing.T) {
 	if result.PublicIp.ValueString() != publicIP {
 		t.Errorf("Expected public IP '%s', got '%s'", publicIP, result.PublicIp.ValueString())
 	}
-	if !result.AllocatePublicIp.ValueBool() {
-		t.Error("Expected AllocatePublicIp to be true when public IP exists")
+	if result.AllocatePublicIp.ValueBool() {
+		t.Error("Expected AllocatePublicIp to stay false when an address exists")
+	}
+	if result.PublicIpId.ValueString() != "pubip-001" {
+		t.Errorf("Expected public_ip_id 'pubip-001', got '%s'", result.PublicIpId.ValueString())
 	}
 	if result.SubnetId.ValueString() != subnetID {
 		t.Errorf("Expected subnet_id '%s', got '%s'", subnetID, result.SubnetId.ValueString())
@@ -1472,7 +1475,7 @@ func TestSetNetworkModelValuesNotPresentFillsVpcIdentityOnImportUnit(t *testing.
 						{
 							"id": "interface-1", "networkInterface": 1, "isPrimary": 1,
 							"world": "vpc", "privateIp": "10.20.0.7", "publicIp": "203.0.113.9",
-							"vpcSubnetId": "subnet-1", "vpcId": "vpc-1",
+							"publicIpId": "pubip-import", "vpcSubnetId": "subnet-1", "vpcId": "vpc-1",
 						},
 						{
 							"id": "interface-2", "networkInterface": 2, "isPrimary": 0,
@@ -1506,11 +1509,14 @@ func TestSetNetworkModelValuesNotPresentFillsVpcIdentityOnImportUnit(t *testing.
 	if result.SubnetId.ValueString() != "subnet-1" {
 		t.Errorf("Expected subnet_id 'subnet-1', got '%s'", result.SubnetId.ValueString())
 	}
-	if !result.AllocatePublicIp.ValueBool() {
-		t.Error("Expected allocate_public_ip true when the primary interface holds an address")
+	if result.AllocatePublicIp.ValueBool() {
+		t.Error("Expected allocate_public_ip false on an import, whatever address the machine carries")
 	}
 	if result.PublicIp.ValueString() != "203.0.113.9" {
 		t.Errorf("Expected public_ip '203.0.113.9', got '%s'", result.PublicIp.ValueString())
+	}
+	if result.PublicIpId.ValueString() != "pubip-import" {
+		t.Errorf("Expected public_ip_id 'pubip-import', got '%s'", result.PublicIpId.ValueString())
 	}
 	var segments []string
 	if listDiags := result.L2SegmentIds.ElementsAs(context.Background(), &segments, false); listDiags.HasError() {
@@ -1519,6 +1525,73 @@ func TestSetNetworkModelValuesNotPresentFillsVpcIdentityOnImportUnit(t *testing.
 	want := []string{"segment-a", "segment-b"}
 	if !slices.Equal(segments, want) {
 		t.Errorf("Expected l2_segment_ids %v, got %v", want, segments)
+	}
+}
+
+// GPCN stores an acquired address and a held one in the same row. An import therefore
+// records the address as held. An inferred intent would release the operator's address.
+func TestSetNetworkModelValuesNotPresentNeverInfersAnAcquiredAddressUnit(t *testing.T) {
+	tests := []struct {
+		name         string
+		address      any
+		addressID    any
+		intent       types.Bool
+		wantAllocate bool
+		wantHeld     string
+	}{
+		{"an import with an address records it as held", "203.0.113.9", "pubip-held", types.BoolNull(), false, "pubip-held"},
+		{"an import without an address records none", nil, nil, types.BoolNull(), false, ""},
+		{"a configured intent survives", "203.0.113.9", "pubip-held", types.BoolValue(true), true, ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+				T: t,
+				Handler: func(w http.ResponseWriter, r *http.Request) {
+					if r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces") {
+						testutil.WriteJSONResponse(w, map[string]any{
+							"success": true, "message": "Network interfaces retrieved",
+							"data": []map[string]any{{
+								"id": "interface-1", "networkInterface": 1, "isPrimary": 1,
+								"world": "vpc", "privateIp": "10.20.0.7",
+								"publicIp": tc.address, "publicIpId": tc.addressID,
+								"vpcSubnetId": "subnet-1", "vpcId": "vpc-1",
+							}},
+						})
+					} else {
+						testutil.LogUnexpectedRequest(t, w, r)
+					}
+				},
+			})
+			defer server.Close()
+
+			model := ResourceModel{
+				SubnetId:         types.StringNull(),
+				L2SegmentIds:     types.ListNull(types.StringType),
+				AllocatePublicIp: tc.intent,
+				PublicIpId:       types.StringNull(),
+				PublicIp:         types.StringNull(),
+			}
+
+			result, diags := setNetworkModelValuesNotPresent(context.Background(), gpcnClient, "vm-held-address", model)
+			if diags.HasError() {
+				t.Fatalf("setNetworkModelValuesNotPresent reported errors: %v", diags)
+			}
+
+			if result.AllocatePublicIp.ValueBool() != tc.wantAllocate {
+				t.Errorf("Expected allocate_public_ip %t, got %t", tc.wantAllocate, result.AllocatePublicIp.ValueBool())
+			}
+			if tc.wantHeld == "" {
+				if !result.PublicIpId.IsNull() {
+					t.Errorf("Expected a null public_ip_id, got '%s'", result.PublicIpId.ValueString())
+				}
+				return
+			}
+			if result.PublicIpId.ValueString() != tc.wantHeld {
+				t.Errorf("Expected public_ip_id '%s', got '%s'", tc.wantHeld, result.PublicIpId.ValueString())
+			}
+		})
 	}
 }
 
