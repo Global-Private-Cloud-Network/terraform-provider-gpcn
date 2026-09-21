@@ -41,7 +41,6 @@ const (
 	ErrDetailUnmarshalingDeleteWithID  = "Error unmarshaling GPCN Virtual Machine - Delete with ID %s"
 	ErrDetailJobInfoCheckDashboard     = "Encountered an error getting job info. The request may still have succeeded. Check the GPCN dashboard for more information"
 	ErrDetailStoppingVM                = "Error stopping virtual machine with ID %s"
-	ErrDetailStartingVM                = "Error starting virtual machine with ID %s"
 	ErrDetailCannotRemoveLastNetwork   = "unable to remove the last Network attached to a virtual machine"
 	ErrDetailNetworkTypeMustBeStandard = "the prospective primary network (first in the list) is of type custom. allocate_public_ip can only be true when the primary network's network_type is standard"
 	ErrDetailFetchUpgradeSizesFailed   = "The provider could not fetch the valid upgrade targets for this Virtual Machine, so it cannot tell whether the size_id change is an in-place upgrade. This error is often transient. Re-run the plan. Underlying error: %s"
