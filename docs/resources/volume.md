@@ -59,7 +59,7 @@ output "example_gpcn_volume_ssd" {
 - `datacenter_id` (String) Unique identifier of the datacenter where the volume will be created. Changing this value requires replacing the volume
 - `name` (String) Human-readable name for the volume. Must be 1-255 characters. Changing this value requires replacing the volume
 - `size_gb` (Number) Size of the volume in GB. Can be increased without replacement, but shrinking requires replacing the volume
-- `volume_type` (String) Type of storage: 'SSD', 'NVMe', or a storage component code such as 'vol-add-ultra'. Use "SSD" or "NVMe" for the built-in storage classes and the component code for any other class. The datacenter decides which codes it offers, and a code it does not offer is refused with the list of codes it does offer. Changing this value requires replacing the volume. A volume whose SKU the platform cannot resolve reads "Unknown"; after the platform repairs it, remove the volume from state and import it again so the code is recorded.
+- `volume_type` (String) Type of storage: 'SSD', 'NVMe', or a storage component code such as 'vol-add-ultra'. Use "SSD" or "NVMe" for the built-in storage classes and the component code for any other class. The datacenter decides which codes it offers, and a code it does not offer is refused with the list of codes it does offer. Changing this value requires replacing the volume. A volume whose SKU the platform cannot resolve reads "Unknown"; after the platform repairs it, remove the volume from state and import it again so the code is recorded. The built-in codes vol-add-ssd and vol-add-nvme are refused at plan time; write SSD or NVMe instead.
 
 ### Read-Only
 
