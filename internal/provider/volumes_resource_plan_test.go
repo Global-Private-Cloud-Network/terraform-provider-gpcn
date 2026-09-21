@@ -447,10 +447,10 @@ func TestVolumeResourcePlanImportAliasPlansEmpty(t *testing.T) {
 				),
 			},
 			{
-				Config:            config,
-				ResourceName:      gpcnVolumeTest,
-				ImportStateKind:   resource.ImportBlockWithID,
-				ImportState:       true,
+				Config:          config,
+				ResourceName:    gpcnVolumeTest,
+				ImportStateKind: resource.ImportBlockWithID,
+				ImportState:     true,
 			},
 			{
 				Config: config,
