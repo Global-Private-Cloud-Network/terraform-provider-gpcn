@@ -265,9 +265,57 @@ func isHTTPError(err error, target **HTTPError) bool {
 // subsequent operation. Delete implementations use it to treat an
 // already-deleted resource as success.
 func IsNotFound(err error) bool {
+	return hasStatus(err, http.StatusNotFound)
+}
+
+// IsForbidden reports whether err was caused by an HTTP 403 response.
+//
+// A 403 is a refusal the caller cannot retry away: the role lacks the
+// permission, the tenant lacks the feature, or the operation is walled off.
+// Read implementations separate it from a 404, which removes state.
+func IsForbidden(err error) bool {
+	return hasStatus(err, http.StatusForbidden)
+}
+
+// IsConflict reports whether err was caused by an HTTP 409 response.
+//
+// The API answers 409 when the request fights live state, for example a name
+// already taken or a container that still holds children.
+func IsConflict(err error) bool {
+	return hasStatus(err, http.StatusConflict)
+}
+
+// IsUnauthorized reports whether err was caused by an HTTP 401 response.
+//
+// Every credential failure answers the same 401, so this means the API key no
+// longer authenticates, never that the key lacks a permission.
+func IsUnauthorized(err error) bool {
+	return hasStatus(err, http.StatusUnauthorized)
+}
+
+// ErrorCode returns the machine-readable code the API sent, or "" when err is
+// not an HTTPError or carried an unparseable body.
+func ErrorCode(err error) string {
 	var httpErr *HTTPError
 	if ok := isHTTPError(err, &httpErr); ok {
-		return httpErr.StatusCode == http.StatusNotFound
+		return httpErr.Code
+	}
+	return ""
+}
+
+// HasErrorCode reports whether err carries exactly the given API error code.
+// An empty code never matches, so a transport failure cannot answer yes.
+func HasErrorCode(err error, code string) bool {
+	if code == "" {
+		return false
+	}
+	return ErrorCode(err) == code
+}
+
+func hasStatus(err error, status int) bool {
+	var httpErr *HTTPError
+	if ok := isHTTPError(err, &httpErr); ok {
+		return httpErr.StatusCode == status
 	}
 	return false
 }
