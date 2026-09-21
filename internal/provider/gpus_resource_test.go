@@ -1,9 +1,14 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"testing"
+
+	"terraform-provider-gpcn/internal/gpu"
+
+	"github.com/hashicorp/terraform-plugin-framework/datasource"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -11,6 +16,54 @@ import (
 )
 
 var gpcnGPUTest = "gpcn_gpu.test"
+
+// gpuCreateRefusalError matches every diagnostic a create refusal can render:
+// the summary, and the two details CheckInventory returns.
+var gpuCreateRefusalError = regexp.MustCompile("(Unable to Create GPU|no GPU availability|is not offered)")
+
+// The data source describes its own filters, so it must not send the reader to
+// itself. The bytes are the release spec's.
+func TestGPUInventoryDataSourceFilterDescriptions(t *testing.T) {
+	t.Parallel()
+
+	var resp datasource.SchemaResponse
+	NewGPUInventoryDataSource().Schema(context.Background(), datasource.SchemaRequest{}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("Expected a schema, got %v", resp.Diagnostics)
+	}
+
+	want := map[string]string{
+		"series_code": "Filter by the series code as returned in this data source's series list. Conflicts with series_name.",
+		"series_name": "Filter by the series name as returned in this data source's series list. Conflicts with series_code.",
+	}
+	for name, description := range want {
+		attribute, ok := resp.Schema.Attributes[name]
+		if !ok {
+			t.Fatalf("Expected a %q attribute", name)
+		}
+		if got := attribute.GetDescription(); got != description {
+			t.Errorf("Expected %q description %q, got %q", name, description, got)
+		}
+	}
+}
+
+// The acceptance refusal regexp is worthless if it matches no string the code
+// emits. The unit test holds it to the constants.
+func TestGPUCreateRefusalRegexpMatchesEmittedDiagnostics(t *testing.T) {
+	t.Parallel()
+
+	emitted := []string{
+		gpu.ErrSummaryUnableToCreateGPU,
+		fmt.Sprintf(gpu.ErrDetailNoInventoryAvailable, "nvidia-a100-series", "dc-1", 4),
+		fmt.Sprintf(gpu.ErrDetailUnknownGPUSeries, "nvidia-a100-series", "dc-1", "nvidia-h200-series (NVIDIA H200 Series)"),
+	}
+
+	for _, diagnostic := range emitted {
+		if !gpuCreateRefusalError.MatchString(diagnostic) {
+			t.Errorf("Expected %q to match %q", gpuCreateRefusalError.String(), diagnostic)
+		}
+	}
+}
 
 func TestGPUResource(t *testing.T) {
 	t.Parallel()
@@ -222,7 +275,7 @@ func TestGPUResourceNoAvailability(t *testing.T) {
 			resource "gpcn_gpu" "test" {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				series_code   = "nvidia-a100_series"
+				series_code   = "nvidia-a100-series"
 				gpu_count     = 4
 				image_name    = "ubuntu-22.04"
 				initial_auth = {
@@ -230,7 +283,7 @@ func TestGPUResourceNoAvailability(t *testing.T) {
 				}
 			}
 			`, sshKeyName, gpuName),
-				ExpectError: regexp.MustCompile("(no GPU availability|No GPU Inventory Available|Unable to create GPCN GPU)"),
+				ExpectError: gpuCreateRefusalError,
 			},
 		},
 	})
@@ -349,18 +402,9 @@ func TestGPUResourceInvalidSeries(t *testing.T) {
 		imageName   string
 		wantErr     string
 	}{
-		{
-			name:        "invalid_series_code",
-			seriesField: `series_code = "invalid_series_code"`,
-			gpuCount:    "1", imageName: "ubuntu-22.04",
-			wantErr: "Attribute series_code value must be one of",
-		},
-		{
-			name:        "invalid_series_name",
-			seriesField: `series_name = "Invalid GPU Series"`,
-			gpuCount:    "1", imageName: "ubuntu-22.04",
-			wantErr: "Attribute series_name value must be one of",
-		},
+		// An unknown series is no longer a configuration error. The inventory
+		// response decides which series a datacenter offers. The refusal
+		// arrives during apply.
 		{
 			name:        "both_code_and_name",
 			seriesField: `series_name = "NVIDIA RTX A6000 Series"` + "\n" + `		  series_code = "nvidia-rtx_a6000-series"`,
@@ -372,6 +416,20 @@ func TestGPUResourceInvalidSeries(t *testing.T) {
 			seriesField: "",
 			gpuCount:    "1", imageName: "ubuntu-22.04",
 			wantErr: "No attribute specified when one",
+		},
+		// ExactlyOneOf counts an empty string as an answer, so the length
+		// validator is the only gate on it.
+		{
+			name:        "empty_code",
+			seriesField: `series_code = ""`,
+			gpuCount:    "1", imageName: "ubuntu-22.04",
+			wantErr: "Attribute series_code string length must be at least 1",
+		},
+		{
+			name:        "empty_name",
+			seriesField: `series_name = ""`,
+			gpuCount:    "1", imageName: "ubuntu-22.04",
+			wantErr: "Attribute series_name string length must be at least 1",
 		},
 	}
 	for _, tc := range tests {

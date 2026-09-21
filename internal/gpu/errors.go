@@ -17,4 +17,5 @@ const (
 	ErrDetailUpdateGPUFailed      = "Failed to update GPU with ID %s"
 	ErrDetailDeleteGPUFailed      = "Failed to delete GPU with ID %s"
 	ErrDetailNoInventoryAvailable = "no GPU availability for series code %s in datacenter %s with GPU count %d"
+	ErrDetailUnknownGPUSeries     = "GPU series %q is not offered in datacenter %s; available series: %s"
 )

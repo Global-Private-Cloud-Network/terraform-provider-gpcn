@@ -76,14 +76,15 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"series_name": schema.StringAttribute{
-				Description: "Human-readable name of the GPU series. Exactly one of series_name or series_code must be specified",
+				Description: "Human-readable name of the GPU series. Exactly one of series_name or series_code must be specified. Use the gpcn_gpu_inventory data source to list the series offered in a datacenter.",
 				Optional:    true,
 				Computed:    true,
 				Validators: []validator.String{
 					stringvalidator.ExactlyOneOf(path.Expressions{
 						path.MatchRoot("series_code"),
 					}...),
-					stringvalidator.OneOf(gpu.GPUSeriesNames...),
+					// ExactlyOneOf counts any non-null series_name, so it accepts "".
+					stringvalidator.LengthAtLeast(1),
 				},
 				PlanModifiers: []planmodifier.String{
 					// Changing the series_name requires us to destroy and create a new GPU
@@ -92,14 +93,15 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"series_code": schema.StringAttribute{
-				Description: "Short code of the GPU series. Exactly one of series_name or series_code must be specified",
+				Description: "Short code of the GPU series. Exactly one of series_name or series_code must be specified. Use the gpcn_gpu_inventory data source to list the series offered in a datacenter.",
 				Optional:    true,
 				Computed:    true,
 				Validators: []validator.String{
 					stringvalidator.ExactlyOneOf(path.Expressions{
 						path.MatchRoot("series_name"),
 					}...),
-					stringvalidator.OneOf(gpu.GPUSeriesCodes...),
+					// ExactlyOneOf counts any non-null series_code, so it accepts "".
+					stringvalidator.LengthAtLeast(1),
 				},
 				PlanModifiers: []planmodifier.String{
 					// Changing the series_code requires us to destroy and create a new GPU
@@ -206,15 +208,9 @@ func (r *gpuResource) Create(ctx context.Context, req resource.CreateRequest, re
 		return
 	}
 
-	// If series code is not populated, perform a lookup and set it
-	if plan.SeriesCode.IsNull() || plan.SeriesCode.ValueString() == "" {
-		code := gpu.GPUSeriesNameToCode[plan.SeriesName.ValueString()]
-		plan.SeriesCode = types.StringValue(code)
-	}
-
 	// The API always needs the series ID, so look up inventory even when the user
-	// pins a sku_code.
-	inventory, err := gpu.CheckInventory(r.client, ctx, plan)
+	// pins a sku_code. The response also resolves a series name to its code.
+	inventory, seriesCode, err := gpu.CheckInventory(r.client, ctx, plan)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			gpu.ErrSummaryUnableToCreateGPU,
@@ -222,6 +218,7 @@ func (r *gpuResource) Create(ctx context.Context, req resource.CreateRequest, re
 		)
 		return
 	}
+	plan.SeriesCode = types.StringValue(seriesCode)
 
 	// Every SKU for the series shares the series ID the create call needs.
 	seriesId := inventory[0].SeriesID

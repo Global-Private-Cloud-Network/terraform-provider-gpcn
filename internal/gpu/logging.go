@@ -22,15 +22,15 @@ const (
 	LogSuccessfullyFinishedDeleteGPU = "Successfully finished Delete GPCN GPU"
 
 	// CheckInventory messages
-	LogStartingCheckInventory               = "Starting CheckInventory for series code %s in datacenter %s with GPU count %d"
+	LogStartingCheckInventory               = "Starting CheckInventory for series %s in datacenter %s with GPU count %d"
 	LogConstructedInventoryRequestURL       = "Constructed GPU inventory request URL successfully"
 	LogSuccessfullyRetrievedInventory       = "Successfully retrieved GPU inventory response"
 	LogValidatingInventoryResponseStructure = "Validating inventory response structure"
 	LogInventoryAvailable                   = "GPU inventory available for series code %s in datacenter %s with GPU count %d"
 
 	// FetchInventory messages
-	LogStartingFetchInventory       = "Starting FetchInventory for datacenter %s, series code %s, GPU count %d"
-	LogSuccessfullyFetchedInventory = "Successfully fetched %d GPU inventory SKUs for datacenter %s"
+	LogStartingFetchInventory       = "Starting FetchInventory for datacenter %s, series %s, GPU count %d"
+	LogSuccessfullyFetchedInventory = "Successfully fetched %d GPU inventory SKUs for series %s in datacenter %s"
 )
 
 // Drift-detection messages for resources deleted outside of Terraform
