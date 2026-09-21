@@ -1,8 +1,10 @@
 package vpcsubnets
 
 import (
+	"fmt"
 	"time"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -47,16 +49,38 @@ func isUnset(value types.String) bool {
 	return value.IsNull() || value.IsUnknown()
 }
 
+func isUnsetInt64(value types.Int64) bool {
+	return value.IsNull() || value.IsUnknown()
+}
+
+// SubnetFailedWarning reports a carve the platform gave up on. The row reads
+// back cleanly, so an apply that says nothing here leaves the operator with a
+// subnet that carries no network and no sign of it.
+func SubnetFailedWarning(response *ApiSubnet) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if response.State != StateFailed {
+		return diags
+	}
+
+	reason := WarnDetailSubnetNoFailureReason
+	if response.FailureReason != nil && *response.FailureReason != "" {
+		reason = *response.FailureReason
+	}
+	diags.AddWarning(WarnSummarySubnetFailed, fmt.Sprintf(WarnDetailSubnetFailed, response.ID, reason))
+	return diags
+}
+
 // MapSubnetResponseToModel writes the Computed attributes and fills the
 // configurable ones only when the caller chose no value, which is what an
 // import and a Create both leave behind. A configured CIDR must survive:
 // reconciling a drifted one would destroy a subnet that can hold live
-// interfaces.
+// interfaces. The NIC census is held the same way, because its plan value comes
+// from the prior state and an Update that wrote a fresher count would end with
+// a result the plan does not allow.
 func MapSubnetResponseToModel(response *ApiSubnet, model ResourceModel) ResourceModel {
 	model.ID = types.StringValue(response.ID)
 	model.State = types.StringValue(response.State)
 	model.NsgName = optionalString(response.NsgName)
-	model.AttachedNicCount = types.Int64Value(response.AttachedNicCount)
 	model.FailureReason = optionalString(response.FailureReason)
 	model.CreatedTime = formatTimestamp(response.CreatedAt)
 	model.LastUpdated = formatTimestamp(response.UpdatedAt)
@@ -79,14 +103,18 @@ func MapSubnetResponseToModel(response *ApiSubnet, model ResourceModel) Resource
 	if isUnset(model.NsgID) {
 		model.NsgID = types.StringValue(response.NsgID)
 	}
+	if isUnsetInt64(model.AttachedNicCount) {
+		model.AttachedNicCount = types.Int64Value(response.AttachedNicCount)
+	}
 
 	return model
 }
 
-// RefreshSubnetModelFromResponse shows the two changes Terraform reconciles in
-// place: a rename, and a rebind to another security group. The CIDR is the
-// allocator's reservation and the prefix is request-only, so neither refreshes.
-// Read calls this after the mapper; Create and Update keep the planned values.
+// RefreshSubnetModelFromResponse shows the changes Terraform reconciles in
+// place: a rename, a rebind to another security group, and the NIC census. The
+// CIDR is the allocator's reservation and the prefix is request-only, so
+// neither refreshes. Read calls this after the mapper; Create and Update keep
+// the planned values.
 func RefreshSubnetModelFromResponse(response *ApiSubnet, model ResourceModel) ResourceModel {
 	if response.Name != "" {
 		model.Name = types.StringValue(response.Name)
@@ -94,5 +122,6 @@ func RefreshSubnetModelFromResponse(response *ApiSubnet, model ResourceModel) Re
 	if response.NsgID != "" {
 		model.NsgID = types.StringValue(response.NsgID)
 	}
+	model.AttachedNicCount = types.Int64Value(response.AttachedNicCount)
 	return model
 }

@@ -207,8 +207,8 @@ func unitTestListBody(rows []map[string]any, totalPages int) map[string]any {
 	}
 }
 
-// The update body carries only the keys the caller changed, because the API
-// refuses an unknown key and needs at least one known one.
+// The update body carries the name and the description and no structural key,
+// because the API refuses an unknown key and needs at least one of the two.
 func TestUpdateSubnetSendsNameAndDescriptionUnit(t *testing.T) {
 	t.Parallel()
 
@@ -276,5 +276,93 @@ func TestMapSubnetResponseToModelFillsUnknownValuesUnit(t *testing.T) {
 	}
 	if model.Description.IsUnknown() || model.Description.ValueString() != "" {
 		t.Errorf("expected an empty description, got %v", model.Description)
+	}
+}
+
+// A failed carve leaves a row Terraform reads without complaint, so the warning
+// is the only place the operator learns the subnet carries no network.
+func TestSubnetFailedWarningUnit(t *testing.T) {
+	t.Parallel()
+
+	reason := "the provider rejected the allocation"
+	response := unitTestApiSubnet()
+	response.State = StateFailed
+	response.FailureReason = &reason
+
+	diags := SubnetFailedWarning(response)
+
+	if got := diags.WarningsCount(); got != 1 {
+		t.Fatalf("expected one warning, got %d", got)
+	}
+	warning := diags.Warnings()[0]
+	if got := warning.Summary(); got != WarnSummarySubnetFailed {
+		t.Errorf("expected the summary %q, got %q", WarnSummarySubnetFailed, got)
+	}
+	want := fmt.Sprintf(WarnDetailSubnetFailed, unitTestSubnetID, reason)
+	if got := warning.Detail(); got != want {
+		t.Errorf("expected the detail %q, got %q", want, got)
+	}
+}
+
+// A failed subnet with no reason still warrants the warning, and the sentence
+// must stay readable where the reason would have been.
+func TestSubnetFailedWarningWithoutReasonUnit(t *testing.T) {
+	t.Parallel()
+
+	response := unitTestApiSubnet()
+	response.State = StateFailed
+
+	diags := SubnetFailedWarning(response)
+
+	want := fmt.Sprintf(WarnDetailSubnetFailed, unitTestSubnetID, WarnDetailSubnetNoFailureReason)
+	if got := diags.Warnings()[0].Detail(); got != want {
+		t.Errorf("expected the detail %q, got %q", want, got)
+	}
+}
+
+// A ready subnet has nothing to warn about.
+func TestSubnetFailedWarningSilentWhenReadyUnit(t *testing.T) {
+	t.Parallel()
+
+	if got := SubnetFailedWarning(unitTestApiSubnet()).WarningsCount(); got != 0 {
+		t.Errorf("expected no warning for a ready subnet, got %d", got)
+	}
+}
+
+// The plan pins attached_nic_count to the prior state, so an Update that wrote
+// a fresher census would end the apply with an inconsistent result. The mapper
+// must leave a count the caller already holds.
+func TestMapSubnetResponseToModelKeepsPlannedNicCountUnit(t *testing.T) {
+	t.Parallel()
+
+	response := unitTestApiSubnet()
+	response.AttachedNicCount = 7
+
+	model := MapSubnetResponseToModel(response, ResourceModel{
+		Name:             types.StringValue("subnet-a"),
+		CIDR:             types.StringValue("10.50.1.0/24"),
+		NsgID:            types.StringValue(unitTestNsgID),
+		Description:      types.StringValue(""),
+		AttachedNicCount: types.Int64Value(0),
+	})
+
+	if got := model.AttachedNicCount.ValueInt64(); got != 0 {
+		t.Errorf("expected the planned attached_nic_count 0 to survive the mapper, got %d", got)
+	}
+}
+
+// Read is where a fresher census belongs: reconciling a count destroys nothing.
+func TestRefreshSubnetModelFromResponseUpdatesNicCountUnit(t *testing.T) {
+	t.Parallel()
+
+	response := unitTestApiSubnet()
+	response.AttachedNicCount = 7
+
+	model := RefreshSubnetModelFromResponse(response, ResourceModel{
+		AttachedNicCount: types.Int64Value(0),
+	})
+
+	if got := model.AttachedNicCount.ValueInt64(); got != 7 {
+		t.Errorf("expected the refreshed attached_nic_count 7, got %d", got)
 	}
 }

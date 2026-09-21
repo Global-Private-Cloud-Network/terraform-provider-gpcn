@@ -25,3 +25,10 @@ const (
 	ErrDetailUnableToDeleteSubnetWithID = "Unable to delete GPCN VPC subnet with ID '%s'"
 	ErrDetailImportIDFormat             = "Import ID must be '<vpc_id>/<subnet_id>'. A subnet is read through its VPC's listing, so the VPC ID cannot be derived from the subnet ID alone. Got: '%s'"
 )
+
+// Warning strings for a subnet the platform could not carve.
+const (
+	WarnSummarySubnetFailed         = "GPCN VPC subnet is in the failed state"
+	WarnDetailSubnetFailed          = "Subnet '%s' is in the 'failed' state, so it carries no working network. GPCN gives this reason: %s. Delete the subnet and create it again, or contact GPCN support."
+	WarnDetailSubnetNoFailureReason = "the API reported no reason"
+)

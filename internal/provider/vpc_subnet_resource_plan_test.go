@@ -37,8 +37,14 @@ type subnetPlanTestServerState struct {
 	nicCount     int64
 	deleted      bool
 	refuseDelete bool
-	createBody   map[string]any
-	rebindBody   map[string]any
+	// nicCountOnRename stands for an interface that attaches between the
+	// refresh and the apply. Zero leaves the census alone.
+	nicCountOnRename int64
+	// missingOnDelete answers the DELETE with a 404, which is what a subnet
+	// another operator already removed answers.
+	missingOnDelete bool
+	createBody      map[string]any
+	rebindBody      map[string]any
 }
 
 func (s *subnetPlanTestServerState) row() map[string]any {
@@ -106,6 +112,9 @@ func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestS
 			state.mu.Lock()
 			state.name, _ = body["name"].(string)
 			state.description, _ = body["description"].(string)
+			if state.nicCountOnRename > 0 {
+				state.nicCount = state.nicCountOnRename
+			}
 			row := state.row()
 			state.mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "", "data": row})
@@ -119,8 +128,16 @@ func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestS
 			testutil.HandleCreateJobResponse(w, "job-rebind", "Operation initiated successfully")
 		case r.Method == http.MethodDelete && r.URL.Path == subnetPath:
 			state.mu.Lock()
+			missing := state.missingOnDelete
 			refuse := state.refuseDelete
 			count := state.nicCount
+			if missing {
+				state.mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, `{"success":false,"message":"Subnet not found","error":{"code":"RESOURCE_NOT_FOUND","statusCode":404,"details":null}}`)
+				return
+			}
 			if refuse {
 				state.refuseDelete = false
 			} else {
@@ -333,9 +350,8 @@ func TestVpcSubnetResourcePlanRecreatesWhenAbsentFromListing(t *testing.T) {
 }
 
 // A subnet that asks for a size rather than a block gets its CIDR from the
-// allocator. That CIDR must come out of state on the next plan: an unknown one
-// would plan a replacement of a live subnet on every apply. The test pins the
-// carve path. It does not guard a fix.
+// allocator. The carved CIDR lands in state, and the plan that follows is
+// empty.
 func TestVpcSubnetResourcePlanCarvesFromPrefix(t *testing.T) {
 	t.Parallel()
 	server, state := startSubnetPlanMockServer(t)
@@ -370,6 +386,100 @@ func TestVpcSubnetResourcePlanCarvesFromPrefix(t *testing.T) {
 				Config:             config,
 				PlanOnly:           true,
 				ExpectNonEmptyPlan: false,
+			},
+		},
+	})
+}
+
+// A NIC can attach between the refresh and the apply, and the plan pins the
+// census to the value the refresh saw. An Update that wrote the fresher count
+// would end the apply with a result the plan does not allow.
+func TestVpcSubnetResourcePlanKeepsNicCountThroughRename(t *testing.T) {
+	t.Parallel()
+	server, state := startSubnetPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: subnetPlanTestConfig(server.URL, "subnet-plan-a", ""),
+				Check:  resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "attached_nic_count", "0"),
+			},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					state.nicCountOnRename = 7
+				},
+				Config: subnetPlanTestConfig(server.URL, "subnet-plan-b", ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "name", "subnet-plan-b"),
+					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "attached_nic_count", "0"),
+				),
+			},
+			{
+				Config: subnetPlanTestConfig(server.URL, "subnet-plan-b", ""),
+				Check:  resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "attached_nic_count", "7"),
+			},
+		},
+	})
+}
+
+// A subnet another operator already removed answers the DELETE with a 404. The
+// destroy must finish, because the row is gone either way.
+func TestVpcSubnetResourcePlanTreatsMissingSubnetAsDeleted(t *testing.T) {
+	t.Parallel()
+	server, state := startSubnetPlanMockServer(t)
+
+	config := subnetPlanTestConfig(server.URL, "subnet-plan-a", "")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+			},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					state.missingOnDelete = true
+				},
+				Config:  config,
+				Destroy: true,
+			},
+		},
+	})
+}
+
+// A chosen security group must reach the API on the create. The mapper keeps
+// the planned value, so a dropped key would write state that names a group the
+// subnet is not bound to.
+func TestVpcSubnetResourcePlanSendsChosenNsgOnCreate(t *testing.T) {
+	t.Parallel()
+	server, state := startSubnetPlanMockServer(t)
+
+	checkCreateBody := func(*terraform.State) error {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		if state.createBody == nil {
+			return fmt.Errorf("expected a create POST, got none")
+		}
+		if got, _ := state.createBody["nsgId"].(string); got != subnetPlanTestOtherNsg {
+			return fmt.Errorf("expected the create body nsgId %q, got %q", subnetPlanTestOtherNsg, got)
+		}
+		return nil
+	}
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: subnetPlanTestConfig(server.URL, "subnet-plan-a", fmt.Sprintf("nsg_id = %q", subnetPlanTestOtherNsg)),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "nsg_id", subnetPlanTestOtherNsg),
+					checkCreateBody,
+				),
 			},
 		},
 	})

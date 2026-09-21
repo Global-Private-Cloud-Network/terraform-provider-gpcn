@@ -214,6 +214,7 @@ func (r *vpcSubnetResource) Read(ctx context.Context, req resource.ReadRequest, 
 
 	state = vpcsubnets.MapSubnetResponseToModel(subnet, state)
 	state = vpcsubnets.RefreshSubnetModelFromResponse(subnet, state)
+	resp.Diagnostics.Append(vpcsubnets.SubnetFailedWarning(subnet)...)
 
 	diags = resp.State.Set(ctx, state)
 	resp.Diagnostics.Append(diags...)

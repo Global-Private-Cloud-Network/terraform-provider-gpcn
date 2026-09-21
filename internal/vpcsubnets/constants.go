@@ -9,6 +9,10 @@ const (
 	nsgPathSegment     = "/nsg"
 )
 
+// StateFailed is the state a subnet lands in when its carve job stops badly.
+// The row stays readable, so only a warning tells the operator about it.
+const StateFailed = "failed"
+
 // ListPageLimit is the largest page the subnet listing serves.
 const ListPageLimit = 100
 
