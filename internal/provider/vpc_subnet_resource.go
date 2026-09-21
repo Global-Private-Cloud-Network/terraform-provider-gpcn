@@ -92,7 +92,7 @@ func (r *vpcSubnetResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"prefix": schema.Int64Attribute{
-				Description: "Prefix length of the block to carve when cidr is omitted, between 22 and 28. GPCN defaults to 24. The API accepts this value only on creation and never reports it back, so it is never refreshed. Changing this value requires replacing the subnet",
+				Description: "Prefix length of the block to carve when cidr is omitted, between 22 and 28. GPCN defaults to 24. The API accepts this value only on creation and never reports it back, so it is read from the carved CIDR's mask length on import and is never refreshed after that. Changing this value requires replacing the subnet",
 				Optional:    true,
 				Validators: []validator.Int64{
 					int64validator.Between(vpcsubnets.MinPrefix, vpcsubnets.MaxPrefix),
