@@ -57,12 +57,11 @@ func networkPlanTestReadBody(name string) map[string]any {
 	}
 }
 
-// startNetworkPlanMockServer serves the network endpoints a rename needs, starting from a
-// network that already exists: creation is retired, so a plan test reaches an existing row
-// through terraform import. The handler keeps the name from the last update, so the read
-// after an apply matches the configuration and the refresh plan stays empty. The returned
-// function renames the network out of band, which is how a test creates drift. There is no
-// create route, so a plan that tried to mint a network fails the test loudly.
+// startNetworkPlanMockServer serves one network that already exists. Creation is retired,
+// so a plan test reaches the row through terraform import. The handler keeps the name from
+// the last update. The read after an apply then matches the configuration, and the refresh
+// plan stays empty. The returned function renames the network out of band. That is how a
+// test makes drift. The mock has no create route, so an unintended create fails the test.
 func startNetworkPlanMockServer(t *testing.T, initialName string) (*httptest.Server, func(string)) {
 	t.Helper()
 
@@ -125,8 +124,8 @@ resource "gpcn_network" "test" {
 `, host, name, networkPlanTestDatacenterID, networkPlanTestCIDRBlock, networkPlanTestDHCPStart, networkPlanTestDHCPEnd, networkPlanTestDNSServer)
 }
 
-// TestNetworkResourcePlanRefusesCreate guards the create refusal. The platform retired the
-// legacy create verb, so a plan that would mint a network must fail before any request goes out.
+// TestNetworkResourcePlanRefusesCreate guards the create refusal. A plan that mints a
+// network must fail before the provider sends any request.
 func TestNetworkResourcePlanRefusesCreate(t *testing.T) {
 	t.Parallel()
 	server, _ := startNetworkPlanMockServer(t, "net-plan-new")
@@ -142,8 +141,8 @@ func TestNetworkResourcePlanRefusesCreate(t *testing.T) {
 	})
 }
 
-// TestNetworkResourcePlanRename pins the in-place rename path of a grandfathered network.
-// The first step imports, because the create refusal closes the path this test used to take.
+// TestNetworkResourcePlanRename pins the in-place rename of a grandfathered network.
+// The first step imports, because the create refusal closes the path this test once took.
 func TestNetworkResourcePlanRename(t *testing.T) {
 	t.Parallel()
 	server, _ := startNetworkPlanMockServer(t, "net-plan-a")
@@ -225,8 +224,7 @@ func TestNetworkResourcePlanDetectsOutOfBandRename(t *testing.T) {
 const networkPlanTestCustomID = "net-custom-1"
 
 // customNetworkPlanMock serves one grandfathered custom network. The API stores an empty
-// cidrBlock for every custom row, so the mock returns one and records the update body the
-// provider sends back.
+// cidrBlock for every custom row. The mock returns one and records the update body.
 type customNetworkPlanMock struct {
 	mu          sync.Mutex
 	description string
@@ -234,8 +232,8 @@ type customNetworkPlanMock struct {
 	gone        bool
 }
 
-// setGone makes the network answer the 404 that the platform serves for a row it adopted
-// into an L2 segment. The body is the one the backend renders, byte for byte.
+// setGone makes the network answer the 404 of a row the platform adopted into an L2
+// segment. The body is the one the backend renders, byte for byte.
 func (m *customNetworkPlanMock) setGone() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -338,9 +336,9 @@ resource "gpcn_network" "test" {
 `, host, networkPlanTestDatacenterID, description)
 }
 
-// TestNetworkResourcePlanUpdatesExistingCustomWithoutCidrBlock guards the whole path a
-// grandfathered custom network takes through a rename: its stored cidrBlock is "", and the
-// update body must not carry that value back, or the API answers 422.
+// TestNetworkResourcePlanUpdatesExistingCustomWithoutCidrBlock guards a grandfathered
+// custom network through an update. The stored cidrBlock is empty. The update body must
+// not carry that value back, because the API answers 422 to it.
 func TestNetworkResourcePlanUpdatesExistingCustomWithoutCidrBlock(t *testing.T) {
 	t.Parallel()
 	server, mock := startCustomNetworkPlanMockServer(t)
@@ -380,10 +378,10 @@ func TestNetworkResourcePlanUpdatesExistingCustomWithoutCidrBlock(t *testing.T) 
 	})
 }
 
-// TestNetworkResourcePlanWarnsWhenCustomNetworkGone pins what a refresh does with a custom
-// network the platform adopted: the row leaves state, so the next plan proposes a create and
-// the create refusal answers. The warning the refresh also emits is pinned by
-// TestCustomNetworkGoneWarningUnit, because this harness cannot observe a warning diagnostic.
+// TestNetworkResourcePlanWarnsWhenCustomNetworkGone pins the refresh of an adopted custom
+// network. The row leaves state, so the next plan proposes a create. The create refusal
+// then answers. TestCustomNetworkGoneWarningUnit pins the warning text, because this
+// harness cannot observe a warning diagnostic.
 func TestNetworkResourcePlanWarnsWhenCustomNetworkGone(t *testing.T) {
 	t.Parallel()
 	server, mock := startCustomNetworkPlanMockServer(t)

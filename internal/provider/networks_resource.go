@@ -45,8 +45,8 @@ func (r *networksResource) Metadata(_ context.Context, req resource.MetadataRequ
 	resp.TypeName = req.ProviderTypeName + "_network"
 }
 
-// networkDeprecationMessage names the three resources that replace gpcn_network, because a
-// deprecation notice with no destination leaves the reader to guess which one to move to.
+// The notice names the three replacements. A deprecation with no destination leaves the
+// reader to guess which resource to move to.
 const networkDeprecationMessage = "gpcn_network is deprecated: GPCN networking is VPC-based. Use gpcn_vpc, gpcn_vpc_subnet and gpcn_l2_segment. Existing networks can still be read and destroyed."
 
 // Schema defines the schema for the resource.
@@ -260,9 +260,9 @@ func (r *networksResource) Read(ctx context.Context, req resource.ReadRequest, r
 	if err != nil {
 		// Resource was deleted outside of Terraform
 		if client.IsNotFound(err) {
-			// The platform answers the same 404 for a custom network it adopted into an L2
-			// segment as for an id that never existed, so a silent removal here loses a live
-			// carrier. A standard network keeps the silent removal.
+			// A custom network the platform adopted answers the same 404 as an unknown id.
+			// A silent removal therefore loses a carrier that live traffic uses. A standard
+			// network keeps the silent removal.
 			if state.NetworkType.ValueString() == networks.NETWORK_TYPE_CUSTOM {
 				resp.Diagnostics.Append(networks.CustomNetworkGoneWarning(state.ID.ValueString()))
 			}
@@ -355,10 +355,10 @@ func (r *networksResource) ImportState(ctx context.Context, req resource.ImportS
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
-// ModifyPlan refuses to plan a new network. The platform retired the legacy create verb, so
-// the request would fail against the API. The refusal is here and not on an attribute, because
-// an attribute validator also runs for a network that already exists, and those rows must keep
-// planning updates and deletes. A null prior state names a create; a null plan names a destroy.
+// ModifyPlan refuses to plan a new network. The platform retired the legacy create verb.
+// An attribute validator is the wrong place for the refusal. A validator also runs for a
+// network that already exists, and those rows must keep planning updates and deletes.
+// A null prior state names a create. A null plan names a destroy.
 func (r *networksResource) ModifyPlan(_ context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	if req.State.Raw.IsNull() && !req.Plan.Raw.IsNull() {
 		resp.Diagnostics.AddError(

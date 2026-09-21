@@ -1071,8 +1071,8 @@ func TestUpdateNetworkInterfacesSkipsRefreshWhenPrimaryIsUnchangedUnit(t *testin
 }
 
 // TestUpdateNetworkOmitsEmptyCIDRBlockMockHTTP guards the update body against an empty
-// cidrBlock. The API stores "" for every custom network and its update schema validates the
-// key against a CIDR pattern, so echoing the stored "" back turns a rename into a 422.
+// cidrBlock. The API stores an empty value for every custom network. Its update schema
+// validates the key against a CIDR pattern, so the empty value turns a rename into a 422.
 func TestUpdateNetworkOmitsEmptyCIDRBlockMockHTTP(t *testing.T) {
 	const networkID = "network-cidr-guard"
 
@@ -1134,9 +1134,9 @@ func TestUpdateNetworkOmitsEmptyCIDRBlockMockHTTP(t *testing.T) {
 	}
 }
 
-// TestCustomNetworkGoneWarningUnit pins the adoption warning byte for byte. The test harness
-// cannot observe a warning diagnostic, so this is the only guard on the text a user reads
-// after the platform adopts their custom network into an L2 segment.
+// TestCustomNetworkGoneWarningUnit pins the adoption warning byte for byte. The test
+// harness cannot observe a warning diagnostic. This test is therefore the only guard on
+// the text a user reads after the platform adopts a custom network.
 func TestCustomNetworkGoneWarningUnit(t *testing.T) {
 	const networkID = "network-adopted-123"
 

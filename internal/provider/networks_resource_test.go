@@ -14,13 +14,13 @@ import (
 
 var gpcnNetworkTest = "gpcn_network.test"
 
-// networkTestIDEnvVar names an existing GPCN network for the import case below. Creation is
-// retired, so the acceptance case can no longer mint the network it exercises.
+// networkTestIDEnvVar names an existing GPCN network for the import case below. Creation
+// is retired, so the acceptance case can no longer mint the network it exercises.
 const networkTestIDEnvVar = "GPCN_TEST_NETWORK_ID"
 
 // TestNetworksResource imports a grandfathered network and checks the state it lands in.
-// The step does not persist the imported state, so the run never plans a destroy against a
-// network the platform still serves.
+// The step does not persist the imported state. The run therefore never plans a destroy
+// against a network the platform still serves.
 func TestNetworksResource(t *testing.T) {
 	t.Parallel()
 	networkID := os.Getenv(networkTestIDEnvVar)
@@ -70,8 +70,8 @@ func TestNetworksResource(t *testing.T) {
 */
 
 // TestNetworkResourceSchemaCarriesDeprecation pins the deprecation notice byte for byte.
-// Terraform prints it on every plan that names the resource, so a reworded notice is a
-// user-facing change and must be a deliberate one.
+// Terraform prints the notice on every plan that names the resource. A reworded notice is
+// therefore a user-facing change, and it must be a deliberate one.
 func TestNetworkResourceSchemaCarriesDeprecation(t *testing.T) {
 	t.Parallel()
 

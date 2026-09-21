@@ -46,9 +46,8 @@ const (
 	WarnDetailCustomNetworkGone        = "Network %s was not found. If it was adopted into an L2 segment by the platform, remove it from state and import the segment as gpcn_l2_segment: terraform state rm %s && terraform import gpcn_l2_segment.<name> <segment-id>."
 )
 
-// CustomNetworkGoneWarning builds the diagnostic a vanished custom network earns. The
-// platform answers the same 404 for an adopted network as for a typo, so the message must
-// name both readings and the move that resolves the first one.
+// The platform answers the same 404 for an adopted network as for a typo. The message
+// therefore names both readings. It also names the state move that recovers the segment.
 func CustomNetworkGoneWarning(networkID string) diag.Diagnostic {
 	return diag.NewWarningDiagnostic(
 		WarnSummaryNetworkRemovedFromState,
