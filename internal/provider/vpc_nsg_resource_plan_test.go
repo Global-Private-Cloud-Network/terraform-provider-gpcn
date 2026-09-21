@@ -55,6 +55,9 @@ type nsgPlanTestServerState struct {
 	renamePuts   int
 	subnetCount  int64
 	refuseDelete bool
+	// subnetCountOnRename stands for a subnet that binds between the refresh
+	// and the apply. Zero leaves the census alone.
+	subnetCountOnRename int64
 	// missingOnDelete answers the DELETE with a 404. A group another operator
 	// already removed gives that answer.
 	missingOnDelete bool
@@ -149,6 +152,9 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 			state.renamePuts++
 			state.name, _ = body["name"].(string)
 			state.description, _ = body["description"].(string)
+			if state.subnetCountOnRename > 0 {
+				state.subnetCount = state.subnetCountOnRename
+			}
 			detail := state.detail()
 			state.mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "", "data": detail["nsg"]})
@@ -454,7 +460,7 @@ func TestVpcNsgResourcePlanAcceptsMovedSubnetCount(t *testing.T) {
 				PreConfig: func() {
 					state.mu.Lock()
 					defer state.mu.Unlock()
-					state.subnetCount = 3
+					state.subnetCountOnRename = 3
 				},
 				Config: nsgPlanTestConfig(server.URL, "nsg-plan-b", nsgPlanTestRuleHTTPS),
 				Check: resource.ComposeAggregateTestCheckFunc(
