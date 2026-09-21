@@ -16,8 +16,8 @@ import (
 
 var gpcnVirtualMachineTest = "gpcn_virtualmachine.test"
 
-// skipWithoutTestNetwork stops a case that has no network to attach. Network creation is
-// retired, so these cases can no longer mint the network the machine is born on.
+// skipWithoutTestNetwork stops a case that has no network to attach. GPCN no longer
+// creates networks, so these cases cannot mint the network the machine is born on.
 func skipWithoutTestNetwork(t *testing.T, networkID string) {
 	t.Helper()
 	if networkID == "" {

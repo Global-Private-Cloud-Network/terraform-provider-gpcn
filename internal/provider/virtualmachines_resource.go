@@ -441,7 +441,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		return
 	}
 
-	// Validate the prospective primary network has a valid configuration for allocatePublicIp
+	// Validate the prospective primary network has a valid configuration for allocate_public_ip
 	if plan.AllocatePublicIp != state.AllocatePublicIp {
 		// First validate the primary network type is standard
 		err := virtualmachines.ValidatePublicIpValue(r.client, ctx, plan)
@@ -551,8 +551,8 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 		tflog.Info(ctx, virtualmachines.LogVirtualMachineAlreadyDeleted)
 		return
 	} else if virtualmachines.IsTerminalStatusError(err) {
-		// The platform writes Destroyed and Deleting from its own lifecycle, so the
-		// machine never stops and there is nothing left to delete.
+		// The platform writes Destroyed and Deleting from its own lifecycle. The machine
+		// never stops, and no machine remains to delete.
 		tflog.Info(ctx, fmt.Sprintf(virtualmachines.LogVirtualMachineTerminalRemovingFromState, err.Error()))
 		resp.State.RemoveResource(ctx)
 		return

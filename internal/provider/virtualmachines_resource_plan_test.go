@@ -93,8 +93,8 @@ func vmPlanTestReadBody(name, status, skuId string) map[string]any {
 	}
 }
 
-// The birth network comes from the create body, so the interface the API reports is the
-// one the provider asked for rather than a fixture that agrees by coincidence.
+// The birth network comes from the create body. The interface the API reports is
+// therefore the one the provider asked for. A fixed fixture could agree by coincidence.
 func vmPlanTestNetworkInterfacesBody(birthNetworkID string) map[string]any {
 	return map[string]any{
 		"success": true,
@@ -292,7 +292,7 @@ func TestVirtualMachineResourcePlanIgnoresOutOfBandResize(t *testing.T) {
 const vmPlanTestSecondNetworkID = "net-2"
 
 // vmAttachPlanTestNetworkInterfacesBody lists the birth interface and one row per
-// network that attached, so the state a failed attach leaves behind is observable.
+// network that attached. A test can then observe the state a failed attach leaves behind.
 func vmAttachPlanTestNetworkInterfacesBody(birthNetworkID string, attached []string) map[string]any {
 	rows := make([]map[string]any, 0, 1+len(attached))
 	rows = append(rows, map[string]any{
@@ -327,8 +327,8 @@ func vmAttachPlanTestNetworkInterfacesBody(birthNetworkID string, attached []str
 }
 
 // startVirtualMachineAttachMockServer refuses the post-create attach until the returned
-// function heals it. The refusal is a 500 and the provider configuration asks for no
-// retries, so the attach fails on the first call.
+// function heals it. The refusal is a 500, and the provider configuration asks for no
+// retries. The attach therefore fails on the first call.
 func startVirtualMachineAttachMockServer(t *testing.T) (*httptest.Server, func()) {
 	t.Helper()
 
@@ -540,9 +540,9 @@ func startVirtualMachineDestroyMockServer(t *testing.T) (*httptest.Server, func(
 	return server, setDeleting
 }
 
-// A machine the platform is already removing never reaches a stopped status, so the
-// pre-delete stop times out on a status it never leaves. That is the same outcome as a
-// 404: the machine is gone and leaves state without an error.
+// A machine the platform is already removing never reaches a stopped status. The
+// pre-delete stop fails fast on a status the machine never leaves. The outcome matches a
+// 404: the machine is gone, so it leaves state without an error.
 func TestVirtualMachineResourcePlanDestroyTreatsDeletingAsGone(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server, setDeleting := startVirtualMachineDestroyMockServer(t)
