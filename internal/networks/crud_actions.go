@@ -187,7 +187,7 @@ func UpdateNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkId
 		"serveDNSServersEnabled": isStandardNetwork,
 	}
 
-	// Every custom network stores an empty cidrBlock, and the update schema validates the key
+	// Every custom network stores an empty cidrBlock. The update schema validates the key
 	// against a CIDR pattern. Sending the stored value back turns a rename into a 422.
 	if !model.CIDRBlock.IsNull() && !model.CIDRBlock.IsUnknown() && model.CIDRBlock.ValueString() != "" {
 		updateNetworkRequestBody["cidrBlock"] = model.CIDRBlock.ValueString()

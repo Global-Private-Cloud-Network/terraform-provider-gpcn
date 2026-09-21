@@ -261,8 +261,7 @@ func (r *networksResource) Read(ctx context.Context, req resource.ReadRequest, r
 		// Resource was deleted outside of Terraform
 		if client.IsNotFound(err) {
 			// A custom network the platform adopted answers the same 404 as an unknown id.
-			// A silent removal therefore loses a carrier that live traffic uses. A standard
-			// network keeps the silent removal.
+			// A silent removal therefore loses a carrier that live traffic uses.
 			if state.NetworkType.ValueString() == networks.NETWORK_TYPE_CUSTOM {
 				resp.Diagnostics.Append(networks.CustomNetworkGoneWarning(state.ID.ValueString()))
 			}
@@ -355,10 +354,9 @@ func (r *networksResource) ImportState(ctx context.Context, req resource.ImportS
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
 }
 
-// ModifyPlan refuses to plan a new network. The platform retired the legacy create verb.
-// An attribute validator is the wrong place for the refusal. A validator also runs for a
-// network that already exists, and those rows must keep planning updates and deletes.
-// A null prior state names a create. A null plan names a destroy.
+// The platform retired the legacy create verb. An attribute validator is the wrong place
+// for the refusal. A validator also runs for a network that already exists, and those rows
+// must keep planning updates and deletes.
 func (r *networksResource) ModifyPlan(_ context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	if req.State.Raw.IsNull() && !req.Plan.Raw.IsNull() {
 		resp.Diagnostics.AddError(
