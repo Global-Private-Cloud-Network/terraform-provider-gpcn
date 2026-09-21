@@ -250,8 +250,6 @@ func (e *terminalStatusError) Error() string {
 	return fmt.Sprintf(ErrDetailVMTerminalStatus, e.vmID, e.status, strings.Join(e.targets, ", "))
 }
 
-// IsTerminalStatusError reports whether the poller gave up because the virtual
-// machine reached a status it never leaves.
 func IsTerminalStatusError(err error) bool {
 	var terminalErr *terminalStatusError
 	return errors.As(err, &terminalErr)

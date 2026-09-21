@@ -11,11 +11,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-// AuthCredentialKindAPIKey is the credential kind the API reports for a key.
-// The other kind is a browser session, which a provider never holds.
+// The API reports one other credential kind, a browser session. A provider
+// never holds one.
 const AuthCredentialKindAPIKey = "api_key"
 
-// AuthCheckCredential describes the credential that authenticated the call.
 // Every nullable field is a pointer. The API sends null for a value it does not
 // have, and an empty string is a value.
 type AuthCheckCredential struct {
@@ -27,14 +26,12 @@ type AuthCheckCredential struct {
 	ExpiresAt *string `json:"expiresAt"`
 }
 
-// AuthCheckGrants describes what the credential is allowed to do.
 type AuthCheckGrants struct {
 	Source      string   `json:"source"`
 	EntityID    *string  `json:"entityId"`
 	Permissions []string `json:"permissions"`
 }
 
-// AuthCheckData is the payload of a successful auth check.
 type AuthCheckData struct {
 	Authenticated bool                 `json:"authenticated"`
 	Credential    *AuthCheckCredential `json:"credential"`
@@ -61,7 +58,7 @@ func (c *GpcnClient) AuthCheck(ctx context.Context) (*AuthCheckData, error) {
 
 	response, err := c.DoWithRetry(request)
 	if err != nil {
-		// Returned unwrapped, so the caller can read the status off it.
+		// The caller reads the status off this error, so it stays unwrapped.
 		return nil, err
 	}
 	defer func() {
@@ -93,8 +90,8 @@ func (c *GpcnClient) EntityID() string {
 }
 
 // Permissions returns the permission ceiling the API reported for this key.
-// A permission that is absent is a reliable refusal, but one that is present
-// is not a promise: a route can narrow the grant further.
+// An absent permission is a reliable refusal. A present one is not a promise,
+// because a route can narrow the grant further.
 func (c *GpcnClient) Permissions() []string {
 	return slices.Clone(c.permissions)
 }

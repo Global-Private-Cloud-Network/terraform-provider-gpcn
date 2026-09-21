@@ -134,9 +134,8 @@ func SetupMockServerWithRealTransport(config MockServerConfig) (*httptest.Server
 	return server, gpcnClient
 }
 
-// HandleAuthCheck writes the canonical auth-check body. Provider Configure
-// calls this endpoint before any resource work. Every mock server a provider
-// test drives needs an arm for it.
+// Provider Configure calls this endpoint before any resource work. Every mock
+// server a provider test drives needs an arm for it.
 func HandleAuthCheck(w http.ResponseWriter) {
 	WriteJSONResponse(w, map[string]any{
 		"success": true,

@@ -18,7 +18,7 @@ const (
 	ErrDetailDeleteSSHKeyFailed = "Failed to delete SSH key with ID %s"
 )
 
-// Name rule details. GPCN sends the last three verbatim, so they stay byte-exact.
+// GPCN sends the last three of these details verbatim, so they stay byte-exact.
 const (
 	ErrDetailSSHKeyNameWhitespace = "Name must not start or end with whitespace (GPCN trims it, which would make the stored name differ from the configuration)"
 	ErrDetailSSHKeyNameRequired   = "Name is required"

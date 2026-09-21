@@ -40,7 +40,6 @@ const (
 	ErrDetailRefreshNetworkInterfacesFailed = "error refreshing the network interfaces of virtual machine ID '%s' before promoting a primary: %w"
 )
 
-// Warning strings for a custom network the platform adopted into an L2 segment
 const (
 	WarnSummaryNetworkRemovedFromState = "Network removed from state"
 	WarnDetailCustomNetworkGone        = "Network %s was not found. If it was adopted into an L2 segment by the platform, remove it from state and import the segment as gpcn_l2_segment: terraform state rm gpcn_network.<name> && terraform import gpcn_l2_segment.<name> <segment-id>."

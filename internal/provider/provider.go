@@ -26,9 +26,9 @@ var (
 	_ provider.Provider = &gpcnProvider{}
 )
 
-// Preflight diagnostics. The API answers every credential failure with the same
-// opaque 401. A host that points elsewhere answers a bare route-not-found. The
-// provider therefore names the causes and the setting to check.
+// The API answers every credential failure with the same opaque 401. A host
+// that points elsewhere answers a bare route-not-found. The provider therefore
+// names the causes and the setting to check.
 //
 //nolint:gosec // G101: These are diagnostic sentences about a key, not a key.
 const (
@@ -45,14 +45,13 @@ const (
 	WarnDetailAPIKeyExpiresSoon  = "The API key expires at %s."
 )
 
-// LogAPIKeyIdentified names the key in play. The fragment is the prefix and the
-// leading characters only, never the secret.
+// The logged fragment is the prefix and the leading characters only, never the
+// secret.
 //
 //nolint:gosec // G101: This is a log message about a key, not a key.
 const LogAPIKeyIdentified = "GPCN API key identified"
 
-// apiKeyExpiryWarningWindow is how far ahead an expiry is worth a warning. A
-// whole week gives a practitioner time to mint a replacement.
+// A whole week gives a practitioner time to mint a replacement key.
 const apiKeyExpiryWarningWindow = 7 * 24 * time.Hour
 
 // New is a helper function to simplify provider server and testing implementation.
@@ -266,9 +265,9 @@ func (p *gpcnProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 	tflog.Debug(ctx, "GPCN client successfully created. Provider online")
 }
 
-// reportPreflight logs the key in play and warns about what a practitioner
-// should know but must not be stopped for: a credential of another kind still
-// works, and a key that expires next week still works today.
+// These warnings tell the practitioner what they must know, and neither one
+// stops the apply. A credential of another kind still works. A key that expires
+// next week still works today.
 func reportPreflight(ctx context.Context, authCheck *client.AuthCheckData, diags *diag.Diagnostics) {
 	credential := authCheck.Credential
 	if credential == nil {

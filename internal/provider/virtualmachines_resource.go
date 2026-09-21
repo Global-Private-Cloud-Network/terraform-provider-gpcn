@@ -463,7 +463,6 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		return
 	}
 
-	// Validate the prospective primary network has a valid configuration for allocate_public_ip
 	if plan.AllocatePublicIp != state.AllocatePublicIp {
 		// First validate the primary network type is standard
 		err := virtualmachines.ValidatePublicIpValue(r.client, ctx, plan)
