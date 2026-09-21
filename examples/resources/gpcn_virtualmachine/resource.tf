@@ -83,10 +83,10 @@ resource "gpcn_virtualmachine" "example" {
   allocate_public_ip = false
   subnet_id          = gpcn_vpc_subnet.example.id
 
-  # Carry L2 segments, each attached as an interface after the machine exists
+  # Needs a gpcn_l2_segment resource in this configuration:
   # l2_segment_ids = [gpcn_l2_segment.example.id]
 
-  # Attach an address the operator holds, rather than acquire one with the machine
+  # Needs a held gpcn_vpc_public_ip resource in this configuration:
   # public_ip_id   = gpcn_vpc_public_ip.example.id
 
   # Resource Group
