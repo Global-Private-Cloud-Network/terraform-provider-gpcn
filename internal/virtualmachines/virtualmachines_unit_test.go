@@ -1414,6 +1414,11 @@ func TestVirtualMachineLeftStoppedBytes(t *testing.T) {
 			actual:   ErrDetailVMLeftStoppedCreate,
 			expected: "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform untaint on it; otherwise the next apply replaces the machine.",
 		},
+		{
+			name:     "retry detail",
+			actual:   ErrDetailVMLeftStoppedRetry,
+			expected: "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal; the change was not recorded, so the next apply retries it.",
+		},
 	}
 
 	for _, tc := range tests {

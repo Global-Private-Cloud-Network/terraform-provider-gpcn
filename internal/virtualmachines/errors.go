@@ -48,6 +48,7 @@ const (
 	ErrDetailVMCreatedAttachFailed     = "virtual machine %s was created and is in state, but attaching %s failed: %s. Terraform has marked the machine tainted: run terraform untaint on it and apply again to attach the remaining networks, or let the next apply replace it."
 	ErrDetailVMLeftStoppedUpdate       = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal."
 	ErrDetailVMLeftStoppedCreate       = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform untaint on it; otherwise the next apply replaces the machine."
+	ErrDetailVMLeftStoppedRetry        = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal; the change was not recorded, so the next apply retries it."
 )
 
 // Warning detail message templates
