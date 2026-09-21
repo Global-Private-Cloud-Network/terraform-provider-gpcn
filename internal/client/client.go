@@ -93,9 +93,9 @@ func (e *HTTPError) Error() string {
 }
 
 // errorEnvelope covers the error bodies the GPCN API can answer with. Every
-// field is a pointer, because presence is what tells the shapes apart: the
-// dominant shape puts the sentence at the top level, and the rate limiter puts
-// it inside "error" with no top-level message at all.
+// field is a pointer, because presence tells the shapes apart. The dominant
+// shape puts the sentence at the top level. The rate limiter puts it inside
+// "error", with no top-level message at all.
 type errorEnvelope struct {
 	Message *string `json:"message"`
 	Error   *struct {
@@ -252,10 +252,9 @@ func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 	return nil, fmt.Errorf("%w: %w", ErrMaxRetriesExceeded, lastErr)
 }
 
-// retryWait returns how long to wait before the next attempt. An API that says
-// when to come back is obeyed in place of the computed backoff, but the
-// configured maximum still bounds the wait: a rate limiter can ask for
-// fourteen minutes, which no apply should sit through.
+// retryWait returns how long to wait before the next attempt. An interval the
+// API asks for replaces the computed backoff. The configured maximum still
+// bounds the wait, because a rate limiter can ask for fourteen minutes.
 func (c *GpcnClient) retryWait(backoff time.Duration, httpErr *HTTPError) time.Duration {
 	if httpErr == nil || httpErr.RetryAfter <= 0 {
 		return backoff
@@ -296,16 +295,16 @@ func IsForbidden(err error) bool {
 
 // IsConflict reports whether err was caused by an HTTP 409 response.
 //
-// The API answers 409 when the request fights live state, for example a name
-// already taken or a container that still holds children.
+// The API answers 409 when the request fights live state. An example is a name
+// already taken, or a container that still holds children.
 func IsConflict(err error) bool {
 	return hasStatus(err, http.StatusConflict)
 }
 
 // IsUnauthorized reports whether err was caused by an HTTP 401 response.
 //
-// Every credential failure answers the same 401, so this means the API key no
-// longer authenticates, never that the key lacks a permission.
+// Every credential failure answers the same 401. This means the API key no
+// longer authenticates. It never means the key lacks a permission.
 func IsUnauthorized(err error) bool {
 	return hasStatus(err, http.StatusUnauthorized)
 }

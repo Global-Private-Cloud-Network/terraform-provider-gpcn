@@ -32,8 +32,8 @@ data "gpcn_datacenters" "test" {}
 }
 
 // preflightDatacenterBody is the one row the datacenters read needs. An empty
-// list sends the data source down its suggestion path, which asks for regions
-// and countries and hides what the test is about.
+// list sends the data source down its suggestion path. That path asks for
+// regions and countries, and it hides what the test is about.
 func preflightDatacenterBody() map[string]any {
 	return map[string]any{
 		"success": true,
@@ -142,8 +142,8 @@ func TestConfigurePreflightWarnsOnExpiry(t *testing.T) {
 }
 
 // TestConfigurePreflightWarningBytes pins the warning sentences. The test
-// harness runs a step to completion or not at all, so it cannot read a warning
-// back; the diagnostics are asserted where they are built.
+// harness runs a step to completion or not at all. It cannot read a warning
+// back. This test calls the reporter and reads the diagnostics it builds.
 func TestConfigurePreflightWarningBytes(t *testing.T) {
 	stringPtr := func(value string) *string { return &value }
 
@@ -211,7 +211,7 @@ func TestConfigurePreflightWarningBytes(t *testing.T) {
 
 // TestConfigurePreflightNamesHostOnRouteNotFound proves a wrong host is named as
 // such. A host that points at something else answers the bare route-not-found
-// body, never a 401, so a key diagnostic would send the user hunting the wrong
+// body, never a 401. A key diagnostic would then send the user to the wrong
 // setting.
 func TestConfigurePreflightNamesHostOnRouteNotFound(t *testing.T) {
 	server, _ := startPreflightServer(t, func(w http.ResponseWriter) {

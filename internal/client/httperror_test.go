@@ -48,8 +48,8 @@ func errorFromStatusBody(t *testing.T, status int, body string, headers map[stri
 }
 
 // TestHTTPErrorParsesEnvelopeShapes pins the four error envelopes the API can
-// answer with, and the raw fallback. The backend has no single envelope, so a
-// client that parses only the dominant shape mis-reads the other three and
+// answer with, and the raw fallback. The backend has no single envelope. A
+// client that parses only the dominant shape mis-reads the other three. It then
 // surfaces raw JSON in a Terraform diagnostic.
 func TestHTTPErrorParsesEnvelopeShapes(t *testing.T) {
 	tests := []struct {

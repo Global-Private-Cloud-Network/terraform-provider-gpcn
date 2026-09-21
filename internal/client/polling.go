@@ -94,8 +94,8 @@ func PerformLongPollingWithConfig(gpcnClient *GpcnClient, ctx context.Context, a
 			return nil, fmt.Errorf("polling for job %s failed: %w", jobId, err)
 		}
 
-		// The API omits a job that does not exist or belongs to another tenant,
-		// so an empty array is permanent and waiting cannot change it.
+		// The API omits a job that does not exist or belongs to another tenant.
+		// An empty array is therefore permanent, and waiting cannot change it.
 		if len(jobResponse.Data.Jobs) == 0 {
 			return nil, fmt.Errorf(ErrJobNotVisible, jobId)
 		}

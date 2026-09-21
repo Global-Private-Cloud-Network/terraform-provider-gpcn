@@ -27,8 +27,8 @@ var (
 )
 
 // Preflight diagnostics. The API answers every credential failure with the same
-// opaque 401, and a host that points elsewhere answers a bare route-not-found,
-// so the provider has to name the causes and the setting to check itself.
+// opaque 401. A host that points elsewhere answers a bare route-not-found. The
+// provider therefore names the causes and the setting to check.
 //
 //nolint:gosec // G101: These are diagnostic sentences about a key, not a key.
 const (

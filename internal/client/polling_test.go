@@ -16,8 +16,8 @@ const (
 	pollTestAction = "Create GPCN Network"
 )
 
-// The API and the provider both spell the stage the British way, so the
-// fixture and the expected sentence quote those bytes.
+// The API and the provider both spell the stage the British way. The fixture
+// and the expected sentence quote those bytes.
 //
 //nolint:misspell // Byte-exact quotes of the wire value and of ErrJobCancelled.
 const (
@@ -25,8 +25,8 @@ const (
 	pollTestCancelStageError = `job job-1 for action "Create GPCN Network" was cancelled by the platform`
 )
 
-// jobsServer answers every poll with the given body and counts the calls, so a
-// test can prove the poller stopped rather than looped to its timeout.
+// jobsServer answers every poll with the given body, and it counts the calls.
+// A test can then prove the poller stopped instead of looping to its timeout.
 func jobsServer(t *testing.T, body string) (*client.GpcnClient, *atomic.Int32) {
 	t.Helper()
 
@@ -64,8 +64,8 @@ func fastPollingConfig() *client.PollingConfig {
 }
 
 // TestPollStopsOnCancelledStage proves an operator cancel ends the poll. Such a
-// job reports isCompleted false and hasFailed false, so a poller that waits for
-// either sits until its timeout and hides the cancel.
+// job reports isCompleted false and hasFailed false. A poller that waits for
+// either sits until its timeout, and it hides the cancel.
 func TestPollStopsOnCancelledStage(t *testing.T) {
 	gpcnClient, calls := jobsServer(t, `{"success":true,"message":"Job progress retrieved successfully",`+
 		`"data":{"jobs":[`+pollTestCancelStageJob+`]}}`)
@@ -84,8 +84,9 @@ func TestPollStopsOnCancelledStage(t *testing.T) {
 }
 
 // TestPollReportsJobErrorMessage proves the failure text comes from the job.
-// The envelope message on the read path is always the same success sentence, so
-// reporting it told every user their job failed because progress was retrieved.
+// The envelope message on the read path is always the same success sentence.
+// A poller that reports it tells every user their job failed because progress
+// was retrieved.
 func TestPollReportsJobErrorMessage(t *testing.T) {
 	t.Run("prefers the job errorMessage", func(t *testing.T) {
 		gpcnClient, _ := jobsServer(t, `{"success":true,"message":"Job progress retrieved successfully",`+
@@ -152,9 +153,9 @@ func TestPollReportsJobErrorMessage(t *testing.T) {
 	})
 }
 
-// TestPollFailsFastOnInvisibleJob proves an empty jobs array ends the poll. The
-// API omits a job that does not exist or belongs to another tenant, so an empty
-// array is permanent and no amount of waiting changes it.
+// TestPollFailsFastOnInvisibleJob proves an empty jobs array ends the poll.
+// The array stays empty for a job the caller may never see. A poller that keeps
+// asking only burns the timeout.
 func TestPollFailsFastOnInvisibleJob(t *testing.T) {
 	gpcnClient, calls := jobsServer(t, `{"success":true,"message":"Job progress retrieved successfully","data":{"jobs":[]}}`)
 

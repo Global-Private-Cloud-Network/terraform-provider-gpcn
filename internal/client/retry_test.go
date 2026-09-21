@@ -35,9 +35,9 @@ func retryAfterServer(t *testing.T, retryAfterSeconds int) (*httptest.Server, *a
 }
 
 // TestDoWithRetryHonoursRetryAfter proves the retry waits the interval the API
-// asked for instead of its own backoff, and that the configured maximum delay
-// still bounds the wait. A rate limiter can ask for fourteen minutes, which no
-// Terraform apply should sit through.
+// asks for. The retry uses that interval instead of its own backoff. The
+// configured maximum delay still bounds the wait, because a rate limiter can
+// ask for fourteen minutes.
 func TestDoWithRetryHonoursRetryAfter(t *testing.T) {
 	t.Run("caps a long retryAfter at the maximum delay", func(t *testing.T) {
 		server, attempts := retryAfterServer(t, 840)

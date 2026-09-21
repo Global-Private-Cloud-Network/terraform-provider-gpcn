@@ -16,8 +16,8 @@ import (
 const AuthCredentialKindAPIKey = "api_key"
 
 // AuthCheckCredential describes the credential that authenticated the call.
-// Every nullable field is a pointer, because the API sends null for a value it
-// does not have and an empty string is a value.
+// Every nullable field is a pointer. The API sends null for a value it does not
+// have, and an empty string is a value.
 type AuthCheckCredential struct {
 	Kind      string  `json:"kind"`
 	ID        string  `json:"id"`
@@ -48,8 +48,8 @@ type authCheckResponse struct {
 }
 
 // AuthCheck asks the API who the configured key is, and stashes the tenant and
-// the permission ceiling it reports. It is the cheapest authenticated call, it
-// needs no permission, and it is the only one that reports the key's kind and
+// the permission ceiling it reports. It is the cheapest authenticated call, and
+// it needs no permission. It is the only call that reports the key's kind and
 // lifetime.
 func (c *GpcnClient) AuthCheck(ctx context.Context) (*AuthCheckData, error) {
 	ctx = WithCorrelationID(ctx)
