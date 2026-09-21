@@ -38,8 +38,9 @@ const (
 )
 
 // The messages GPCN's own super-CIDR refinement raises, byte for byte
-// (src/components/vpc/vpc.validation.ts:31,38,45). The plan and the API refuse
-// the same strings only while these agree.
+// (src/components/vpc/vpc.validation.ts:31,38,45). A refused plan names the
+// rule in the API's own words. The API trims its input first, so the plan also
+// refuses a CIDR that carries surrounding spaces.
 const (
 	ErrDetailVpcCidrShape      = "must be a valid IPv4 CIDR whose address is the network address (e.g. 10.50.0.0/16)"
 	ErrDetailVpcCidrPrefixBand = "prefix must be between /16 and /24"
