@@ -537,32 +537,6 @@ func TestCanonicalVolumeTypeAcceptsCodesAndNamesUnit(t *testing.T) {
 			}
 		}
 	})
-
-	// A degraded volume has no code, and the API names it "Unknown".
-	t.Run("import_prefers_the_code_then_the_name", func(t *testing.T) {
-		cases := []struct {
-			name     string
-			code     string
-			expected string
-		}{
-			{name: "SSD", code: "vol-add-ssd", expected: "vol-add-ssd"},
-			{name: "nvme", code: "vol-add-nvme", expected: "vol-add-nvme"},
-			{name: "Unknown", code: "vol-add-ultra", expected: "vol-add-ultra"},
-			{name: "ULTRA", code: "vol-add-ultra", expected: "vol-add-ultra"},
-			{name: "Unknown", code: "", expected: "Unknown"},
-		}
-		for _, testCase := range cases {
-			response := newVolumeResponse("volume-123", "imported-volume", 256, "sku-uuid-10")
-			response.Data.VolumeType.Name = testCase.name
-			response.Data.VolumeType.Code = testCase.code
-
-			result := MapVolumeResponseToModel(context.Background(), response, ResourceModel{})
-
-			if result.VolumeType.ValueString() != testCase.expected {
-				t.Errorf("name %q code %q: expected VolumeType %q, got %q", testCase.name, testCase.code, testCase.expected, result.VolumeType.ValueString())
-			}
-		}
-	})
 }
 
 func TestMapVolumeResponseToModelImportKeepsNullOnEmptyUnit(t *testing.T) {
@@ -598,8 +572,8 @@ func TestMapVolumeResponseToModelImportPopulatesUnit(t *testing.T) {
 	if result.DatacenterId.ValueString() != testDatacenterID {
 		t.Errorf("Expected DatacenterId '%s', got '%s'", testDatacenterID, result.DatacenterId.ValueString())
 	}
-	if result.VolumeType.ValueString() != "vol-add-ssd" {
-		t.Errorf("Expected VolumeType 'vol-add-ssd', got '%s'", result.VolumeType.ValueString())
+	if result.VolumeType.ValueString() != "SSD" {
+		t.Errorf("Expected VolumeType 'SSD', got '%s'", result.VolumeType.ValueString())
 	}
 }
 
@@ -624,5 +598,27 @@ func TestMapVolumeResponseToModelKeepsPlanValuesUnit(t *testing.T) {
 	}
 	if result.VolumeType.ValueString() != "SSD" {
 		t.Errorf("Expected VolumeType 'SSD', got '%s'", result.VolumeType.ValueString())
+	}
+}
+
+// A configuration spells a built-in storage class by its alias, so an import
+// that writes the code plans a replacement.
+func TestImportedVolumeTypePrefersAliasUnit(t *testing.T) {
+	cases := []struct {
+		name     string
+		code     string
+		expected string
+	}{
+		{name: "SSD", code: "vol-add-ssd", expected: "SSD"},
+		{name: "NVMe", code: "vol-add-nvme", expected: "NVMe"},
+		{name: "ULTRA", code: "vol-add-ultra", expected: "vol-add-ultra"},
+		{name: "Unknown", code: "vol-add-ultra", expected: "vol-add-ultra"},
+		{name: "Unknown", code: "", expected: "Unknown"},
+	}
+	for _, testCase := range cases {
+		got := importedVolumeType(volumeTypeResponse{Name: testCase.name, Code: testCase.code})
+		if got.ValueString() != testCase.expected {
+			t.Errorf("name %q code %q: expected %q, got %q", testCase.name, testCase.code, testCase.expected, got.ValueString())
+		}
 	}
 }

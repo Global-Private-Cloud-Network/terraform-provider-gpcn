@@ -83,16 +83,26 @@ func setModelValuesNotPresent(response *readVolumesResponse, model ResourceModel
 	return model
 }
 
-// The code is the value the catalog lookup takes, so an import writes it.
 // A volume can have no code, and the API names such a volume "Unknown".
 func importedVolumeType(volumeType volumeTypeResponse) types.String {
 	if volumeType.Code != "" {
-		return types.StringValue(volumeType.Code)
+		return types.StringValue(volumeTypeAliasForCode(volumeType.Code))
 	}
 	if volumeType.Name != "" {
 		return types.StringValue(volumeType.Name)
 	}
 	return types.StringNull()
+}
+
+// A configuration spells a built-in storage class by its alias. An import that
+// writes the code instead plans a replacement.
+func volumeTypeAliasForCode(code string) string {
+	for alias, aliasCode := range volumeTypeMapping {
+		if aliasCode == code {
+			return alias
+		}
+	}
+	return code
 }
 
 // An alias can arrive in any case. The mapping lookup takes the normalised key.
