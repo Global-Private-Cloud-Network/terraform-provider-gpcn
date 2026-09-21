@@ -383,6 +383,60 @@ func TestUpdateVolumeLooksUpSkuByComponentCodeMockHTTP(t *testing.T) {
 	}
 }
 
+// The platform cannot always resolve the SKU of a volume, and the API names such
+// a volume "Unknown". No datacenter offers that as a component code, so the
+// catalog refuses the resize and names the codes it does offer.
+func TestUpdateVolumeRefusesUnresolvableTypeMockHTTP(t *testing.T) {
+	const (
+		offeredCode = "vol-add-ssd"
+		volumeID    = "volume-update-unknown"
+		newSizeGb   = int64(512)
+	)
+
+	var resizeCalled bool
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/data-centers/") && strings.HasSuffix(r.URL.Path, "/volume-sizes"):
+				testutil.WriteJSONResponse(w, newVolumeSizesResponseForCode(testDatacenterID, offeredCode, []volumeSizesDataVolumeTypesAvailableSizesResponse{
+					{SkuId: "sku-ssd-512", SizeGb: newSizeGb},
+				}))
+
+			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+volumeID+"/resize"):
+				resizeCalled = true
+				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
+					Success: true,
+					Message: "Volume resize job started",
+					Data:    client.JobResponse{JobID: "job-unknown"},
+				})
+
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	model := createTestVolumeModel("degraded-volume", "Unknown", newSizeGb)
+	model.ID = types.StringValue(volumeID)
+
+	_, err := UpdateVolume(gpcnClient, context.Background(), volumeID, model)
+	if err == nil {
+		t.Fatal("Expected UpdateVolume to fail for an unresolvable volume type")
+	}
+	if !strings.Contains(err.Error(), "not available for this datacenter") {
+		t.Errorf("Expected a datacenter refusal, got '%s'", err.Error())
+	}
+	if !strings.Contains(err.Error(), offeredCode) {
+		t.Errorf("Expected the refusal to list '%s', got '%s'", offeredCode, err.Error())
+	}
+	if resizeCalled {
+		t.Error("Expected no resize request for an unresolvable volume type")
+	}
+}
+
 func TestGetVolumeSkuIdMockHTTP(t *testing.T) {
 	const (
 		componentCode = "vol-add-ssd"
@@ -484,7 +538,6 @@ func TestCanonicalVolumeTypeAcceptsCodesAndNamesUnit(t *testing.T) {
 		}
 	})
 
-	// The code is the value the catalog lookup takes, so an import writes it.
 	// A degraded volume has no code, and the API names it "Unknown".
 	t.Run("import_prefers_the_code_then_the_name", func(t *testing.T) {
 		cases := []struct {
