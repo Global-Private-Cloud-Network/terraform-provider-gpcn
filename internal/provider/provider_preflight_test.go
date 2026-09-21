@@ -88,7 +88,7 @@ func TestConfigurePreflightRejectsRevokedKey(t *testing.T) {
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{{
 			Config:      preflightConfig(server.URL),
-			ExpectError: regexp.MustCompile(`API key rejected`),
+			ExpectError: regexp.MustCompile(`API key rejected[\s\S]*hourly\s+request\s+limit\s+\(1000\s+per\s+hour\)`),
 		}},
 	})
 
