@@ -316,6 +316,7 @@ func (p *gpcnProvider) Resources(_ context.Context) []func() resource.Resource {
 		NewResourceGroupResource,
 		NewSSHKeyResource,
 		NewVirtualMachinesResource,
+		NewVPCPublicIpResource,
 		NewVolumeAttachmentResource,
 		NewVolumesResource,
 	}
