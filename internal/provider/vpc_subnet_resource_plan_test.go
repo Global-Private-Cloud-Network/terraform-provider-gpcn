@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,11 @@ import (
 	"testing"
 
 	"terraform-provider-gpcn/internal/testutil"
+	"terraform-provider-gpcn/internal/vpcsubnets"
+
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
@@ -17,13 +23,15 @@ import (
 )
 
 const (
-	subnetPlanTestVpcID      = "11111111-1111-4111-8111-111111111111"
-	subnetPlanTestID         = "22222222-2222-4222-8222-222222222222"
-	subnetPlanTestDefaultNsg = "33333333-3333-4333-8333-333333333333"
-	subnetPlanTestOtherNsg   = "44444444-4444-4444-8444-444444444444"
-	subnetPlanTestCIDR       = "10.50.1.0/24"
-	subnetPlanTestTimestamp  = "2026-01-02T15:04:05Z"
-	gpcnVpcSubnetTest        = "gpcn_vpc_subnet.test"
+	subnetPlanTestVpcID        = "11111111-1111-4111-8111-111111111111"
+	subnetPlanTestID           = "22222222-2222-4222-8222-222222222222"
+	subnetPlanTestDefaultNsg   = "33333333-3333-4333-8333-333333333333"
+	subnetPlanTestOtherNsg     = "44444444-4444-4444-8444-444444444444"
+	subnetPlanTestCIDR         = "10.50.1.0/24"
+	subnetPlanTestTimestamp    = "2026-01-02T15:04:05Z"
+	subnetPlanTestRFC850       = "Friday, 02-Jan-26 15:04:05 UTC"
+	subnetPlanTestFailedReason = "the provider rejected the allocation"
+	gpcnVpcSubnetTest          = "gpcn_vpc_subnet.test"
 )
 
 // subnetPlanTestServerState is the row the mock keeps between requests. A read
@@ -726,4 +734,90 @@ func TestVpcSubnetResourcePlanReplacesOnChangedPrefix(t *testing.T) {
 			},
 		},
 	})
+}
+
+// The plan harness carries no warning assertion, so Read is driven directly. A
+// test on the constructor alone leaves the call site unguarded.
+func TestVpcSubnetReadWarnsOnFailedSubnetUnit(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	readInState := func(rowState, failureReason string) fwresource.ReadResponse {
+		t.Helper()
+
+		row := &subnetPlanTestServerState{
+			name:          "subnet-plan-a",
+			nsgID:         subnetPlanTestDefaultNsg,
+			nsgName:       "default",
+			cidr:          subnetPlanTestCIDR,
+			rowState:      rowState,
+			failureReason: failureReason,
+		}
+
+		_, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+			T: t,
+			Handler: func(w http.ResponseWriter, _ *http.Request) {
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"message": "",
+					"data":    []map[string]any{row.row()},
+					"meta":    map[string]any{"total": 1, "page": 1, "pageSize": 100, "totalPages": 1},
+				})
+			},
+		})
+
+		subnetResource := &vpcSubnetResource{client: gpcnClient}
+
+		var schemaResponse fwresource.SchemaResponse
+		subnetResource.Schema(ctx, fwresource.SchemaRequest{}, &schemaResponse)
+
+		priorState := tfsdk.State{Schema: schemaResponse.Schema}
+		diags := priorState.Set(ctx, vpcsubnets.ResourceModel{
+			ID:               types.StringValue(subnetPlanTestID),
+			VpcID:            types.StringValue(subnetPlanTestVpcID),
+			Name:             types.StringValue("subnet-plan-a"),
+			Description:      types.StringValue(""),
+			CIDR:             types.StringValue(subnetPlanTestCIDR),
+			Prefix:           types.Int64Value(24),
+			NsgID:            types.StringValue(subnetPlanTestDefaultNsg),
+			NsgName:          types.StringValue("default"),
+			State:            types.StringValue("ready"),
+			AttachedNicCount: types.Int64Value(0),
+			FailureReason:    types.StringNull(),
+			CreatedTime:      types.StringValue(subnetPlanTestRFC850),
+			LastUpdated:      types.StringValue(subnetPlanTestRFC850),
+		})
+		if diags.HasError() {
+			t.Fatalf("failed to build the prior state: %v", diags)
+		}
+
+		readResponse := fwresource.ReadResponse{
+			State: tfsdk.State{Schema: schemaResponse.Schema, Raw: priorState.Raw},
+		}
+		subnetResource.Read(ctx, fwresource.ReadRequest{State: priorState}, &readResponse)
+
+		if readResponse.Diagnostics.HasError() {
+			t.Fatalf("Read reported errors: %v", readResponse.Diagnostics.Errors())
+		}
+		return readResponse
+	}
+
+	failed := readInState("failed", subnetPlanTestFailedReason)
+	warnings := failed.Diagnostics.Warnings()
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %v, want exactly one", warnings)
+	}
+	if got := warnings[0].Summary(); got != "GPCN VPC subnet is in the failed state" {
+		t.Errorf("summary = %q, want %q", got, "GPCN VPC subnet is in the failed state")
+	}
+	wantDetail := fmt.Sprintf(vpcsubnets.WarnDetailSubnetFailed, subnetPlanTestID, subnetPlanTestFailedReason)
+	if got := warnings[0].Detail(); got != wantDetail {
+		t.Errorf("detail = %q, want %q", got, wantDetail)
+	}
+
+	ready := readInState("ready", "")
+	if got := ready.Diagnostics.WarningsCount(); got != 0 {
+		t.Errorf("warnings for a ready subnet = %d, want 0", got)
+	}
 }
