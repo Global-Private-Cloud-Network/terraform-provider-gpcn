@@ -743,6 +743,12 @@ func TestVpcResourcePlanRefusesAnIllegalNameserverList(t *testing.T) {
 				Config:      withNameservers(`["9.9.9.9", "9.9.9.9"]`),
 				ExpectError: regexp.MustCompile(`contains duplicate values of`),
 			},
+			// Terraform hard-wraps a diagnostic, so the count and the noun can
+			// land on separate lines.
+			{
+				Config:      withNameservers(`[]`),
+				ExpectError: regexp.MustCompile(`at least 1\s+elements`),
+			},
 		},
 	})
 }
