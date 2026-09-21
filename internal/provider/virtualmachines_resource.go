@@ -329,13 +329,35 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 		attached := []string{networkIds[0]}
 		var attachErr error
 		failedNetworkId := ""
-		for _, networkId := range networkIds[1:] {
-			attachErr = networks.AddNetworkInterface(r.client, ctx, plan.ID.ValueString(), networkId)
-			if attachErr != nil {
-				failedNetworkId = networkId
-				break
+
+		// GPCN refuses an add-NIC on a running machine whose image has no network
+		// hotplug. The update path takes the same gate.
+		stopped := false
+		if !plan.NetworkHotplug.ValueBool() {
+			if stopErr := virtualmachines.StopVirtualMachine(r.client, ctx, plan.ID.ValueString()); stopErr != nil {
+				attachErr = fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStoppingVM, plan.ID.ValueString()), stopErr)
+				failedNetworkId = networkIds[1]
+			} else {
+				stopped = true
 			}
-			attached = append(attached, networkId)
+		}
+
+		if attachErr == nil {
+			for _, networkId := range networkIds[1:] {
+				attachErr = networks.AddNetworkInterface(r.client, ctx, plan.ID.ValueString(), networkId)
+				if attachErr != nil {
+					failedNetworkId = networkId
+					break
+				}
+				attached = append(attached, networkId)
+			}
+		}
+
+		// A machine the provider stopped must run again, even after a refused attach.
+		if stopped {
+			if startErr := virtualmachines.StartVirtualMachine(r.client, ctx, plan.ID.ValueString()); startErr != nil {
+				tflog.Debug(ctx, fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStartingVM, plan.ID.ValueString()), startErr).Error())
+			}
 		}
 
 		plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)

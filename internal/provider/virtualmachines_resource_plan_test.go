@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 const (
@@ -565,4 +567,147 @@ func TestVirtualMachineResourcePlanDestroyTreatsDeletingAsGone(t *testing.T) {
 			},
 		},
 	})
+}
+
+const vmPlanTestPath = "/v1/resource/virtual-machines/" + vmPlanTestID
+
+// vmPlanTestReadBodyWithHotplug reports whether the image carries network hotplug. GPCN
+// refuses an add-NIC on a running machine whose image lacks it.
+func vmPlanTestReadBodyWithHotplug(name, status string, hotplug int) map[string]any {
+	body := vmPlanTestReadBody(name, status, vmPlanTestSizeID)
+	body["data"].(map[string]any)["networkHotplug"] = hotplug
+	return body
+}
+
+// startVirtualMachineHotplugMockServer accepts every call and records the order in which
+// they arrive. A test reads the order to learn whether the provider stopped the machine
+// around the post-create attach.
+func startVirtualMachineHotplugMockServer(t *testing.T, hotplug int) (*httptest.Server, func() []string) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	birthNetworkID := ""
+	status := virtualmachines.VMStatusRunning.String()
+	var attached []string
+	var sequence []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		sequence = append(sequence, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			birthNetworkID, _ = body["networkId"].(string)
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			body := testutil.ReadRequestBody(r)
+			networkID, _ := body["networkId"].(string)
+			mu.Lock()
+			attached = append(attached, networkID)
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mu.Lock()
+			currentBirth := birthNetworkID
+			current := append([]string(nil), attached...)
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmAttachPlanTestNetworkInterfacesBody(currentBirth, current))
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/start":
+			mu.Lock()
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, hotplug))
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	recorded := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), sequence...)
+	}
+
+	return server, recorded
+}
+
+func indexOfRequest(sequence []string, request string) int {
+	return slices.Index(sequence, request)
+}
+
+// GPCN refuses an add-NIC on a running machine whose image lacks network hotplug. The
+// post-create attach therefore takes the same gate the update path takes.
+func TestVirtualMachineResourcePlanCreateStopsForAttachWithoutHotplug(t *testing.T) {
+	tests := []struct {
+		name          string
+		hotplug       int
+		expectStopped bool
+	}{
+		{"without hotplug the machine stops around the attach", 0, true},
+		{"with hotplug the machine stays running", 1, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			shortenVirtualMachinePolling(t)
+			server, recorded := startVirtualMachineHotplugMockServer(t, tc.hotplug)
+
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config: vmAttachPlanTestConfig(server.URL, "vm-plan-hotplug"),
+						Check: func(*terraform.State) error {
+							sequence := recorded()
+							attach := indexOfRequest(sequence, "POST "+vmPlanTestPath+"/network-interfaces")
+							stop := indexOfRequest(sequence, "POST "+vmPlanTestPath+"/stop")
+							start := indexOfRequest(sequence, "POST "+vmPlanTestPath+"/start")
+							if attach < 0 {
+								return fmt.Errorf("expected an attach call, got %v", sequence)
+							}
+							if !tc.expectStopped {
+								if stop >= 0 || start >= 0 {
+									return fmt.Errorf("expected no stop or start, got %v", sequence)
+								}
+								return nil
+							}
+							if stop < 0 || stop > attach {
+								return fmt.Errorf("expected a stop before the attach, got %v", sequence)
+							}
+							if start < 0 || start < attach {
+								return fmt.Errorf("expected a start after the attach, got %v", sequence)
+							}
+							return nil
+						},
+					},
+				},
+			})
+		})
+	}
 }
