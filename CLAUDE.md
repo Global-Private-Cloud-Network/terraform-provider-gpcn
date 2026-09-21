@@ -66,7 +66,7 @@ That is the usual shape, not a rule. Packages add topic files: `networks` has
 
 Exceptions:
 
-- `internal/volumeattachments` has no `constants.go` — it composes `volumes` and `virtualmachines` and reuses their endpoints.
+- `internal/volumeattachments` has no `constants.go` — it composes `volumes` and reuses its endpoints.
 - `internal/datacenters` holds only constants and errors; its HTTP is inline in `internal/provider/datacenter_data_source.go`. Copy the newer data-source packages (`internal/virtualmachinesizes`, `internal/virtualmachineimages`) instead.
 
 Shared helpers live in `internal/helpers` and `internal/testutil`.
@@ -80,7 +80,9 @@ Resource schema definitions live in `internal/provider/{resource}_resource.go`.
 3. **Read refresh**: `gpcn_gpu`, `gpcn_network` and `gpcn_virtualmachine` have a `Refresh<X>ModelFromResponse` that Read calls after the mapper. Each one refreshes `name` only, because Terraform reconciles a rename in place. Every other configured attribute keeps the configured value, because reconciling an out-of-band change to it can destroy the resource. On `gpcn_virtualmachine` that covers `size_id`: a refreshed value plans a downgrade, and the API refuses one. On `gpcn_volume` it covers `name` and `size_gb`, so neither refreshes and the resource has no such function. A drifted volume name requires replacement, and a drifted grow plans a shrink that requires one. `gpcn_ssh_key` and `gpcn_resource_group` refresh `name` inside their shared mapper, which Create and Update call too. `gpcn_volume_attachment` refreshes nothing; its Read compares the attached VM id. Create and Update keep the planned values
 4. **Error/Logging Constants**: Centralized in each resource's `errors.go` and `logging.go`
 5. **API Versioning**: All endpoints use versioned paths (e.g., `/v1/resource/virtual-machines/`), defined in each resource's `constants.go`
-6. **Internal import direction**: `client` and `helpers` are leaves; `networks` builds on them, `virtualmachines` on `networks`, `volumeattachments` on `virtualmachines` and `volumes`. Keep it acyclic
+6. **Internal import direction**: `client` and `helpers` are leaves; `networks` builds on them, `virtualmachines` on `networks`, `volumeattachments` on `volumes` and `client` only. Keep it acyclic
+7. **Plan-test mocks serve the preflight**: `Configure` calls `GET /v1/auth/check` before any resource work, so every `httptest` mock behind a `resource.UnitTest` must answer it with `testutil.HandleAuthCheck`, or every step fails with `Cannot reach the GPCN API`
+8. **`gpcn_network` is deprecated**: `ModifyPlan` refuses a create (prior state null) with `ErrDetailNetworkCreateRetired`; existing networks still read, update and destroy. GPU series are validated against the live inventory (`CheckInventory`), never a fixed list. `volume_type` accepts `SSD`, `NVMe` or a storage component code; import writes the alias for the built-in classes
 
 ### Virtual Machine Specifics
 
@@ -113,7 +115,7 @@ acceptance test by that call, and pass its exact function name to
 five longer names that start with it.
 
 - **Unit tests**: `testutil.SetupMockServerWithGpcnClient` (`internal/testutil/mock_http.go`) serves mocked HTTP. It bypasses `authTransport`, so not-found and `HTTPError` paths cannot be tested through it — use `testutil.SetupMockServerWithRealTransport`, or `client.NewGpcnClient` against an `httptest` server, for those. Run with `make test`.
-- **Acceptance tests**: Create real resources, and there are no sweepers, so a failed run leaves them behind. Run with `make testacc`. Run individual tests to iterate faster.
+- **Acceptance tests**: Create real resources, and there are no sweepers, so a failed run leaves them behind. Run with `make testacc`. Run individual tests to iterate faster. The network and virtual machine cases read `GPCN_TEST_NETWORK_ID` (an existing network the key can see) and skip when it is unset, because the provider refuses to create a `gpcn_network`.
 
 ## Documentation
 
