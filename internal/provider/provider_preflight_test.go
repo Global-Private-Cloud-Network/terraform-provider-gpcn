@@ -9,8 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 )
 
@@ -136,6 +138,74 @@ func TestConfigurePreflightWarnsOnExpiry(t *testing.T) {
 
 	if got := int(authCheckCalls.Load()); got < 1 {
 		t.Errorf("auth check calls = %d, want at least 1", got)
+	}
+}
+
+// TestConfigurePreflightWarningBytes pins the warning sentences. The test
+// harness runs a step to completion or not at all, so it cannot read a warning
+// back; the diagnostics are asserted where they are built.
+func TestConfigurePreflightWarningBytes(t *testing.T) {
+	stringPtr := func(value string) *string { return &value }
+
+	soon := time.Now().Add(48 * time.Hour).UTC().Format(time.RFC3339)
+	later := time.Now().Add(30 * 24 * time.Hour).UTC().Format(time.RFC3339)
+
+	tests := []struct {
+		name        string
+		credential  *client.AuthCheckCredential
+		wantSummary string
+		wantDetail  string
+	}{
+		{
+			name:       "no credential",
+			credential: nil,
+		},
+		{
+			name:       "an api key with no expiry",
+			credential: &client.AuthCheckCredential{Kind: "api_key", KeyStart: stringPtr("gpcn_test")},
+		},
+		{
+			name:       "an api key that expires past the window",
+			credential: &client.AuthCheckCredential{Kind: "api_key", ExpiresAt: &later},
+		},
+		{
+			name:        "an api key that expires inside the window",
+			credential:  &client.AuthCheckCredential{Kind: "api_key", ExpiresAt: &soon},
+			wantSummary: "API key expires soon",
+			wantDetail:  "The API key expires at " + soon + ".",
+		},
+		{
+			name:        "a credential of another kind",
+			credential:  &client.AuthCheckCredential{Kind: "session"},
+			wantSummary: "The configured credential is not an API key",
+			wantDetail:  `GPCN reports credential kind "session".`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var diags diag.Diagnostics
+			reportPreflight(t.Context(), &client.AuthCheckData{Credential: tt.credential}, &diags)
+
+			if diags.HasError() {
+				t.Fatalf("preflight added an error diagnostic: %v", diags.Errors())
+			}
+			if tt.wantSummary == "" {
+				if len(diags) != 0 {
+					t.Fatalf("diagnostics = %v, want none", diags)
+				}
+				return
+			}
+			if len(diags) != 1 {
+				t.Fatalf("diagnostics = %v, want exactly one warning", diags)
+			}
+			if got := diags[0].Summary(); got != tt.wantSummary {
+				t.Errorf("summary = %q, want %q", got, tt.wantSummary)
+			}
+			if got := diags[0].Detail(); got != tt.wantDetail {
+				t.Errorf("detail = %q, want %q", got, tt.wantDetail)
+			}
+		})
 	}
 }
 
