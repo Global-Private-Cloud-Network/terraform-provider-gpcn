@@ -76,11 +76,15 @@ func (s *nsgPlanTestServerState) storeRules(body map[string]any) {
 }
 
 func (s *nsgPlanTestServerState) detail() map[string]any {
+	var description any
+	if s.description != "" {
+		description = s.description
+	}
 	return map[string]any{
 		"nsg": map[string]any{
 			"id":            nsgPlanTestID,
 			"name":          s.name,
-			"description":   nil,
+			"description":   description,
 			"isDefault":     s.isDefault,
 			"state":         "ready",
 			"failureReason": nil,
@@ -184,6 +188,13 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 }
 
 func nsgPlanTestConfig(host, name, rules string) string {
+	return nsgPlanTestConfigWithDescription(host, name, "", rules)
+}
+
+func nsgPlanTestConfigWithDescription(host, name, description, rules string) string {
+	if description != "" {
+		description = fmt.Sprintf("  description = %q\n", description)
+	}
 	return fmt.Sprintf(`
 provider "gpcn" {
   host    = %q
@@ -193,9 +204,9 @@ provider "gpcn" {
 resource "gpcn_vpc_nsg" "test" {
   vpc_id = %q
   name   = %q
-%s
+%s%s
 }
-`, host, nsgPlanTestVpcID, name, rules)
+`, host, nsgPlanTestVpcID, name, description, rules)
 }
 
 // The rules PUT is a full replace, so a configuration that drops one rule must
@@ -513,6 +524,40 @@ func TestVpcNsgResourcePlanReplacesRulesOnDefaultGroup(t *testing.T) {
 					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "rule.#", "2"),
 					lastRulesPutCount(2),
 				),
+			},
+		},
+	})
+}
+
+// Terraform reconciles a description in place, so Read must show the one GPCN
+// holds. A refresh that kept the stale value would plan nothing and leave the
+// drift in place.
+func TestVpcNsgResourcePlanRefreshesDescription(t *testing.T) {
+	t.Parallel()
+	server, state := startNsgPlanMockServer(t)
+
+	config := nsgPlanTestConfigWithDescription(server.URL, "nsg-plan-a", "web tier", nsgPlanTestRuleHTTPS)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check:  resource.TestCheckResourceAttr(gpcnVpcNsgTest, "description", "web tier"),
+			},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					state.description = "changed out of band"
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcNsgTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(gpcnVpcNsgTest, "description", "web tier"),
 			},
 		},
 	})

@@ -420,3 +420,34 @@ func TestNoOuterWhitespaceValidatorUnit(t *testing.T) {
 		})
 	}
 }
+
+// Terraform reconciles a description in place, so Read shows the one GPCN
+// holds. A null description reads as the empty string the schema defaults to.
+func TestRefreshNsgModelFromResponseUpdatesDescriptionUnit(t *testing.T) {
+	t.Parallel()
+
+	changed := "changed out of band"
+	detail := unitTestDetail()
+	detail.Nsg.Description = &changed
+
+	model, diags := RefreshNsgModelFromResponse(context.Background(), detail, ResourceModel{
+		Description: types.StringValue("web tier"),
+	})
+	if diags.HasError() {
+		t.Fatalf("expected no diagnostics, got %v", diags)
+	}
+	if got := model.Description.ValueString(); got != changed {
+		t.Errorf("expected the refreshed description %q, got %q", changed, got)
+	}
+
+	detail.Nsg.Description = nil
+	model, diags = RefreshNsgModelFromResponse(context.Background(), detail, ResourceModel{
+		Description: types.StringValue("web tier"),
+	})
+	if diags.HasError() {
+		t.Fatalf("expected no diagnostics, got %v", diags)
+	}
+	if got := model.Description.ValueString(); got != "" {
+		t.Errorf("expected a cleared description to read as the empty string, got %q", got)
+	}
+}

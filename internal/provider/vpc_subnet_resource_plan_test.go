@@ -56,10 +56,14 @@ func (s *subnetPlanTestServerState) row() map[string]any {
 	if s.failureReason != "" {
 		failureReason = s.failureReason
 	}
+	var description any
+	if s.description != "" {
+		description = s.description
+	}
 	return map[string]any{
 		"id":               subnetPlanTestID,
 		"name":             s.name,
-		"description":      nil,
+		"description":      description,
 		"cidr":             subnetPlanTestCIDR,
 		"state":            s.rowState,
 		"nsgId":            s.nsgID,
@@ -541,6 +545,40 @@ func TestVpcSubnetResourcePlanReadsFailedSubnet(t *testing.T) {
 					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "state", "failed"),
 					resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "failure_reason", "the provider rejected the allocation"),
 				),
+			},
+		},
+	})
+}
+
+// Terraform reconciles a description in place, so Read must show the one GPCN
+// holds. A refresh that kept the stale value would plan nothing and leave the
+// drift in place.
+func TestVpcSubnetResourcePlanRefreshesDescription(t *testing.T) {
+	t.Parallel()
+	server, state := startSubnetPlanMockServer(t)
+
+	config := subnetPlanTestConfig(server.URL, "subnet-plan-a", `description = "web tier"`)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check:  resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "description", "web tier"),
+			},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					state.description = "changed out of band"
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcSubnetTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(gpcnVpcSubnetTest, "description", "web tier"),
 			},
 		},
 	})

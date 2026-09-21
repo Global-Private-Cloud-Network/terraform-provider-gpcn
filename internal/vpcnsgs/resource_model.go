@@ -180,13 +180,18 @@ func MapNsgResponseToModel(ctx context.Context, response *NsgDetail, model Resou
 }
 
 // RefreshNsgModelFromResponse shows what Terraform reconciles in place: the
-// name, and the rule set this resource exists to manage. Read calls this after
-// the mapper; Create and Update keep the planned values.
+// name, the description, and the rule set this resource exists to manage. Read
+// calls this after the mapper; Create and Update keep the planned values.
 func RefreshNsgModelFromResponse(ctx context.Context, response *NsgDetail, model ResourceModel) (ResourceModel, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
 	if response.Nsg.Name != "" {
 		model.Name = types.StringValue(response.Nsg.Name)
+	}
+	if response.Nsg.Description == nil {
+		model.Description = types.StringValue("")
+	} else {
+		model.Description = types.StringValue(*response.Nsg.Description)
 	}
 
 	rules, ruleDiags := RulesToSet(ctx, response.Rules)

@@ -399,3 +399,28 @@ func TestNoOuterWhitespaceValidatorUnit(t *testing.T) {
 		})
 	}
 }
+
+// Terraform reconciles a description in place, so Read shows the one GPCN
+// holds. A null description reads as the empty string the schema defaults to.
+func TestRefreshSubnetModelFromResponseUpdatesDescriptionUnit(t *testing.T) {
+	t.Parallel()
+
+	changed := "changed out of band"
+	response := unitTestApiSubnet()
+	response.Description = &changed
+
+	model := RefreshSubnetModelFromResponse(response, ResourceModel{
+		Description: types.StringValue("web tier"),
+	})
+	if got := model.Description.ValueString(); got != changed {
+		t.Errorf("expected the refreshed description %q, got %q", changed, got)
+	}
+
+	response.Description = nil
+	model = RefreshSubnetModelFromResponse(response, ResourceModel{
+		Description: types.StringValue("web tier"),
+	})
+	if got := model.Description.ValueString(); got != "" {
+		t.Errorf("expected a cleared description to read as the empty string, got %q", got)
+	}
+}

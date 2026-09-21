@@ -102,12 +102,18 @@ func MapSubnetResponseToModel(response *ApiSubnet, model ResourceModel) Resource
 }
 
 // RefreshSubnetModelFromResponse shows the changes Terraform reconciles in
-// place: a rename and a rebind to another group. The CIDR is the allocator's
-// reservation and the prefix is request-only, so neither refreshes. Read calls
-// this after the mapper. Create and Update keep the planned values.
+// place: a rename, a new description and a rebind to another group. The CIDR is
+// the allocator's reservation and the prefix is request-only, so neither
+// refreshes. Read calls this after the mapper. Create and Update keep the
+// planned values.
 func RefreshSubnetModelFromResponse(response *ApiSubnet, model ResourceModel) ResourceModel {
 	if response.Name != "" {
 		model.Name = types.StringValue(response.Name)
+	}
+	if response.Description == nil {
+		model.Description = types.StringValue("")
+	} else {
+		model.Description = types.StringValue(*response.Description)
 	}
 	if response.NsgID != "" {
 		model.NsgID = types.StringValue(response.NsgID)
