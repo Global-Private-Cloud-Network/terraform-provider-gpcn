@@ -860,8 +860,8 @@ func TestVirtualMachineResourcePlanCreateReportsFailedRestart(t *testing.T) {
 	})
 }
 
-// The update stops the machine to attach the added network. A start that fails leaves the
-// machine stopped, and only an error tells the user so.
+// The update stops the machine to attach the added network. Only an error tells the user
+// the machine stayed stopped.
 func TestVirtualMachineResourcePlanUpdateReportsFailedRestart(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server := startVirtualMachineFailedRestartMockServer(t)
