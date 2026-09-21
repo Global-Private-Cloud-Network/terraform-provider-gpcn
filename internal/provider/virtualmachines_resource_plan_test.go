@@ -1009,7 +1009,7 @@ func TestVirtualMachineResourcePlanStartsAgainWhenAnUpdateStepFailsAfterTheStop(
 		},
 	})
 
-	// A passing apply never calls ErrorCheck, so the assertions inside it would vanish.
+	// A passing apply never calls ErrorCheck, so the assertions inside it never run.
 	if !errorCheckRan {
 		t.Error("Expected ErrorCheck to run on the failed apply, but it did not")
 	}
@@ -1038,7 +1038,7 @@ func TestVirtualMachineResourcePlanReportsLeftStoppedWhenTheStartAlsoFails(t *te
 				Config:      vmNetworkListPlanTestConfig(server.URL, "vm-plan-left-stopped-update", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
 				ExpectError: regexp.MustCompile(`(?s)Error\s+updating\s+network\s+interfaces.*Virtual\s+machine\s+left\s+stopped.*did\s+not\s+start\s+again.*then\s+run\s+terraform\s+plan\s+and\s+check\s+the\s+proposed\s+changes\s+before\s+applying\.`),
 			},
-			// The attach was refused, so a recorded change would show two networks.
+			// The attach is refused, so a recorded change shows two networks.
 			{
 				RefreshState:       true,
 				ExpectNonEmptyPlan: true,
