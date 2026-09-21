@@ -6,4 +6,5 @@ const (
 	LogStartingPerformLongPollingWithAction = "Starting PerformLongPolling for action: %s"
 	LogStartingLongPollingIteration         = "Starting long polling iteration %d for %s. Seconds spent: %d"
 	LogLongPollingCompletedSuccessfully     = "Long polling completed successfully for action: %s"
+	LogLongPollingJobProgress               = "Long polling job progress for action: %s"
 )

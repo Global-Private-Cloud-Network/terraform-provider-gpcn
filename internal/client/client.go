@@ -1,6 +1,7 @@
 package client
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +15,9 @@ import (
 type GpcnClient struct {
 	httpClient *http.Client
 	config     *Config
+	// Reported by AuthCheck at configure time. Both stay zero until then.
+	entityID    string
+	permissions []string
 }
 
 type authTransport struct {
@@ -59,10 +63,7 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 		if readErr != nil {
 			return nil, fmt.Errorf("HTTP error %d, failed to read response body: %w", resp.StatusCode, readErr)
 		}
-		return nil, &HTTPError{
-			StatusCode: resp.StatusCode,
-			Body:       string(bodyBytes),
-		}
+		return nil, newHTTPError(resp, bodyBytes)
 	}
 
 	return resp, nil
@@ -72,13 +73,88 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 type HTTPError struct {
 	StatusCode int
 	Body       string
+	Code       string
+	Message    string
+	Details    map[string]any
+	RetryAfter time.Duration
 }
 
 func (e *HTTPError) Error() string {
+	if e.Message != "" {
+		if e.Code != "" {
+			return fmt.Sprintf("HTTP %d (%s): %s", e.StatusCode, e.Code, e.Message)
+		}
+		return fmt.Sprintf("HTTP %d: %s", e.StatusCode, e.Message)
+	}
 	if e.Body != "" {
 		return fmt.Sprintf("HTTP error %d: %s", e.StatusCode, e.Body)
 	}
 	return "HTTP error " + strconv.Itoa(e.StatusCode)
+}
+
+// errorEnvelope covers the error bodies the GPCN API can answer with. Every
+// field is a pointer, because presence tells the shapes apart. The dominant
+// shape puts the sentence at the top level. The rate limiter puts it inside
+// "error", with no top-level message at all.
+type errorEnvelope struct {
+	Message *string `json:"message"`
+	Error   *struct {
+		Code       *string        `json:"code"`
+		Message    *string        `json:"message"`
+		RetryAfter *int           `json:"retryAfter"`
+		Details    map[string]any `json:"details"`
+	} `json:"error"`
+}
+
+// newHTTPError parses the response body once, where it is read. A body that
+// matches no known shape keeps Code and Message empty, so Error() falls back to
+// the raw form.
+func newHTTPError(resp *http.Response, body []byte) *HTTPError {
+	httpErr := &HTTPError{
+		StatusCode: resp.StatusCode,
+		Body:       string(body),
+	}
+
+	var envelope errorEnvelope
+	if err := json.Unmarshal(body, &envelope); err == nil {
+		switch {
+		case envelope.Message != nil && envelope.Error != nil:
+			httpErr.Message = *envelope.Message
+			httpErr.Code = derefString(envelope.Error.Code)
+			httpErr.Details = envelope.Error.Details
+		case envelope.Error != nil && envelope.Error.Message != nil:
+			httpErr.Message = *envelope.Error.Message
+			httpErr.Code = derefString(envelope.Error.Code)
+			if envelope.Error.RetryAfter != nil {
+				httpErr.RetryAfter = time.Duration(*envelope.Error.RetryAfter) * time.Second
+			}
+		case envelope.Message != nil:
+			httpErr.Message = *envelope.Message
+		}
+	}
+
+	if httpErr.RetryAfter == 0 {
+		httpErr.RetryAfter = retryAfterHeader(resp.Header)
+	}
+
+	return httpErr
+}
+
+// retryAfterHeader reads the seconds form of Retry-After. The HTTP-date form is
+// ignored, because the rate limiter only ever sends seconds.
+func retryAfterHeader(header http.Header) time.Duration {
+	seconds, err := strconv.Atoi(header.Get("Retry-After"))
+	if err != nil || seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
+}
+
+func derefString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 // IsRetryable returns true if the error is a transient failure that can be retried
@@ -164,7 +240,7 @@ func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 
 		// Don't sleep after the last attempt
 		if attempt < c.config.MaxRetries {
-			time.Sleep(delay)
+			time.Sleep(c.retryWait(delay, httpErr))
 			// Exponential backoff with cap
 			delay *= 2
 			if delay > c.config.MaxRetryDelay {
@@ -174,6 +250,19 @@ func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 	}
 
 	return nil, fmt.Errorf("%w: %w", ErrMaxRetriesExceeded, lastErr)
+}
+
+// retryWait returns how long to wait before the next attempt. An interval the
+// API asks for replaces the computed backoff. The configured maximum still
+// bounds the wait, because a rate limiter can ask for fourteen minutes.
+func (c *GpcnClient) retryWait(backoff time.Duration, httpErr *HTTPError) time.Duration {
+	if httpErr == nil || httpErr.RetryAfter <= 0 {
+		return backoff
+	}
+	if c.config.MaxRetryDelay > 0 && httpErr.RetryAfter > c.config.MaxRetryDelay {
+		return c.config.MaxRetryDelay
+	}
+	return httpErr.RetryAfter
 }
 
 // isHTTPError checks if the error is an HTTPError and assigns it to target
@@ -192,9 +281,57 @@ func isHTTPError(err error, target **HTTPError) bool {
 // subsequent operation. Delete implementations use it to treat an
 // already-deleted resource as success.
 func IsNotFound(err error) bool {
+	return hasStatus(err, http.StatusNotFound)
+}
+
+// IsForbidden reports whether err was caused by an HTTP 403 response.
+//
+// A 403 is a refusal the caller cannot retry away: the role lacks the
+// permission, the tenant lacks the feature, or the operation is walled off.
+// Read implementations separate it from a 404, which removes state.
+func IsForbidden(err error) bool {
+	return hasStatus(err, http.StatusForbidden)
+}
+
+// IsConflict reports whether err was caused by an HTTP 409 response.
+//
+// The API answers 409 when the request fights live state. An example is a name
+// already taken, or a container that still holds children.
+func IsConflict(err error) bool {
+	return hasStatus(err, http.StatusConflict)
+}
+
+// IsUnauthorized reports whether err was caused by an HTTP 401 response.
+//
+// Every credential failure answers the same 401. This means the API key no
+// longer authenticates. It never means the key lacks a permission.
+func IsUnauthorized(err error) bool {
+	return hasStatus(err, http.StatusUnauthorized)
+}
+
+// ErrorCode returns the machine-readable code the API sent, or "" when err is
+// not an HTTPError or carried an unparseable body.
+func ErrorCode(err error) string {
 	var httpErr *HTTPError
 	if ok := isHTTPError(err, &httpErr); ok {
-		return httpErr.StatusCode == http.StatusNotFound
+		return httpErr.Code
+	}
+	return ""
+}
+
+// HasErrorCode reports whether err carries exactly the given API error code.
+// An empty code never matches, so a transport failure cannot answer yes.
+func HasErrorCode(err error, code string) bool {
+	if code == "" {
+		return false
+	}
+	return ErrorCode(err) == code
+}
+
+func hasStatus(err error, status int) bool {
+	var httpErr *HTTPError
+	if ok := isHTTPError(err, &httpErr); ok {
+		return httpErr.StatusCode == status
 	}
 	return false
 }
