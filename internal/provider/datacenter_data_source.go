@@ -34,6 +34,8 @@ type datacenterDataSourceModel struct {
 	RegionName   types.String `tfsdk:"region_name"`
 	GPUEnabled   types.Bool   `tfsdk:"gpu_enabled"`
 	CustomImages types.Bool   `tfsdk:"custom_images"`
+	VPCCapable   types.Bool   `tfsdk:"vpc_capable"`
+	L2Capable    types.Bool   `tfsdk:"l2_capable"`
 	DataCenters  types.List   `tfsdk:"datacenters"`
 }
 
@@ -50,6 +52,8 @@ type datacenterRow struct {
 	ContinentName       string `json:"continentName"`
 	GPUEnabled          bool   `json:"gpuEnabled"`
 	CustomImages        bool   `json:"customImages"`
+	VPCCapable          bool   `json:"vpcCapable"`
+	L2Capable           bool   `json:"l2Capable"`
 }
 
 type datacenterMeta struct {
@@ -76,6 +80,8 @@ type datacenterDataResponseTF struct {
 	ContinentName       types.String `tfsdk:"continent_name"`
 	GPUEnabled          types.Bool   `tfsdk:"gpu_enabled"`
 	CustomImages        types.Bool   `tfsdk:"custom_images"`
+	VPCCapable          types.Bool   `tfsdk:"vpc_capable"`
+	L2Capable           types.Bool   `tfsdk:"l2_capable"`
 }
 
 func (o datacenterDataResponseTF) AttrTypes() map[string]attr.Type {
@@ -92,6 +98,8 @@ func (o datacenterDataResponseTF) AttrTypes() map[string]attr.Type {
 		"continent_name":       types.StringType,
 		"gpu_enabled":          types.BoolType,
 		"custom_images":        types.BoolType,
+		"vpc_capable":          types.BoolType,
+		"l2_capable":           types.BoolType,
 	}
 }
 
@@ -122,6 +130,14 @@ func (d *datacenterDataSource) Schema(_ context.Context, _ datasource.SchemaRequ
 			"custom_images": schema.BoolAttribute{
 				Optional:    true,
 				Description: "Filter datacenters to only those that support custom images.",
+			},
+			"vpc_capable": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Filter datacenters to only those that offer VPC networking.",
+			},
+			"l2_capable": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Filter datacenters to only those that offer layer-2 segments.",
 			},
 			"datacenters": schema.ListNestedAttribute{
 				Computed:    true,
@@ -175,6 +191,14 @@ func (d *datacenterDataSource) Schema(_ context.Context, _ datasource.SchemaRequ
 						"custom_images": schema.BoolAttribute{
 							Computed:    true,
 							Description: "Whether custom images are supported in this datacenter.",
+						},
+						"vpc_capable": schema.BoolAttribute{
+							Computed:    true,
+							Description: "Whether VPC networking is available in this datacenter.",
+						},
+						"l2_capable": schema.BoolAttribute{
+							Computed:    true,
+							Description: "Whether layer-2 segments are available in this datacenter.",
 						}},
 				},
 			},
@@ -221,6 +245,14 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 	}
 	if !state.Name.IsNull() {
 		otherFilters += "&search=" + url.QueryEscape(state.Name.ValueString())
+	}
+	// The capability filters join the other server-side filters, so the
+	// gpu_enabled explanation below still names the one value that matches none.
+	if !state.VPCCapable.IsNull() {
+		otherFilters += "&vpcCapable=" + strconv.FormatBool(state.VPCCapable.ValueBool())
+	}
+	if !state.L2Capable.IsNull() {
+		otherFilters += "&l2Capable=" + strconv.FormatBool(state.L2Capable.ValueBool())
 	}
 
 	query := otherFilters
@@ -281,6 +313,8 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 			ContinentName:       types.StringValue(datacenter.ContinentName),
 			GPUEnabled:          types.BoolValue(datacenter.GPUEnabled),
 			CustomImages:        types.BoolValue(datacenter.CustomImages),
+			VPCCapable:          types.BoolValue(datacenter.VPCCapable),
+			L2Capable:           types.BoolValue(datacenter.L2Capable),
 		})
 	}
 
