@@ -351,9 +351,9 @@ func TestGPUResourcePlanAcceptsCatalogSeriesCode(t *testing.T) {
 	})
 }
 
-// ExactlyOneOf counts any non-null value, so it accepts the empty string. An
-// empty series reaches the inventory request as "no filter", and the data
-// source then lists every series the datacenter offers.
+// An empty series_code passes ExactlyOneOf, so only the length rule refuses it.
+// The inventory request then carries no filter, and the read lists every series
+// the datacenter offers.
 func TestGPUInventoryDataSourcePlanRefusesEmptySeriesCode(t *testing.T) {
 	t.Parallel()
 	server, _, _ := startGPUPlanMockServer(t)

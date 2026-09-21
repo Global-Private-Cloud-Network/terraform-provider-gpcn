@@ -275,12 +275,9 @@ func isHTTPError(err error, target **HTTPError) bool {
 	return false
 }
 
-// IsNotFound reports whether err was caused by an HTTP 404 response.
-//
-// Read implementations use this to detect that a resource was deleted outside
-// of Terraform, so it can be removed from state rather than failing every
-// subsequent operation. Delete implementations use it to treat an
-// already-deleted resource as success.
+// A 404 means the resource is gone from the platform. A Read implementation
+// removes it from state instead of failing every later operation. A Delete
+// implementation treats it as success.
 func IsNotFound(err error) bool {
 	return hasStatus(err, http.StatusNotFound)
 }
