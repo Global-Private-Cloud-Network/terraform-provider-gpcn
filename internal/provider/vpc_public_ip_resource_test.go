@@ -1,9 +1,12 @@
 package provider
 
 import (
+	"context"
 	"os"
+	"strings"
 	"testing"
 
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
@@ -51,4 +54,26 @@ resource "gpcn_vpc_public_ip" "test" {
 			},
 		},
 	})
+}
+
+/*
+*
+----- Unit tests -----
+*
+*/
+
+// TestVPCPublicIpResourceSchemaWarnsAboutReleasingAnAttachedAddress pins the
+// warning byte for byte. GPCN releases an attached address without asking for
+// a detach, so a destroy can cut a live machine off and the schema has to say
+// so.
+func TestVPCPublicIpResourceSchemaWarnsAboutReleasingAnAttachedAddress(t *testing.T) {
+	t.Parallel()
+
+	schemaResponse := &fwresource.SchemaResponse{}
+	NewVPCPublicIpResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
+
+	const want = "GPCN releases an attached address as readily as a held one, so destroying this resource while the address serves a machine takes that machine's connectivity away."
+	if got := schemaResponse.Schema.Description; !strings.Contains(got, want) {
+		t.Errorf("Description = %q, want it to contain %q", got, want)
+	}
 }

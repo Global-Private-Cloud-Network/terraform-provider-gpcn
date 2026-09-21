@@ -41,7 +41,7 @@ func (r *vpcPublicIpResource) Metadata(_ context.Context, req resource.MetadataR
 // Schema defines the schema for the resource.
 func (r *vpcPublicIpResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Acquires an elastic public IP address from a VPC and holds it. The address stays with the VPC until it is released, so it survives the virtual machines it serves. Attach it to a network interface with gpcn_vpc_public_ip_attachment. Requires the API-key permissions vpc:read, vpc-public-ip:create and vpc-public-ip:delete.",
+		Description: "Acquires an elastic public IP address from a VPC and holds it. The address stays with the VPC until it is released, so it survives the virtual machines it serves. Attach it to a network interface with gpcn_vpc_public_ip_attachment. GPCN releases an attached address as readily as a held one, so destroying this resource while the address serves a machine takes that machine's connectivity away. Requires the API-key permissions vpc:read, vpc-public-ip:create and vpc-public-ip:delete.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the public IP address in UUID format",
