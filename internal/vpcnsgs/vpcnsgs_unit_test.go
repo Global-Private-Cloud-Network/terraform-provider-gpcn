@@ -444,3 +444,30 @@ func TestCreateNsgCarriesOneCorrelationIDUnit(t *testing.T) {
 		t.Errorf("poll correlation id = %q, want the create's %q", pollID, createID)
 	}
 }
+
+// A 202 that names no group leaves the caller with nothing to write to state.
+// The create must stop there, before the poll files a group Terraform cannot
+// name.
+func TestIssueCreateNsgRejectsResponseWithoutIDUnit(t *testing.T) {
+	t.Parallel()
+
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, _ *http.Request) {
+			testutil.WriteJSONResponse(w, map[string]any{
+				"success": true,
+				"message": "Operation initiated successfully",
+				"data":    map[string]any{"jobId": "job-create"},
+			})
+		},
+	})
+
+	_, err := IssueCreateNsg(gpcnClient, context.Background(), unitTestVpcID, "nsg-a", "", nil)
+
+	if err == nil {
+		t.Fatal("expected an error, got none")
+	}
+	if err.Error() != ErrDetailNoNsgIDInCreate {
+		t.Errorf("error = %q, want %q", err.Error(), ErrDetailNoNsgIDInCreate)
+	}
+}

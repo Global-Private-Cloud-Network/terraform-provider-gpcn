@@ -462,3 +462,37 @@ func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
 		t.Errorf("poll correlation id = %q, want the create's %q", pollID, createID)
 	}
 }
+
+// A 202 that names no subnet leaves the caller with nothing to write to state.
+// The create must stop there, before the poll files a row Terraform cannot
+// name.
+func TestIssueCreateSubnetRejectsResponseWithoutIDUnit(t *testing.T) {
+	t.Parallel()
+
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, _ *http.Request) {
+			testutil.WriteJSONResponse(w, map[string]any{
+				"success": true,
+				"message": "Operation initiated successfully",
+				"data": map[string]any{
+					"jobId":  "job-create",
+					"subnet": map[string]any{"cidr": "10.50.1.0/24", "nsgId": unitTestNsgID},
+				},
+			})
+		},
+	})
+
+	_, err := IssueCreateSubnet(gpcnClient, context.Background(), ResourceModel{
+		VpcID:       types.StringValue(unitTestVpcID),
+		Name:        types.StringValue("subnet-a"),
+		Description: types.StringValue(""),
+	})
+
+	if err == nil {
+		t.Fatal("expected an error, got none")
+	}
+	if err.Error() != ErrDetailNoSubnetIDInCreate {
+		t.Errorf("error = %q, want %q", err.Error(), ErrDetailNoSubnetIDInCreate)
+	}
+}

@@ -121,6 +121,11 @@ func IssueCreateSubnet(gpcnClient *client.GpcnClient, ctx context.Context, model
 	if err := json.Unmarshal(body, &created); err != nil {
 		return nil, err
 	}
+	// The ID is what Create writes to state before the poll. Without one the
+	// row exists and Terraform cannot name it, so the create stops here.
+	if created.Data.Subnet.ID == "" {
+		return nil, fmt.Errorf("%s", ErrDetailNoSubnetIDInCreate)
+	}
 	tflog.Info(ctx, LogIssuedCreateSubnetJob)
 
 	return &IssuedSubnet{JobID: created.Data.JobID, Subnet: created.Data.Subnet}, nil

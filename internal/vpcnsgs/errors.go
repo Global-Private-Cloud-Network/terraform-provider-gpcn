@@ -21,6 +21,7 @@ const (
 	ErrDetailUnableToDeleteNsgWithID  = "Unable to delete GPCN VPC security group with ID '%s'"
 	ErrDetailNsgCreatedJobFailed      = "security group %s was created and is in state, but its creation job failed: %s. Terraform has marked the group tainted, so the next apply deletes it and creates it again."
 	ErrDetailNsgCreatedReadBackFailed = "security group %s was created and is in state, but reading it back failed: %s. Terraform has marked the group tainted, so the next apply deletes it and creates it again."
+	ErrDetailNoNsgIDInCreate          = "the create response carried no security group ID"
 	ErrDetailImportIDFormat           = "Import ID must be '<vpc_id>/<nsg_id>'. A security group is read through its VPC, so the VPC ID cannot be derived from the group ID alone. Got: '%s'"
 )
 
