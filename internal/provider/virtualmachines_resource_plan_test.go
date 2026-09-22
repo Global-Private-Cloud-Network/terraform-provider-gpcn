@@ -2600,6 +2600,38 @@ var vmPlanTestAcquiredAddressReleaseFailedPattern = regexp.MustCompile(
 	`(?s)public\s+IP\s+` + vmPlanTestAcquiredIpID + `\s+was\s+acquired\s+for\s+virtual\s+machine\s+` +
 		vmPlanTestID + `\s+but\s+the\s+update\s+failed\s+afterwards:.*releasing\s+it\s+failed\s+too`)
 
+// vmPlanTestSentencePattern matches one rendered sentence whatever line breaks
+// Terraform puts inside it.
+func vmPlanTestSentencePattern(sentence string) *regexp.Regexp {
+	words := strings.Fields(sentence)
+	for i, word := range words {
+		words[i] = regexp.QuoteMeta(word)
+	}
+	return regexp.MustCompile(`(?s)` + strings.Join(words, `\s+`))
+}
+
+// vmPlanTestUnwindSentence renders the unwind report around the detail of the step that
+// failed. The two patterns below leave no wildcard where that detail goes, so an
+// unwind that drops it or reports the summary instead cannot match.
+func vmPlanTestUnwindSentence(stepDetail string) string {
+	return fmt.Sprintf(virtualmachines.ErrDetailAcquiredAddressReleasedAfterStepFailure,
+		vmPlanTestAcquiredIpID, vmPlanTestID, stepDetail)
+}
+
+// vmPlanTestRetriesExhausted prefixes every refusal the client gives up on. The plan
+// tests configure no retry, so the first answer of the mock exhausts them.
+const vmPlanTestRetriesExhausted = "maximum retry attempts exceeded: "
+
+// vmPlanTestResizeUnwindPattern holds the report to the resize refusal the mock answers.
+var vmPlanTestResizeUnwindPattern = vmPlanTestSentencePattern(
+	vmPlanTestUnwindSentence(vmPlanTestRetriesExhausted + "HTTP 500: resize refused"))
+
+// vmPlanTestReadBackUnwindPattern holds the report to the read-back refusal. That mock
+// answers no body, so the step detail ends with the bare status.
+var vmPlanTestReadBackUnwindPattern = vmPlanTestSentencePattern(
+	vmPlanTestUnwindSentence(virtualmachines.ErrDetailVMInfoFailedCanImport + ": " +
+		vmPlanTestRetriesExhausted + "HTTP error 500"))
+
 // vmPlanTestAcquiredAddressVerbs lists the verbs an unwound acquire leaves behind. The
 // runner issues the release in every arm. Only the platform's answer differs.
 func vmPlanTestAcquiredAddressVerbs() []string {
@@ -2630,7 +2662,7 @@ func TestVirtualMachineResourcePlanReleasesTheAcquiredAddressWhenTheResizeFails(
 			},
 			{
 				Config:      vmPublicIpSizePlanTestConfig(server.URL, "vm-plan-resize-fails", true, "", vmPlanTestSizeID2),
-				ExpectError: vmPlanTestAcquiredAddressReleasedPattern,
+				ExpectError: vmPlanTestResizeUnwindPattern,
 			},
 			{
 				Config: vmPublicIpSizePlanTestConfig(server.URL, "vm-plan-resize-fails", false, "", vmPlanTestSizeID),
@@ -2713,7 +2745,7 @@ func TestVirtualMachineResourcePlanReleasesTheAcquiredAddressWhenTheReadBackFail
 			},
 			{
 				Config:      vmPublicIpPlanTestConfig(server.URL, "vm-plan-read-back-fails", true, ""),
-				ExpectError: vmPlanTestAcquiredAddressReleasedPattern,
+				ExpectError: vmPlanTestReadBackUnwindPattern,
 			},
 			{
 				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-read-back-fails", false, ""),
