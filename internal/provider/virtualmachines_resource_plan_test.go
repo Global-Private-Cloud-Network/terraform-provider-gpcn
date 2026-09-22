@@ -2611,8 +2611,8 @@ func vmPlanTestSentencePattern(sentence string) *regexp.Regexp {
 }
 
 // vmPlanTestUnwindSentence renders the unwind report around the detail of the step that
-// failed. The two patterns below leave no wildcard where that detail goes, so an
-// unwind that drops it or reports the summary instead cannot match.
+// failed. The two patterns below leave no wildcard where that detail goes. An unwind
+// that drops the detail, or that reports the summary, cannot match.
 func vmPlanTestUnwindSentence(stepDetail string) string {
 	return fmt.Sprintf(virtualmachines.ErrDetailAcquiredAddressReleasedAfterStepFailure,
 		vmPlanTestAcquiredIpID, vmPlanTestID, stepDetail)
@@ -2853,7 +2853,7 @@ var vmPlanTestResizeErrorPattern = vmPlanTestSentencePattern(
 	virtualmachines.ErrSummaryErrorUpdatingVMSize)
 
 // The resize fails on a machine the update stopped, and the start then fails as well.
-// The release still succeeds. Three repairs reach the operator from one apply: the
+// The release still succeeds. One apply leaves the operator three repairs. They are the
 // step that failed, the machine left stopped, and the address given back.
 func TestVirtualMachineResourcePlanReportsTheStoppedMachineAndTheReleasedAddress(t *testing.T) {
 	shortenVirtualMachinePolling(t)
