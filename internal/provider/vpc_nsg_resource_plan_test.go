@@ -946,6 +946,8 @@ func TestVpcNsgReadWarnsOnFailedGroupUnit(t *testing.T) {
 	}
 
 	readInState := func(rowState, failureReason string) fwresource.ReadResponse {
+		t.Helper()
+
 		return readGroup(&nsgPlanTestServerState{
 			name:          "nsg-plan-a",
 			rules:         []map[string]any{},
