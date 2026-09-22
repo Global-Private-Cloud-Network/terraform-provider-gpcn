@@ -955,8 +955,8 @@ func TestVpcSubnetReadWarnsOnFailedSubnetUnit(t *testing.T) {
 	}
 }
 
-// The platform inserts the subnet row before it dispatches the carve job, and
-// the row holds the name and the CIDR until someone deletes it. A failed job
+// The platform inserts the subnet row before it dispatches the carve job. The
+// row then holds the name and the CIDR until someone deletes it. A failed job
 // must therefore leave the id in state. The destroy then deletes the row
 // instead of leaving the next apply to collide with it.
 func TestVpcSubnetResourcePlanKeepsTheIdWhenTheCreateJobFails(t *testing.T) {

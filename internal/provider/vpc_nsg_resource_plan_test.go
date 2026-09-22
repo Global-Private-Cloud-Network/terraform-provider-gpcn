@@ -763,7 +763,7 @@ func TestVpcNsgModifyPlanWarnsBeforeReplacingDefaultRulesUnit(t *testing.T) {
 	}
 }
 
-// GPCN inserts the group row before it dispatches the build job, and the row
+// GPCN inserts the group row before it dispatches the build job. The row then
 // holds the name until someone deletes it. A failed job must therefore leave
 // the id in state. The destroy then deletes the group instead of leaving the
 // next apply to collide with it.

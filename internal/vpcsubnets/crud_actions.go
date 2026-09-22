@@ -67,8 +67,8 @@ func subnetPath(vpcID, subnetID string) string {
 }
 
 // IssuedSubnet is what the 202 answers with. The platform inserts the row
-// before it dispatches the carve job, so the ID, the reserved CIDR and the
-// group binding are real whatever the job does next.
+// before it dispatches the carve job. The ID, the reserved CIDR and the group
+// binding are real whatever the job does next.
 type IssuedSubnet struct {
 	JobID  string
 	Subnet ApiSubnet

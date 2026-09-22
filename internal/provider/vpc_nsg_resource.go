@@ -203,8 +203,8 @@ func (r *vpcNsgResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	// GPCN inserts the group row before it dispatches the build job, and the
-	// row holds the name until someone deletes it. State must name the group,
+	// GPCN inserts the group row before it dispatches the build job. The row
+	// then holds the name until someone deletes it. State must name the group,
 	// or the next apply collides with a row Terraform cannot see.
 	resp.Diagnostics.Append(resp.State.Set(ctx, vpcnsgs.MapIssuedNsgToModel(issued.NsgID, plan))...)
 	if resp.Diagnostics.HasError() {

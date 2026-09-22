@@ -71,7 +71,8 @@ func nsgPath(vpcID, nsgID string) string {
 }
 
 // IssuedNsg is what the 202 answers with. GPCN inserts the group row before it
-// dispatches the build job, so the ID is real whatever the job does next.
+// dispatches the build job. The ID is therefore real whatever the job does
+// next.
 type IssuedNsg struct {
 	JobID string
 	NsgID string

@@ -84,9 +84,9 @@ func SubnetFailedWarning(response *ApiSubnet) diag.Diagnostics {
 	return diags
 }
 
-// MapIssuedSubnetToModel records what the 202 already knows: the ID, the block
-// the allocator reserved and the group the row is bound to. The carve job has
-// not run, so nothing else is read and every other Computed attribute is null.
+// MapIssuedSubnetToModel records what the 202 already knows. That is the ID,
+// the reserved block and the group the row is bound to. The carve job has not
+// run, so nothing else is read and every other Computed attribute is null.
 func MapIssuedSubnetToModel(response *ApiSubnet, model ResourceModel) ResourceModel {
 	model.ID = types.StringValue(response.ID)
 	model.CIDR = types.StringValue(response.CIDR)

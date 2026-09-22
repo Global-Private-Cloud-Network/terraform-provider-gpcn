@@ -179,7 +179,7 @@ func (r *vpcSubnetResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 
-	// GPCN inserts the row before it dispatches the carve job, and the row
+	// GPCN inserts the row before it dispatches the carve job. The row then
 	// holds the name and the CIDR until someone deletes it. State must name the
 	// subnet, or the next apply collides with a row Terraform cannot see.
 	resp.Diagnostics.Append(resp.State.Set(ctx, vpcsubnets.MapIssuedSubnetToModel(&issued.Subnet, plan))...)
