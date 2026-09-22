@@ -2834,6 +2834,58 @@ func TestVirtualMachineResourcePlanStartsTheMachineBeforeItReleasesTheAddress(t 
 	}
 }
 
+// vmPlanTestResizeErrorPattern matches the refused resize after Terraform wraps it.
+var vmPlanTestResizeErrorPattern = vmPlanTestSentencePattern(
+	virtualmachines.ErrSummaryErrorUpdatingVMSize)
+
+// The resize fails on a machine the update stopped, and the start then fails as well.
+// The release still succeeds. Three repairs reach the operator from one apply: the
+// step that failed, the machine left stopped, and the address given back.
+func TestVirtualMachineResourcePlanReportsTheStoppedMachineAndTheReleasedAddress(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachinePublicIpMockServer(t, vmPublicIpMockArms{
+		refuseSizeOnce: true,
+		refuseStart:    true,
+		noHotplug:      true,
+	})
+
+	errorCheckRan := false
+	var verbsAtFailure []string
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		ErrorCheck: func(err error) error {
+			errorCheckRan = true
+			verbsAtFailure = recorded()
+			if !vmPlanTestResizeErrorPattern.MatchString(err.Error()) {
+				t.Errorf("Expected the resize error, got '%s'", err.Error())
+			}
+			if !vmPlanTestLeftStoppedPattern.MatchString(err.Error()) {
+				t.Errorf("Expected the left-stopped diagnostic, got '%s'", err.Error())
+			}
+			if !vmPlanTestResizeUnwindPattern.MatchString(err.Error()) {
+				t.Errorf("Expected the released detail, got '%s'", err.Error())
+			}
+			return nil
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: vmPublicIpSizePlanTestConfig(server.URL, "vm-plan-stopped-released", false, "", vmPlanTestSizeID),
+			},
+			{
+				Config: vmPublicIpSizePlanTestConfig(server.URL, "vm-plan-stopped-released", true, "", vmPlanTestSizeID2),
+			},
+		},
+	})
+
+	if !errorCheckRan {
+		t.Error("Expected the apply to fail and ErrorCheck to run")
+	}
+	if !slices.Equal(verbsAtFailure, vmPlanTestStoppedResizeVerbs()) {
+		t.Errorf("Expected %v, got %v", vmPlanTestStoppedResizeVerbs(), verbsAtFailure)
+	}
+}
+
 // The start and the release both fail after the resize. The machine stays stopped and
 // the address stays at the platform. The operator repairs each by hand, so the report
 // carries both.
