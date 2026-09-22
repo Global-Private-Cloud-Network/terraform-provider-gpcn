@@ -140,21 +140,27 @@ func TestMapVpcResponseToModelKeepsReplaceForcingValues(t *testing.T) {
 	}
 }
 
-// Terraform reconciles a rename in place, so the name is the one configured
-// attribute a read refreshes.
-func TestRefreshVpcModelFromResponseRefreshesNameOnly(t *testing.T) {
+// Terraform reconciles a rename and a description edit in place. Every other
+// configured attribute plans a replacement, so a read leaves it alone.
+func TestRefreshVpcModelFromResponseRefreshesNameAndDescription(t *testing.T) {
 	t.Parallel()
 
 	configured := ResourceModel{
 		Name:         types.StringValue("vpc-configured"),
+		Description:  types.StringValue("stale"),
 		CIDR:         types.StringValue("10.60.0.0/16"),
 		DatacenterId: types.StringValue("dc-2"),
 	}
 	response := &readVpcResponse{Data: vpcUnitTestPayload()}
 
-	model := RefreshVpcModelFromResponse(response, configured)
+	model := RefreshVpcModelFromResponse(response, MapVpcResponseToModel(context.Background(), response, configured))
 	if got := model.Name.ValueString(); got != "vpc-from-api" {
 		t.Errorf("Name = %q, want %q", got, "vpc-from-api")
+	}
+	// The mapper carries the refresh of the description. A fill-if-null branch
+	// there leaves an out-of-band edit invisible to every plan.
+	if got := model.Description.ValueString(); got != "shared services" {
+		t.Errorf("Description = %q, want %q", got, "shared services")
 	}
 	if got := model.CIDR.ValueString(); got != "10.60.0.0/16" {
 		t.Errorf("CIDR = %q, want %q", got, "10.60.0.0/16")

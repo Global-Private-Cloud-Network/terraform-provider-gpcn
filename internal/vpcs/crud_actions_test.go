@@ -17,7 +17,9 @@ const vpcNotActiveBody = `{"success":false,` +
 // vpcDeleteMock answers the first delete with the refusal a creating VPC
 // raises, and the second with the teardown job.
 type vpcDeleteMock struct {
-	mutex       sync.Mutex
+	mutex sync.Mutex
+	// refusals is how many DELETEs answer VPC_NOT_ACTIVE before one is taken.
+	refusals    int
 	status      string
 	activeJobID any
 	deletes     int
@@ -39,7 +41,7 @@ func (m *vpcDeleteMock) handler(t *testing.T) func(http.ResponseWriter, *http.Re
 		case r.Method == http.MethodDelete:
 			m.mutex.Lock()
 			m.deletes++
-			refuse := m.deletes == 1
+			refuse := m.deletes <= m.refusals
 			m.mutex.Unlock()
 
 			if refuse {
@@ -86,7 +88,7 @@ func (m *vpcDeleteMock) handler(t *testing.T) func(http.ResponseWriter, *http.Re
 func TestVpcDeleteWaitsForTheCreateJobAndRetriesOnce(t *testing.T) {
 	t.Parallel()
 
-	mock := &vpcDeleteMock{status: VPC_STATUS_CREATING, activeJobID: "job-create"}
+	mock := &vpcDeleteMock{refusals: 1, status: VPC_STATUS_CREATING, activeJobID: "job-create"}
 	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{T: t, Handler: mock.handler(t)})
 
 	if err := DeleteVpc(gpcnClient, context.Background(), vpcUnitTestID); err != nil {
@@ -102,7 +104,7 @@ func TestVpcDeleteWaitsForTheCreateJobAndRetriesOnce(t *testing.T) {
 func TestVpcDeleteDoesNotRetryWhenNoJobOwnsTheVpc(t *testing.T) {
 	t.Parallel()
 
-	mock := &vpcDeleteMock{status: VPC_STATUS_ACTIVE, activeJobID: nil}
+	mock := &vpcDeleteMock{refusals: 1, status: VPC_STATUS_ACTIVE, activeJobID: nil}
 	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{T: t, Handler: mock.handler(t)})
 
 	err := DeleteVpc(gpcnClient, context.Background(), vpcUnitTestID)
@@ -114,5 +116,26 @@ func TestVpcDeleteDoesNotRetryWhenNoJobOwnsTheVpc(t *testing.T) {
 	}
 	if count := mock.deleteCount(); count != 1 {
 		t.Errorf("DELETE count = %d, want 1", count)
+	}
+}
+
+// The retry exists for one race: the create job ends between the refusal and
+// the second DELETE. A refusal that survives it is the platform's answer, and
+// a loop around it hides a VPC nothing will free.
+func TestVpcDeleteSurfacesASecondRefusal(t *testing.T) {
+	t.Parallel()
+
+	mock := &vpcDeleteMock{refusals: 2, status: VPC_STATUS_CREATING, activeJobID: "job-create"}
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{T: t, Handler: mock.handler(t)})
+
+	err := DeleteVpc(gpcnClient, context.Background(), vpcUnitTestID)
+	if err == nil {
+		t.Fatalf("Expected the second refusal to reach the caller")
+	}
+	if !client.HasErrorCode(err, ERROR_CODE_VPC_NOT_ACTIVE) {
+		t.Errorf("Expected a VPC_NOT_ACTIVE error, got %v", err)
+	}
+	if count := mock.deleteCount(); count != 2 {
+		t.Errorf("DELETE count = %d, want 2", count)
 	}
 }

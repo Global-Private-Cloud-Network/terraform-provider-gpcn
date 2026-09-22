@@ -62,6 +62,7 @@ type vpcMock struct {
 	deleteNotFound bool
 	getNotFound    bool
 	createBody     map[string]any
+	createBodies   []map[string]any
 	requests       []string
 }
 
@@ -121,6 +122,9 @@ func (m *vpcMock) handleCreate(w http.ResponseWriter, r *http.Request) {
 	body := testutil.ReadRequestBody(r)
 
 	m.mutex.Lock()
+	// A refused create records its body too. A second attempt is invisible in
+	// the answer, because the mock refuses whatever the body carries.
+	m.createBodies = append(m.createBodies, body)
 	refusal := m.createRefusal
 	if refusal == "" {
 		m.getNotFound = false
@@ -269,6 +273,12 @@ func (m *vpcMock) lastCreateBody() map[string]any {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	return m.createBody
+}
+
+func (m *vpcMock) allCreateBodies() []map[string]any {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	return append([]map[string]any(nil), m.createBodies...)
 }
 
 // setName renames the VPC behind the provider's back. The mutex orders the
@@ -455,6 +465,17 @@ func TestVpcResourcePlanSurfacesOverlapRefusal(t *testing.T) {
 			},
 		},
 	})
+
+	// The mock refuses every create, so a provider that answered the gate
+	// itself would still fail the step above. Only the request log shows it.
+	if count := mock.requestCount("POST /v1/resource/vpcs/"); count != 1 {
+		t.Errorf("create POST count = %d, want 1", count)
+	}
+	for _, body := range mock.allCreateBodies() {
+		if acknowledged, sent := body["acknowledgeOverlap"]; sent {
+			t.Errorf("create body carries acknowledgeOverlap = %v, want the key absent", acknowledged)
+		}
+	}
 }
 
 // A refusal that names children is a dependency error. A retry cannot clear it,

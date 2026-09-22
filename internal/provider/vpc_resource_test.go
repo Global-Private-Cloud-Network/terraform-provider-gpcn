@@ -235,7 +235,7 @@ func TestVpcResourceCreateWritesIdBeforePolling(t *testing.T) {
 func TestVpcResourceReadWarnsWhenVpcFailed(t *testing.T) {
 	t.Parallel()
 
-	readWithFailureReason := func(failureReason any) diag.Diagnostic {
+	readInStatus := func(status string, failureReason any) fwresource.ReadResponse {
 		t.Helper()
 
 		_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
@@ -250,7 +250,7 @@ func TestVpcResourceReadWarnsWhenVpcFailed(t *testing.T) {
 						"description":    "",
 						"cidr":           vpcPlanTestCidr,
 						"datacenter":     map[string]any{"id": vpcPlanTestDatacenterID, "code": "kansas", "name": "Kansas"},
-						"status":         "failed",
+						"status":         status,
 						"failureReason":  failureReason,
 						"egressIp":       nil,
 						"activeJobId":    nil,
@@ -283,6 +283,13 @@ func TestVpcResourceReadWarnsWhenVpcFailed(t *testing.T) {
 		if readResponse.Diagnostics.HasError() {
 			t.Fatalf("Expected no error diagnostic, got %v", readResponse.Diagnostics)
 		}
+		return *readResponse
+	}
+
+	readWithFailureReason := func(failureReason any) diag.Diagnostic {
+		t.Helper()
+
+		readResponse := readInStatus("failed", failureReason)
 		if count := len(readResponse.Diagnostics); count != 1 {
 			t.Fatalf("Expected 1 diagnostic, got %d: %v", count, readResponse.Diagnostics)
 		}
@@ -306,6 +313,13 @@ func TestVpcResourceReadWarnsWhenVpcFailed(t *testing.T) {
 	wantNoReason := "VPC vpc-1 is in the failed state. Destroy the VPC and create it again."
 	if got := noReason.Detail(); got != wantNoReason {
 		t.Errorf("Detail with no reason = %q, want %q", got, wantNoReason)
+	}
+
+	// An active VPC must stay silent. Without this drive an unconditional
+	// warning passes every assertion above.
+	active := readInStatus("active", nil)
+	if quiet := active.Diagnostics.Warnings(); len(quiet) != 0 {
+		t.Errorf("Warnings on an active VPC = %v, want none", quiet)
 	}
 }
 
