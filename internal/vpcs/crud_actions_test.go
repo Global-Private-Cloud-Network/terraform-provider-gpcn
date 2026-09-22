@@ -3,8 +3,11 @@ package vpcs
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"regexp"
 	"sync"
 	"testing"
+	"time"
 
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
@@ -137,5 +140,63 @@ func TestVpcDeleteSurfacesASecondRefusal(t *testing.T) {
 	}
 	if count := mock.deleteCount(); count != 2 {
 		t.Errorf("DELETE count = %d, want 2", count)
+	}
+}
+
+// The ruled bytes for a wait that runs out, with the measured duration left
+// open. A test that reads the constant cannot refute a rewrite of it.
+var vpcTeardownTimeoutPattern = regexp.MustCompile(
+	`a teardown was already running, and the VPC was still present after [0-9]\S*`)
+
+// vpcTeardownTestCap bounds the wait this test itself makes. A provider that
+// never ends the wait fails here instead of hanging the package.
+const vpcTeardownTestCap = 10 * time.Second
+
+// vpcClientWithPollingTimeout builds a client the timeout arm can reach. The
+// shared test helper fixes the polling timeout at ten minutes.
+func vpcClientWithPollingTimeout(t *testing.T, handler http.HandlerFunc, pollingTimeout time.Duration) *client.GpcnClient {
+	t.Helper()
+
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+
+	config := client.DefaultConfig(server.URL, "test-key")
+	config.MaxRetries = 0
+	config.InitialRetryDelay = 0
+	config.PollingTimeout = pollingTimeout
+
+	gpcnClient, err := client.NewGpcnClient(config)
+	if err != nil {
+		t.Fatalf("failed to create GPCN client: %v", err)
+	}
+	return gpcnClient
+}
+
+// A teardown another caller started can outlive the polling timeout. The
+// provider then reports the wait instead of a destroy it never achieves.
+func TestDeleteVpcReportsATeardownThatOutlivesThePollingTimeout(t *testing.T) {
+	t.Parallel()
+
+	mock := &vpcDeleteMock{refusals: 1, status: VPC_STATUS_DELETING, activeJobID: nil}
+	gpcnClient := vpcClientWithPollingTimeout(t, mock.handler(t), 5*time.Millisecond)
+
+	deleteResult := make(chan error, 1)
+	go func() {
+		deleteResult <- DeleteVpc(gpcnClient, context.Background(), vpcUnitTestID)
+	}()
+
+	select {
+	case err := <-deleteResult:
+		if err == nil {
+			t.Fatalf("Expected the wait to run out and report itself")
+		}
+		if !vpcTeardownTimeoutPattern.MatchString(err.Error()) {
+			t.Errorf("error = %q, want a match for %s", err.Error(), vpcTeardownTimeoutPattern)
+		}
+		if count := mock.deleteCount(); count != 1 {
+			t.Errorf("DELETE count = %d, want 1", count)
+		}
+	case <-time.After(vpcTeardownTestCap):
+		t.Fatalf("DeleteVpc did not return within %s", vpcTeardownTestCap)
 	}
 }
