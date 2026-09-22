@@ -160,9 +160,9 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 	carriedID := primary.PublicIPID
 
 	// The machine gives up what it no longer asks for before it takes anything on. One
-	// machine carries one address, so an exchange must free the interface first. An
-	// address the plan names is held by the operator. GPCN releases an attached
-	// address, so a release of that one destroys it.
+	// machine carries one address, so an exchange must free the interface first. The
+	// operator holds an address the plan names. GPCN releases an attached address, so a
+	// release of that one destroys it.
 	if acquireChanged && state.AllocatePublicIp.ValueBool() && !carriedID.IsNull() &&
 		carriedID.ValueString() != plan.PublicIpId.ValueString() {
 		releasedID := carriedID.ValueString()
@@ -190,7 +190,7 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 	}
 
 	if acquireChanged && plan.AllocatePublicIp.ValueBool() {
-		// The detach above cleared an address this call gave up. Anything the interface
+		// The detach above clears an address this call gives up. Anything the interface
 		// still carries came from somewhere else, and GPCN refuses a second address.
 		if !carriedID.IsNull() {
 			diags.AddError(
