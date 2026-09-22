@@ -23,7 +23,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>1.3.0"
+      version = "~>1.4.0"
     }
   }
 }
@@ -103,8 +103,8 @@ resource "gpcn_gpu" "example" {
 
 ### Optional
 
-- `series_code` (String) Short code of the GPU series. Exactly one of series_name or series_code must be specified
-- `series_name` (String) Human-readable name of the GPU series. Exactly one of series_name or series_code must be specified
+- `series_code` (String) Short code of the GPU series. Exactly one of series_name or series_code must be specified. Use the gpcn_gpu_inventory data source to list the series offered in a datacenter.
+- `series_name` (String) Human-readable name of the GPU series. Exactly one of series_name or series_code must be specified. Use the gpcn_gpu_inventory data source to list the series offered in a datacenter.
 - `sku_code` (String) Optional exact SKU code within the series. When set, the API provisions this specific SKU if available; when omitted, it picks the first available SKU. series and gpu_count are still required
 
 ### Read-Only

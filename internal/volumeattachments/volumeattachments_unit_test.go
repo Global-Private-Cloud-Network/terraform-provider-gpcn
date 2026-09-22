@@ -2,14 +2,15 @@ package volumeattachments
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
-	"time"
 
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
-	"terraform-provider-gpcn/internal/virtualmachines"
 )
 
 const (
@@ -17,6 +18,12 @@ const (
 	testVolID = "vol-test-456"
 	testJobID = "job-test-001"
 )
+
+// backendStatusRefusal is the byte-exact sentence GPCN answers with 400 when the
+// target machine is not settled. DEV src/services/volumes.service.ts:108-116 builds
+// it, and the single quotes around the status are part of it.
+const backendStatusRefusal = "Cannot attach a volume while the VM is in status 'Provisioning'. " +
+	"The VM must be Running, Stopped, Shutoff."
 
 func vmResponse(id string, hotplug int, status string) map[string]any {
 	return map[string]any{
@@ -45,7 +52,7 @@ func volumeResponse(volID, attachedVMID string) map[string]any {
 		"data": map[string]any{
 			"id": volID, "name": "test-vol", "sizeGb": 100,
 			"skuId":      "sku-vol-1",
-			"volumeType": map[string]any{"id": 1, "name": "SSD", "description": "SSD volume"},
+			"volumeType": map[string]any{"name": "SSD", "description": "SSD volume"},
 			"datacenter": map[string]any{
 				"id": "dc-1", "name": "Chicago", "region": "Central",
 				"countryAbbr": "US", "country": "United States",
@@ -56,17 +63,86 @@ func volumeResponse(volID, attachedVMID string) map[string]any {
 	}
 }
 
-// useFastVMStatusPollInterval keeps the VM status poller from sleeping for whole seconds.
-func useFastVMStatusPollInterval(t *testing.T) {
+// requestRecorder keeps the method and path of every request the mock server saw.
+// The handler runs on the server goroutine, so the mutex guards the slice.
+type requestRecorder struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (r *requestRecorder) record(req *http.Request) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.lines = append(r.lines, req.Method+" "+req.URL.Path)
+}
+
+func (r *requestRecorder) saw(method, pathSuffix string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, line := range r.lines {
+		if strings.HasPrefix(line, method+" ") && strings.HasSuffix(line, pathSuffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *requestRecorder) String() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return strings.Join(r.lines, ", ")
+}
+
+// volumeOperationServer answers the named volume verb and records every request.
+// The machine read, stop and start arms stay available, so a recorded stop proves a
+// deliberate call. The stop and start arms answer 500 to keep a failure fast.
+func volumeOperationServer(t *testing.T, volumeAction string) (*client.GpcnClient, *requestRecorder) {
 	t.Helper()
-	originalInterval := virtualmachines.VM_STATUS_POLL_INTERVAL
-	originalSettle := virtualmachines.VM_STATUS_SETTLE_WAIT
-	virtualmachines.VM_STATUS_POLL_INTERVAL = 5 * time.Millisecond
-	virtualmachines.VM_STATUS_SETTLE_WAIT = 5 * time.Millisecond
-	t.Cleanup(func() {
-		virtualmachines.VM_STATUS_POLL_INTERVAL = originalInterval
-		virtualmachines.VM_STATUS_SETTLE_WAIT = originalSettle
+	recorder := &requestRecorder{}
+
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			recorder.record(r)
+			switch {
+			case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+testVMID):
+				testutil.WriteJSONResponse(w, vmResponse(testVMID, 0, "Running"))
+
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/stop"):
+				w.WriteHeader(http.StatusInternalServerError)
+
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/start"):
+				w.WriteHeader(http.StatusInternalServerError)
+
+			case r.Method == "PUT" && strings.HasSuffix(r.URL.Path, "/volumes/"+testVolID+"/"+volumeAction):
+				if volumeAction == "attach" {
+					body := testutil.ReadRequestBody(r)
+					if body["virtualMachineId"] != testVMID {
+						t.Errorf("expected virtualMachineId %s in the attach body, got %v", testVMID, body["virtualMachineId"])
+					}
+				}
+				testutil.HandleCreateJobResponse(w, testJobID, volumeAction+" started")
+
+			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, testJobID, testVolID, true)
+
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
 	})
+
+	return gpcnClient, recorder
+}
+
+func assertNoStopOrStart(t *testing.T, recorder *requestRecorder) {
+	t.Helper()
+	if recorder.saw("POST", "/"+testVMID+"/stop") {
+		t.Errorf("the volume operation stopped the virtual machine; requests: %s", recorder)
+	}
+	if recorder.saw("POST", "/"+testVMID+"/start") {
+		t.Errorf("the volume operation started the virtual machine; requests: %s", recorder)
+	}
 }
 
 func TestGetAttachedVMIdAttached(t *testing.T) {
@@ -113,435 +189,98 @@ func TestGetAttachedVMIdNotAttached(t *testing.T) {
 	}
 }
 
-func TestAttachVolumeHotplugEnabled(t *testing.T) {
-	var attachCalled bool
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+testVMID):
-				testutil.WriteJSONResponse(w, vmResponse(testVMID, 1, "Running"))
-
-			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+testVolID+"/attach"):
-				attachCalled = true
-				body := testutil.ReadRequestBody(r)
-				if body["virtualMachineId"] != testVMID {
-					t.Errorf("expected virtualMachineId %s in body, got %v", testVMID, body["virtualMachineId"])
-				}
-				testutil.HandleCreateJobResponse(w, testJobID, "attach started")
-
-			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
-				testutil.HandleJobResponse(w, testJobID, testVolID, true)
-
-			default:
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-	defer server.Close()
+func TestAttachVolumeDoesNotStopVMMockHTTP(t *testing.T) {
+	gpcnClient, recorder := volumeOperationServer(t, "attach")
 
 	err := AttachVolume(gpcnClient, context.Background(), testVMID, testVolID)
+
+	assertNoStopOrStart(t, recorder)
+	if !recorder.saw("PUT", "/volumes/"+testVolID+"/attach") {
+		t.Errorf("expected the attach verb to be called; requests: %s", recorder)
+	}
 	if err != nil {
 		t.Fatalf("AttachVolume failed: %v", err)
 	}
-	if !attachCalled {
-		t.Error("expected attach endpoint to be called")
-	}
 }
 
-func TestAttachVolumeHotplugDisabledStopsAndStartsVM(t *testing.T) {
-	useFastVMStatusPollInterval(t)
+func TestDetachVolumeDoesNotStopVMMockHTTP(t *testing.T) {
+	gpcnClient, recorder := volumeOperationServer(t, "detach")
 
-	var stopCalled, startCalled, attachCalled bool
-	vmStatus := "Running"
+	err := DetachVolume(gpcnClient, context.Background(), testVolID)
 
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+testVMID):
-				testutil.WriteJSONResponse(w, vmResponse(testVMID, 0, vmStatus))
-
-			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/stop"):
-				stopCalled = true
-				vmStatus = "Shutoff"
-				testutil.WriteJSONResponse(w, map[string]bool{"success": true})
-
-			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/start"):
-				startCalled = true
-				vmStatus = "Running"
-				testutil.WriteJSONResponse(w, map[string]bool{"success": true})
-
-			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+testVolID+"/attach"):
-				attachCalled = true
-				testutil.HandleCreateJobResponse(w, testJobID, "attach started")
-
-			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
-				testutil.HandleJobResponse(w, testJobID, testVolID, true)
-
-			default:
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-	defer server.Close()
-
-	err := AttachVolume(gpcnClient, context.Background(), testVMID, testVolID)
-	if err != nil {
-		t.Fatalf("AttachVolume failed: %v", err)
+	assertNoStopOrStart(t, recorder)
+	if !recorder.saw("PUT", "/volumes/"+testVolID+"/detach") {
+		t.Errorf("expected the detach verb to be called; requests: %s", recorder)
 	}
-	if !stopCalled {
-		t.Error("expected VM to be stopped before attach")
-	}
-	if !attachCalled {
-		t.Error("expected attach endpoint to be called")
-	}
-	if !startCalled {
-		t.Error("expected VM to be started after attach")
-	}
-}
-
-func TestAttachVolumeAlreadyStoppedDoesNotStart(t *testing.T) {
-	var stopCalled, startCalled bool
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+testVMID):
-				// hotplug=0, already Shutoff
-				testutil.WriteJSONResponse(w, vmResponse(testVMID, 0, "Shutoff"))
-
-			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/stop"):
-				stopCalled = true
-				testutil.WriteJSONResponse(w, map[string]bool{"success": true})
-
-			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/start"):
-				startCalled = true
-				testutil.WriteJSONResponse(w, map[string]bool{"success": true})
-
-			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+testVolID+"/attach"):
-				testutil.HandleCreateJobResponse(w, testJobID, "attach started")
-
-			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
-				testutil.HandleJobResponse(w, testJobID, testVolID, true)
-
-			default:
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-	defer server.Close()
-
-	err := AttachVolume(gpcnClient, context.Background(), testVMID, testVolID)
-	if err != nil {
-		t.Fatalf("AttachVolume failed: %v", err)
-	}
-	if stopCalled {
-		t.Error("expected stop NOT to be called when VM already stopped")
-	}
-	if startCalled {
-		t.Error("expected start NOT to be called when we did not stop the VM")
-	}
-}
-
-func TestDetachVolumeHotplugEnabled(t *testing.T) {
-	var detachCalled bool
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+testVMID):
-				testutil.WriteJSONResponse(w, vmResponse(testVMID, 1, "Running"))
-
-			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+testVolID+"/detach"):
-				detachCalled = true
-				testutil.HandleCreateJobResponse(w, testJobID, "detach started")
-
-			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
-				testutil.HandleJobResponse(w, testJobID, testVolID, true)
-
-			default:
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-	defer server.Close()
-
-	err := DetachVolume(gpcnClient, context.Background(), testVMID, testVolID)
 	if err != nil {
 		t.Fatalf("DetachVolume failed: %v", err)
 	}
-	if !detachCalled {
-		t.Error("expected detach endpoint to be called")
+}
+
+func TestAttachSurfacesBackendStatusRefusalMockHTTP(t *testing.T) {
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PUT" && strings.HasSuffix(r.URL.Path, "/volumes/"+testVolID+"/attach") {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"success": false,
+					"message": backendStatusRefusal,
+					"error": map[string]any{
+						"code":       "Validation Error",
+						"statusCode": 400,
+						"details":    nil,
+					},
+				})
+				return
+			}
+			testutil.LogUnexpectedRequest(t, w, r)
+		},
+	})
+
+	err := AttachVolume(gpcnClient, context.Background(), testVMID, testVolID)
+	if err == nil {
+		t.Fatal("expected AttachVolume to report the refusal")
+	}
+
+	var httpErr *client.HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("expected a *client.HTTPError in the chain, got %T: %v", err, err)
+	}
+	want := "HTTP 400 (Validation Error): " + backendStatusRefusal
+	if got := httpErr.Error(); got != want {
+		t.Errorf("HTTPError.Error() =\n%q\nwant\n%q", got, want)
+	}
+	// The client strips the *url.Error that net/http adds, so the operator reads
+	// the API's words first. A provider wrapper adds nothing in front of them.
+	if err.Error() != want {
+		t.Errorf("AttachVolume error =\n%q\nwant\n%q", err.Error(), want)
+	}
+	if code := client.ErrorCode(err); code != "Validation Error" {
+		t.Errorf("client.ErrorCode = %q, want %q", code, "Validation Error")
 	}
 }
 
-func vmNotFoundServer(t *testing.T) (func(), *client.GpcnClient) {
-	server, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+// TestDetachVolumeNotFoundStaysNotFound guards the classification Delete depends on.
+// Delete reads a not-found detach as an attachment that is already gone.
+func TestDetachVolumeNotFoundStaysNotFound(t *testing.T) {
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
-			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+testVMID) {
+			if r.Method == "PUT" && strings.HasSuffix(r.URL.Path, "/volumes/"+testVolID+"/detach") {
 				w.WriteHeader(http.StatusNotFound)
 				return
 			}
 			testutil.LogUnexpectedRequest(t, w, r)
 		},
 	})
-	return server.Close, gpcnClient
-}
 
-func TestDetachVolumeVMNotFoundKeepsHTTPError(t *testing.T) {
-	closeServer, gpcnClient := vmNotFoundServer(t)
-	defer closeServer()
-
-	err := DetachVolume(gpcnClient, context.Background(), testVMID, testVolID)
+	err := DetachVolume(gpcnClient, context.Background(), testVolID)
 	if err == nil {
-		t.Fatal("expected DetachVolume to fail when the VM is gone")
-	}
-	if !strings.Contains(err.Error(), "could not be read") {
-		t.Errorf("expected the error to come from the read site, got: %v", err)
-	}
-	if strings.Contains(err.Error(), "could not be stopped") {
-		t.Errorf("a failed read must not be reported as a failed stop: %v", err)
+		t.Fatal("expected DetachVolume to fail when the volume is gone")
 	}
 	if !client.IsNotFound(err) {
 		t.Errorf("expected client.IsNotFound to be true, got false for error: %v", err)
-	}
-}
-
-func TestAttachVolumeVMNotFoundKeepsHTTPError(t *testing.T) {
-	closeServer, gpcnClient := vmNotFoundServer(t)
-	defer closeServer()
-
-	err := AttachVolume(gpcnClient, context.Background(), testVMID, testVolID)
-	if err == nil {
-		t.Fatal("expected AttachVolume to fail when the VM is gone")
-	}
-	if !strings.Contains(err.Error(), "could not be read") {
-		t.Errorf("expected the error to come from the read site, got: %v", err)
-	}
-	if strings.Contains(err.Error(), "could not be stopped") {
-		t.Errorf("a failed read must not be reported as a failed stop: %v", err)
-	}
-	if !client.IsNotFound(err) {
-		t.Errorf("expected client.IsNotFound to be true, got false for error: %v", err)
-	}
-}
-
-// vmRestartFailureServer drives the hotplug-disabled path to the restart site. The VM stops
-// and the volume operation succeeds. Then POST /start returns 404 while the VM stays Shutoff.
-func vmRestartFailureServer(t *testing.T, volumeAction string) (func(), *client.GpcnClient) {
-	vmStatus := "Running"
-
-	server, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+testVMID):
-				testutil.WriteJSONResponse(w, vmResponse(testVMID, 0, vmStatus))
-
-			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/stop"):
-				vmStatus = "Shutoff"
-				testutil.WriteJSONResponse(w, map[string]bool{"success": true})
-
-			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/start"):
-				w.WriteHeader(http.StatusNotFound)
-
-			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+testVolID+"/"+volumeAction):
-				testutil.HandleCreateJobResponse(w, testJobID, volumeAction+" started")
-
-			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
-				testutil.HandleJobResponse(w, testJobID, testVolID, true)
-
-			default:
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-	return server.Close, gpcnClient
-}
-
-func assertRestartFailure(t *testing.T, err error) {
-	t.Helper()
-	if err == nil {
-		t.Fatal("expected a restart failure to be reported")
-	}
-	if !strings.Contains(err.Error(), testVMID) {
-		t.Errorf("expected the error to name VM %s, got: %v", testVMID, err)
-	}
-	if !strings.Contains(err.Error(), "could not be started") {
-		t.Errorf("expected the error to report the failed restart, got: %v", err)
-	}
-	if client.IsNotFound(err) {
-		t.Errorf("expected client.IsNotFound to be false for a restart failure, got true for error: %v", err)
-	}
-}
-
-func TestDetachVolumeRestartFailureIsNotNotFound(t *testing.T) {
-	useFastVMStatusPollInterval(t)
-
-	closeServer, gpcnClient := vmRestartFailureServer(t, "detach")
-	defer closeServer()
-
-	assertRestartFailure(t, DetachVolume(gpcnClient, context.Background(), testVMID, testVolID))
-}
-
-func TestAttachVolumeRestartFailureIsNotNotFound(t *testing.T) {
-	useFastVMStatusPollInterval(t)
-
-	closeServer, gpcnClient := vmRestartFailureServer(t, "attach")
-	defer closeServer()
-
-	assertRestartFailure(t, AttachVolume(gpcnClient, context.Background(), testVMID, testVolID))
-}
-
-// vmStopFailureServer drives the hotplug-disabled path to a failed stop call. The VM stays
-// Running and answers every GET, but POST /stop returns 404.
-func vmStopFailureServer(t *testing.T) (func(), *client.GpcnClient) {
-	server, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+testVMID):
-				testutil.WriteJSONResponse(w, vmResponse(testVMID, 0, "Running"))
-
-			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/stop"):
-				w.WriteHeader(http.StatusNotFound)
-
-			default:
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-	return server.Close, gpcnClient
-}
-
-func assertStopFailureOnLiveVM(t *testing.T, err error) {
-	t.Helper()
-	if err == nil {
-		t.Fatal("expected a stop failure to be reported")
-	}
-	if !strings.Contains(err.Error(), "could not be stopped") {
-		t.Errorf("expected the error to report the failed stop, got: %v", err)
-	}
-	if client.IsNotFound(err) {
-		t.Errorf("expected client.IsNotFound to be false for a live VM, got true for error: %v", err)
-	}
-}
-
-func TestDetachVolumeStopCallFailureOnLiveVMIsNotNotFound(t *testing.T) {
-	closeServer, gpcnClient := vmStopFailureServer(t)
-	defer closeServer()
-
-	assertStopFailureOnLiveVM(t, DetachVolume(gpcnClient, context.Background(), testVMID, testVolID))
-}
-
-func TestAttachVolumeStopCallFailureOnLiveVMIsNotNotFound(t *testing.T) {
-	closeServer, gpcnClient := vmStopFailureServer(t)
-	defer closeServer()
-
-	assertStopFailureOnLiveVM(t, AttachVolume(gpcnClient, context.Background(), testVMID, testVolID))
-}
-
-// vmGoneDuringStopServer deletes the VM under the stop call: POST /stop fails with 500 and
-// every later GET returns 404. The two statuses differ, so only the re-check error carries
-// the not-found the caller must see.
-func vmGoneDuringStopServer(t *testing.T) (func(), *client.GpcnClient) {
-	var stopAttempted bool
-
-	server, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+testVMID):
-				if stopAttempted {
-					w.WriteHeader(http.StatusNotFound)
-					return
-				}
-				testutil.WriteJSONResponse(w, vmResponse(testVMID, 0, "Running"))
-
-			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/stop"):
-				stopAttempted = true
-				w.WriteHeader(http.StatusInternalServerError)
-
-			default:
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-	return server.Close, gpcnClient
-}
-
-func TestDetachVolumeVMGoneDuringStopKeepsHTTPError(t *testing.T) {
-	closeServer, gpcnClient := vmGoneDuringStopServer(t)
-	defer closeServer()
-
-	err := DetachVolume(gpcnClient, context.Background(), testVMID, testVolID)
-	if err == nil {
-		t.Fatal("expected DetachVolume to fail when the VM disappears under the stop call")
-	}
-	if !client.IsNotFound(err) {
-		t.Errorf("expected client.IsNotFound to be true for a gone VM, got false for error: %v", err)
-	}
-	if !strings.Contains(err.Error(), "could not be stopped") {
-		t.Errorf("expected the error to report the failed stop, got: %v", err)
-	}
-	if !strings.Contains(err.Error(), "HTTP error 500") {
-		t.Errorf("expected the error to keep the stop failure status, got: %v", err)
-	}
-}
-
-func TestDetachVolumeConcurrentStopIsAbsorbed(t *testing.T) {
-	useFastVMStatusPollInterval(t)
-
-	var stopAttempted, detachCalled, startCalled bool
-	vmStatus := "Running"
-
-	server, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+testVMID):
-				testutil.WriteJSONResponse(w, vmResponse(testVMID, 0, vmStatus))
-
-			// Another process stops the VM while this stop call fails.
-			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/stop"):
-				stopAttempted = true
-				vmStatus = "Shutoff"
-				w.WriteHeader(http.StatusInternalServerError)
-
-			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/start"):
-				startCalled = true
-				vmStatus = "Running"
-				testutil.WriteJSONResponse(w, map[string]bool{"success": true})
-
-			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+testVolID+"/detach"):
-				detachCalled = true
-				testutil.HandleCreateJobResponse(w, testJobID, "detach started")
-
-			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
-				testutil.HandleJobResponse(w, testJobID, testVolID, true)
-
-			default:
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-	defer server.Close()
-
-	if err := DetachVolume(gpcnClient, context.Background(), testVMID, testVolID); err != nil {
-		t.Fatalf("expected the concurrent stop to be absorbed, got: %v", err)
-	}
-	if !stopAttempted {
-		t.Error("expected the stop call to be attempted")
-	}
-	if !detachCalled {
-		t.Error("expected detach endpoint to be called")
-	}
-	if startCalled {
-		t.Error("expected start NOT to be called when another process stopped the VM")
 	}
 }

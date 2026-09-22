@@ -90,6 +90,20 @@ func useVMStatusPollInterval(t *testing.T, interval time.Duration) {
 	t.Cleanup(func() { VM_STATUS_POLL_INTERVAL = original })
 }
 
+func useVirtualMachineStatusTimeout(t *testing.T, seconds int) {
+	t.Helper()
+	original := DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS
+	DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS = seconds
+	t.Cleanup(func() { DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS = original })
+}
+
+func useNetworkTimeout(t *testing.T, seconds int) {
+	t.Helper()
+	original := DEFAULT_NETWORK_TIMEOUT_SECONDS
+	DEFAULT_NETWORK_TIMEOUT_SECONDS = seconds
+	t.Cleanup(func() { DEFAULT_NETWORK_TIMEOUT_SECONDS = original })
+}
+
 // Only sequential tests change these package variables, so the change is safe.
 // Go resumes a parallel test after every sequential test ends.
 func useNoInitialPollDelay(t *testing.T) {
@@ -166,6 +180,9 @@ func TestCreateVirtualMachineMockHTTP(t *testing.T) {
 				}
 				if req["imageId"].(string) != imageID {
 					t.Errorf("Expected imageId %s, got '%v'", imageID, req["imageId"])
+				}
+				if _, present := req["networkId"]; present {
+					t.Error("Expected networkId to be absent when the model names no network")
 				}
 
 				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
@@ -382,8 +399,10 @@ func TestValidatePublicIpValueMockHTTP(t *testing.T) {
 				t.Errorf("Expected no error but got: %v", err)
 			}
 			if tc.expectError && err != nil {
-				if !strings.Contains(err.Error(), "allocate_public_ip") && !strings.Contains(err.Error(), "allocatePublicIp") {
-					t.Errorf("Expected error to contain validation message, got '%s'", err.Error())
+				// The detail names the schema attribute, not the retired wire key.
+				const expected = "the prospective primary network (first in the list) is of type custom. allocate_public_ip can only be true when the primary network's network_type is standard"
+				if err.Error() != expected {
+					t.Errorf("Expected error '%s', got '%s'", expected, err.Error())
 				}
 			}
 		})
@@ -784,6 +803,330 @@ func TestPollForVirtualMachineStatusPreservesNotFound(t *testing.T) {
 	}
 }
 
+func TestPollForVirtualMachineStatusAcceptsStopped(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	const vmID = "vm-stopped-123"
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID) {
+				resp := newVMResponse(vmID, "test-vm")
+				resp.Data.Status = VMStatusStopped.String()
+				testutil.WriteJSONResponse(w, resp)
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	targets := []string{VMStatusShutoff.String(), VMStatusStopped.String()}
+	response, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, targets, 30, 0)
+	if err != nil {
+		t.Fatalf("PollForVirtualMachineStatus failed: %v", err)
+	}
+	if response == nil {
+		t.Fatal("Expected response, got nil")
+		return
+	}
+	if response.Data.Status != VMStatusStopped.String() {
+		t.Errorf("Expected final status '%s', got '%s'", VMStatusStopped, response.Data.Status)
+	}
+}
+
+func TestPollForVirtualMachineStatusKeepsPollingOnError(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	const vmID = "vm-error-123"
+	const timeoutMaxSec = 1
+	pollCount := 0
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID) {
+				pollCount++
+				resp := newVMResponse(vmID, "test-vm")
+				resp.Data.Status = VMStatusError.String()
+				testutil.WriteJSONResponse(w, resp)
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	start := time.Now()
+	targets := []string{VMStatusRunning.String()}
+	response, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, targets, timeoutMaxSec, 0)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("Expected a timeout error, got nil")
+	}
+	if response != nil {
+		t.Errorf("Expected no response on timeout, got '%v'", response)
+	}
+	expectedMessage := fmt.Sprintf(ErrVirtualMachineStatusTimeoutTemplate, timeoutMaxSec)
+	if err.Error() != expectedMessage {
+		t.Errorf("Expected error '%s', got '%s'", expectedMessage, err.Error())
+	}
+	if pollCount < 2 {
+		t.Errorf("Expected the poller to keep polling past an Error status, got %d poll(s)", pollCount)
+	}
+	if elapsed < 900*time.Millisecond {
+		t.Errorf("Expected the poller to wait about %d second(s), it gave up after %v", timeoutMaxSec, elapsed)
+	}
+}
+
+func TestPollForVirtualMachineStatusFailsFastOnDeleting(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	const vmID = "vm-deleting-123"
+	pollCount := 0
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID) {
+				pollCount++
+				resp := newVMResponse(vmID, "test-vm")
+				resp.Data.Status = VMStatusDeleting.String()
+				testutil.WriteJSONResponse(w, resp)
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	targets := []string{VMStatusRunning.String()}
+	_, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, targets, 3, 0)
+	if err == nil {
+		t.Fatal("Expected a terminal status error, got nil")
+	}
+	if !strings.Contains(err.Error(), `reached status "Deleting"`) {
+		t.Errorf("Expected the error to name the observed status, got '%s'", err.Error())
+	}
+	if pollCount != 1 {
+		t.Errorf("Expected exactly 1 GET before the poller gave up, got %d", pollCount)
+	}
+}
+
+func TestPollForVirtualMachineStatusFailsFastOnDestroyed(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	const vmID = "vm-destroyed-123"
+	pollCount := 0
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID) {
+				pollCount++
+				resp := newVMResponse(vmID, "test-vm")
+				resp.Data.Status = VMStatusDestroyed.String()
+				testutil.WriteJSONResponse(w, resp)
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	targets := []string{VMStatusShutoff.String(), VMStatusStopped.String()}
+	_, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, targets, 3, 0)
+	if err == nil {
+		t.Fatal("Expected a terminal status error, got nil")
+	}
+	expectedMessage := fmt.Sprintf(ErrDetailVMTerminalStatus, vmID, VMStatusDestroyed.String(), "Shutoff, Stopped")
+	if err.Error() != expectedMessage {
+		t.Errorf("Expected error '%s', got '%s'", expectedMessage, err.Error())
+	}
+	if !strings.Contains(err.Error(), `reached status "Destroyed"`) {
+		t.Errorf("Expected the error to name the observed status, got '%s'", err.Error())
+	}
+	if pollCount != 1 {
+		t.Errorf("Expected exactly 1 GET before the poller gave up, got %d", pollCount)
+	}
+}
+
+func TestPollForVirtualMachineStatusKeepsPollingOnUnknown(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	const vmID = "vm-unknown-123"
+	pollCount := 0
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID) {
+				pollCount++
+				resp := newVMResponse(vmID, "test-vm")
+				if pollCount < 3 {
+					resp.Data.Status = VMStatusUnknown.String()
+				}
+				testutil.WriteJSONResponse(w, resp)
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	response, err := PollForVirtualMachineStatus(gpcnClient, context.Background(), vmID, []string{VMStatusRunning.String()}, 30, 0)
+	if err != nil {
+		t.Fatalf("PollForVirtualMachineStatus failed: %v", err)
+	}
+	if response == nil {
+		t.Fatal("Expected response, got nil")
+		return
+	}
+	if pollCount < 3 {
+		t.Errorf("Expected the poller to keep polling past a transient Unknown, got %d poll(s)", pollCount)
+	}
+}
+
+func TestIsTerminalStatusError(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	const vmID = "vm-terminal-check-123"
+
+	terminalServer, terminalClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			resp := newVMResponse(vmID, "test-vm")
+			resp.Data.Status = VMStatusDestroyed.String()
+			testutil.WriteJSONResponse(w, resp)
+		},
+	})
+	defer terminalServer.Close()
+
+	_, terminalErr := PollForVirtualMachineStatus(terminalClient, context.Background(), vmID, []string{VMStatusRunning.String()}, 3, 0)
+	if terminalErr == nil {
+		t.Fatal("Expected a terminal status error, got nil")
+	}
+	if !IsTerminalStatusError(terminalErr) {
+		t.Errorf("Expected IsTerminalStatusError to report the poller's terminal error, got false for '%v'", terminalErr)
+	}
+	if !IsTerminalStatusError(fmt.Errorf("stop virtual machine: %w", terminalErr)) {
+		t.Error("Expected IsTerminalStatusError to see through a wrapping error")
+	}
+	expectedMessage := fmt.Sprintf(ErrDetailVMTerminalStatus, vmID, VMStatusDestroyed.String(), VMStatusRunning.String())
+	if terminalErr.Error() != expectedMessage {
+		t.Errorf("Expected error '%s', got '%s'", expectedMessage, terminalErr.Error())
+	}
+
+	stuckServer, stuckClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			resp := newVMResponse(vmID, "test-vm")
+			resp.Data.Status = VMStatusProvisioning.String()
+			testutil.WriteJSONResponse(w, resp)
+		},
+	})
+	defer stuckServer.Close()
+
+	_, timeoutErr := PollForVirtualMachineStatus(stuckClient, context.Background(), vmID, []string{VMStatusRunning.String()}, 1, 0)
+	if timeoutErr == nil {
+		t.Fatal("Expected a timeout error, got nil")
+	}
+	if IsTerminalStatusError(timeoutErr) {
+		t.Errorf("Expected IsTerminalStatusError to reject the timeout error, got true for '%v'", timeoutErr)
+	}
+
+	missingServer, missingClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"message":"virtual machine not found"}`))
+		},
+	})
+	defer missingServer.Close()
+
+	_, notFoundErr := PollForVirtualMachineStatus(missingClient, context.Background(), vmID, []string{VMStatusRunning.String()}, 3, 0)
+	if notFoundErr == nil {
+		t.Fatal("Expected a not found error, got nil")
+	}
+	if IsTerminalStatusError(fmt.Errorf("stop virtual machine: %w", notFoundErr)) {
+		t.Errorf("Expected IsTerminalStatusError to reject a wrapped not found error, got true for '%v'", notFoundErr)
+	}
+}
+
+func TestStopVirtualMachineAcceptsStopped(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	useNetworkTimeout(t, 2)
+	const vmID = "vm-stop-accepts-stopped"
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/stop"):
+				testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "Stop requested"})
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
+				resp := newVMResponse(vmID, "test-vm")
+				resp.Data.Status = VMStatusStopped.String()
+				testutil.WriteJSONResponse(w, resp)
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	if err := StopVirtualMachine(gpcnClient, context.Background(), vmID); err != nil {
+		t.Fatalf("StopVirtualMachine failed: %v", err)
+	}
+}
+
+func TestCreateVirtualMachineAcceptsStoppedStatus(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	useNoInitialPollDelay(t)
+	useVirtualMachineStatusTimeout(t, 2)
+	const (
+		jobID   = "job-stopped-1"
+		vmID    = "vm-created-stopped"
+		imageID = "550e8400-e29b-41d4-a716-446655440000"
+		sizeID  = "sku-abc-123"
+	)
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
+					Success: true,
+					Message: "VM creation job started",
+					Data: client.JobStatusDataResponse{
+						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: vmID}},
+					},
+				})
+			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, vmID, true)
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
+				resp := newVMResponse(vmID, "test-vm")
+				resp.Data.Status = VMStatusStopped.String()
+				testutil.WriteJSONResponse(w, resp)
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces"):
+				testutil.WriteJSONResponse(w, emptyNetworkInterfacesResponse())
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	response, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, createTestVMModel("test-vm", testVMImage, false))
+	if err != nil {
+		t.Fatalf("CreateVirtualMachine failed: %v", err)
+	}
+	if response == nil {
+		t.Fatal("Expected response, got nil")
+		return
+	}
+	if response.Data.Status != VMStatusStopped.String() {
+		t.Errorf("Expected the create poller to settle on '%s', got '%s'", VMStatusStopped, response.Data.Status)
+	}
+}
+
 func TestUpdatePublicIPIfChangedReportsMissingPrimaryInterface(t *testing.T) {
 	const vmID = "vm-no-primary-123"
 
@@ -924,5 +1267,165 @@ func TestRefreshVirtualMachineModelFromResponseKeepsValuesOnEmpty(t *testing.T) 
 
 	if result.Name.ValueString() != "configured-vm" {
 		t.Errorf("Expected name 'configured-vm', got '%s'", result.Name.ValueString())
+	}
+}
+
+func TestCreateVirtualMachineSendsAcquirePublicIpAndSingleNetworkIdMockHTTP(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	useNoInitialPollDelay(t)
+	const (
+		jobID    = "job-acquire-1"
+		vmID     = "vm-acquire-1"
+		imageID  = "550e8400-e29b-41d4-a716-446655440000"
+		sizeID   = "sku-abc-123"
+		networkA = "11111111-1111-1111-1111-111111111111"
+		networkB = "22222222-2222-2222-2222-222222222222"
+	)
+
+	var createBody map[string]any
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatalf("reading the create body failed: %v", err)
+				}
+				if err := json.Unmarshal(body, &createBody); err != nil {
+					t.Fatalf("unmarshaling the create body failed: %v", err)
+				}
+				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
+					Success: true,
+					Message: "VM creation job started",
+					Data: client.JobStatusDataResponse{
+						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: vmID}},
+					},
+				})
+			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, vmID, true)
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
+				testutil.WriteJSONResponse(w, newVMResponse(vmID, "test-vm"))
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/networks/"+networkA):
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"message": "Network retrieved",
+					"data":    map[string]any{"id": networkA, "name": "birth-network", "networkType": "standard"},
+				})
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	model := createTestVMModel("test-vm", testVMImage, true)
+	networkIds, listDiags := types.ListValueFrom(context.Background(), types.StringType, []string{networkA, networkB})
+	if listDiags.HasError() {
+		t.Fatalf("building the network id list failed: %v", listDiags)
+	}
+	model.NetworkIds = networkIds
+
+	if _, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, model); err != nil {
+		t.Fatalf("CreateVirtualMachine failed: %v", err)
+	}
+
+	if createBody == nil {
+		t.Fatal("Expected the create endpoint to be called")
+	}
+	if acquire, ok := createBody["acquirePublicIp"].(bool); !ok || !acquire {
+		t.Errorf("Expected acquirePublicIp true, got '%v'", createBody["acquirePublicIp"])
+	}
+	if _, present := createBody["allocatePublicIp"]; present {
+		t.Error("Expected allocatePublicIp to be absent from the create body")
+	}
+	if _, present := createBody["networkInterfaces"]; present {
+		t.Error("Expected networkInterfaces to be absent from the create body")
+	}
+	if createBody["networkId"] != networkA {
+		t.Errorf("Expected networkId '%s', got '%v'", networkA, createBody["networkId"])
+	}
+}
+
+// The detail is a user-facing string that the release pins. It tells the
+// operator that the machine is in state and tainted. A re-run of apply then
+// replaces the machine, unless the operator untaints it first.
+func TestVirtualMachineCreatedAttachFailedDetailBytes(t *testing.T) {
+	const expected = "virtual machine %s was created and is in state, but attaching %s failed: %s. Terraform has marked the machine tainted: run terraform untaint on it and apply again to attach the remaining networks, or let the next apply replace it."
+
+	if ErrDetailVMCreatedAttachFailed != expected {
+		t.Errorf("Expected detail '%s', got '%s'", expected, ErrDetailVMCreatedAttachFailed)
+	}
+}
+
+// The API sends these status bytes, and the provider waits for them by value. A changed
+// byte makes a poller wait for a status that never arrives.
+func TestVirtualMachineStatusBytes(t *testing.T) {
+	tests := []struct {
+		status   VMStatus
+		expected string
+	}{
+		{VMStatusRunning, "Running"},
+		{VMStatusStopped, "Stopped"},
+		{VMStatusProvisioning, "Provisioning"},
+		{VMStatusResizing, "Resizing"},
+		{VMStatusStarting, "Starting"},
+		{VMStatusStopping, "Stopping"},
+		{VMStatusDeleting, "Deleting"},
+		{VMStatusDestroyed, "Destroyed"},
+		{VMStatusShutoff, "Shutoff"},
+		{VMStatusRescue, "Rescue"},
+		{VMStatusRescuing, "Rescuing"},
+		{VMStatusUnrescuing, "Unrescuing"},
+		{VMStatusUnknown, "Unknown"},
+		{VMStatusError, "Error"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.expected, func(t *testing.T) {
+			if tc.status.String() != tc.expected {
+				t.Errorf("Expected status '%s', got '%s'", tc.expected, tc.status.String())
+			}
+		})
+	}
+}
+
+// A failed start leaves a stopped machine, and these bytes are the only report of it.
+// The release pins them, and the compiler accepts any rewording.
+func TestVirtualMachineLeftStoppedBytes(t *testing.T) {
+	tests := []struct {
+		name     string
+		actual   string
+		expected string
+	}{
+		{
+			name:     "summary",
+			actual:   ErrSummaryVMLeftStopped,
+			expected: "Virtual machine left stopped",
+		},
+		{
+			name:     "update detail",
+			actual:   ErrDetailVMLeftStoppedUpdate,
+			expected: "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal.",
+		},
+		{
+			name:     "create detail",
+			actual:   ErrDetailVMLeftStoppedCreate,
+			expected: "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform untaint on it; otherwise the next apply replaces the machine.",
+		},
+		{
+			name:     "retry detail",
+			actual:   ErrDetailVMLeftStoppedRetry,
+			expected: "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform plan and check the proposed changes before applying.",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.actual != tc.expected {
+				t.Errorf("Expected %s '%s', got '%s'", tc.name, tc.expected, tc.actual)
+			}
+		})
 	}
 }

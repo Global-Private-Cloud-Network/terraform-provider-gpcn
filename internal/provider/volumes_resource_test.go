@@ -1,9 +1,12 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"regexp"
 	"testing"
+
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -54,7 +57,7 @@ func TestVolumesResource(t *testing.T) {
 					resource.TestCheckResourceAttrSet(gpcnVolumeTest, "location.country"),
 					resource.TestCheckResourceAttrSet(gpcnVolumeTest, "location.datacenter"),
 					resource.TestCheckResourceAttrSet(gpcnVolumeTest, "location.region"),
-					resource.TestCheckResourceAttrSet(gpcnVolumeTest, "volume_type_id"),
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "volume_type_code", "vol-add-ssd"),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
@@ -178,4 +181,31 @@ func TestVolumesResourceInvalidSize(t *testing.T) {
 			},
 		})
 	})
+}
+
+// The Description is the only place that tells the reader how to repair a
+// volume whose SKU is unresolvable. The bytes are the release spec's.
+func TestVolumeResourceVolumeTypeDescription(t *testing.T) {
+	t.Parallel()
+
+	var resp fwresource.SchemaResponse
+	NewVolumesResource().Schema(context.Background(), fwresource.SchemaRequest{}, &resp)
+	if resp.Diagnostics.HasError() {
+		t.Fatalf("Expected a schema, got %v", resp.Diagnostics)
+	}
+
+	want := "Type of storage: 'SSD', 'NVMe', or a storage component code such as 'vol-add-ultra'. " +
+		"Use \"SSD\" or \"NVMe\" for the built-in storage classes and the component code for any other class. " +
+		"The datacenter decides which codes it offers, and a code it does not offer is refused with the list of codes it does offer. " +
+		"Changing this value requires replacing the volume. " +
+		"A volume whose SKU the platform cannot resolve reads \"Unknown\"; after the platform repairs it, remove the volume from state and import it again so the code is recorded. " +
+		"The built-in codes vol-add-ssd and vol-add-nvme are refused at plan time; write SSD or NVMe instead."
+
+	attribute, ok := resp.Schema.Attributes["volume_type"]
+	if !ok {
+		t.Fatalf("Expected a volume_type attribute")
+	}
+	if got := attribute.GetDescription(); got != want {
+		t.Errorf("Expected volume_type description %q, got %q", want, got)
+	}
 }

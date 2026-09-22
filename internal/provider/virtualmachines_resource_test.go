@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"testing"
 
@@ -14,6 +15,15 @@ import (
 )
 
 var gpcnVirtualMachineTest = "gpcn_virtualmachine.test"
+
+// skipWithoutTestNetwork stops a case that has no network to attach. GPCN no longer
+// creates networks, so these cases cannot mint the network the machine is born on.
+func skipWithoutTestNetwork(t *testing.T, networkID string) {
+	t.Helper()
+	if networkID == "" {
+		t.Skipf("%s is not set: name an existing GPCN network for the virtual machine", networkTestIDEnvVar)
+	}
+}
 
 // dataCenterImagesAndSize returns the common datacenter, image, and size datasource lookup blocks for Chicago.
 func dataCenterImagesAndSize() string {
@@ -41,13 +51,13 @@ func TestVirtualMachinesResource(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
 	sshKeyName := fmt.Sprintf("vm-basic-key-%s", rName)
-	networkStdName := fmt.Sprintf("vm-basic-net-std-%s", rName)
-	networkCustName := fmt.Sprintf("vm-basic-net-cust-%s", rName)
+	networkID := os.Getenv(networkTestIDEnvVar)
 	volumeName := fmt.Sprintf("vm-basic-vol-%s", rName)
 	vmName := fmt.Sprintf("vm-basic-%s", rName)
 	vmNameUpdated := fmt.Sprintf("vm-basic-updated-%s", rName)
 
 	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { skipWithoutTestNetwork(t, networkID) },
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create and Read testing
@@ -60,22 +70,6 @@ func TestVirtualMachinesResource(t *testing.T) {
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
-			}
-
-			resource "gpcn_network" "vm_network" {
-				name          = "%s"
-				network_type  = "standard"
-				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				cidr_block = "10.0.0.0/24"
-				dhcp_start_address = "10.0.0.10"
-				dhcp_end_address   = "10.0.0.254"
-				dns_servers = ["8.8.8.8", "8.8.4.4"]
-			}
-
-			resource "gpcn_network" "vm_network_custom" {
-				name          = "%s"
-				network_type  = "custom"
-				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 			}
 
 			resource "gpcn_volume" "vm_storage" {
@@ -94,8 +88,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 
 				allocate_public_ip = false
 				network_ids = [
-					gpcn_network.vm_network.id,
-					gpcn_network.vm_network_custom.id
+					%q
 				]
 
 				resource_group_id = gpcn_resource_group.vm_group.id
@@ -105,14 +98,12 @@ func TestVirtualMachinesResource(t *testing.T) {
 					username   = "testuser"
 				}
 			}
-			`, sshKeyName, networkStdName, networkCustName, volumeName, vmName),
+			`, sshKeyName, volumeName, vmName, networkID),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction("gpcn_resource_group.vm_group", plancheck.ResourceActionCreate),
 						plancheck.ExpectResourceAction("gpcn_ssh_key.vm_uploaded_key", plancheck.ResourceActionCreate),
 						plancheck.ExpectResourceAction("gpcn_volume.vm_storage", plancheck.ResourceActionCreate),
-						plancheck.ExpectResourceAction("gpcn_network.vm_network", plancheck.ResourceActionCreate),
-						plancheck.ExpectResourceAction("gpcn_network.vm_network_custom", plancheck.ResourceActionCreate),
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionCreate),
 					},
 				},
@@ -126,7 +117,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.cpu"),
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.ram"),
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "configuration.base_storage"),
-					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.#", "2"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.#", "1"),
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "network_interfaces.0.network_id"),
 				),
 			},
@@ -145,16 +136,6 @@ func TestVirtualMachinesResource(t *testing.T) {
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
 			}
 
-			resource "gpcn_network" "vm_network" {
-				name          = "%s"
-				network_type  = "standard"
-				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				cidr_block = "10.0.0.0/24"
-				dhcp_start_address = "10.0.0.10"
-				dhcp_end_address   = "10.0.0.254"
-				dns_servers = ["8.8.8.8", "8.8.4.4"]
-			}
-
 			resource "gpcn_virtualmachine" "test" {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
@@ -162,14 +143,14 @@ func TestVirtualMachinesResource(t *testing.T) {
 				image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 				allocate_public_ip = false
 				network_ids = [
-					gpcn_network.vm_network.id
+					%q
 				]
 				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
 					username   = "testuser"
 				}
 			}
-			`, sshKeyName, networkStdName, vmNameUpdated),
+			`, sshKeyName, vmNameUpdated, networkID),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "name", vmNameUpdated),
 				),
@@ -177,8 +158,6 @@ func TestVirtualMachinesResource(t *testing.T) {
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction("gpcn_resource_group.vm_group", plancheck.ResourceActionDestroy),
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
-						// network_ids changes, so network_interfaces must refresh after apply
-						plancheck.ExpectUnknownValue(gpcnVirtualMachineTest, tfjsonpath.New("network_interfaces")),
 					},
 				},
 				ConfigStateChecks: []statecheck.StateCheck{
@@ -210,16 +189,6 @@ func TestVirtualMachinesResource(t *testing.T) {
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
 			}
 
-			resource "gpcn_network" "vm_network" {
-				name          = "%s"
-				network_type  = "standard"
-				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				cidr_block = "10.0.0.0/24"
-				dhcp_start_address = "10.0.0.10"
-				dhcp_end_address   = "10.0.0.254"
-				dns_servers = ["8.8.8.8", "8.8.4.4"]
-			}
-
 			resource "gpcn_virtualmachine" "test" {
 				name          = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
@@ -227,14 +196,14 @@ func TestVirtualMachinesResource(t *testing.T) {
 				image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 				allocate_public_ip = false
 				network_ids = [
-					gpcn_network.vm_network.id
+					%q
 				]
 				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
 					username   = "testuser"
 				}
 			}
-			`, sshKeyName, networkStdName, vmNameUpdated),
+			`, sshKeyName, vmNameUpdated, networkID),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "image_id"),
 				),
@@ -252,24 +221,14 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
 	sshKeyName := fmt.Sprintf("vm-public-ip-key-%s", rName)
-	networkName := fmt.Sprintf("vm-public-ip-net-%s", rName)
+	networkID := os.Getenv(networkTestIDEnvVar)
 	vmName := fmt.Sprintf("vm-public-ip-%s", rName)
 
-	vmConfig := func(sshKey, network, vm string, allocatePublicIp bool) string {
+	vmConfig := func(sshKey, networkID, vm string, allocatePublicIp bool) string {
 		return providerConfig + dataCenterImagesAndSize() + fmt.Sprintf(`
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
-			}
-
-			resource "gpcn_network" "vm_network" {
-			  name          = "%s"
-			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			  cidr_block = "10.0.0.0/24"
-			  dhcp_start_address = "10.0.0.10"
-			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 
 			resource "gpcn_virtualmachine" "test" {
@@ -279,32 +238,32 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			  image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 			  allocate_public_ip = %t
 			  network_ids = [
-			    gpcn_network.vm_network.id
+			    %q
 			  ]
 			  initial_auth = {
 				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
     			username   = "testuser"
 			  }
 			}
-			`, sshKey, network, vm, allocatePublicIp)
+			`, sshKey, vm, allocatePublicIp, networkID)
 	}
 
 	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { skipWithoutTestNetwork(t, networkID) },
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Set baseline
 			{
-				Config: vmConfig(sshKeyName, networkName, vmName, false),
+				Config: vmConfig(sshKeyName, networkID, vmName, false),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("gpcn_network.vm_network", plancheck.ResourceActionCreate),
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionCreate),
 					},
 				},
 			},
 			// Update allocate_public_ip to true
 			{
-				Config: vmConfig(sshKeyName, networkName, vmName, true),
+				Config: vmConfig(sshKeyName, networkID, vmName, true),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
@@ -316,7 +275,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 			},
 			// Release the IP
 			{
-				Config: vmConfig(sshKeyName, networkName, vmName, false),
+				Config: vmConfig(sshKeyName, networkID, vmName, false),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
@@ -334,10 +293,10 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
 	sshKeyName := fmt.Sprintf("vm-size-upgrade-key-%s", rName)
-	networkName := fmt.Sprintf("vm-size-upgrade-net-%s", rName)
+	networkID := os.Getenv(networkTestIDEnvVar)
 	vmName := fmt.Sprintf("vm-size-upgrade-%s", rName)
 
-	vmConfig := func(sshKey, network, vm, sizeDataSource string) string {
+	vmConfig := func(sshKey, networkID, vm, sizeDataSource string) string {
 		return providerConfig + `
 			data "gpcn_datacenters" "central_us" {
 				country_name = "United States"
@@ -355,16 +314,6 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
 			}
 
-			resource "gpcn_network" "vm_network" {
-			  name          = "%s"
-			  network_type  = "standard"
-			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-			  cidr_block = "10.0.0.0/24"
-			  dhcp_start_address = "10.0.0.10"
-			  dhcp_end_address   = "10.0.0.254"
-			  dns_servers = ["8.8.8.8", "8.8.4.4"]
-			}
-
 			resource "gpcn_virtualmachine" "test" {
 			  name          = "%s"
 			  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
@@ -372,14 +321,14 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 			  image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 			  allocate_public_ip = false
 			  network_ids = [
-			    gpcn_network.vm_network.id
+			    %q
 			  ]
 			  initial_auth = {
 				ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
     			username   = "testuser"
 			  }
 			}
-			`, sshKey, network, vm)
+			`, sshKey, vm, networkID)
 	}
 
 	microSize := `
@@ -399,11 +348,12 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 	`
 
 	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { skipWithoutTestNetwork(t, networkID) },
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create VM with micro size
 			{
-				Config: vmConfig(sshKeyName, networkName, vmName, microSize),
+				Config: vmConfig(sshKeyName, networkID, vmName, microSize),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionCreate),
@@ -415,7 +365,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 			},
 			// Upgrade to a larger size - should update in place
 			{
-				Config: vmConfig(sshKeyName, networkName, vmName, smallSize),
+				Config: vmConfig(sshKeyName, networkID, vmName, smallSize),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
@@ -427,7 +377,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 			},
 			// Downgrade back to micro - should require replacement
 			{
-				Config: vmConfig(sshKeyName, networkName, vmName, microSize),
+				Config: vmConfig(sshKeyName, networkID, vmName, microSize),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionReplace),
@@ -552,10 +502,11 @@ func TestVirtualMachinesAuth(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
 	sshKeyName := fmt.Sprintf("vm-auth-key-%s", rName)
-	networkName := fmt.Sprintf("vm-auth-net-%s", rName)
+	networkID := os.Getenv(networkTestIDEnvVar)
 	vmName := fmt.Sprintf("vm-auth-%s", rName)
 
 	resource.Test(t, resource.TestCase{
+		PreCheck:                 func() { skipWithoutTestNetwork(t, networkID) },
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			// Create with ssh_key_id and username
@@ -564,16 +515,6 @@ func TestVirtualMachinesAuth(t *testing.T) {
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
-			}
-
-			resource "gpcn_network" "vm_network" {
-				name          = "%s"
-				network_type  = "standard"
-				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				cidr_block = "10.0.0.0/24"
-				dhcp_start_address = "10.0.0.10"
-				dhcp_end_address   = "10.0.0.254"
-				dns_servers = ["8.8.8.8", "8.8.4.4"]
 			}
 
 			resource "gpcn_virtualmachine" "test" {
@@ -585,7 +526,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 
 				allocate_public_ip = false
 				network_ids = [
-					gpcn_network.vm_network.id
+					%q
 				]
 
 				initial_auth = {
@@ -593,7 +534,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 					username   = "testuser"
 				}
 			}
-			`, sshKeyName, networkName, vmName),
+			`, sshKeyName, vmName, networkID),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionCreate),
@@ -607,15 +548,6 @@ func TestVirtualMachinesAuth(t *testing.T) {
 			// Changing initial_auth is a no-op - state is updated with new config values but no API calls are made
 			{
 				Config: providerConfig + dataCenterImagesAndSize() + fmt.Sprintf(`
-			resource "gpcn_network" "vm_network" {
-				name          = "%s"
-				network_type  = "standard"
-				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				cidr_block = "10.0.0.0/24"
-				dhcp_start_address = "10.0.0.10"
-				dhcp_end_address   = "10.0.0.254"
-				dns_servers = ["8.8.8.8", "8.8.4.4"]
-			}
 
 			resource "gpcn_virtualmachine" "test" {
 				name          = "%s"
@@ -626,7 +558,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 
 				allocate_public_ip = false
 				network_ids = [
-					gpcn_network.vm_network.id
+					%q
 				]
 
 				initial_auth = {
@@ -634,7 +566,7 @@ func TestVirtualMachinesAuth(t *testing.T) {
 					username = "newuser"
 				}
 			}
-			`, networkName, vmName),
+			`, vmName, networkID),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),

@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
+	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +16,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
 const (
@@ -92,7 +96,9 @@ func vmPlanTestReadBody(name, status, skuId string) map[string]any {
 	}
 }
 
-func vmPlanTestNetworkInterfacesBody() map[string]any {
+// The birth network comes from the create body. The interface the API reports is
+// therefore the one the provider asked for. A fixed fixture could agree by coincidence.
+func vmPlanTestNetworkInterfacesBody(birthNetworkID string) map[string]any {
 	return map[string]any{
 		"success": true,
 		"message": "ok",
@@ -104,7 +110,7 @@ func vmPlanTestNetworkInterfacesBody() map[string]any {
 			"publicIpId":       "",
 			"privateIp":        "10.0.0.5",
 			"networkName":      "net-standard",
-			"networkId":        vmPlanTestNetworkID,
+			"networkId":        birthNetworkID,
 			"cidrBlock":        "10.0.0.0/24",
 			"gatewayIp":        "10.0.0.1",
 			"networkType":      "standard",
@@ -122,6 +128,7 @@ func startVirtualMachinePlanMockServer(t *testing.T) (*httptest.Server, func(str
 
 	var mu sync.Mutex
 	name := ""
+	birthNetworkID := ""
 	skuId := vmPlanTestSizeID
 	status := virtualmachines.VMStatusRunning.String()
 
@@ -129,10 +136,13 @@ func startVirtualMachinePlanMockServer(t *testing.T) (*httptest.Server, func(str
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
 			body := testutil.ReadRequestBody(r)
 			mu.Lock()
 			name, _ = body["name"].(string)
+			birthNetworkID, _ = body["networkId"].(string)
 			mu.Unlock()
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
@@ -143,7 +153,10 @@ func startVirtualMachinePlanMockServer(t *testing.T) (*httptest.Server, func(str
 			mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodGet && r.URL.Path == vmPath+"/network-interfaces":
-			testutil.WriteJSONResponse(w, vmPlanTestNetworkInterfacesBody())
+			mu.Lock()
+			currentNetwork := birthNetworkID
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestNetworkInterfacesBody(currentNetwork))
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
 			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
 		case r.Method == http.MethodGet && r.URL.Path == vmPath:
@@ -277,4 +290,818 @@ func TestVirtualMachineResourcePlanIgnoresOutOfBandResize(t *testing.T) {
 			},
 		},
 	})
+}
+
+const (
+	vmPlanTestSecondNetworkID = "net-2"
+	vmPlanTestThirdNetworkID  = "net-3"
+)
+
+// vmAttachPlanTestNetworkInterfacesBody lists the birth interface and one row per
+// network that attached. A test can then observe the state a failed attach leaves behind.
+func vmAttachPlanTestNetworkInterfacesBody(birthNetworkID string, attached []string) map[string]any {
+	rows := make([]map[string]any, 0, 1+len(attached))
+	rows = append(rows, map[string]any{
+		"id":               "nic-1",
+		"networkInterface": 0,
+		"isPrimary":        1,
+		"publicIp":         "",
+		"publicIpId":       "",
+		"privateIp":        "10.0.0.5",
+		"networkName":      "net-standard",
+		"networkId":        birthNetworkID,
+		"cidrBlock":        "10.0.0.0/24",
+		"gatewayIp":        "10.0.0.1",
+		"networkType":      "standard",
+	})
+	for index, networkID := range attached {
+		rows = append(rows, map[string]any{
+			"id":               fmt.Sprintf("nic-%d", index+2),
+			"networkInterface": index + 1,
+			"isPrimary":        0,
+			"publicIp":         "",
+			"publicIpId":       "",
+			"privateIp":        "10.0.1.5",
+			"networkName":      "net-extra",
+			"networkId":        networkID,
+			"cidrBlock":        "10.0.1.0/24",
+			"gatewayIp":        "10.0.1.1",
+			"networkType":      "standard",
+		})
+	}
+	return map[string]any{"success": true, "message": "ok", "data": rows}
+}
+
+// startVirtualMachineAttachMockServer refuses the post-create attach until the returned
+// function heals it. The refusal is a 500, and the provider configuration asks for no
+// retries. The attach therefore fails on the first call.
+func startVirtualMachineAttachMockServer(t *testing.T) (*httptest.Server, func()) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	birthNetworkID := ""
+	attachFails := true
+	status := virtualmachines.VMStatusRunning.String()
+	var attached []string
+
+	vmPath := "/v1/resource/virtual-machines/" + vmPlanTestID
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			birthNetworkID, _ = body["networkId"].(string)
+			attached = nil
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == vmPath+"/network-interfaces":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			refuse := attachFails
+			if !refuse {
+				networkID, _ := body["networkId"].(string)
+				attached = append(attached, networkID)
+			}
+			mu.Unlock()
+			if refuse {
+				w.WriteHeader(http.StatusInternalServerError)
+				testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "attach refused"})
+				return
+			}
+			testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+		case r.Method == http.MethodGet && r.URL.Path == vmPath+"/network-interfaces":
+			mu.Lock()
+			currentBirth := birthNetworkID
+			current := append([]string(nil), attached...)
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmAttachPlanTestNetworkInterfacesBody(currentBirth, current))
+		case r.Method == http.MethodPost && r.URL.Path == vmPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, vmPlanTestSizeID))
+		case r.Method == http.MethodPut && r.URL.Path == vmPath:
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			if updated, ok := body["name"].(string); ok {
+				name = updated
+			}
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodDelete && r.URL.Path == vmPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	heal := func() {
+		mu.Lock()
+		attachFails = false
+		mu.Unlock()
+	}
+
+	return server, heal
+}
+
+// A failed attach must not orphan the machine: it exists at the API, so it belongs in
+// state. State must also name only the networks that attached, or no later plan can
+// attach the rest. Terraform taints a resource whose create returned an error, so the
+// last step plans a replacement. A machine absent from state would plan a bare create
+// instead, with nothing to destroy.
+func TestVirtualMachineResourcePlanCreateWritesStateWhenAttachFails(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, heal := startVirtualMachineAttachMockServer(t)
+
+	config := vmNetworkListPlanTestConfig(server.URL, "vm-plan-attach", vmPlanTestNetworkID, vmPlanTestSecondNetworkID)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexp.MustCompile(`(?s)attaching .* failed.*terraform\s+untaint`),
+			},
+			{
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_ids.#", "1"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_ids.0", vmPlanTestNetworkID),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.#", "1"),
+				),
+			},
+			{
+				PreConfig: heal,
+				Config:    config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionReplace),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "id"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.#", "2"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.0.network_id", vmPlanTestNetworkID),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.1.network_id", vmPlanTestSecondNetworkID),
+				),
+			},
+		},
+	})
+}
+
+// startVirtualMachineDestroyMockServer refuses to delete. A test that reaches the delete
+// endpoint has not treated the machine as gone.
+func startVirtualMachineDestroyMockServer(t *testing.T) (*httptest.Server, func()) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	birthNetworkID := ""
+	status := virtualmachines.VMStatusRunning.String()
+
+	vmPath := "/v1/resource/virtual-machines/" + vmPlanTestID
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			birthNetworkID, _ = body["networkId"].(string)
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodGet && r.URL.Path == vmPath+"/network-interfaces":
+			mu.Lock()
+			currentNetwork := birthNetworkID
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestNetworkInterfacesBody(currentNetwork))
+		case r.Method == http.MethodPost && r.URL.Path == vmPath+"/stop":
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, vmPlanTestSizeID))
+		case r.Method == http.MethodDelete && r.URL.Path == vmPath:
+			t.Error("Expected no delete call for a machine the platform already removed")
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	setDeleting := func() {
+		mu.Lock()
+		status = virtualmachines.VMStatusDeleting.String()
+		mu.Unlock()
+	}
+
+	return server, setDeleting
+}
+
+// A machine the platform is already removing never reaches a stopped status. The
+// pre-delete stop fails fast on a status the machine never leaves. The outcome matches a
+// 404: the machine is gone, so it leaves state without an error.
+func TestVirtualMachineResourcePlanDestroyTreatsDeletingAsGone(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, setDeleting := startVirtualMachineDestroyMockServer(t)
+
+	config := vmPlanTestConfig(server.URL, "vm-plan-destroy")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
+				),
+			},
+			{
+				PreConfig: setDeleting,
+				Config:    config,
+				Destroy:   true,
+			},
+		},
+	})
+}
+
+const vmPlanTestPath = "/v1/resource/virtual-machines/" + vmPlanTestID
+
+func vmPlanTestReadBodyWithHotplug(name, status string, hotplug int) map[string]any {
+	body := vmPlanTestReadBody(name, status, vmPlanTestSizeID)
+	body["data"].(map[string]any)["networkHotplug"] = hotplug
+	return body
+}
+
+// startVirtualMachineHotplugMockServer accepts every call and records the order in which
+// they arrive. A test reads the order to learn whether the provider stopped the machine
+// around the post-create attach.
+func startVirtualMachineHotplugMockServer(t *testing.T, hotplug int) (*httptest.Server, func() []string) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	birthNetworkID := ""
+	status := virtualmachines.VMStatusRunning.String()
+	var attached []string
+	var sequence []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		sequence = append(sequence, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			birthNetworkID, _ = body["networkId"].(string)
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			body := testutil.ReadRequestBody(r)
+			networkID, _ := body["networkId"].(string)
+			mu.Lock()
+			attached = append(attached, networkID)
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mu.Lock()
+			currentBirth := birthNetworkID
+			current := append([]string(nil), attached...)
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmAttachPlanTestNetworkInterfacesBody(currentBirth, current))
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/start":
+			mu.Lock()
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, hotplug))
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	recorded := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), sequence...)
+	}
+
+	return server, recorded
+}
+
+func indexOfRequest(sequence []string, request string) int {
+	return slices.Index(sequence, request)
+}
+
+func lastIndexOfRequest(sequence []string, request string) int {
+	for i := len(sequence) - 1; i >= 0; i-- {
+		if sequence[i] == request {
+			return i
+		}
+	}
+	return -1
+}
+
+func TestVirtualMachineResourcePlanCreateStopsForAttachWithoutHotplug(t *testing.T) {
+	tests := []struct {
+		name          string
+		hotplug       int
+		networkIDs    []string
+		expectStopped bool
+	}{
+		// Three networks mean two attaches. A start after the first attach then differs
+		// from a start after the last one.
+		{"without hotplug the machine stops around the attach", 0, []string{vmPlanTestNetworkID, vmPlanTestSecondNetworkID, vmPlanTestThirdNetworkID}, true},
+		{"with hotplug the machine stays running", 1, []string{vmPlanTestNetworkID, vmPlanTestSecondNetworkID}, false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			shortenVirtualMachinePolling(t)
+			server, recorded := startVirtualMachineHotplugMockServer(t, tc.hotplug)
+
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config: vmNetworkListPlanTestConfig(server.URL, "vm-plan-hotplug", tc.networkIDs...),
+						Check: func(*terraform.State) error {
+							sequence := recorded()
+							attach := indexOfRequest(sequence, "POST "+vmPlanTestPath+"/network-interfaces")
+							lastAttach := lastIndexOfRequest(sequence, "POST "+vmPlanTestPath+"/network-interfaces")
+							stop := indexOfRequest(sequence, "POST "+vmPlanTestPath+"/stop")
+							start := indexOfRequest(sequence, "POST "+vmPlanTestPath+"/start")
+							if attach < 0 {
+								return fmt.Errorf("expected an attach call, got %v", sequence)
+							}
+							if !tc.expectStopped {
+								if stop >= 0 || start >= 0 {
+									return fmt.Errorf("expected no stop or start, got %v", sequence)
+								}
+								return nil
+							}
+							if stop < 0 || stop > attach {
+								return fmt.Errorf("expected a stop before the attach, got %v", sequence)
+							}
+							if start < 0 || start < lastAttach {
+								return fmt.Errorf("expected a start after the last attach, got %v", sequence)
+							}
+							return nil
+						},
+					},
+				},
+			})
+		})
+	}
+}
+
+// startVirtualMachineFailedRestartMockServer refuses every start. The machine it reports
+// has no network hotplug, so the provider stops it before it changes the networks. A test
+// then observes what the provider does with a machine it cannot start again.
+func startVirtualMachineFailedRestartMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	birthNetworkID := ""
+	status := virtualmachines.VMStatusRunning.String()
+	var attached []string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			birthNetworkID, _ = body["networkId"].(string)
+			attached = nil
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			body := testutil.ReadRequestBody(r)
+			networkID, _ := body["networkId"].(string)
+			mu.Lock()
+			attached = append(attached, networkID)
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mu.Lock()
+			currentBirth := birthNetworkID
+			current := append([]string(nil), attached...)
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmAttachPlanTestNetworkInterfacesBody(currentBirth, current))
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/"):
+			mu.Lock()
+			attached = attached[:0]
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-4", "detach issued")
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/start":
+			w.WriteHeader(http.StatusInternalServerError)
+			testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "start refused"})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, 0))
+		case r.Method == http.MethodPut && r.URL.Path == vmPlanTestPath:
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			if updated, ok := body["name"].(string); ok {
+				name = updated
+			}
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	return server
+}
+
+// vmNetworkListPlanTestConfig takes any number of networks, so a test can observe the
+// attach loop. It asks for no retries, so a refused call fails on the first attempt.
+func vmNetworkListPlanTestConfig(host, name string, networkIDs ...string) string {
+	quoted := make([]string, 0, len(networkIDs))
+	for _, networkID := range networkIDs {
+		quoted = append(quoted, fmt.Sprintf("%q", networkID))
+	}
+
+	return fmt.Sprintf(`
+provider "gpcn" {
+  host        = %q
+  api_key     = "test-key"
+  max_retries = 0
+}
+
+resource "gpcn_virtualmachine" "test" {
+  name               = %q
+  datacenter_id      = %q
+  size_id            = %q
+  image_id           = %q
+  allocate_public_ip = false
+  network_ids        = [%s]
+  initial_auth = {
+    ssh_key_id = %q
+    username   = %q
+  }
+}
+`, host, name, vmPlanTestDatacenterID, vmPlanTestSizeID, vmPlanTestImageID, strings.Join(quoted, ", "), vmPlanTestSshKeyID, vmPlanTestUsername)
+}
+
+// The create stops the machine to attach the second network. A start that fails leaves
+// the machine stopped, and only an error tells the user so. The machine exists at the
+// API, so it stays in state.
+func TestVirtualMachineResourcePlanCreateReportsFailedRestart(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server := startVirtualMachineFailedRestartMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      vmNetworkListPlanTestConfig(server.URL, "vm-plan-restart-create", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
+				ExpectError: regexp.MustCompile(`(?s)left\s+stopped.*did not start again.*otherwise\s+the\s+next\s+apply\s+replaces\s+the\s+machine`),
+			},
+			{
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_ids.#", "2"),
+				),
+			},
+		},
+	})
+}
+
+// The update stops the machine to attach the added network. Only an error tells the user
+// the machine stayed stopped.
+func TestVirtualMachineResourcePlanUpdateReportsFailedRestart(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server := startVirtualMachineFailedRestartMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmNetworkListPlanTestConfig(server.URL, "vm-plan-restart-update", vmPlanTestNetworkID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
+				),
+			},
+			{
+				Config:      vmNetworkListPlanTestConfig(server.URL, "vm-plan-restart-update", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
+				ExpectError: regexp.MustCompile(`(?s)left\s+stopped.*did not start again.*Start\s+it\s+in\s+the\s+portal\.`),
+			},
+			{
+				RefreshState: true,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_ids.#", "2"),
+				),
+			},
+		},
+	})
+}
+
+// startVirtualMachineAttachRefusedMockServer counts the starts the provider issues.
+// The machine reports the given network hotplug value, so a test chooses whether an
+// update stops it first. The attach is refused unless getFailsAfterStop is set, because
+// the read-back is only reachable past a successful attach. That flag then makes the
+// first GET after the attach answer 500. startSucceeds answers the start.
+func startVirtualMachineAttachRefusedMockServer(t *testing.T, startSucceeds bool, hotplug int, getFailsAfterStop bool) (*httptest.Server, func() int) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	birthNetworkID := ""
+	status := virtualmachines.VMStatusRunning.String()
+	startCount := 0
+	attachDone := false
+	readBackFailed := false
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			birthNetworkID, _ = body["networkId"].(string)
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			if getFailsAfterStop {
+				mu.Lock()
+				attachDone = true
+				mu.Unlock()
+				testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+				return
+			}
+			w.WriteHeader(http.StatusInternalServerError)
+			testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "attach refused"})
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mu.Lock()
+			currentBirth := birthNetworkID
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmAttachPlanTestNetworkInterfacesBody(currentBirth, nil))
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/start":
+			mu.Lock()
+			startCount++
+			if startSucceeds {
+				status = virtualmachines.VMStatusRunning.String()
+			}
+			mu.Unlock()
+			if !startSucceeds {
+				w.WriteHeader(http.StatusInternalServerError)
+				testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "start refused"})
+				return
+			}
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			refuseReadBack := attachDone && !readBackFailed
+			readBackFailed = readBackFailed || refuseReadBack
+			mu.Unlock()
+			if refuseReadBack {
+				w.WriteHeader(http.StatusInternalServerError)
+				testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "read-back refused"})
+				return
+			}
+			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, hotplug))
+		case r.Method == http.MethodPut && r.URL.Path == vmPlanTestPath:
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			if updated, ok := body["name"].(string); ok {
+				name = updated
+			}
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	starts := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return startCount
+	}
+
+	return server, starts
+}
+
+// vmPlanTestAttachErrorPattern matches the attach refusal after Terraform wraps it.
+var vmPlanTestAttachErrorPattern = regexp.MustCompile(`(?s)Error\s+updating\s+network\s+interfaces`)
+
+// vmPlanTestLeftStoppedPattern matches the left-stopped summary after Terraform wraps it.
+var vmPlanTestLeftStoppedPattern = regexp.MustCompile(`(?s)Virtual\s+machine\s+left\s+stopped`)
+
+// The update stops the machine and the attach then fails. The provider starts the
+// machine again, so the user reads the attach error alone. The step sets no
+// ExpectError, because ErrorCheck never runs for a step that sets one.
+func TestVirtualMachineResourcePlanStartsAgainWhenAnUpdateStepFailsAfterTheStop(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, startCount := startVirtualMachineAttachRefusedMockServer(t, true, 0, false)
+
+	errorCheckRan := false
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		ErrorCheck: func(err error) error {
+			errorCheckRan = true
+			if !vmPlanTestAttachErrorPattern.MatchString(err.Error()) {
+				t.Errorf("Expected the attach error, got '%s'", err.Error())
+			}
+			if vmPlanTestLeftStoppedPattern.MatchString(err.Error()) {
+				t.Errorf("Expected no '%s' diagnostic, got '%s'", virtualmachines.ErrSummaryVMLeftStopped, err.Error())
+			}
+			return nil
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: vmNetworkListPlanTestConfig(server.URL, "vm-plan-restart-after-failure", vmPlanTestNetworkID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
+				),
+			},
+			{
+				Config: vmNetworkListPlanTestConfig(server.URL, "vm-plan-restart-after-failure", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
+			},
+		},
+	})
+
+	// A passing apply never calls ErrorCheck, so the assertions inside it never run.
+	if !errorCheckRan {
+		t.Error("Expected ErrorCheck to run on the failed apply, but it did not")
+	}
+
+	if starts := startCount(); starts != 1 {
+		t.Errorf("Expected exactly 1 start, got %d", starts)
+	}
+}
+
+// The update stops the machine, the attach fails, and the start fails too. The user
+// reads both errors, so the machine that stays stopped is never a silent one.
+func TestVirtualMachineResourcePlanReportsLeftStoppedWhenTheStartAlsoFails(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, startCount := startVirtualMachineAttachRefusedMockServer(t, false, 0, false)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmNetworkListPlanTestConfig(server.URL, "vm-plan-left-stopped-update", vmPlanTestNetworkID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
+				),
+			},
+			{
+				Config:      vmNetworkListPlanTestConfig(server.URL, "vm-plan-left-stopped-update", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
+				ExpectError: regexp.MustCompile(`(?s)Error\s+updating\s+network\s+interfaces.*Virtual\s+machine\s+left\s+stopped.*did\s+not\s+start\s+again.*then\s+run\s+terraform\s+plan\s+and\s+check\s+the\s+proposed\s+changes\s+before\s+applying\.`),
+			},
+			// The attach is refused, so a recorded change shows two networks.
+			{
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check:              resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_ids.#", "1"),
+			},
+		},
+	})
+
+	if starts := startCount(); starts != 1 {
+		t.Errorf("Expected exactly 1 start, got %d", starts)
+	}
+}
+
+// Network hotplug keeps the machine running through the attach. A failed attach leaves
+// nothing to start. A start would then reboot a machine the provider never stopped.
+func TestVirtualMachineResourcePlanDoesNotStartAMachineItNeverStopped(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, startCount := startVirtualMachineAttachRefusedMockServer(t, true, 1, false)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmNetworkListPlanTestConfig(server.URL, "vm-plan-never-stopped", vmPlanTestNetworkID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
+				),
+			},
+			{
+				Config:      vmNetworkListPlanTestConfig(server.URL, "vm-plan-never-stopped", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
+				ExpectError: regexp.MustCompile(`(?s)Error\s+updating\s+network\s+interfaces`),
+			},
+		},
+	})
+
+	if starts := startCount(); starts != 0 {
+		t.Errorf("Expected no start, got %d", starts)
+	}
+}
+
+// The read-back after the update is the last step that can fail before the start.
+// It runs inside the runner, so a refused GET also starts the machine again.
+func TestVirtualMachineResourcePlanStartsAgainWhenTheReadBackFails(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, startCount := startVirtualMachineAttachRefusedMockServer(t, true, 0, true)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmNetworkListPlanTestConfig(server.URL, "vm-plan-read-back-fails", vmPlanTestNetworkID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
+				),
+			},
+			{
+				Config:      vmNetworkListPlanTestConfig(server.URL, "vm-plan-read-back-fails", vmPlanTestNetworkID, vmPlanTestSecondNetworkID),
+				ExpectError: regexp.MustCompile(`(?s)Retrieving\s+information\s+about\s+the\s+Virtual\s+Machine\s+failed`),
+			},
+		},
+	})
+
+	if starts := startCount(); starts != 1 {
+		t.Errorf("Expected exactly 1 start, got %d", starts)
+	}
 }

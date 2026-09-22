@@ -6,7 +6,7 @@ const (
 	LogStartingCreateVirtualMachine               = "Starting CreateVirtualMachine"
 	LogValidatingPublicIPConfiguration            = "Validating public IP configuration"
 	LogValidatedPublicIPConfigurationSuccessfully = "Validated public IP configuration successfully"
-	LogNetworkIdsNotNull                          = "NetworkIds was not null. Adding network interfaces to create request"
+	LogNetworkIdsNotNull                          = "NetworkIds was not null. Naming the first network as the birth network of the create request"
 	LogNetworkIdsNullOrEmpty                      = "NetworkIds was null or empty in the Virtual Machine creation. VM will be created with a default network"
 	LogConstructedCreateVMRequest                 = "Constructed Create GPCN Virtual Machine request successfully"
 	LogIssuedCreateVMJob                          = "Successfully issued to job to create GPCN Virtual Machine. Beginning long-polling to check the status"
@@ -70,4 +70,5 @@ const (
 const (
 	LogVirtualMachineNotFoundRemovingFromState = "GPCN Virtual Machine no longer exists (deleted outside of Terraform) - removing it from state"
 	LogVirtualMachineAlreadyDeleted            = "GPCN Virtual Machine was already deleted"
+	LogVirtualMachineTerminalRemovingFromState = "The GPCN platform already removed the Virtual Machine - removing it from state: %s"
 )

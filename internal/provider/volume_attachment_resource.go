@@ -36,7 +36,7 @@ func (r *volumeAttachmentResource) Metadata(_ context.Context, req resource.Meta
 
 func (r *volumeAttachmentResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages the attachment of a volume to a virtual machine. A volume can only be attached to one virtual machine at a time. If the virtual machine has network_hotplug disabled, the VM will be stopped and restarted around the attach/detach operation. When attaching multiple volumes to the same network_hotplug=false VM concurrently, use depends_on to serialize operations.",
+		Description: "Manages the attachment of a volume to a virtual machine. A volume can only be attached to one virtual machine at a time. GPCN attaches a volume to a virtual machine that is Running, Stopped or Shutoff, so the provider never stops it. GPCN refuses any other status and the provider reports that refusal with the API's own message.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the attachment (equal to the volume ID).",
@@ -170,8 +170,8 @@ func (r *volumeAttachmentResource) Delete(ctx context.Context, req resource.Dele
 		return
 	}
 
-	if err := volumeattachments.DetachVolume(r.client, ctx, state.VirtualMachineId.ValueString(), state.VolumeId.ValueString()); client.IsNotFound(err) {
-		// The VM or volume is already deleted
+	if err := volumeattachments.DetachVolume(r.client, ctx, state.VolumeId.ValueString()); client.IsNotFound(err) {
+		// GPCN no longer knows the volume, so nothing is left to detach.
 		tflog.Info(ctx, volumeattachments.LogVolumeAttachmentAlreadyDetached)
 	} else if err != nil {
 		resp.Diagnostics.AddError(volumeattachments.ErrSummaryUnableToDetachVolume, err.Error())

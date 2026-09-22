@@ -12,6 +12,7 @@ import (
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
@@ -545,8 +546,8 @@ func TestMapNetworkResponseToModelKeepsPlanValuesUnit(t *testing.T) {
 	}
 }
 
-// requestRecorder collects the requests that matter to an assertion. The mock server
-// serves each request on its own goroutine, so the mutex guards the slice.
+// The mock server serves each request on its own goroutine, so the mutex
+// guards the slice.
 type requestRecorder struct {
 	mu       sync.Mutex
 	requests []string
@@ -705,7 +706,7 @@ func TestUpdateNetworkInterfacesRemovesLastInterfaceUnit(t *testing.T) {
 	}
 }
 
-// singlePutRequest returns the one PUT that the recorder saw. A promotion issues one PUT.
+// A promotion issues exactly one PUT.
 func singlePutRequest(t *testing.T, recorded []string) string {
 	t.Helper()
 	var puts []string
@@ -1066,5 +1067,89 @@ func TestUpdateNetworkInterfacesSkipsRefreshWhenPrimaryIsUnchangedUnit(t *testin
 		if got[i] != want[i] {
 			t.Errorf("Expected request %d to be '%s', got '%s'", i, want[i], got[i])
 		}
+	}
+}
+
+// TestUpdateNetworkOmitsEmptyCIDRBlockMockHTTP guards the update body against an empty
+// cidrBlock. The API stores an empty value for every custom network. Its update schema
+// validates the key against a CIDR pattern, so the empty value turns a rename into a 422.
+func TestUpdateNetworkOmitsEmptyCIDRBlockMockHTTP(t *testing.T) {
+	const networkID = "network-cidr-guard"
+
+	cases := []struct {
+		name      string
+		cidrBlock types.String
+		want      any
+	}{
+		{name: "null", cidrBlock: types.StringNull(), want: nil},
+		{name: "empty", cidrBlock: types.StringValue(""), want: nil},
+		{name: "set", cidrBlock: types.StringValue("10.0.0.0/24"), want: "10.0.0.0/24"},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			var putBody map[string]any
+
+			server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+				T: t,
+				Handler: func(w http.ResponseWriter, r *http.Request) {
+					switch {
+					case r.Method == "PUT" && strings.Contains(r.URL.Path, "/networks/"+networkID):
+						putBody = testutil.ReadRequestBody(r)
+						testutil.WriteJSONResponse(w, map[string]bool{"success": true})
+					case r.Method == "GET" && strings.Contains(r.URL.Path, "/networks/"+networkID):
+						testutil.WriteJSONResponse(w, newNetworkResponse(networkID, "custom-network", "custom"))
+					default:
+						testutil.LogUnexpectedRequest(t, w, r)
+					}
+				},
+			})
+			defer server.Close()
+
+			model := createTestResourceModel("custom", "", "", "", "")
+			model.ID = types.StringValue(networkID)
+			model.Name = types.StringValue("custom-network")
+			model.CIDRBlock = testCase.cidrBlock
+
+			if _, err := UpdateNetwork(gpcnClient, context.Background(), networkID, model); err != nil {
+				t.Fatalf("UpdateNetwork failed: %v", err)
+			}
+			if putBody == nil {
+				t.Fatal("Expected the update endpoint to be called")
+			}
+			got, present := putBody["cidrBlock"]
+			if testCase.want == nil {
+				if present {
+					t.Errorf("Expected cidrBlock to be absent from the update body, got '%v'", got)
+				}
+				return
+			}
+			if !present {
+				t.Fatalf("Expected cidrBlock '%v' in the update body, got no key", testCase.want)
+			}
+			if got != testCase.want {
+				t.Errorf("Expected cidrBlock '%v', got '%v'", testCase.want, got)
+			}
+		})
+	}
+}
+
+// TestCustomNetworkGoneWarningUnit pins the adoption warning byte for byte. The test
+// harness cannot observe a warning diagnostic. This test is therefore the only guard on
+// the text a user reads after the platform adopts a custom network.
+func TestCustomNetworkGoneWarningUnit(t *testing.T) {
+	const networkID = "network-adopted-123"
+
+	warning := CustomNetworkGoneWarning(networkID)
+
+	if got, want := warning.Severity(), diag.SeverityWarning; got != want {
+		t.Errorf("Expected severity %v, got %v", want, got)
+	}
+	if got, want := warning.Summary(), "Network removed from state"; got != want {
+		t.Errorf("Expected summary '%s', got '%s'", want, got)
+	}
+	want := "Network network-adopted-123 was not found. If it was adopted into an L2 segment by the platform, remove it from state and import the segment as gpcn_l2_segment: terraform state rm gpcn_network.<name> && terraform import gpcn_l2_segment.<name> <segment-id>."
+	if got := warning.Detail(); got != want {
+		t.Errorf("Expected detail '%s', got '%s'", want, got)
 	}
 }

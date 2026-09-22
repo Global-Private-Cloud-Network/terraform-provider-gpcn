@@ -314,6 +314,86 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
+	var networkIds []string
+	if !plan.NetworkIds.IsNull() {
+		listDiags := plan.NetworkIds.ElementsAs(ctx, &networkIds, true)
+		resp.Diagnostics.Append(listDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+	// GPCN creates the machine on one birth network, then the loop attaches the rest.
+	// State holds the machine and the networks that attached, so a refused attach leaves
+	// no machine outside Terraform.
+	if len(networkIds) > 1 {
+		attached := []string{networkIds[0]}
+		var attachErr error
+		failedNetworkId := ""
+
+		// GPCN refuses an add-NIC on a running machine whose image has no network
+		// hotplug. The update path takes the same gate.
+		stopped := false
+		if !plan.NetworkHotplug.ValueBool() {
+			if stopErr := virtualmachines.StopVirtualMachine(r.client, ctx, plan.ID.ValueString()); stopErr != nil {
+				attachErr = fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStoppingVM, plan.ID.ValueString()), stopErr)
+				failedNetworkId = networkIds[1]
+			} else {
+				stopped = true
+			}
+		}
+
+		if attachErr == nil {
+			for _, networkId := range networkIds[1:] {
+				attachErr = networks.AddNetworkInterface(r.client, ctx, plan.ID.ValueString(), networkId)
+				if attachErr != nil {
+					failedNetworkId = networkId
+					break
+				}
+				attached = append(attached, networkId)
+			}
+		}
+
+		// The provider stops the machine for the attach, so it starts the machine again.
+		// A start that fails leaves the machine stopped, and the user learns that from
+		// the diagnostic below the state write.
+		var startErr error
+		if stopped {
+			startErr = virtualmachines.StartVirtualMachine(r.client, ctx, plan.ID.ValueString())
+		}
+
+		plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
+		resp.Diagnostics.Append(mapDiags...)
+
+		// network_ids names the networks the machine really holds. A configured list that
+		// outruns the attach loop leaves a later plan no difference to act on.
+		attachedIds, attachedDiags := types.ListValueFrom(ctx, types.StringType, attached)
+		resp.Diagnostics.Append(attachedDiags...)
+		if !attachedDiags.HasError() {
+			plan.NetworkIds = attachedIds
+		}
+
+		diags = resp.State.Set(ctx, plan)
+		resp.Diagnostics.Append(diags...)
+
+		if startErr != nil {
+			resp.Diagnostics.AddError(
+				virtualmachines.ErrSummaryVMLeftStopped,
+				fmt.Sprintf(virtualmachines.ErrDetailVMLeftStoppedCreate, plan.ID.ValueString(), startErr.Error()),
+			)
+		}
+
+		if attachErr != nil {
+			resp.Diagnostics.AddError(
+				virtualmachines.ErrSummaryVMCreatedAttachFailed,
+				fmt.Sprintf(virtualmachines.ErrDetailVMCreatedAttachFailed, plan.ID.ValueString(), failedNetworkId, attachErr.Error()),
+			)
+			return
+		}
+		if resp.Diagnostics.HasError() {
+			return
+		}
+	}
+
 	tflog.Info(ctx, virtualmachines.LogSuccessfullyFinishedCreateGPCNVirtualMachine)
 }
 
@@ -391,7 +471,6 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		return
 	}
 
-	// Validate the prospective primary network has a valid configuration for allocatePublicIp
 	if plan.AllocatePublicIp != state.AllocatePublicIp {
 		// First validate the primary network type is standard
 		err := virtualmachines.ValidatePublicIpValue(r.client, ctx, plan)
@@ -419,42 +498,54 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		}
 	}
 
-	// Update network interfaces if changed
-	networkDiags := virtualmachines.UpdateNetworkInterfacesIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
-	resp.Diagnostics.Append(networkDiags...)
-	if resp.Diagnostics.HasError() {
-		return
+	// Every step between the stop and the state write leaves the machine stopped when
+	// it fails. The steps run in order through one runner, so one early return owns
+	// that repair. The runner keeps the response of the read-back for the mapping.
+	var getVirtualMachineResponse *virtualmachines.ReadVirtualMachinesResponse
+	updateSteps := []func() diag.Diagnostics{
+		func() diag.Diagnostics {
+			return virtualmachines.UpdateNetworkInterfacesIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+		},
+		func() diag.Diagnostics {
+			return virtualmachines.UpdatePublicIPIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+		},
+		func() diag.Diagnostics {
+			return virtualmachines.UpdateSizeIfChanged(r.client, ctx, plan.ID.ValueString(), state, plan)
+		},
+		func() diag.Diagnostics {
+			return virtualmachines.UpdateChangeableAttributesIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+		},
+		func() diag.Diagnostics {
+			var readBackDiags diag.Diagnostics
+			tflog.Info(ctx, virtualmachines.LogAllVMUpdateOpsCompleteRetrievingLatestInfo)
+			var readBackErr error
+			getVirtualMachineResponse, readBackErr = virtualmachines.GetVirtualMachine(r.client, ctx, plan.ID.ValueString())
+			if readBackErr != nil {
+				readBackDiags.AddError(
+					virtualmachines.ErrSummaryRetrievingVMInfoFailed,
+					fmt.Errorf("%s: %w", virtualmachines.ErrDetailVMInfoFailedCanImport, readBackErr).Error(),
+				)
+			}
+			return readBackDiags
+		},
 	}
 
-	// Update public IP allocation if changed
-	publicIPDiags := virtualmachines.UpdatePublicIPIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
-	resp.Diagnostics.Append(publicIPDiags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Update size if changed
-	sizeDiags := virtualmachines.UpdateSizeIfChanged(r.client, ctx, plan.ID.ValueString(), state, plan)
-	resp.Diagnostics.Append(sizeDiags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Update name if changed
-	nameDiags := virtualmachines.UpdateChangeableAttributesIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
-	resp.Diagnostics.Append(nameDiags...)
-	if resp.Diagnostics.HasError() {
-		return
-	}
-
-	// Perform a GET call to retrieve actual information about the Virtual Machine
-	tflog.Info(ctx, virtualmachines.LogAllVMUpdateOpsCompleteRetrievingLatestInfo)
-	getVirtualMachineResponse, err := virtualmachines.GetVirtualMachine(r.client, ctx, plan.ID.ValueString())
-	if err != nil {
-		resp.Diagnostics.AddError(
-			virtualmachines.ErrSummaryRetrievingVMInfoFailed,
-			fmt.Errorf("%s: %w", virtualmachines.ErrDetailVMInfoFailedCanImport, err).Error(),
-		)
+	// A start that fails is the only report the user gets. It follows the diagnostics
+	// of the step that fails. This path writes no state, so the next plan shows what is left to do.
+	for _, updateStep := range updateSteps {
+		resp.Diagnostics.Append(updateStep()...)
+		if !resp.Diagnostics.HasError() {
+			continue
+		}
+		if needStopVM {
+			startErr := virtualmachines.StartVirtualMachine(r.client, ctx, state.ID.ValueString())
+			if startErr != nil {
+				resp.Diagnostics.AddError(
+					virtualmachines.ErrSummaryVMLeftStopped,
+					fmt.Sprintf(virtualmachines.ErrDetailVMLeftStoppedRetry, state.ID.ValueString(), startErr.Error()),
+				)
+			}
+		}
 		return
 	}
 
@@ -463,18 +554,25 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
 	resp.Diagnostics.Append(mapDiags...)
 
-	// Once finished, conditionally start the virtual machine again
+	// Once finished, conditionally start the virtual machine again. The diagnostic below
+	// the state write reports a failed start.
+	var startErr error
 	if needStopVM {
-		err = virtualmachines.StartVirtualMachine(r.client, ctx, state.ID.ValueString())
-		if err != nil {
-			tflog.Debug(ctx, fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStartingVM, state.ID.ValueString()), err).Error())
-		}
+		startErr = virtualmachines.StartVirtualMachine(r.client, ctx, state.ID.ValueString())
 	}
 	tflog.Debug(ctx, fmt.Sprintf(virtualmachines.LogSuccessfullyUpdatedVMMayNotBeRunning, state.ID.ValueString()))
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
+
+	if startErr != nil {
+		resp.Diagnostics.AddError(
+			virtualmachines.ErrSummaryVMLeftStopped,
+			fmt.Sprintf(virtualmachines.ErrDetailVMLeftStoppedUpdate, state.ID.ValueString(), startErr.Error()),
+		)
+	}
+
 	if resp.Diagnostics.HasError() {
 		return
 	}
@@ -499,6 +597,12 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	if client.IsNotFound(err) {
 		// Already deleted outside of Terraform
 		tflog.Info(ctx, virtualmachines.LogVirtualMachineAlreadyDeleted)
+		return
+	} else if virtualmachines.IsTerminalStatusError(err) {
+		// The platform writes Destroyed and Deleting from its own lifecycle. The machine
+		// never stops, and no machine remains to delete.
+		tflog.Info(ctx, fmt.Sprintf(virtualmachines.LogVirtualMachineTerminalRemovingFromState, err.Error()))
+		resp.State.RemoveResource(ctx)
 		return
 	} else if err != nil {
 		resp.Diagnostics.AddError(

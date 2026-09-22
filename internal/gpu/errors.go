@@ -12,9 +12,11 @@ const (
 
 // Error detail message templates
 const (
-	ErrDetailExpectedGpcnClient   = "Expected *client.GpcnClient, got: %T. Please report this issue to the provider developers."
-	ErrDetailReadGPUFailed        = "Failed to read GPU with ID %s"
-	ErrDetailUpdateGPUFailed      = "Failed to update GPU with ID %s"
-	ErrDetailDeleteGPUFailed      = "Failed to delete GPU with ID %s"
-	ErrDetailNoInventoryAvailable = "no GPU availability for series code %s in datacenter %s with GPU count %d"
+	ErrDetailExpectedGpcnClient         = "Expected *client.GpcnClient, got: %T. Please report this issue to the provider developers."
+	ErrDetailReadGPUFailed              = "Failed to read GPU with ID %s"
+	ErrDetailUpdateGPUFailed            = "Failed to update GPU with ID %s"
+	ErrDetailDeleteGPUFailed            = "Failed to delete GPU with ID %s"
+	ErrDetailNoInventoryAvailable       = "no GPU availability for series code %s in datacenter %s with GPU count %d"
+	ErrDetailNoInventoryAvailableByName = "no GPU availability for series %s in datacenter %s with GPU count %d"
+	ErrDetailUnknownGPUSeries           = "GPU series %q is not offered in datacenter %s; available series: %s"
 )

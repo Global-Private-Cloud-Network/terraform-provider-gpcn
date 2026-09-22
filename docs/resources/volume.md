@@ -22,7 +22,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>1.3.0"
+      version = "~>1.4.0"
     }
   }
 }
@@ -59,7 +59,7 @@ output "example_gpcn_volume_ssd" {
 - `datacenter_id` (String) Unique identifier of the datacenter where the volume will be created. Changing this value requires replacing the volume
 - `name` (String) Human-readable name for the volume. Must be 1-255 characters. Changing this value requires replacing the volume
 - `size_gb` (Number) Size of the volume in GB. Can be increased without replacement, but shrinking requires replacing the volume
-- `volume_type` (String) Type of storage: either 'SSD' or 'NVMe'. Changing this value requires replacing the volume. Note that not all volume types are available for every datacenter
+- `volume_type` (String) Type of storage: 'SSD', 'NVMe', or a storage component code such as 'vol-add-ultra'. Use "SSD" or "NVMe" for the built-in storage classes and the component code for any other class. The datacenter decides which codes it offers, and a code it does not offer is refused with the list of codes it does offer. Changing this value requires replacing the volume. A volume whose SKU the platform cannot resolve reads "Unknown"; after the platform repairs it, remove the volume from state and import it again so the code is recorded. The built-in codes vol-add-ssd and vol-add-nvme are refused at plan time; write SSD or NVMe instead.
 
 ### Read-Only
 
@@ -67,7 +67,8 @@ output "example_gpcn_volume_ssd" {
 - `id` (String) Unique identifier for the volume in UUID format
 - `last_updated` (String) Timestamp when the volume was last updated in ISO-8601 format
 - `location` (Map of String) Location details including datacenter, region, and country information
-- `volume_type_id` (Number) Internal identifier for the volume type
+- `volume_type_code` (String) Component code of the storage class, for example 'vol-add-ssd'. This is the identifier the API uses for a volume type
+- `volume_type_id` (Number, Deprecated) Always null. The API identifies a volume type by code
 
 ## Import
 

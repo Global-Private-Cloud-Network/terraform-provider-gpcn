@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 	"os"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework-validators/int64validator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/provider/schema"
@@ -23,6 +25,34 @@ import (
 var (
 	_ provider.Provider = &gpcnProvider{}
 )
+
+// The API answers every credential failure with the same opaque 401. A host
+// that points elsewhere answers a bare route-not-found. The provider therefore
+// names the causes and the setting to check.
+//
+//nolint:gosec // G101: These are diagnostic sentences about a key, not a key.
+const (
+	ErrSummaryAPIKeyRejected = "API key rejected"
+	ErrDetailAPIKeyRejected  = "GPCN answered 401 to GET /v1/auth/check. The key in GPCN_API_KEY was revoked, expired, disabled, never bound to an entity, its owner left the entity, the entity is deactivated, or the key has exceeded its hourly request limit (1000 per hour by default). Mint a new key in the portal or wait for the limit to reset."
+
+	ErrSummaryAPIUnreachable = "Cannot reach the GPCN API"
+	ErrDetailAPIUnreachable  = "GET %s/v1/auth/check failed: %s. Check GPCN_HOST."
+
+	WarnSummaryCredentialNotAPIKey = "The configured credential is not an API key"
+	WarnDetailCredentialNotAPIKey  = "GPCN reports credential kind %q."
+
+	WarnSummaryAPIKeyExpiresSoon = "API key expires soon"
+	WarnDetailAPIKeyExpiresSoon  = "The API key expires at %s."
+)
+
+// The logged fragment is the prefix and the leading characters only, never the
+// secret.
+//
+//nolint:gosec // G101: This is a log message about a key, not a key.
+const LogAPIKeyIdentified = "GPCN API key identified"
+
+// A whole week gives a practitioner time to mint a replacement key.
+const apiKeyExpiryWarningWindow = 7 * 24 * time.Hour
 
 // New is a helper function to simplify provider server and testing implementation.
 func New(version string) func() provider.Provider {
@@ -215,10 +245,57 @@ func (p *gpcnProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 		return
 	}
 
+	// The preflight is unconditional. Without it a dead or misdirected key fails
+	// later, one resource at a time, with a 401 that names nothing.
+	authCheck, err := gpcnClient.AuthCheck(ctx)
+	if err != nil {
+		if client.IsUnauthorized(err) {
+			resp.Diagnostics.AddError(ErrSummaryAPIKeyRejected, ErrDetailAPIKeyRejected)
+			return
+		}
+		resp.Diagnostics.AddError(ErrSummaryAPIUnreachable, fmt.Sprintf(ErrDetailAPIUnreachable, host, err.Error()))
+		return
+	}
+
+	reportPreflight(ctx, authCheck, &resp.Diagnostics)
+
 	// Pass the full GpcnClient so resources can access both HTTP client and config
 	resp.DataSourceData = gpcnClient
 	resp.ResourceData = gpcnClient
 	tflog.Debug(ctx, "GPCN client successfully created. Provider online")
+}
+
+// These warnings tell the practitioner what they must know, and neither one
+// stops the apply. A credential of another kind still works. A key that expires
+// next week still works today.
+func reportPreflight(ctx context.Context, authCheck *client.AuthCheckData, diags *diag.Diagnostics) {
+	credential := authCheck.Credential
+	if credential == nil {
+		return
+	}
+
+	if credential.KeyStart != nil {
+		tflog.Info(ctx, LogAPIKeyIdentified, map[string]any{"key_start": *credential.KeyStart})
+	}
+
+	if credential.Kind != client.AuthCredentialKindAPIKey {
+		diags.AddWarning(WarnSummaryCredentialNotAPIKey, fmt.Sprintf(WarnDetailCredentialNotAPIKey, credential.Kind))
+	}
+
+	if credential.ExpiresAt == nil {
+		return
+	}
+
+	expiresAt, parseErr := time.Parse(time.RFC3339, *credential.ExpiresAt)
+	if parseErr != nil {
+		tflog.Debug(ctx, "GPCN reported an unreadable API key expiry",
+			map[string]any{"expires_at": *credential.ExpiresAt})
+		return
+	}
+
+	if time.Until(expiresAt) < apiKeyExpiryWarningWindow {
+		diags.AddWarning(WarnSummaryAPIKeyExpiresSoon, fmt.Sprintf(WarnDetailAPIKeyExpiresSoon, *credential.ExpiresAt))
+	}
 }
 
 // DataSources defines the data sources implemented in the provider.

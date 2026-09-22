@@ -174,3 +174,42 @@ func TestIsNotFoundThroughRoundTrip(t *testing.T) {
 		})
 	}
 }
+
+func TestDoWithRetryUnwrapsURLError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"success":false,"message":"Cannot attach a volume while the VM is in status 'Provisioning'.","error":{"code":"Validation Error","statusCode":400,"details":null}}`))
+	}))
+	defer server.Close()
+
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.MaxRetries = 0
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, "/test", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := gpcnClient.DoWithRetry(req)
+	if resp != nil {
+		resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+
+	// net/http wraps a transport error in *url.Error, which would prefix the
+	// diagnostic with the method and URL. The operator must read the API's words.
+	want := "HTTP 400 (Validation Error): Cannot attach a volume while the VM is in status 'Provisioning'."
+	if err.Error() != want {
+		t.Fatalf("expected %q, got %q", want, err.Error())
+	}
+	var httpErr *client.HTTPError
+	if !errors.As(err, &httpErr) {
+		t.Fatalf("expected an *HTTPError, got %T", err)
+	}
+}

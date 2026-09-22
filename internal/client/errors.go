@@ -19,3 +19,11 @@ var (
 var (
 	ErrMaxRetriesExceeded = errors.New("maximum retry attempts exceeded")
 )
+
+// Each polling format renders the whole sentence. The job id and the action
+// tell one stopped job from another.
+const (
+	//nolint:misspell // The platform spells the cancelled stage this way, and the sentence quotes it.
+	ErrJobCancelled  = "job %s for action %q was cancelled by the platform"
+	ErrJobNotVisible = "job %s is not visible to this API key (it does not exist, belongs to another tenant, or was deleted)"
+)

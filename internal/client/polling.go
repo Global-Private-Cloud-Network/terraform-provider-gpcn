@@ -18,13 +18,28 @@ type JobStatusSingularResponse struct {
 	Data    JobResponse `json:"data"`
 }
 type JobResponse struct {
-	JobID        string `json:"jobId"`
-	IsCompleted  bool   `json:"isCompleted"`
-	HasFailed    bool   `json:"hasFailed"`
-	ResourceId   string `json:"resourceId"`
-	ResourceName string `json:"resourceName"`
-	ResourceType string `json:"resourceType"`
+	JobID       string `json:"jobId"`
+	Stage       string `json:"stage"`
+	IsCompleted bool   `json:"isCompleted"`
+	IsTerminal  bool   `json:"isTerminal"`
+	HasFailed   bool   `json:"hasFailed"`
+	// A job percentage decodes as a float, so a platform that starts sending
+	// fractions does not break the poll. An integer field rejects the whole
+	// envelope.
+	ProgressPercentage float64 `json:"progressPercentage"`
+	Message            string  `json:"message"`
+	ErrorMessage       string  `json:"errorMessage"`
+	ResourceId         string  `json:"resourceId"`
+	ResourceName       string  `json:"resourceName"`
+	ResourceType       string  `json:"resourceType"`
 }
+
+// JobStageCancelled is the stage an operator cancel leaves a job in. It is
+// terminal, and it reports neither completion nor failure.
+//
+//nolint:misspell // The value is the byte the API sends, not prose.
+const JobStageCancelled = "cancelled"
+
 type JobStatusMultiResponse struct {
 	Success bool                  `json:"success"`
 	Message string                `json:"message"`
@@ -82,16 +97,29 @@ func PerformLongPollingWithConfig(gpcnClient *GpcnClient, ctx context.Context, a
 			return nil, fmt.Errorf("polling for job %s failed: %w", jobId, err)
 		}
 
-		// Bounds check before accessing Jobs array
+		// The API omits a job that does not exist or belongs to another tenant.
+		// An empty array is therefore permanent, and waiting cannot change it.
 		if len(jobResponse.Data.Jobs) == 0 {
-			return nil, fmt.Errorf("polling for job %s: %w", jobId, ErrEmptyJobsResponse)
+			return nil, fmt.Errorf(ErrJobNotVisible, jobId)
 		}
 
 		job := jobResponse.Data.Jobs[0]
 
-		if job.HasFailed {
-			if jobResponse.Message != "" {
-				return nil, fmt.Errorf("job %s for action %q: %w: %s", jobId, action, ErrJobFailed, jobResponse.Message)
+		tflog.Debug(ctx, fmt.Sprintf(LogLongPollingJobProgress, action),
+			map[string]any{
+				"job_id":              jobId,
+				"iteration":           iteration,
+				"stage":               job.Stage,
+				"progress_percentage": job.ProgressPercentage,
+				"message":             job.Message,
+			})
+
+		if job.HasFailed || (job.IsTerminal && !job.IsCompleted) {
+			if job.Stage == JobStageCancelled {
+				return nil, fmt.Errorf(ErrJobCancelled, jobId, action)
+			}
+			if detail := jobFailureDetail(job, jobResponse.Message); detail != "" {
+				return nil, fmt.Errorf("job %s for action %q: %w: %s", jobId, action, ErrJobFailed, detail)
 			}
 			return nil, fmt.Errorf("job %s for action %q: %w", jobId, action, ErrJobFailed)
 		}
@@ -115,6 +143,19 @@ func PerformLongPollingWithConfig(gpcnClient *GpcnClient, ctx context.Context, a
 		}
 		iteration++
 	}
+}
+
+// jobFailureDetail returns the text that tells the user why the job stopped.
+// The envelope message is the last resort, because the read path always sends
+// the same success sentence there.
+func jobFailureDetail(job JobResponse, envelopeMessage string) string {
+	if job.ErrorMessage != "" {
+		return job.ErrorMessage
+	}
+	if job.Message != "" {
+		return job.Message
+	}
+	return envelopeMessage
 }
 
 func poll(gpcnClient *GpcnClient, ctx context.Context, jobId string) (*JobStatusMultiResponse, error) {

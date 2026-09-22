@@ -8,22 +8,26 @@ description: |-
 
 # gpcn_network (Resource)
 
+~> **Deprecated** `gpcn_network` is deprecated in favour of `gpcn_vpc`, `gpcn_vpc_subnet` and `gpcn_l2_segment`. New networks can no longer be created. An existing network is still read, renamed and destroyed by this resource.
+
 Manages a private network to connect virtual machines within the same datacenter
 
 ## Example Usage
 
 ```terraform
-# Example: Creating GPCN Networks
+# gpcn_network is deprecated in favour of gpcn_vpc, gpcn_vpc_subnet and gpcn_l2_segment.
 #
-# This example demonstrates creating both standard and custom network types.
-# Standard networks include DHCP, DNS, and SNAT configuration.
-# Custom networks provide more flexibility for advanced networking setups.
+# Example: Adopting an existing GPCN Network into Terraform
+#
+# New networks can no longer be created, so this example never declares one. It brings a
+# network that already exists under Terraform with an import block, and then reads,
+# renames and destroys it.
 
 terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>1.3.0"
+      version = "~>1.4.0"
     }
   }
 }
@@ -39,8 +43,15 @@ data "gpcn_datacenters" "central_us" {
   name         = "Chicago"
 }
 
-# Example 1: Standard Network with DHCP and DNS
-resource "gpcn_network" "example_standard" {
+# The id of the network that GPCN already serves.
+import {
+  to = gpcn_network.existing
+  id = "<network-id>"
+}
+
+# The block the import fills. Every value must match what GPCN reports for the network,
+# or the first plan proposes a change.
+resource "gpcn_network" "existing" {
   name          = "terraform-demo-standard"
   network_type  = "standard"
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
@@ -61,21 +72,8 @@ resource "gpcn_network" "example_standard" {
   dns_servers = ["8.8.8.8"]
 }
 
-output "gpcn_network_example_standard" {
-  value = gpcn_network.example_standard
-}
-
-# Example 2: Custom Network
-resource "gpcn_network" "example_custom" {
-  name          = "terraform-demo-custom"
-  network_type  = "custom"
-  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-
-  description = "Custom network for advanced networking configuration"
-}
-
-output "gpcn_network_example_custom" {
-  value = gpcn_network.example_custom
+output "gpcn_network_existing" {
+  value = gpcn_network.existing
 }
 ```
 
@@ -113,5 +111,31 @@ Import is supported using the following syntax:
 The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
 
 ```shell
-terraform import gpcn_network.example_standard "c13808d9-3b7d-42c5-a21d-f0961308a38a"
+terraform import gpcn_network.existing "c13808d9-3b7d-42c5-a21d-f0961308a38a"
 ```
+
+
+## Migrating an adopted custom network
+
+The platform adopts custom networks into L2 segments. After the adoption the network answers 404, so this resource cannot manage it. The segment is a new object with a new id, and Terraform cannot make the move itself. Follow the steps below in order.
+
+Find the segment id by the first route that works:
+
+- the adoption CLI log line `adopted as segment <uuid>`, or `repaired as segment <uuid>` when a re-run finished the network;
+- the network interface list of a virtual machine that was on the network, where the interface now reports `l2SegmentId`;
+- the `platform.l2segment.adopt` audit event, whose target is the segment and whose `metadata.change.networkId` is the old network id. This route needs the `audit-log:manage` permission. A key that holds only `audit-log:read` gets the list without this event, because the event is in the `admin` category.
+
+Rewrite the block as `gpcn_l2_segment`, keeping `name`, `datacenter_id` and `description`, and delete the L3 attributes (`network_type`, `cidr_block`, `gateway_ip`, `dns_servers`, `dhcp_start_address`, `dhcp_end_address`). A block still written as `gpcn_network` plans a create, and a create is refused.
+
+Then move the state row, which leaves the data plane untouched:
+
+```shell
+terraform state rm gpcn_network.<name>
+terraform import gpcn_l2_segment.<name> <segment-id>
+```
+
+Then run `terraform apply`. The plan is empty when the imported segment matches the block. Never destroy the old row: the segment carries live traffic, and a destroy tears the carrier down.
+
+Re-point every `gpcn_network.<name>.id` reference in outputs and modules. In a `gpcn_virtualmachine` block, move the id from `network_ids` to `l2_segment_ids`, which is where a segment attaches.
+
+The adoption deduplicates a segment name that your account already uses in that datacenter, by appending `-2`, `-3` and so on. If the name of your network was deduplicated, write the deduplicated name (`<name>-2`) into the `gpcn_l2_segment` block. Otherwise the first apply plans a rename that you did not ask for.

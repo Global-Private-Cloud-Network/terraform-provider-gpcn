@@ -3,12 +3,12 @@
 page_title: "gpcn_volume_attachment Resource - gpcn"
 subcategory: ""
 description: |-
-  Manages the attachment of a volume to a virtual machine. A volume can only be attached to one virtual machine at a time. If the virtual machine has network_hotplug disabled, the VM will be stopped and restarted around the attach/detach operation. When attaching multiple volumes to the same network_hotplug=false VM concurrently, use depends_on to serialize operations.
+  Manages the attachment of a volume to a virtual machine. A volume can only be attached to one virtual machine at a time. GPCN attaches a volume to a virtual machine that is Running, Stopped or Shutoff, so the provider never stops it. GPCN refuses any other status and the provider reports that refusal with the API's own message.
 ---
 
 # gpcn_volume_attachment (Resource)
 
-Manages the attachment of a volume to a virtual machine. A volume can only be attached to one virtual machine at a time. If the virtual machine has network_hotplug disabled, the VM will be stopped and restarted around the attach/detach operation. When attaching multiple volumes to the same network_hotplug=false VM concurrently, use depends_on to serialize operations.
+Manages the attachment of a volume to a virtual machine. A volume can only be attached to one virtual machine at a time. GPCN attaches a volume to a virtual machine that is Running, Stopped or Shutoff, so the provider never stops it. GPCN refuses any other status and the provider reports that refusal with the API's own message.
 
 ## Example Usage
 
@@ -17,7 +17,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>1.3.0"
+      version = "~>1.4.0"
     }
   }
 }
@@ -79,8 +79,9 @@ resource "gpcn_volume_attachment" "primary_storage" {
   volume_id          = gpcn_volume.vm_storage_primary.id
 }
 
-# When attaching multiple volumes to a VM with network_hotplug=false,
-# use depends_on to serialize the operations and avoid concurrent stop/start races
+# GPCN attaches to a virtual machine that is Running, Stopped or Shutoff, and it
+# serializes volume changes per machine with a lock it waits up to ten minutes
+# for. depends_on keeps a second attachment to the same machine out of that wait.
 resource "gpcn_volume_attachment" "secondary_storage" {
   virtual_machine_id = gpcn_virtualmachine.example.id
   volume_id          = gpcn_volume.vm_storage_secondary.id

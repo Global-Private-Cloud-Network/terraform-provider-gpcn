@@ -70,18 +70,18 @@ func (d *gpuInventoryDataSource) Schema(_ context.Context, _ datasource.SchemaRe
 			},
 			"series_name": schema.StringAttribute{
 				Optional:    true,
-				Description: "Filter by human-readable GPU series name. Conflicts with series_code",
+				Description: "Filter by the series name as returned in this data source's series list. Conflicts with series_code.",
 				Validators: []validator.String{
-					stringvalidator.OneOf(gpu.GPUSeriesNames...),
 					stringvalidator.ConflictsWith(path.MatchRoot("series_code")),
+					stringvalidator.LengthAtLeast(1),
 				},
 			},
 			"series_code": schema.StringAttribute{
 				Optional:    true,
-				Description: "Filter by short GPU series code. Conflicts with series_name",
+				Description: "Filter by the series code as returned in this data source's series list. Conflicts with series_name.",
 				Validators: []validator.String{
-					stringvalidator.OneOf(gpu.GPUSeriesCodes...),
 					stringvalidator.ConflictsWith(path.MatchRoot("series_name")),
+					stringvalidator.LengthAtLeast(1),
 				},
 			},
 			"gpu_count": schema.Int64Attribute{
@@ -158,18 +158,12 @@ func (d *gpuInventoryDataSource) Read(ctx context.Context, req datasource.ReadRe
 		return
 	}
 
-	// Resolve a series name to its code so the API filter always uses the code.
-	seriesCode := state.SeriesCode.ValueString()
-	if seriesCode == "" && state.SeriesName.ValueString() != "" {
-		seriesCode = gpu.GPUSeriesNameToCode[state.SeriesName.ValueString()]
-	}
-
 	var gpuCount int64
 	if !state.GPUCount.IsNull() {
 		gpuCount = state.GPUCount.ValueInt64()
 	}
 
-	items, err := gpu.FetchInventory(d.client, ctx, state.DatacenterId.ValueString(), seriesCode, gpuCount)
+	items, err := gpu.FetchInventory(d.client, ctx, state.DatacenterId.ValueString(), state.SeriesCode.ValueString(), state.SeriesName.ValueString(), gpuCount)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			gpu.ErrSummaryUnableToFetchInventory,

@@ -84,7 +84,7 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 
 	// Create a new request from the model
 	createVMRequestBody := map[string]any{
-		"allocatePublicIp":  model.AllocatePublicIp.ValueBool(),
+		"acquirePublicIp":   model.AllocatePublicIp.ValueBool(),
 		"authMethod":        authMethod,
 		"skuId":             skuId,
 		"datacenterId":      model.DatacenterId.ValueString(),
@@ -108,21 +108,17 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 		createVMRequestBody["resourceGroupId"] = model.ResourceGroupId.ValueString()
 	}
 
-	// If networkIds is populated, add it to the create request
+	// GPCN create takes one birth network. The caller attaches the rest after the
+	// machine exists.
 	if !model.NetworkIds.IsNull() && len(model.NetworkIds.Elements()) > 0 {
 		var networkIds []string
-		model.NetworkIds.ElementsAs(ctx, &networkIds, true)
+		diags := model.NetworkIds.ElementsAs(ctx, &networkIds, true)
+		if diags.HasError() {
+			return nil, fmt.Errorf("failed to read network_ids")
+		}
 
 		tflog.Info(ctx, LogNetworkIdsNotNull)
-		// Add all network interfaces, setting the first value entered as the primary
-		var networkInterfaces []map[string]any
-		for idx, networkId := range networkIds {
-			networkInterfaces = append(networkInterfaces, map[string]any{
-				"networkId": networkId,
-				"primary":   idx == 0,
-			})
-		}
-		createVMRequestBody["networkInterfaces"] = networkInterfaces
+		createVMRequestBody["networkId"] = networkIds[0]
 	} else {
 		tflog.Info(ctx, LogNetworkIdsNullOrEmpty)
 	}
@@ -180,7 +176,7 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 	}
 
 	// Wait for the VM to actually be spun up before doing anything more
-	getVirtualMachineResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, resourceID, []string{VMStatusRunning.String(), VMStatusShutoff.String()}, DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS, DEFAULT_INITIAL_POLL_DELAY_SECONDS)
+	getVirtualMachineResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, resourceID, []string{VMStatusRunning.String(), VMStatusShutoff.String(), VMStatusStopped.String()}, DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS, DEFAULT_INITIAL_POLL_DELAY_SECONDS)
 	if err != nil {
 		return nil, err
 	}
@@ -242,6 +238,29 @@ func UpdateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, vi
 	return nil
 }
 
+// The Delete path must separate a dead virtual machine from every other poll
+// failure. A typed error carries that fact, so no caller reads the message bytes.
+type terminalStatusError struct {
+	vmID    string
+	status  string
+	targets []string
+}
+
+func (e *terminalStatusError) Error() string {
+	return fmt.Sprintf(ErrDetailVMTerminalStatus, e.vmID, e.status, strings.Join(e.targets, ", "))
+}
+
+func IsTerminalStatusError(err error) bool {
+	var terminalErr *terminalStatusError
+	return errors.As(err, &terminalErr)
+}
+
+func isTerminalFailureStatus(status string) bool {
+	return slices.ContainsFunc(vmTerminalFailureStatuses, func(terminal VMStatus) bool {
+		return strings.EqualFold(status, terminal.String())
+	})
+}
+
 // Iteratively calls getVirtualMachine until the machine is in a target status, or it times out
 func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string, targetStatuses []string, timeoutMaxSec int, initialDelaySec int) (*ReadVirtualMachinesResponse, error) {
 	// Make all statuses lowercase for ease of comparison
@@ -276,6 +295,10 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 			// The API can report the target status before the change is complete.
 			// The extra wait lowers that risk.
 			time.Sleep(VM_STATUS_SETTLE_WAIT)
+			break
+		}
+		if isTerminalFailureStatus(getResp.Data.Status) {
+			pollErr = &terminalStatusError{vmID: virtualMachineId, status: getResp.Data.Status, targets: targetStatuses}
 			break
 		}
 		time.Sleep(VM_STATUS_POLL_INTERVAL)

@@ -23,7 +23,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>1.3.0"
+      version = "~>1.4.0"
     }
   }
 }
@@ -115,6 +115,9 @@ output "custom_image_datacenter_ids" {
 
 Read-Only:
 
+- `code` (String) Short code that identifies the datacenter.
+- `continent_code` (String) Code of the continent where the datacenter is located (e.g., 'NA').
+- `continent_name` (String) Name of the continent where the datacenter is located.
 - `country_abbreviation` (String) Two-letter country code abbreviation (e.g., 'US').
 - `country_id` (String) Unique identifier of the country where the datacenter is located.
 - `country_name` (String) Name of the country where the datacenter is located.

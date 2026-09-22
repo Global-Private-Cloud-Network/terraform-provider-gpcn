@@ -23,7 +23,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>1.3.0"
+      version = "~>1.4.0"
     }
   }
 }
@@ -68,8 +68,8 @@ output "a6000_sku_codes" {
 ### Optional
 
 - `gpu_count` (Number) Filter to SKUs with this GPU count. Must be 1, 2, 4, or 8
-- `series_code` (String) Filter by short GPU series code. Conflicts with series_name
-- `series_name` (String) Filter by human-readable GPU series name. Conflicts with series_code
+- `series_code` (String) Filter by the series code as returned in this data source's series list. Conflicts with series_name.
+- `series_name` (String) Filter by the series name as returned in this data source's series list. Conflicts with series_code.
 
 ### Read-Only
 

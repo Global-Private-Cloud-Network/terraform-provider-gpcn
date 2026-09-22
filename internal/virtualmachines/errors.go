@@ -21,6 +21,8 @@ const (
 	ErrSummaryUnableToUpdatePublicIPConfiguration = "Unable to update public IP configuration"
 	ErrSummaryUnableToDetermineSizeChange         = "Unable to determine whether size_id change requires replacement"
 	ErrSummaryNoPrimaryNetworkInterface           = "No primary network interface"
+	ErrSummaryVMCreatedAttachFailed               = "Virtual machine created but a network interface attach failed"
+	ErrSummaryVMLeftStopped                       = "Virtual machine left stopped"
 )
 
 // Warning summary constants
@@ -39,11 +41,14 @@ const (
 	ErrDetailUnmarshalingDeleteWithID  = "Error unmarshaling GPCN Virtual Machine - Delete with ID %s"
 	ErrDetailJobInfoCheckDashboard     = "Encountered an error getting job info. The request may still have succeeded. Check the GPCN dashboard for more information"
 	ErrDetailStoppingVM                = "Error stopping virtual machine with ID %s"
-	ErrDetailStartingVM                = "Error starting virtual machine with ID %s"
 	ErrDetailCannotRemoveLastNetwork   = "unable to remove the last Network attached to a virtual machine"
-	ErrDetailNetworkTypeMustBeStandard = "the prospective primary network (first in the list) is of type custom. The value for allocatePublicIp can only be set to true if the primary network's network_type is standard"
+	ErrDetailNetworkTypeMustBeStandard = "the prospective primary network (first in the list) is of type custom. allocate_public_ip can only be true when the primary network's network_type is standard"
 	ErrDetailFetchUpgradeSizesFailed   = "The provider could not fetch the valid upgrade targets for this Virtual Machine, so it cannot tell whether the size_id change is an in-place upgrade. This error is often transient. Re-run the plan. Underlying error: %s"
 	ErrDetailNoPrimaryNetworkInterface = "No network interface on virtual machine with ID %s is marked primary, so the public IP cannot be changed"
+	ErrDetailVMCreatedAttachFailed     = "virtual machine %s was created and is in state, but attaching %s failed: %s. Terraform has marked the machine tainted: run terraform untaint on it and apply again to attach the remaining networks, or let the next apply replace it."
+	ErrDetailVMLeftStoppedUpdate       = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal."
+	ErrDetailVMLeftStoppedCreate       = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform untaint on it; otherwise the next apply replaces the machine."
+	ErrDetailVMLeftStoppedRetry        = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform plan and check the proposed changes before applying."
 )
 
 // Warning detail message templates
@@ -54,4 +59,5 @@ const (
 // Polling constants
 const (
 	ErrVirtualMachineStatusTimeoutTemplate = "After %d seconds, the virtual machine was still not in the target status. Please check the GPCN API for more information"
+	ErrDetailVMTerminalStatus              = "virtual machine %s reached status %q while waiting for %s"
 )
