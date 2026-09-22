@@ -3,12 +3,12 @@
 page_title: "gpcn_l2_segment Resource - gpcn"
 subcategory: ""
 description: |-
-  Manages an L2 segment: a layer-2 network that carries virtual machine traffic inside one datacenter. The API key needs l2-segment:read to read a segment, and l2-segment:create, l2-segment:update and l2-segment:delete to manage one.
+  Manages an L2 segment: a layer-2 network that carries virtual machine traffic inside one datacenter. The API key needs l2-segment:read to read a segment, and l2-segment:create, l2-segment:update and l2-segment:delete to manage one. A segment that sits in a resource group imports without the group; the provider does not manage resource groups in this release.
 ---
 
 # gpcn_l2_segment (Resource)
 
-Manages an L2 segment: a layer-2 network that carries virtual machine traffic inside one datacenter. The API key needs l2-segment:read to read a segment, and l2-segment:create, l2-segment:update and l2-segment:delete to manage one.
+Manages an L2 segment: a layer-2 network that carries virtual machine traffic inside one datacenter. The API key needs l2-segment:read to read a segment, and l2-segment:create, l2-segment:update and l2-segment:delete to manage one. A segment that sits in a resource group imports without the group; the provider does not manage resource groups in this release.
 
 ## Example Usage
 
