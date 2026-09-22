@@ -40,11 +40,11 @@ const vpcNotEmptyRefusalBody = `{"success":false,` +
 // (src/components/vpc/vpc.validation.ts:68-81).
 const vpcEmptyUpdateRefusalBody = `{"success":false,` +
 	`"message":"Invalid Parameters: At least one of name, description or resourceGroupId must be provided",` +
-	`"error":{"code":"VALIDATION_ERROR","statusCode":422,` +
+	`"error":{"code":"Validation Error","statusCode":422,` +
 	`"details":{"issues":[{"path":"","message":"At least one of name, description or resourceGroupId must be provided"}]}}}`
 
 const vpcNotFoundBody = `{"success":false,"message":"VPC not found",` +
-	`"error":{"code":"NOT_FOUND","statusCode":404,"details":null}}`
+	`"error":{"code":"Resource Not Found","statusCode":404,"details":null}}`
 
 // A VPC already being torn down refuses a second claim
 // (src/components/vpc/vpc.service.ts:129-130,547).
