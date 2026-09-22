@@ -1932,10 +1932,11 @@ func publicIpMockServer(t *testing.T, carriedID, acquiredID string, failedJobs .
 	return server, gpcnClient, &verbs
 }
 
-// A read-back that fails after an acquisition leaves state behind the platform. The
-// next apply then asks for an address the interface already carries. GPCN answers 409
-// for a second address, so the acquire reads the live interface and not state.
-func TestUpdatePublicIPIfChangedSkipsTheAcquireWhenThePrimaryCarriesAnAddress(t *testing.T) {
+// A machine can carry an address Terraform did not acquire. The operator attaches one
+// with gpcn_vpc_public_ip_attachment, or a read-back fails after an acquisition. The
+// provider cannot tell the two apart. Adopting the address makes the next destroy
+// release what another resource owns, so the update refuses and names it.
+func TestUpdatePublicIPIfChangedRefusesAnAddressItDidNotAcquire(t *testing.T) {
 	const vmID = "vm-carries-an-address"
 
 	server, gpcnClient, verbs := publicIpUpdateMockServer(t, testPublicIpAcquiredID)
@@ -1945,8 +1946,15 @@ func TestUpdatePublicIPIfChangedSkipsTheAcquireWhenThePrimaryCarriesAnAddress(t 
 	plan := createTestVMModel("test-vm", testVMImage, true)
 
 	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
-	if diags.HasError() {
-		t.Fatalf("Expected no error diagnostic, got %v", diags.Errors())
+	if !diags.HasError() {
+		t.Fatal("Expected an error diagnostic when the primary carries a foreign address")
+	}
+	if summary := diags.Errors()[0].Summary(); summary != ErrSummaryUnableToUpdatePublicIPConfiguration {
+		t.Errorf("Expected '%s', got '%s'", ErrSummaryUnableToUpdatePublicIPConfiguration, summary)
+	}
+	want := fmt.Sprintf(ErrDetailPrimaryInterfaceCarriesAForeignAddress, vmID, testPublicIpAcquiredID)
+	if detail := diags.Errors()[0].Detail(); detail != want {
+		t.Errorf("Expected '%s', got '%s'", want, detail)
 	}
 	if len(*verbs) != 0 {
 		t.Errorf("Expected no address verb, got %v", *verbs)
@@ -2184,5 +2192,15 @@ func TestPublicIpOrphanDetailBytes(t *testing.T) {
 				t.Errorf("Expected '%s', got '%s'", tc.expected, tc.actual)
 			}
 		})
+	}
+}
+
+// The refusal is the only place the operator reads the id of the address the machine
+// carries. The sentence also names the two ways out of it.
+func TestPrimaryInterfaceCarriesAForeignAddressDetailBytes(t *testing.T) {
+	const expected = "the primary network interface of virtual machine %s already carries public IP %s, which Terraform did not acquire; name it in public_ip_id or detach it before asking for an acquired address"
+
+	if ErrDetailPrimaryInterfaceCarriesAForeignAddress != expected {
+		t.Errorf("Expected '%s', got '%s'", expected, ErrDetailPrimaryInterfaceCarriesAForeignAddress)
 	}
 }

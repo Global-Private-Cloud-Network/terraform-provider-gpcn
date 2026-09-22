@@ -188,16 +188,18 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 	}
 
 	if acquireChanged && plan.AllocatePublicIp.ValueBool() {
-		// A read-back that fails after an acquisition leaves state behind the platform.
-		// The address the interface carries is then the one the plan asks for, and GPCN
-		// refuses a second one.
-		if carriedID.IsNull() {
-			diags.Append(acquireAndAttachPublicIp(gpcnClient, ctx, vmID, vpcID, primaryNetworkInterfaceId)...)
-			if diags.HasError() {
-				return diags
-			}
-		} else {
-			tflog.Info(ctx, LogVirtualMachineAlreadyCarriesAnAddress)
+		// The detach above cleared an address this call gave up. Anything the interface
+		// still carries came from somewhere else, and GPCN refuses a second address.
+		if !carriedID.IsNull() {
+			diags.AddError(
+				ErrSummaryUnableToUpdatePublicIPConfiguration,
+				fmt.Sprintf(ErrDetailPrimaryInterfaceCarriesAForeignAddress, vmID, carriedID.ValueString()),
+			)
+			return diags
+		}
+		diags.Append(acquireAndAttachPublicIp(gpcnClient, ctx, vmID, vpcID, primaryNetworkInterfaceId)...)
+		if diags.HasError() {
+			return diags
 		}
 	}
 	if heldChanged && !plan.PublicIpId.IsNull() {

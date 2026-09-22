@@ -2701,10 +2701,16 @@ func startVirtualMachineCarriedAddressMockServer(t *testing.T) (*httptest.Server
 	return server, recorded
 }
 
-// A read-back that fails after an acquisition leaves allocate_public_ip false in state
-// while the machine carries the address. Asking for one again therefore reads the
-// interface: a second acquire mints an address GPCN then refuses to attach.
-func TestVirtualMachineResourcePlanSkipsTheAcquireWhenTheMachineCarriesTheAddress(t *testing.T) {
+// vmPlanTestForeignAddressPattern matches the refusal of a carried address after
+// Terraform wraps it.
+var vmPlanTestForeignAddressPattern = regexp.MustCompile(
+	`(?s)already\s+carries\s+public\s+IP\s+` + vmPlanTestAcquiredIpID +
+		`.*name\s+it\s+in\s+public_ip_id\s+or\s+detach\s+it`)
+
+// A machine can carry an address Terraform did not acquire. The provider cannot tell a
+// held one from the leftover of a failed read-back. Adopting it makes the next destroy
+// release an address gpcn_vpc_public_ip owns, so the update refuses.
+func TestVirtualMachineResourcePlanRefusesAnAddressItDidNotAcquire(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server, recorded := startVirtualMachineCarriedAddressMockServer(t)
 
@@ -2719,20 +2725,15 @@ func TestVirtualMachineResourcePlanSkipsTheAcquireWhenTheMachineCarriesTheAddres
 				),
 			},
 			{
-				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-carried-address", true, ""),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "allocate_public_ip", "true"),
-					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "public_ip", vmPlanTestAcquiredIpAddress),
-					func(*terraform.State) error {
-						if verbs := recorded(); len(verbs) != 0 {
-							return fmt.Errorf("expected no address verb, got %v", verbs)
-						}
-						return nil
-					},
-				),
+				Config:      vmPublicIpPlanTestConfig(server.URL, "vm-plan-carried-address", true, ""),
+				ExpectError: vmPlanTestForeignAddressPattern,
 			},
 		},
 	})
+
+	if verbs := recorded(); len(verbs) != 0 {
+		t.Errorf("Expected no address verb, got %v", verbs)
+	}
 }
 
 // vmLegacyPlanTestInterfacesBody reports a primary interface on a legacy network. A
