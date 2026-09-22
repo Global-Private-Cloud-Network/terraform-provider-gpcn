@@ -221,7 +221,7 @@ func (m *vpcMock) handleDelete(w http.ResponseWriter) {
 		m.tearingDownDeletes--
 		m.status = "deleting"
 		m.tearingDown = true
-		m.deletingGets = 1
+		m.deletingGets = 2
 	}
 	refuse := !tearingDown && m.deleteRefusals > 0
 	if refuse {
@@ -838,9 +838,8 @@ func TestVpcResourcePlanWaitsOutATeardownAlreadyRunning(t *testing.T) {
 		},
 	})
 
-	// The status read plus the read that met the 404. A provider that swallowed
-	// the refusal without waiting makes neither.
-	if count := mock.readsWhileTearingDown(); count != 2 {
-		t.Errorf("reads while tearing down = %d, want 2", count)
+	// The status read plus two polls.
+	if count := mock.readsWhileTearingDown(); count != 3 {
+		t.Errorf("reads while tearing down = %d, want 3", count)
 	}
 }
