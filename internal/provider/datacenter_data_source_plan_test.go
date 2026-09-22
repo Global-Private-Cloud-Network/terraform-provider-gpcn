@@ -646,7 +646,7 @@ func TestDatacentersDataSourceOmitsUnsetCapabilityFilters(t *testing.T) {
 		},
 	})
 
-	// A data source that fabricates its rows sends nothing, and an assertion on
+	// A data source that fabricates its rows sends nothing. An assertion on
 	// what a request omits then passes on no request at all.
 	datacenterPlanTestAssertOnlyListPath(t, rec)
 

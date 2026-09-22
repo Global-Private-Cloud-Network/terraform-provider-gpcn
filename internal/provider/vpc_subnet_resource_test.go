@@ -38,7 +38,7 @@ resource "gpcn_vpc_subnet" "test" {
 
 // vpcSubnetAccOctetSlot names the block each acceptance case in this file
 // owns. A case that draws its block at random meets an earlier run about half
-// the time, because the repository has no sweepers.
+// the time. The repository has no sweepers.
 var vpcSubnetAccOctetSlot = map[string]int{
 	"TestVpcSubnetResource": 0,
 }

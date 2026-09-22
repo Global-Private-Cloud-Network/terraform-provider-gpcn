@@ -23,7 +23,7 @@ import (
 
 // vpcAccOctetSlot names the block each acceptance case in this file owns. A
 // case that draws its block at random meets an earlier run about half the
-// time, because the repository has no sweepers.
+// time. The repository has no sweepers.
 var vpcAccOctetSlot = map[string]int{
 	"TestVpcResource": 0,
 }
