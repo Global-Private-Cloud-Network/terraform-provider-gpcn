@@ -1,4 +1,4 @@
-## 1.4.0 (Unreleased)
+## 1.4.0 (September 22, 2026)
 
 This release targets the GPCN API deployed with the VPC networking rollout. It does not work against the previous API: the virtual machine create body changed and the API refuses the old keys.
 
