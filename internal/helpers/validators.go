@@ -41,7 +41,7 @@ func (v NoOuterWhitespaceValidator) ValidateString(_ context.Context, request va
 	}
 
 	value := request.ConfigValue.ValueString()
-	if strings.TrimFunc(value, isJavaScriptWhitespace) == value {
+	if TrimGPCNSpace(value) == value {
 		return
 	}
 
@@ -50,6 +50,13 @@ func (v NoOuterWhitespaceValidator) ValidateString(_ context.Context, request va
 		fmt.Sprintf(v.Summary, v.Attribute),
 		fmt.Sprintf(ErrDetailOuterWhitespace, v.Attribute),
 	)
+}
+
+// TrimGPCNSpace removes the whitespace GPCN itself removes. Every resource that
+// measures outer whitespace measures it with this function, so one set of code
+// points answers for the whole provider.
+func TrimGPCNSpace(value string) string {
+	return strings.TrimFunc(value, isJavaScriptWhitespace)
 }
 
 // isJavaScriptWhitespace reports the code points GPCN's own trim removes. The

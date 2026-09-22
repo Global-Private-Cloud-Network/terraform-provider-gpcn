@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"strings"
 	"unicode/utf8"
+
+	"terraform-provider-gpcn/internal/helpers"
 
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
@@ -36,9 +37,10 @@ func (v NameValidator) ValidateString(_ context.Context, req validator.StringReq
 	}
 	name := req.ConfigValue.ValueString()
 
-	// GPCN trims the name before it validates and stores it. A name with outer
-	// whitespace therefore comes back different and makes the plan never settle.
-	if strings.TrimSpace(name) != name {
+	// GPCN trims the name before it validates and stores it, with the
+	// JavaScript trim set. A name with outer whitespace therefore comes back
+	// different and makes the plan never settle. Go's own set is not that set.
+	if helpers.TrimGPCNSpace(name) != name {
 		resp.Diagnostics.AddAttributeError(req.Path, ErrSummaryInvalidSSHKeyName, ErrDetailSSHKeyNameWhitespace)
 		return
 	}
