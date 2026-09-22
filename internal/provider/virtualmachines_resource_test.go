@@ -40,9 +40,9 @@ resource "gpcn_vpc_subnet" "vm_subnet" {
 `, suffix, octet)
 }
 
-// vmOctetSlot names the block each of the five acceptance cases owns. Cases that draw a
-// block at random take the same one about half the time. GPCN answers 409 for a VPC
-// that overlaps another. Slots 5 to 7 wait for the next cases.
+// vmOctetSlot names the block each of the five acceptance cases owns. Each case takes
+// its own /16, so parallel cases never share a block. Slots 5 to 7 wait for the next
+// cases.
 var vmOctetSlot = map[string]int{
 	"TestVirtualMachinesAuth":                     0,
 	"TestVirtualMachinesVolumeAttachment":         1,
@@ -735,7 +735,7 @@ func TestVirtualMachineAddressDescriptions(t *testing.T) {
 
 	want := map[string]string{
 		"allocate_public_ip": "Whether to acquire an elastic public IP on the VPC that holds the birth interface and attach it to that interface. Changing this value in place needs the vpc-public-ip:create, vpc-public-ip:update and vpc-public-ip:delete permissions. Destroying the virtual machine releases an address acquired this way. Never inferred on import: an imported machine records its address as public_ip_id, so destroying it leaves the address held",
-		"public_ip_id":       "ID of a held gpcn_vpc_public_ip to attach to the primary interface. Cannot be set together with allocate_public_ip. The address outlives the virtual machine, because the operator holds it. An import fills this from the address the primary interface carries. Name this address in the configuration after an import; otherwise the next apply detaches it. Import that address as a gpcn_vpc_public_ip too when Terraform should own its release. Do not name an address that a gpcn_vpc_public_ip_attachment also binds; one resource owns a binding.",
+		"public_ip_id":       "ID of a held gpcn_vpc_public_ip to attach to the primary interface. Cannot be set together with allocate_public_ip. The address outlives the virtual machine, because the operator holds it. An import fills this from the address the primary interface carries. Name this address in the configuration after an import; otherwise the next apply detaches it. Import that address as a gpcn_vpc_public_ip too when Terraform should own its release. Do not name an address that a gpcn_vpc_public_ip_attachment also binds; one resource owns a binding",
 	}
 	for name, description := range want {
 		attribute, ok := schemaResponse.Schema.Attributes[name]
