@@ -81,9 +81,8 @@ func TestVpcResource(t *testing.T) {
 			{
 				Config: providerConfig + fmt.Sprintf(`
 			data "gpcn_datacenters" "central_us" {
-				country_name = "United States"
-				region_name  = "central"
-				name         = "Kansas"
+				name        = "Chicago"
+				vpc_capable = true
 			}
 
 			resource "gpcn_vpc" "test" {
@@ -123,9 +122,8 @@ func TestVpcResource(t *testing.T) {
 			{
 				Config: providerConfig + fmt.Sprintf(`
 			data "gpcn_datacenters" "central_us" {
-				country_name = "United States"
-				region_name  = "central"
-				name         = "Kansas"
+				name        = "Chicago"
+				vpc_capable = true
 			}
 
 			resource "gpcn_vpc" "test" {
