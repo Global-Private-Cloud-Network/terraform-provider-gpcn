@@ -21,9 +21,10 @@ data "gpcn_datacenters" "test" {
 }
 
 resource "gpcn_vpc" "test" {
-  name          = %q
-  datacenter_id = data.gpcn_datacenters.test.datacenters[0].id
-  cidr          = %q
+  name                = %q
+  datacenter_id       = data.gpcn_datacenters.test.datacenters[0].id
+  cidr                = %q
+  acknowledge_overlap = true
 }
 
 resource "gpcn_vpc_subnet" "test" {
@@ -35,17 +36,40 @@ resource "gpcn_vpc_subnet" "test" {
 `, vpcName, vpcCidr, subnetName, description, subnetCidr)
 }
 
+// vpcSubnetAccOctetSlot names the block each acceptance case in this file
+// owns. A case that draws its block at random meets an earlier run about half
+// the time, because the repository has no sweepers.
+var vpcSubnetAccOctetSlot = map[string]int{
+	"TestVpcSubnetResource": 0,
+}
+
+// This file owns the window at base 80. The VPC, group and machine files own
+// 64, 96 and 112.
+const vpcSubnetAccOctetBase = 80
+
+// vpcSubnetAccOctetFor returns the octet of the named case. Every call site
+// reads this one function, so a case cannot take a block the table never gave
+// it.
+func vpcSubnetAccOctetFor(t testing.TB, name string) int {
+	t.Helper()
+	slot, named := vpcSubnetAccOctetSlot[name]
+	if !named {
+		t.Fatalf("Expected %s to own a slot in vpcSubnetAccOctetSlot", name)
+	}
+	return vpcSubnetAccOctetBase + slot
+}
+
 func TestVpcSubnetResource(t *testing.T) {
 	t.Parallel()
 	suffix := acctest.RandString(8)
 	vpcName := fmt.Sprintf("tf-vpc-%s", suffix)
 	subnetName := fmt.Sprintf("tf-subnet-%s", suffix)
 	subnetNameUpdated := fmt.Sprintf("tf-subnet-updated-%s", suffix)
-	// This test function owns the window at base 80. The overlap check covers
-	// the whole entity, so each function draws inside its own window.
-	n := acctest.RandIntRange(0, 16)
-	vpcCidr := fmt.Sprintf("10.%d.0.0/16", 80+n)
-	subnetCidr := fmt.Sprintf("10.%d.1.0/24", 80+n)
+	// A fixed block meets only what an earlier run of this case left behind,
+	// which the configuration acknowledges.
+	octet := vpcSubnetAccOctetFor(t, t.Name())
+	vpcCidr := fmt.Sprintf("10.%d.0.0/16", octet)
+	subnetCidr := fmt.Sprintf("10.%d.1.0/24", octet)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
