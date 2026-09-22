@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Provider documentation
+    url: https://registry.terraform.io/providers/Global-Private-Cloud-Network/gpcn/latest/docs
+    about: Resource and data source reference, with examples, for the released provider.
+  - name: Security problem
+    url: https://github.com/Global-Private-Cloud-Network/terraform-provider-gpcn/blob/main/SECURITY.md
+    about: Please report security problems privately, not as an issue.
