@@ -2192,8 +2192,10 @@ func vmPublicIpPlanTestInterfacesBody(addressID, address string) map[string]any 
 	return body
 }
 
-// vmPublicIpMockArms arms the refusals a step-failure test needs. Each one answers 500
-// once and then behaves normally, so the destroy at the end still reaches the platform.
+// vmPublicIpMockArms arms the refusals a step-failure test needs. Each Once arm answers
+// 500 for one request and then behaves normally. The destroy at the end therefore still
+// reaches the platform. refuseReadAfterChange re-arms on every attach and rename, and
+// refuseStart refuses every start.
 type vmPublicIpMockArms struct {
 	refuseReadAfterChange bool
 	refuseSizeOnce        bool
@@ -2598,8 +2600,8 @@ var vmPlanTestAcquiredAddressReleaseFailedPattern = regexp.MustCompile(
 	`(?s)public\s+IP\s+` + vmPlanTestAcquiredIpID + `\s+was\s+acquired\s+for\s+virtual\s+machine\s+` +
 		vmPlanTestID + `\s+but\s+the\s+update\s+failed\s+afterwards:.*releasing\s+it\s+failed\s+too`)
 
-// vmPlanTestAcquiredAddressVerbs lists the verbs an acquire that is unwound leaves
-// behind. The release closes what the acquire opened, so the retry starts from nothing.
+// vmPlanTestAcquiredAddressVerbs lists the verbs an unwound acquire leaves behind. The
+// runner issues the release in every arm. Only the platform's answer differs.
 func vmPlanTestAcquiredAddressVerbs() []string {
 	return []string{
 		"acquire",
@@ -2664,8 +2666,9 @@ func TestVirtualMachineResourcePlanReleasesTheAcquiredAddressWhenTheResizeFails(
 	}
 }
 
-// The rename follows the acquire, so a refused rename orphans the same address. One rule
-// covers every step after the acquire, so this arm reports the release too.
+// The rename follows the acquire, so a refused rename leaves an address the update never
+// records. One rule covers every step after the acquire, so this arm reports the release
+// too.
 func TestVirtualMachineResourcePlanReleasesTheAcquiredAddressWhenTheRenameFails(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server, recorded := startVirtualMachinePublicIpMockServer(t, vmPublicIpMockArms{refuseAttributesOnce: true})
@@ -3151,9 +3154,10 @@ var vmPlanTestForeignAddressPattern = regexp.MustCompile(
 		`\s+that\s+this\s+configuration\s+did\s+not\s+attach` +
 		`.*name\s+it\s+in\s+public_ip_id,\s+or\s+release\s+it`)
 
-// A machine can carry an address Terraform did not acquire. The provider cannot tell a
-// held one from the leftover of a failed read-back. Adopting it makes the next destroy
-// release an address gpcn_vpc_public_ip owns, so the update refuses.
+// A machine can carry an address Terraform did not acquire. A
+// gpcn_vpc_public_ip_attachment binds one, and an unwind whose release also failed
+// leaves another. Adopting it makes the next destroy release an address
+// gpcn_vpc_public_ip owns, so the update refuses.
 func TestVirtualMachineResourcePlanRefusesAnAddressItDidNotAcquire(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server, recorded := startVirtualMachineCarriedAddressMockServer(t)

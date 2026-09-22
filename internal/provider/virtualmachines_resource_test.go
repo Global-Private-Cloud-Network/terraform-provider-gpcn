@@ -68,7 +68,7 @@ func vpcTestOctetFor(t testing.TB, name string) int {
 }
 
 // The guard reads the table alone, not the call sites. It refuses a slot outside this
-// file's window, because that slot takes a block another file owns. It refuses two
+// file's window, because that slot takes a block this file does not own. It refuses two
 // entries that take one octet. The compiler accepts both.
 func TestVirtualMachineAcceptanceOctetsAreUnique(t *testing.T) {
 	owner := map[int]string{}
