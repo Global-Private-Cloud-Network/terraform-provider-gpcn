@@ -152,33 +152,49 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 	}
 	vpcID := primary.VpcID.ValueString()
 	primaryNetworkInterfaceId := primary.ID.ValueString()
+	// This value names the address the interface carries now. The held detach below
+	// clears it when that detach gives up the same address. The acquire then reads
+	// what the interface holds at that moment.
+	carriedID := primary.PublicIPID
 
 	// The machine gives up what it no longer asks for before it takes anything on. One
 	// machine carries one address, so an exchange must free the interface first.
-	if acquireChanged && state.AllocatePublicIp.ValueBool() && !primary.PublicIPID.IsNull() {
-		acquiredID := primary.PublicIPID.ValueString()
+	if acquireChanged && state.AllocatePublicIp.ValueBool() && !carriedID.IsNull() {
+		acquiredID := carriedID.ValueString()
 		if err := vpcpublicips.DetachPublicIp(gpcnClient, ctx, vpcID, acquiredID); err != nil {
 			return publicIpFailure(diags, err)
 		}
 		if err := vpcpublicips.ReleasePublicIp(gpcnClient, ctx, vpcID, acquiredID); err != nil {
-			return publicIpFailure(diags, err)
+			// The detach already took the address off the interface. No later gate finds
+			// it, so this diagnostic is the last record of it.
+			diags.AddError(
+				ErrSummaryUnableToUpdatePublicIPConfiguration,
+				fmt.Sprintf(ErrDetailPublicIpOrphaned, acquiredID, vmID, ErrPhrasePublicIpReleaseFailed, err.Error()),
+			)
+			return diags
 		}
 	}
 	if heldChanged && !state.PublicIpId.IsNull() {
-		if err := vpcpublicips.DetachPublicIp(gpcnClient, ctx, vpcID, state.PublicIpId.ValueString()); err != nil {
+		heldID := state.PublicIpId.ValueString()
+		if err := vpcpublicips.DetachPublicIp(gpcnClient, ctx, vpcID, heldID); err != nil {
 			return publicIpFailure(diags, err)
+		}
+		if carriedID.ValueString() == heldID {
+			carriedID = types.StringNull()
 		}
 	}
 
 	if acquireChanged && plan.AllocatePublicIp.ValueBool() {
-		// The API inserts the address row before it dispatches the job. The id comes back
-		// even from a failed acquisition.
-		acquiredID, err := vpcpublicips.AcquirePublicIp(gpcnClient, ctx, vpcID)
-		if err != nil {
-			return publicIpFailure(diags, err)
-		}
-		if err := vpcpublicips.AttachPublicIp(gpcnClient, ctx, vpcID, acquiredID, primaryNetworkInterfaceId); err != nil {
-			return publicIpFailure(diags, err)
+		// A read-back that fails after an acquisition leaves state behind the platform.
+		// The address the interface carries is then the one the plan asks for, and GPCN
+		// refuses a second one.
+		if carriedID.IsNull() {
+			diags.Append(acquireAndAttachPublicIp(gpcnClient, ctx, vmID, vpcID, primaryNetworkInterfaceId)...)
+			if diags.HasError() {
+				return diags
+			}
+		} else {
+			tflog.Info(ctx, LogVirtualMachineAlreadyCarriesAnAddress)
 		}
 	}
 	if heldChanged && !plan.PublicIpId.IsNull() {
@@ -187,6 +203,47 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 		}
 	}
 
+	return diags
+}
+
+// acquireAndAttachPublicIp takes an address and binds it to the interface. The API
+// inserts the address row before it dispatches the job. Every failure after the request
+// therefore leaves a real address. No attribute records it, so each diagnostic names it.
+// Returns diagnostics if any errors occurred.
+func acquireAndAttachPublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vmID, vpcID, nicID string) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	acquiredID, err := vpcpublicips.AcquirePublicIp(gpcnClient, ctx, vpcID)
+	if err != nil {
+		// A request the platform refused outright inserts no row and names no address.
+		if acquiredID == "" {
+			return publicIpFailure(diags, err)
+		}
+		diags.AddError(
+			ErrSummaryUnableToUpdatePublicIPConfiguration,
+			fmt.Sprintf(ErrDetailPublicIpOrphaned, acquiredID, vmID, ErrPhrasePublicIpAcquisitionFailed, err.Error()),
+		)
+		return diags
+	}
+
+	attachErr := vpcpublicips.AttachPublicIp(gpcnClient, ctx, vpcID, acquiredID, nicID)
+	if attachErr == nil {
+		return diags
+	}
+
+	// An address no interface carries costs the tenant money and hides from Terraform,
+	// so it goes back before the report.
+	if releaseErr := vpcpublicips.ReleasePublicIp(gpcnClient, ctx, vpcID, acquiredID); releaseErr != nil {
+		diags.AddError(
+			ErrSummaryUnableToUpdatePublicIPConfiguration,
+			fmt.Sprintf(ErrDetailPublicIpAttachFailedReleaseFailed, acquiredID, vmID, attachErr.Error(), releaseErr.Error()),
+		)
+		return diags
+	}
+	diags.AddError(
+		ErrSummaryUnableToUpdatePublicIPConfiguration,
+		fmt.Sprintf(ErrDetailPublicIpAttachFailedReleased, acquiredID, vmID, attachErr.Error()),
+	)
 	return diags
 }
 

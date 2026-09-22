@@ -154,7 +154,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				},
 			},
 			"l2_segment_ids": schema.ListAttribute{
-				Description: "IDs of the L2 segments the virtual machine carries. They attach after the machine is created, and the machine is stopped for a change unless its image supports network hotplug. Maximum of 4, because the birth subnet interface holds one of the five interfaces GPCN allows",
+				Description: "IDs of the L2 segments the virtual machine carries. They attach after the machine is created, and the machine is stopped for a change unless its image supports network hotplug. After an import, name the segments the machine carries; otherwise the next apply detaches them. Maximum of 4, because the birth subnet interface holds one of the five interfaces GPCN allows",
 				ElementType: types.StringType,
 				Optional:    true,
 				Computed:    true,
@@ -713,7 +713,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	// them back. Terraform destroys the address it acquired and leaves a held
 	// public_ip_id to the operator who holds it.
 	var deleteRequestBody io.Reader
-	if state.AllocatePublicIp.ValueBool() {
+	if virtualmachines.ReleasesAcquiredAddress(state, networkInterfaces) {
 		jsonDeleteRequestBody, err := json.Marshal(map[string]any{"releasePublicIps": true})
 		if err != nil {
 			resp.Diagnostics.AddError(

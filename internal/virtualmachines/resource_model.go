@@ -215,6 +215,32 @@ func resolveImageId(gpcnClient *client.GpcnClient, ctx context.Context, current 
 	return types.StringNull(), diags
 }
 
+// ReleasesAcquiredAddress reports whether the destroy asks GPCN to give the address
+// back. Terraform releases only an address it acquired, and only a VPC interface holds
+// one. The release key also needs the vpc-public-ip:delete permission, which a legacy
+// machine must not have to spend. Delete fetches the interfaces before it asks. It
+// returns when that read fails, so the live list is the only source.
+func ReleasesAcquiredAddress(state ResourceModel, live []networks.ReadVirtualMachineNetworkDataResponseTF) bool {
+	if !state.AllocatePublicIp.ValueBool() {
+		return false
+	}
+
+	world, named := primaryInterfaceWorld(live)
+	return named && world == networks.NicWorldVpc
+}
+
+// primaryInterfaceWorld names the world of the birth interface. A list with no primary
+// names none.
+func primaryInterfaceWorld(interfaces []networks.ReadVirtualMachineNetworkDataResponseTF) (string, bool) {
+	primaryIdx := slices.IndexFunc(interfaces, func(iface networks.ReadVirtualMachineNetworkDataResponseTF) bool {
+		return iface.IsPrimary.ValueBool()
+	})
+	if primaryIdx < 0 {
+		return "", false
+	}
+	return interfaces[primaryIdx].World.ValueString(), true
+}
+
 func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient, virtualMachineID string, model ResourceModel) (ResourceModel, diag.Diagnostics) {
 	var allDiags diag.Diagnostics
 

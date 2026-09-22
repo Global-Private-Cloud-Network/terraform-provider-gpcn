@@ -56,12 +56,12 @@ func (v StandardNetworkValidator) ValidateString(ctx context.Context, request va
 	}
 }
 
-// IpAddressValidator validates that a string attribute is a valid IPv4 address
-// and optionally validates it's within the configured CIDR block.
+// IpAddressValidator validates that a string attribute is a valid IPv4 address.
+// It also validates that the address is within the configured CIDR block.
 //
-// Returns early on first error since subsequent validations depend on earlier ones:
-// - If the value isn't a valid IP, checking IPv4 compatibility is meaningless
-// - If it's not IPv4, checking CIDR containment is meaningless
+// Each check depends on the one before it, so the first error returns.
+// A value that is not an IP address has no IPv4 compatibility to check.
+// A value that is not IPv4 has no CIDR containment to check.
 type IpAddressValidator struct{}
 
 func (v IpAddressValidator) Description(ctx context.Context) string {
@@ -126,9 +126,9 @@ func (v IpAddressValidator) ValidateString(ctx context.Context, request validato
 
 // CIDRValidator validates that a string attribute is a valid CIDR block.
 //
-// Returns early on first error since subsequent validations depend on earlier ones:
-// - If the value isn't valid CIDR syntax, checking network address is meaningless
-// - If it's not the network address, checking IPv4 compatibility is meaningless
+// Each check depends on the one before it, so the first error returns.
+// A value that is not CIDR syntax has no network address to check.
+// A value that is not the network address has no IPv4 compatibility to check.
 type CIDRValidator struct{}
 
 func (v CIDRValidator) Description(ctx context.Context) string {

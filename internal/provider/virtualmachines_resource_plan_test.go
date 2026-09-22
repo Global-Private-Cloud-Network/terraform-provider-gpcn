@@ -813,6 +813,40 @@ resource "gpcn_virtualmachine" "test" {
 	})
 }
 
+// GPCN refuses a second interface on one segment, so a repeated id can only fail at
+// apply. The schema therefore refuses it at plan time.
+func TestVirtualMachineResourcePlanRefusesADuplicateSegment(t *testing.T) {
+	config := fmt.Sprintf(`
+provider "gpcn" {
+  host    = "http://127.0.0.1:1"
+  api_key = "test-key"
+}
+
+resource "gpcn_virtualmachine" "test" {
+  name           = "vm-plan-duplicate-segment"
+  datacenter_id  = %q
+  size_id        = %q
+  image_id       = %q
+  subnet_id      = %q
+  l2_segment_ids = [%q, %q]
+  initial_auth = {
+    ssh_key_id = %q
+    username   = %q
+  }
+}
+`, vmPlanTestDatacenterID, vmPlanTestSizeID, vmPlanTestImageID, vmPlanTestSubnetID, vmPlanTestSegmentID, vmPlanTestSegmentID, vmPlanTestSshKeyID, vmPlanTestUsername)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexp.MustCompile(`(?s)Duplicate\s+List\s+Value.*This\s+attribute\s+contains\s+duplicate\s+values\s+of:\s+"` + vmPlanTestSegmentID + `"`),
+			},
+		},
+	})
+}
+
 func vmPlanTestReadBodyWithHotplug(name, status, skuId string, hotplug int) map[string]any {
 	body := vmPlanTestReadBody(name, status, skuId)
 	body["data"].(map[string]any)["networkHotplug"] = hotplug
@@ -2446,10 +2480,289 @@ func TestVirtualMachineResourcePlanImportRecordsAHeldAddress(t *testing.T) {
 	})
 }
 
+// vmCreateOnSubnetInterfacesBody reports the birth interface, its acquired address and
+// one interface per attached segment. An empty addressID leaves the address columns
+// null, as GPCN does for an interface with no address.
+func vmCreateOnSubnetInterfacesBody(birthSubnetID, addressID string, attached []string) map[string]any {
+	body := vmSegmentPlanTestNetworkInterfacesBody(birthSubnetID, vmSegmentNicsFromIds(attached))
+	if addressID == "" {
+		return body
+	}
+	row := body["data"].([]map[string]any)[0]
+	row["publicIp"] = vmPlanTestAcquiredIpAddress
+	row["publicIpId"] = addressID
+	return body
+}
+
+// vmCreateOnSubnetPlanTestConfig asks for a machine on a subnet, with two segments and
+// an acquired address. One create then exercises all three networking attributes.
+func vmCreateOnSubnetPlanTestConfig(host, name string) string {
+	return fmt.Sprintf(`
+provider "gpcn" {
+  host        = %q
+  api_key     = "test-key"
+  max_retries = 0
+}
+
+resource "gpcn_virtualmachine" "test" {
+  name               = %q
+  datacenter_id      = %q
+  size_id            = %q
+  image_id           = %q
+  subnet_id          = %q
+  l2_segment_ids     = [%q, %q]
+  allocate_public_ip = true
+  initial_auth = {
+    ssh_key_id = %q
+    username   = %q
+  }
+}
+`, host, name, vmPlanTestDatacenterID, vmPlanTestSizeID, vmPlanTestImageID, vmPlanTestSubnetID, vmPlanTestSegmentID, vmPlanTestSegmentID2, vmPlanTestSshKeyID, vmPlanTestUsername)
+}
+
+// startVirtualMachineCreateOnSubnetMockServer keeps the create body and the segments the
+// attach loop asked for. The image takes network hotplug, so the loop needs no stop.
+func startVirtualMachineCreateOnSubnetMockServer(t *testing.T) (*httptest.Server, func() map[string]any) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	birthSubnetID := ""
+	boundID := ""
+	status := virtualmachines.VMStatusRunning.String()
+	var attached []string
+	var createBody map[string]any
+
+	addressesPath := "/v1/resource/vpcs/" + vmPlanTestVpcID + "/public-ips"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			createBody = body
+			name, _ = body["name"].(string)
+			birthSubnetID, _ = body["subnetId"].(string)
+			if acquire, ok := body["acquirePublicIp"].(bool); ok && acquire {
+				boundID = vmPlanTestAcquiredIpID
+			}
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			segmentID, _ := testutil.ReadRequestBody(r)["l2SegmentId"].(string)
+			mu.Lock()
+			attached = append(attached, segmentID)
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/"):
+			testutil.HandleCreateJobResponse(w, "job-4", "detach issued")
+		case strings.HasPrefix(r.URL.Path, addressesPath):
+			testutil.HandleCreateJobResponse(w, "job-ip", "address issued")
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mu.Lock()
+			currentSubnet, currentAddress := birthSubnetID, boundID
+			current := append([]string(nil), attached...)
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmCreateOnSubnetInterfacesBody(currentSubnet, currentAddress, current))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, vmPlanTestSizeID, 1))
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	recorded := func() map[string]any {
+		mu.Lock()
+		defer mu.Unlock()
+		return createBody
+	}
+
+	return server, recorded
+}
+
+// The three networking attributes reach GPCN by three different routes. subnet_id goes
+// in the create body. l2_segment_ids goes through the attach loop after it.
+// allocate_public_ip is a flag the API never reports back. One create pins all three in
+// state together.
+func TestVirtualMachineResourcePlanCreateOnSubnet(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, createBody := startVirtualMachineCreateOnSubnetMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmCreateOnSubnetPlanTestConfig(server.URL, "vm-plan-create-on-subnet"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "subnet_id", vmPlanTestSubnetID),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "l2_segment_ids.#", "2"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "l2_segment_ids.0", vmPlanTestSegmentID),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "l2_segment_ids.1", vmPlanTestSegmentID2),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "allocate_public_ip", "true"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "public_ip", vmPlanTestAcquiredIpAddress),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.#", "3"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_interfaces.0.vpc_subnet_id", vmPlanTestSubnetID),
+					func(*terraform.State) error {
+						body := createBody()
+						if got, _ := body["subnetId"].(string); got != vmPlanTestSubnetID {
+							return fmt.Errorf("expected the create body to name subnet %q, got %q", vmPlanTestSubnetID, got)
+						}
+						if acquire, _ := body["acquirePublicIp"].(bool); !acquire {
+							return fmt.Errorf("expected the create body to ask for an address, got %v", body["acquirePublicIp"])
+						}
+						if _, named := body["l2SegmentIds"]; named {
+							return fmt.Errorf("expected no segment key in the create body, got %v", body)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+// startVirtualMachineCarriedAddressMockServer reports an address on the primary
+// interface from the first read. It stands for a machine whose acquisition succeeded
+// and whose read-back did not, so state lags the platform. Every address verb is
+// recorded, because the platform refuses a second address on that interface.
+func startVirtualMachineCarriedAddressMockServer(t *testing.T) (*httptest.Server, func() []string) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	status := virtualmachines.VMStatusRunning.String()
+	var events []string
+
+	addressesPath := "/v1/resource/vpcs/" + vmPlanTestVpcID + "/public-ips"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case strings.HasPrefix(r.URL.Path, addressesPath):
+			mu.Lock()
+			events = append(events, r.Method+" "+r.URL.Path)
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-ip", "address issued")
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			testutil.WriteJSONResponse(w, vmPublicIpPlanTestInterfacesBody(vmPlanTestAcquiredIpID, vmPlanTestAcquiredIpAddress))
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, vmPlanTestSizeID))
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	recorded := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), events...)
+	}
+
+	return server, recorded
+}
+
+// A read-back that fails after an acquisition leaves allocate_public_ip false in state
+// while the machine carries the address. Asking for one again therefore reads the
+// interface: a second acquire mints an address GPCN then refuses to attach.
+func TestVirtualMachineResourcePlanSkipsTheAcquireWhenTheMachineCarriesTheAddress(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachineCarriedAddressMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-carried-address", false, ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "allocate_public_ip", "false"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "public_ip", vmPlanTestAcquiredIpAddress),
+				),
+			},
+			{
+				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-carried-address", true, ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "allocate_public_ip", "true"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "public_ip", vmPlanTestAcquiredIpAddress),
+					func(*terraform.State) error {
+						if verbs := recorded(); len(verbs) != 0 {
+							return fmt.Errorf("expected no address verb, got %v", verbs)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+// vmLegacyPlanTestInterfacesBody reports a primary interface on a legacy network. A
+// machine created by 1.3.0 has one, and its address is not a VPC address.
+func vmLegacyPlanTestInterfacesBody(addressID, address string) map[string]any {
+	body := vmPublicIpPlanTestInterfacesBody(addressID, address)
+	row := body["data"].([]map[string]any)[0]
+	row["world"] = "legacy"
+	row["vpcId"] = nil
+	row["vpcName"] = nil
+	row["vpcSubnetId"] = nil
+	row["subnetName"] = nil
+	row["networkId"] = "net-1"
+	row["networkName"] = "legacy-net"
+	row["networkType"] = "standard"
+	return body
+}
+
+// vmDestroyBodyMock arms the destroy-body mock. A legacy primary reports the birth
+// interface on a legacy network. A failing read-back refuses the interface list until
+// the destroy stops the machine, so state holds no list at all.
+type vmDestroyBodyMock struct {
+	legacyPrimary bool
+	readBackFails bool
+}
+
 // startVirtualMachineDestroyBodyMockServer keeps whichever address the create asked for
 // and records the body of the delete. A test then reads what the destroy asked GPCN to
 // do with that address.
-func startVirtualMachineDestroyBodyMockServer(t *testing.T) (*httptest.Server, func() (string, bool)) {
+func startVirtualMachineDestroyBodyMockServer(t *testing.T, arm vmDestroyBodyMock) (*httptest.Server, func() (string, bool)) {
 	t.Helper()
 
 	var mu sync.Mutex
@@ -2486,8 +2799,18 @@ func startVirtualMachineDestroyBodyMockServer(t *testing.T) (*httptest.Server, f
 			testutil.HandleCreateJobResponse(w, "job-ip", "address issued")
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
 			mu.Lock()
-			currentID, currentAddress := boundID, boundAddress
+			currentID, currentAddress, currentStatus := boundID, boundAddress, status
 			mu.Unlock()
+			// The destroy stops the machine before it reads the list. An armed read-back
+			// failure therefore refuses every read but that one.
+			if arm.readBackFails && currentStatus != virtualmachines.VMStatusShutoff.String() {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			if arm.legacyPrimary {
+				testutil.WriteJSONResponse(w, vmLegacyPlanTestInterfacesBody(currentID, currentAddress))
+				return
+			}
 			testutil.WriteJSONResponse(w, vmPublicIpPlanTestInterfacesBody(currentID, currentAddress))
 		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
 			mu.Lock()
@@ -2525,22 +2848,25 @@ func startVirtualMachineDestroyBodyMockServer(t *testing.T) (*httptest.Server, f
 
 // A destroy gives back only what Terraform acquired. An address the operator holds
 // survives the machine. The delete that carries one names no disposition at all, and
-// GPCN keeps it.
+// GPCN keeps it. A legacy machine has no VPC address, and the release key costs it the
+// vpc-public-ip:delete permission for nothing.
 func TestVirtualMachineResourcePlanDestroyReleasesAcquiredIp(t *testing.T) {
 	tests := []struct {
-		name       string
-		allocate   bool
-		publicIpID string
-		wantBody   string
+		name          string
+		allocate      bool
+		publicIpID    string
+		legacyPrimary bool
+		wantBody      string
 	}{
-		{"an acquired address is released", true, "", `{"releasePublicIps":true}`},
-		{"a held address is kept", false, vmPlanTestHeldIpID, ""},
+		{"an acquired address is released", true, "", false, `{"releasePublicIps":true}`},
+		{"a held address is kept", false, vmPlanTestHeldIpID, false, ""},
+		{"a legacy machine asks for nothing", true, "", true, ""},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			shortenVirtualMachinePolling(t)
-			server, recorded := startVirtualMachineDestroyBodyMockServer(t)
+			server, recorded := startVirtualMachineDestroyBodyMockServer(t, vmDestroyBodyMock{legacyPrimary: tc.legacyPrimary})
 
 			config := vmPublicIpPlanTestConfig(server.URL, "vm-plan-destroy-address", tc.allocate, tc.publicIpID)
 
@@ -2548,6 +2874,51 @@ func TestVirtualMachineResourcePlanDestroyReleasesAcquiredIp(t *testing.T) {
 				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 				Steps: []resource.TestStep{
 					{Config: config},
+					{Config: config, Destroy: true},
+				},
+			})
+
+			body, deleted := recorded()
+			if !deleted {
+				t.Fatal("Expected the machine to be deleted")
+			}
+			if body != tc.wantBody {
+				t.Errorf("Expected the delete body '%s', got '%s'", tc.wantBody, body)
+			}
+		})
+	}
+}
+
+// A read-back that fails leaves state with no interface list. The destroy must still
+// give back an address Terraform acquired. The live list the destroy fetches before it
+// asks names the world, and it is the only source.
+func TestVirtualMachineResourcePlanDestroyReadsTheLiveInterfaceWorld(t *testing.T) {
+	tests := []struct {
+		name          string
+		legacyPrimary bool
+		wantBody      string
+	}{
+		{"a live VPC primary releases the address", false, `{"releasePublicIps":true}`},
+		{"a live legacy primary asks for nothing", true, ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			shortenVirtualMachinePolling(t)
+			server, recorded := startVirtualMachineDestroyBodyMockServer(t, vmDestroyBodyMock{
+				legacyPrimary: tc.legacyPrimary,
+				readBackFails: true,
+			})
+
+			config := vmPublicIpPlanTestConfig(server.URL, "vm-plan-destroy-live-world", true, "")
+
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config: config,
+						Check:  resource.TestCheckNoResourceAttr(gpcnVirtualMachineTest, "network_interfaces.0.world"),
+					},
 					{Config: config, Destroy: true},
 				},
 			})
@@ -2776,6 +3147,36 @@ func TestVirtualMachineResourcePlanRenameKeepsThePinnedPublicIp(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "public_ip", vmPlanTestMovedAddress),
 				),
+			},
+		},
+	})
+}
+
+// The tail of an update writes state before it starts the machine. A start that fails
+// therefore changes nothing the next apply repeats. The remedy sends the user to the
+// portal alone, and the plan that follows is a no-op.
+func TestVirtualMachineResourcePlanUpdateReportsFailedRestart(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, _ := startVirtualMachineSegmentHotplugMockServer(t, 0, false)
+
+	config := vmSegmentListPlanTestConfig(server.URL, "vm-plan-restart-update", vmPlanTestSegmentID)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmSegmentListPlanTestConfig(server.URL, "vm-plan-restart-update"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "id", vmPlanTestID),
+				),
+			},
+			{
+				Config:      config,
+				ExpectError: regexp.MustCompile(`(?s)Virtual\s+machine\s+left\s+stopped.*did\s+not\s+start\s+again.*Start\s+it\s+in\s+the\s+portal\.`),
+			},
+			{
+				Config:   config,
+				PlanOnly: true,
 			},
 		},
 	})

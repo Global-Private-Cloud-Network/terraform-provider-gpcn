@@ -20,14 +20,16 @@ var gpcnVirtualMachineTest = "gpcn_virtualmachine.test"
 // vpcAndSubnet returns the VPC and the subnet a virtual machine is born on. A machine
 // lives in exactly one VPC, so every case that creates one creates these two first.
 // GPCN checks a CIDR for overlap across the whole entity, and the repository has no
-// sweepers. Each case therefore takes its own name and its own block. The octet draws
-// from the window at base 112. One fixed block would fail every run after the first.
+// sweepers. Each case therefore takes its own name and its own fixed block. A case
+// meets only its own block, and only when an earlier run of that case failed and left
+// one. The configuration acknowledges that overlap.
 func vpcAndSubnet(suffix string, octet int) string {
 	return fmt.Sprintf(`
 resource "gpcn_vpc" "vm_vpc" {
-	name          = "terraform-demo-vpc-%[1]s"
-	datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-	cidr          = "10.%[2]d.0.0/16"
+	name                = "terraform-demo-vpc-%[1]s"
+	datacenter_id       = data.gpcn_datacenters.central_us.datacenters[0].id
+	cidr                = "10.%[2]d.0.0/16"
+	acknowledge_overlap = true
 }
 
 resource "gpcn_vpc_subnet" "vm_subnet" {
@@ -38,11 +40,55 @@ resource "gpcn_vpc_subnet" "vm_subnet" {
 `, suffix, octet)
 }
 
-// vpcTestOctet draws the second octet of a case's own /16 out of the 16-wide window this
-// file owns. Each resource file draws from a different window, so parallel cases in
-// different files never collide.
-func vpcTestOctet() int {
-	return 112 + acctest.RandIntRange(0, 16)
+// vmOctetSlot names the block each of the five acceptance cases owns. Cases that draw a
+// block at random take the same one about half the time. GPCN answers 409 for a VPC
+// that overlaps another. Slots 5 to 7 wait for the next cases.
+var vmOctetSlot = map[string]int{
+	"TestVirtualMachinesAuth":                     0,
+	"TestVirtualMachinesVolumeAttachment":         1,
+	"TestVirtualMachinesSizeUpgrade":              2,
+	"TestVirtualMachinesChangePublicIpAllocation": 3,
+	"TestVirtualMachinesResource":                 4,
+}
+
+const (
+	vmOctetBase  = 112
+	vmOctetSlots = 8
+)
+
+// vpcTestOctetFor returns the octet of the named case. The guard below and every call
+// site read this one function. A wrapper that ignores its slot fails the guard.
+func vpcTestOctetFor(t testing.TB, name string) int {
+	t.Helper()
+	slot, named := vmOctetSlot[name]
+	if !named {
+		t.Fatalf("Expected %s to own a slot in vmOctetSlot", name)
+	}
+	return vmOctetBase + slot
+}
+
+// vpcTestOctet returns the second octet of the case's own /16. The map above names every
+// slot. No call site chooses one, so no edit puts two cases in one block. The window
+// belongs to this file, so parallel cases in other files never collide.
+func vpcTestOctet(t *testing.T) int {
+	t.Helper()
+	return vpcTestOctetFor(t, t.Name())
+}
+
+// A shared slot puts two parallel cases in one /16, and GPCN refuses the second VPC.
+// The compiler accepts a duplicate, so the release pins the set.
+func TestVirtualMachineAcceptanceOctetsAreUnique(t *testing.T) {
+	owner := map[int]string{}
+	for name, slot := range vmOctetSlot {
+		if slot < 0 || slot >= vmOctetSlots {
+			t.Errorf("Expected %s to take a slot below %d, got %d", name, vmOctetSlots, slot)
+		}
+		octet := vpcTestOctetFor(t, name)
+		if other, taken := owner[octet]; taken {
+			t.Errorf("Expected %s and %s to take different octets, both take %d", name, other, octet)
+		}
+		owner[octet] = name
+	}
 }
 
 // dataCenterImagesAndSize returns the common datacenter, image, and size datasource lookup blocks for Chicago.
@@ -70,7 +116,7 @@ data "gpcn_virtualmachine_sizes" "vm_size" {
 func TestVirtualMachinesResource(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet()
+	vpcOctet := vpcTestOctet(t)
 	sshKeyName := fmt.Sprintf("vm-basic-key-%s", rName)
 	volumeName := fmt.Sprintf("vm-basic-vol-%s", rName)
 	vmName := fmt.Sprintf("vm-basic-%s", rName)
@@ -234,7 +280,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet()
+	vpcOctet := vpcTestOctet(t)
 	sshKeyName := fmt.Sprintf("vm-public-ip-key-%s", rName)
 	vmName := fmt.Sprintf("vm-public-ip-%s", rName)
 
@@ -303,7 +349,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet()
+	vpcOctet := vpcTestOctet(t)
 	sshKeyName := fmt.Sprintf("vm-size-upgrade-key-%s", rName)
 	vmName := fmt.Sprintf("vm-size-upgrade-%s", rName)
 
@@ -399,7 +445,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet()
+	vpcOctet := vpcTestOctet(t)
 	sshKeyName := fmt.Sprintf("vm-vol-attach-key-%s", rName)
 	vol1Name := fmt.Sprintf("vm-vol-attach-vol1-%s", rName)
 	vol2Name := fmt.Sprintf("vm-vol-attach-vol2-%s", rName)
@@ -511,7 +557,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 func TestVirtualMachinesAuth(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet()
+	vpcOctet := vpcTestOctet(t)
 	sshKeyName := fmt.Sprintf("vm-auth-key-%s", rName)
 	vmName := fmt.Sprintf("vm-auth-%s", rName)
 
@@ -706,5 +752,26 @@ func TestVirtualMachineAddressDescriptions(t *testing.T) {
 		if got := attribute.GetDescription(); got != description {
 			t.Errorf("Expected %q description %q, got %q", name, description, got)
 		}
+	}
+}
+
+// An import fills l2_segment_ids from the interfaces, and the attribute carries a
+// default of the empty list. A configuration that leaves it out therefore detaches
+// every segment on the next apply. The release pins the sentence that says so.
+func TestVirtualMachineSegmentIdsDescription(t *testing.T) {
+	schemaResponse := &fwresource.SchemaResponse{}
+	NewVirtualMachinesResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
+	if schemaResponse.Diagnostics.HasError() {
+		t.Fatalf("Expected a schema, got %v", schemaResponse.Diagnostics)
+	}
+
+	const want = "IDs of the L2 segments the virtual machine carries. They attach after the machine is created, and the machine is stopped for a change unless its image supports network hotplug. After an import, name the segments the machine carries; otherwise the next apply detaches them. Maximum of 4, because the birth subnet interface holds one of the five interfaces GPCN allows"
+
+	attribute, ok := schemaResponse.Schema.Attributes["l2_segment_ids"]
+	if !ok {
+		t.Fatal("Expected an l2_segment_ids attribute")
+	}
+	if got := attribute.GetDescription(); got != want {
+		t.Errorf("Expected the description %q, got %q", want, got)
 	}
 }

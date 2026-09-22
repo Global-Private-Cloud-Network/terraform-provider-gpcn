@@ -246,8 +246,8 @@ func DeleteNetwork(gpcnClient *client.GpcnClient, ctx context.Context, networkId
 		}
 	}
 
-	// It's possible for the delete job to fail if we are deleting it and a virtual machine at the same time
-	// If this happens, catch the error and don't process it until we've failed sufficiently enough
+	// A concurrent virtual machine delete makes this job fail. The loop therefore keeps
+	// the error to itself until the attempts run out.
 	var lastErr error
 	for errorCount := 1; errorCount <= DELETE_NETWORK_RETRY_COUNT; errorCount++ {
 		// Wait before retry (skip on first attempt)
