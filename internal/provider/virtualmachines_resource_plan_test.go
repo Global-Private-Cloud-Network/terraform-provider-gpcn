@@ -2890,8 +2890,8 @@ func TestVirtualMachineResourcePlanDestroyReleasesAcquiredIp(t *testing.T) {
 }
 
 // A read-back that fails leaves state with no interface list. The destroy must still
-// give back an address Terraform acquired. The live list the destroy already fetched
-// names the world, so state is only the fallback.
+// give back an address Terraform acquired. The live list the destroy fetches before it
+// asks names the world, and it is the only source.
 func TestVirtualMachineResourcePlanDestroyReadsTheLiveInterfaceWorld(t *testing.T) {
 	tests := []struct {
 		name          string
