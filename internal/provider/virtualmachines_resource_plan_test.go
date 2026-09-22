@@ -2192,22 +2192,35 @@ func vmPublicIpPlanTestInterfacesBody(addressID, address string) map[string]any 
 	return body
 }
 
+// vmPublicIpMockArms arms the refusals a step-failure test needs. Each one answers 500
+// once and then behaves normally, so the destroy at the end still reaches the platform.
+type vmPublicIpMockArms struct {
+	refuseReadAfterChange bool
+	refuseSizeOnce        bool
+	refuseAttributesOnce  bool
+	refuseReleaseOnce     bool
+}
+
 // startVirtualMachinePublicIpMockServer serves the VPC address verbs and records them in
 // order. The legacy per-NIC routes answer nothing but a test failure. GPCN refuses them
 // on a VPC interface, so the provider must never reach for one. A create that names an
 // address binds it, and the image list answers the import. refuseReadAfterChange makes
 // the first read of the machine after an attach or a rename answer 500. That read is
-// the read-back of the update. It answers one read only, so the destroy still reaches
-// the machine.
-func startVirtualMachinePublicIpMockServer(t *testing.T, refuseReadAfterChange bool) (*httptest.Server, func() []string) {
+// the read-back of the update. The sizes arm reports every size but the one the machine
+// carries, so a planned size change is an in-place resize.
+func startVirtualMachinePublicIpMockServer(t *testing.T, arms vmPublicIpMockArms) (*httptest.Server, func() []string) {
 	t.Helper()
 
 	var mu sync.Mutex
 	name := ""
 	status := virtualmachines.VMStatusRunning.String()
+	skuId := vmPlanTestSizeID
 	boundID := ""
 	boundAddress := ""
 	refuseNextRead := false
+	refuseNextSize := arms.refuseSizeOnce
+	refuseNextAttributes := arms.refuseAttributesOnce
+	refuseNextRelease := arms.refuseReleaseOnce
 	var events []string
 
 	addressesPath := "/v1/resource/vpcs/" + vmPlanTestVpcID + "/public-ips"
@@ -2252,7 +2265,7 @@ func startVirtualMachinePublicIpMockServer(t *testing.T, refuseReadAfterChange b
 			if addressID == vmPlanTestHeldIpID {
 				boundAddress = vmPlanTestHeldIpAddress
 			}
-			refuseNextRead = refuseReadAfterChange
+			refuseNextRead = arms.refuseReadAfterChange
 			mu.Unlock()
 			testutil.HandleCreateJobResponse(w, "job-ip", "attach issued")
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/detach") && strings.HasPrefix(r.URL.Path, addressesPath+"/"):
@@ -2266,7 +2279,18 @@ func startVirtualMachinePublicIpMockServer(t *testing.T, refuseReadAfterChange b
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, addressesPath+"/"):
 			mu.Lock()
 			events = append(events, "release "+strings.TrimPrefix(r.URL.Path, addressesPath+"/"))
+			refused := refuseNextRelease
+			refuseNextRelease = false
+			if !refused {
+				boundID = ""
+				boundAddress = ""
+			}
 			mu.Unlock()
+			if refused {
+				w.WriteHeader(http.StatusInternalServerError)
+				testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "release refused"})
+				return
+			}
 			testutil.HandleCreateJobResponse(w, "job-ip", "release issued")
 		case strings.HasSuffix(r.URL.Path, "/public-ip") && strings.HasPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/"):
 			mu.Lock()
@@ -2285,10 +2309,30 @@ func startVirtualMachinePublicIpMockServer(t *testing.T, refuseReadAfterChange b
 			mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
-			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+			mu.Lock()
+			currentSku := skuId
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestUpgradeSizesBody(currentSku))
+		case r.Method == http.MethodPut && r.URL.Path == vmPlanTestPath+"/size":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			refused := refuseNextSize
+			refuseNextSize = false
+			if !refused {
+				if requested, ok := body["skuId"].(string); ok {
+					skuId = requested
+				}
+			}
+			mu.Unlock()
+			if refused {
+				w.WriteHeader(http.StatusInternalServerError)
+				testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "resize refused"})
+				return
+			}
+			testutil.HandleCreateJobResponse(w, "job-5", "resize issued")
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
 			mu.Lock()
-			currentName, currentStatus := name, status
+			currentName, currentStatus, currentSku := name, status, skuId
 			refused := refuseNextRead
 			refuseNextRead = false
 			mu.Unlock()
@@ -2296,15 +2340,24 @@ func startVirtualMachinePublicIpMockServer(t *testing.T, refuseReadAfterChange b
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, vmPlanTestSizeID))
+			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, currentSku))
 		case r.Method == http.MethodPut && r.URL.Path == vmPlanTestPath:
 			body := testutil.ReadRequestBody(r)
 			mu.Lock()
-			if updated, ok := body["name"].(string); ok {
-				name = updated
+			refused := refuseNextAttributes
+			refuseNextAttributes = false
+			if !refused {
+				if updated, ok := body["name"].(string); ok {
+					name = updated
+				}
+				refuseNextRead = arms.refuseReadAfterChange
 			}
-			refuseNextRead = refuseReadAfterChange
 			mu.Unlock()
+			if refused {
+				w.WriteHeader(http.StatusInternalServerError)
+				testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "attributes refused"})
+				return
+			}
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
 			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
@@ -2326,6 +2379,12 @@ func startVirtualMachinePublicIpMockServer(t *testing.T, refuseReadAfterChange b
 // vmPublicIpPlanTestConfig writes the address attributes a test toggles. An empty
 // publicIpID leaves public_ip_id out of the configuration altogether.
 func vmPublicIpPlanTestConfig(host, name string, allocate bool, publicIpID string) string {
+	return vmPublicIpSizePlanTestConfig(host, name, allocate, publicIpID, vmPlanTestSizeID)
+}
+
+// vmPublicIpSizePlanTestConfig names the SKU as well, so one apply can change the
+// address and the size together.
+func vmPublicIpSizePlanTestConfig(host, name string, allocate bool, publicIpID, sizeID string) string {
 	held := ""
 	if publicIpID != "" {
 		held = fmt.Sprintf("\n  public_ip_id       = %q", publicIpID)
@@ -2350,7 +2409,7 @@ resource "gpcn_virtualmachine" "test" {
     username   = %q
   }
 }
-`, host, name, vmPlanTestDatacenterID, vmPlanTestSizeID, vmPlanTestImageID, vmPlanTestSubnetID, allocate, held, vmPlanTestSshKeyID, vmPlanTestUsername)
+`, host, name, vmPlanTestDatacenterID, sizeID, vmPlanTestImageID, vmPlanTestSubnetID, allocate, held, vmPlanTestSshKeyID, vmPlanTestUsername)
 }
 
 // GPCN answers 409 when the legacy per-interface allocate addresses a VPC interface. An
@@ -2359,7 +2418,7 @@ resource "gpcn_virtualmachine" "test" {
 // it.
 func TestVirtualMachineResourcePlanTogglesPublicIpViaVpcVerbs(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	server, recorded := startVirtualMachinePublicIpMockServer(t, false)
+	server, recorded := startVirtualMachinePublicIpMockServer(t, vmPublicIpMockArms{})
 
 	var afterCreate, afterAcquire int
 
@@ -2412,7 +2471,7 @@ func TestVirtualMachineResourcePlanTogglesPublicIpViaVpcVerbs(t *testing.T) {
 // acquire.
 func TestVirtualMachineResourcePlanAttachesAndDetachesAHeldAddress(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	server, recorded := startVirtualMachinePublicIpMockServer(t, false)
+	server, recorded := startVirtualMachinePublicIpMockServer(t, vmPublicIpMockArms{})
 
 	var afterCreate, afterAttach int
 
@@ -2464,7 +2523,7 @@ func TestVirtualMachineResourcePlanAttachesAndDetachesAHeldAddress(t *testing.T)
 // allocate_public_ip would release an address the operator owns on the next destroy.
 func TestVirtualMachineResourcePlanImportRecordsAHeldAddress(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	server, _ := startVirtualMachinePublicIpMockServer(t, false)
+	server, _ := startVirtualMachinePublicIpMockServer(t, vmPublicIpMockArms{})
 
 	config := vmPublicIpPlanTestConfig(server.URL, "vm-plan-import-address", false, vmPlanTestHeldIpID)
 
@@ -2500,18 +2559,97 @@ func TestVirtualMachineResourcePlanImportRecordsAHeldAddress(t *testing.T) {
 	})
 }
 
-// vmPlanTestAcquiredAddressReadBackPattern matches the orphan report that follows a
-// refused read-back, after Terraform wraps it.
-var vmPlanTestAcquiredAddressReadBackPattern = regexp.MustCompile(
+// vmPlanTestAcquiredAddressReleasedPattern matches the report of an address the runner
+// gave back after a later step failed, once Terraform wraps it.
+var vmPlanTestAcquiredAddressReleasedPattern = regexp.MustCompile(
 	`(?s)public\s+IP\s+` + vmPlanTestAcquiredIpID + `\s+was\s+acquired\s+for\s+virtual\s+machine\s+` +
-		vmPlanTestID + `\s+but\s+reading\s+the\s+machine\s+back\s+failed`)
+		vmPlanTestID + `\s+but\s+the\s+update\s+failed\s+afterwards:.*the\s+address\s+was\s+released`)
+
+// vmPlanTestAcquiredAddressReleaseFailedPattern matches the same report when the release
+// fails too. That arm alone leaves an address for the operator to find.
+var vmPlanTestAcquiredAddressReleaseFailedPattern = regexp.MustCompile(
+	`(?s)public\s+IP\s+` + vmPlanTestAcquiredIpID + `\s+was\s+acquired\s+for\s+virtual\s+machine\s+` +
+		vmPlanTestID + `\s+but\s+the\s+update\s+failed\s+afterwards:.*releasing\s+it\s+failed\s+too`)
+
+// vmPlanTestAcquiredAddressVerbs lists the verbs an acquire that is unwound leaves
+// behind. The release closes what the acquire opened, so the retry starts from nothing.
+func vmPlanTestAcquiredAddressVerbs() []string {
+	return []string{
+		"acquire",
+		"attach " + vmPlanTestAcquiredIpID + " nic-1",
+		"release " + vmPlanTestAcquiredIpID,
+	}
+}
+
+// The resize follows the acquire, so a refused resize leaves an address the update never
+// records. The runner gives it back, and the machine ends where it started. State keeps
+// allocate_public_ip false, and the third step proves the plan is empty again.
+func TestVirtualMachineResourcePlanReleasesTheAcquiredAddressWhenTheResizeFails(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachinePublicIpMockServer(t, vmPublicIpMockArms{refuseSizeOnce: true})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmPublicIpSizePlanTestConfig(server.URL, "vm-plan-resize-fails", false, "", vmPlanTestSizeID),
+			},
+			{
+				Config:      vmPublicIpSizePlanTestConfig(server.URL, "vm-plan-resize-fails", true, "", vmPlanTestSizeID2),
+				ExpectError: vmPlanTestAcquiredAddressReleasedPattern,
+			},
+			{
+				Config: vmPublicIpSizePlanTestConfig(server.URL, "vm-plan-resize-fails", false, "", vmPlanTestSizeID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "allocate_public_ip", "false"),
+					resource.TestCheckNoResourceAttr(gpcnVirtualMachineTest, "public_ip"),
+				),
+			},
+		},
+	})
+
+	if verbs := recorded(); !slices.Equal(verbs, vmPlanTestAcquiredAddressVerbs()) {
+		t.Errorf("Expected %v, got %v", vmPlanTestAcquiredAddressVerbs(), verbs)
+	}
+}
+
+// The rename follows the acquire, so a refused rename orphans the same address. One rule
+// covers every step after the acquire, so this arm reports the release too.
+func TestVirtualMachineResourcePlanReleasesTheAcquiredAddressWhenTheRenameFails(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachinePublicIpMockServer(t, vmPublicIpMockArms{refuseAttributesOnce: true})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-rename-fails", false, ""),
+			},
+			{
+				Config:      vmPublicIpPlanTestConfig(server.URL, "vm-plan-rename-fails-again", true, ""),
+				ExpectError: vmPlanTestAcquiredAddressReleasedPattern,
+			},
+			{
+				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-rename-fails", false, ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "allocate_public_ip", "false"),
+					resource.TestCheckNoResourceAttr(gpcnVirtualMachineTest, "public_ip"),
+				),
+			},
+		},
+	})
+
+	if verbs := recorded(); !slices.Equal(verbs, vmPlanTestAcquiredAddressVerbs()) {
+		t.Errorf("Expected %v, got %v", vmPlanTestAcquiredAddressVerbs(), verbs)
+	}
+}
 
 // The acquire and the attach both succeed, and the read-back then fails. State keeps
-// allocate_public_ip false, so no destroy gives the address back. The diagnostic is the
-// only record of it, so it names the id.
-func TestVirtualMachineResourcePlanNamesTheAddressWhenTheReadBackFails(t *testing.T) {
+// allocate_public_ip false, so no destroy would ever give the address back. The runner
+// releases it instead, and the retry meets no leftover of its own.
+func TestVirtualMachineResourcePlanReleasesTheAcquiredAddressWhenTheReadBackFails(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	server, recorded := startVirtualMachinePublicIpMockServer(t, true)
+	server, recorded := startVirtualMachinePublicIpMockServer(t, vmPublicIpMockArms{refuseReadAfterChange: true})
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -2521,14 +2659,47 @@ func TestVirtualMachineResourcePlanNamesTheAddressWhenTheReadBackFails(t *testin
 			},
 			{
 				Config:      vmPublicIpPlanTestConfig(server.URL, "vm-plan-read-back-fails", true, ""),
-				ExpectError: vmPlanTestAcquiredAddressReadBackPattern,
+				ExpectError: vmPlanTestAcquiredAddressReleasedPattern,
+			},
+			{
+				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-read-back-fails", false, ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "allocate_public_ip", "false"),
+					resource.TestCheckNoResourceAttr(gpcnVirtualMachineTest, "public_ip"),
+				),
 			},
 		},
 	})
 
-	want := []string{"acquire", "attach " + vmPlanTestAcquiredIpID + " nic-1"}
-	if verbs := recorded(); !slices.Equal(verbs, want) {
-		t.Errorf("Expected %v, got %v", want, verbs)
+	if verbs := recorded(); !slices.Equal(verbs, vmPlanTestAcquiredAddressVerbs()) {
+		t.Errorf("Expected %v, got %v", vmPlanTestAcquiredAddressVerbs(), verbs)
+	}
+}
+
+// A release that fails too leaves a real address at the platform. No attribute records
+// it, so the diagnostic names the id and sends the operator to the portal.
+func TestVirtualMachineResourcePlanNamesTheAcquiredAddressWhenTheReleaseFails(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachinePublicIpMockServer(t, vmPublicIpMockArms{
+		refuseReadAfterChange: true,
+		refuseReleaseOnce:     true,
+	})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-release-fails", false, ""),
+			},
+			{
+				Config:      vmPublicIpPlanTestConfig(server.URL, "vm-plan-release-fails", true, ""),
+				ExpectError: vmPlanTestAcquiredAddressReleaseFailedPattern,
+			},
+		},
+	})
+
+	if verbs := recorded(); !slices.Equal(verbs, vmPlanTestAcquiredAddressVerbs()) {
+		t.Errorf("Expected %v, got %v", vmPlanTestAcquiredAddressVerbs(), verbs)
 	}
 }
 
@@ -2546,7 +2717,7 @@ var vmPlanTestReadBackDetailPattern = regexp.MustCompile(`(?s)import\s+the\s+id\
 // step that sets one. A flag records that the check ran.
 func TestVirtualMachineResourcePlanRenameReadBackFailureNamesNoAddress(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	server, recorded := startVirtualMachinePublicIpMockServer(t, true)
+	server, recorded := startVirtualMachinePublicIpMockServer(t, vmPublicIpMockArms{refuseReadAfterChange: true})
 
 	errorCheckRan := false
 

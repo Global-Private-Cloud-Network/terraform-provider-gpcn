@@ -2209,7 +2209,16 @@ func TestPublicIpOrphanDetailBytes(t *testing.T) {
 		},
 		{name: "acquisition phrase", actual: ErrPhrasePublicIpAcquisitionFailed, expected: "its acquisition job failed"},
 		{name: "release phrase", actual: ErrPhrasePublicIpReleaseFailed, expected: "releasing it failed"},
-		{name: "read-back phrase", actual: ErrPhrasePublicIpReadBackFailed, expected: "reading the machine back failed"},
+		{
+			name:     "released after a step failed",
+			actual:   ErrDetailAcquiredAddressReleasedAfterStepFailure,
+			expected: "public IP %s was acquired for virtual machine %s but the update failed afterwards: %s; the address was released.",
+		},
+		{
+			name:     "release failed after a step failed",
+			actual:   ErrDetailAcquiredAddressReleaseFailedAfterStepFailure,
+			expected: "public IP %s was acquired for virtual machine %s but the update failed afterwards: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip.",
+		},
 	}
 
 	for _, tc := range tests {

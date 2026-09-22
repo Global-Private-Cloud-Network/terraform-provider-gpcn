@@ -558,14 +558,14 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	// it fails. The steps run in order through one runner, so one early return owns
 	// that repair. The runner keeps the response of the read-back for the mapping.
 	var getVirtualMachineResponse *virtualmachines.ReadVirtualMachinesResponse
-	acquiredPublicIpID := ""
+	var acquiredAddress virtualmachines.AcquiredAddress
 	updateSteps := []func() diag.Diagnostics{
 		func() diag.Diagnostics {
 			return virtualmachines.UpdateL2SegmentsIfChanged(r.client, ctx, state.ID.ValueString(), state, plan, liveInterfaces)
 		},
 		func() diag.Diagnostics {
 			var publicIpDiags diag.Diagnostics
-			acquiredPublicIpID, publicIpDiags = virtualmachines.UpdatePublicIPIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+			acquiredAddress, publicIpDiags = virtualmachines.UpdatePublicIPIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
 			return publicIpDiags
 		},
 		func() diag.Diagnostics {
@@ -584,28 +584,24 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 					virtualmachines.ErrSummaryRetrievingVMInfoFailed,
 					fmt.Errorf("%s: %w", virtualmachines.ErrDetailVMInfoFailedCanImport, readBackErr).Error(),
 				)
-				// The address is on the machine, and this update writes no state. No
-				// attribute records it, so this diagnostic is the only place it appears.
-				if acquiredPublicIpID != "" {
-					readBackDiags.AddError(
-						virtualmachines.ErrSummaryUnableToUpdatePublicIPConfiguration,
-						fmt.Sprintf(virtualmachines.ErrDetailPublicIpOrphaned, acquiredPublicIpID,
-							plan.ID.ValueString(), virtualmachines.ErrPhrasePublicIpReadBackFailed, readBackErr.Error()),
-					)
-				}
 			}
 			return readBackDiags
 		},
 	}
 
-	// A start that fails is the only report the user gets. It follows the diagnostics
-	// of the step that fails. The change is not in state. An earlier step can still have
-	// succeeded, so the remedy sends the user to the next plan.
+	// One rule covers every step after the public-IP step. A failure hands back an
+	// address the update records nowhere, so the runner unwinds it first. A start that
+	// fails is the only report the user gets after that. The change is not in state. An
+	// earlier step can still have succeeded, so the remedy sends the user to the next
+	// plan.
 	for _, updateStep := range updateSteps {
-		resp.Diagnostics.Append(updateStep()...)
+		stepDiags := updateStep()
+		resp.Diagnostics.Append(stepDiags...)
 		if !resp.Diagnostics.HasError() {
 			continue
 		}
+		resp.Diagnostics.Append(virtualmachines.UnwindAcquiredAddress(
+			r.client, ctx, state.ID.ValueString(), acquiredAddress, stepDiags)...)
 		if needStopVM {
 			startErr := virtualmachines.StartVirtualMachine(r.client, ctx, state.ID.ValueString())
 			if startErr != nil {

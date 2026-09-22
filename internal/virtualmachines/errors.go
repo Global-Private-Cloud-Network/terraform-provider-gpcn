@@ -70,7 +70,15 @@ const (
 	ErrDetailPublicIpAttachFailedReleaseFailed = "public IP %s was acquired for virtual machine %s but attaching it failed: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip."
 	ErrPhrasePublicIpAcquisitionFailed         = "its acquisition job failed"
 	ErrPhrasePublicIpReleaseFailed             = "releasing it failed"
-	ErrPhrasePublicIpReadBackFailed            = "reading the machine back failed"
+)
+
+// A step that fails after a successful acquire leaves an address the update records
+// nowhere. The runner gives that address back, so the machine ends where it started and
+// the retry acquires afresh. Only a release that fails too leaves one to find, and that
+// report names it.
+const (
+	ErrDetailAcquiredAddressReleasedAfterStepFailure      = "public IP %s was acquired for virtual machine %s but the update failed afterwards: %s; the address was released."
+	ErrDetailAcquiredAddressReleaseFailedAfterStepFailure = "public IP %s was acquired for virtual machine %s but the update failed afterwards: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip."
 )
 
 // Warning detail message templates

@@ -101,22 +101,29 @@ func UpdateL2SegmentsIfChanged(gpcnClient *client.GpcnClient, ctx context.Contex
 	return diags
 }
 
+// AcquiredAddress names an address one update acquired, and the VPC that holds it. The
+// release verb needs both ids. A zero value says the update acquired nothing.
+type AcquiredAddress struct {
+	ID    string
+	VpcID string
+}
+
 // UpdatePublicIPIfChanged binds and unbinds the address on the birth interface through
 // the VPC verbs. The legacy per-interface routes answer 409 on a VPC interface, so they
 // have no part here. An address Terraform acquired is released when the machine gives it
 // up. A held address only detaches, because the operator owns it. The interfaces are
 // read here rather than passed in. An earlier step can change the list, and the
 // interface ids with it.
-// Returns the id of the address it acquired, so a later step can name it, and
-// diagnostics if any errors occurred.
-func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, state, plan ResourceModel) (string, diag.Diagnostics) {
+// Returns the address it acquired, so a failure after it can unwind it.
+// Returns diagnostics if any error occurs.
+func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, state, plan ResourceModel) (AcquiredAddress, diag.Diagnostics) {
 	var diags diag.Diagnostics
-	acquiredID := ""
+	var acquired AcquiredAddress
 
 	acquireChanged := !plan.AllocatePublicIp.Equal(state.AllocatePublicIp)
 	heldChanged := !plan.PublicIpId.Equal(state.PublicIpId)
 	if !acquireChanged && !heldChanged {
-		return "", diags
+		return AcquiredAddress{}, diags
 	}
 
 	networkInterfaces, err := networks.GetNetworkInterfaces(gpcnClient, ctx, vmID)
@@ -125,7 +132,7 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 			ErrSummaryErrorRetrievingNetworkIfaces,
 			err.Error(),
 		)
-		return "", diags
+		return AcquiredAddress{}, diags
 	}
 
 	// Find the primary network interface
@@ -139,7 +146,7 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 			ErrSummaryNoPrimaryNetworkInterface,
 			fmt.Sprintf(ErrDetailNoPrimaryNetworkInterface, vmID),
 		)
-		return "", diags
+		return AcquiredAddress{}, diags
 	}
 
 	primary := networkInterfaces[interfaceIdx]
@@ -150,7 +157,7 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 			ErrSummaryUnableToUpdatePublicIPConfiguration,
 			fmt.Sprintf(ErrDetailPrimaryInterfaceNotOnAVpc, vmID),
 		)
-		return "", diags
+		return AcquiredAddress{}, diags
 	}
 	vpcID := primary.VpcID.ValueString()
 	primaryNetworkInterfaceId := primary.ID.ValueString()
@@ -167,7 +174,7 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 		carriedID.ValueString() != plan.PublicIpId.ValueString() {
 		releasedID := carriedID.ValueString()
 		if err := vpcpublicips.DetachPublicIp(gpcnClient, ctx, vpcID, releasedID); err != nil {
-			return "", publicIpFailure(diags, err)
+			return AcquiredAddress{}, publicIpFailure(diags, err)
 		}
 		if err := vpcpublicips.ReleasePublicIp(gpcnClient, ctx, vpcID, releasedID); err != nil {
 			// The detach already took the address off the interface. No later gate finds
@@ -176,13 +183,13 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 				ErrSummaryUnableToUpdatePublicIPConfiguration,
 				fmt.Sprintf(ErrDetailPublicIpOrphaned, releasedID, vmID, ErrPhrasePublicIpReleaseFailed, err.Error()),
 			)
-			return "", diags
+			return AcquiredAddress{}, diags
 		}
 	}
 	if heldChanged && !state.PublicIpId.IsNull() {
 		heldID := state.PublicIpId.ValueString()
 		if err := vpcpublicips.DetachPublicIp(gpcnClient, ctx, vpcID, heldID); err != nil {
-			return "", publicIpFailure(diags, err)
+			return AcquiredAddress{}, publicIpFailure(diags, err)
 		}
 		if carriedID.ValueString() == heldID {
 			carriedID = types.StringNull()
@@ -197,25 +204,28 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 				ErrSummaryUnableToUpdatePublicIPConfiguration,
 				fmt.Sprintf(ErrDetailPrimaryInterfaceCarriesAForeignAddress, vmID, carriedID.ValueString()),
 			)
-			return "", diags
+			return AcquiredAddress{}, diags
 		}
-		var acquireDiags diag.Diagnostics
-		acquiredID, acquireDiags = acquireAndAttachPublicIp(gpcnClient, ctx, vmID, vpcID, primaryNetworkInterfaceId)
+		acquiredID, acquireDiags := acquireAndAttachPublicIp(gpcnClient, ctx, vmID, vpcID, primaryNetworkInterfaceId)
 		diags.Append(acquireDiags...)
 		if diags.HasError() {
-			return "", diags
+			return AcquiredAddress{}, diags
 		}
+		acquired = AcquiredAddress{ID: acquiredID, VpcID: vpcID}
 	}
 	// GPCN answers 409 for a second attach of an address a machine carries. A retry of a
 	// change whose read-back fails finds that address already in place.
 	if heldChanged && !plan.PublicIpId.IsNull() &&
 		carriedID.ValueString() != plan.PublicIpId.ValueString() {
 		if err := vpcpublicips.AttachPublicIp(gpcnClient, ctx, vpcID, plan.PublicIpId.ValueString(), primaryNetworkInterfaceId); err != nil {
-			return "", publicIpFailure(diags, err)
+			// A validator that meets an unknown allocate_public_ip lets both inputs
+			// through, and GPCN then refuses this attach. The acquire above already
+			// happened, so the caller unwinds it.
+			return acquired, publicIpFailure(diags, err)
 		}
 	}
 
-	return acquiredID, diags
+	return acquired, diags
 }
 
 // acquireAndAttachPublicIp takes an address and binds it to the interface. The API
@@ -257,6 +267,38 @@ func acquireAndAttachPublicIp(gpcnClient *client.GpcnClient, ctx context.Context
 		fmt.Sprintf(ErrDetailPublicIpAttachFailedReleased, acquiredID, vmID, attachErr.Error()),
 	)
 	return "", diags
+}
+
+// UnwindAcquiredAddress gives back an address the update took when a step after it
+// fails. The machine then ends where it started, and the retry acquires afresh. GPCN
+// releases an attached address, so no detach comes first. No attribute records the
+// address, so a release that fails too names it.
+// Returns the diagnostic that reports the unwind, and none when nothing was acquired.
+func UnwindAcquiredAddress(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, acquired AcquiredAddress, stepDiags diag.Diagnostics) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if acquired.ID == "" {
+		return diags
+	}
+
+	stepDetail := ""
+	if stepErrors := stepDiags.Errors(); len(stepErrors) > 0 {
+		stepDetail = stepErrors[0].Detail()
+	}
+
+	if releaseErr := vpcpublicips.ReleasePublicIp(gpcnClient, ctx, acquired.VpcID, acquired.ID); releaseErr != nil {
+		diags.AddError(
+			ErrSummaryUnableToUpdatePublicIPConfiguration,
+			fmt.Sprintf(ErrDetailAcquiredAddressReleaseFailedAfterStepFailure,
+				acquired.ID, vmID, stepDetail, releaseErr.Error()),
+		)
+		return diags
+	}
+
+	diags.AddError(
+		ErrSummaryUnableToUpdatePublicIPConfiguration,
+		fmt.Sprintf(ErrDetailAcquiredAddressReleasedAfterStepFailure, acquired.ID, vmID, stepDetail),
+	)
+	return diags
 }
 
 // publicIpFailure frames every refusal of an address verb under one summary. Each one
