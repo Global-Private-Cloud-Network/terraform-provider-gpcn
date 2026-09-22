@@ -165,7 +165,7 @@ func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestS
 				state.mu.Unlock()
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusNotFound)
-				fmt.Fprint(w, `{"success":false,"message":"Subnet not found","error":{"code":"RESOURCE_NOT_FOUND","statusCode":404,"details":null}}`)
+				fmt.Fprint(w, `{"success":false,"message":"Subnet not found","error":{"code":"Resource Not Found","statusCode":404,"details":null}}`)
 				return
 			}
 			if refuse {
@@ -177,7 +177,7 @@ func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestS
 			if refuse {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusConflict)
-				fmt.Fprintf(w, `{"success":false,"message":"Cannot delete a subnet with %d attached network interface(s). Detach or delete the VMs first.","error":{"code":"DUPLICATE_RESOURCE","statusCode":409,"details":null}}`, count)
+				fmt.Fprintf(w, `{"success":false,"message":"Cannot delete a subnet with %d attached network interface(s). Detach or delete the VMs first.","error":{"code":"Duplicate Resource","statusCode":409,"details":null}}`, count)
 				return
 			}
 			testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
@@ -404,7 +404,7 @@ func TestVpcSubnetResourcePlanSurfacesDeleteRefusal(t *testing.T) {
 			{
 				Config:      subnetPlanTestConfig(server.URL, "subnet-plan-a", ""),
 				Destroy:     true,
-				ExpectError: regexp.MustCompile(strings.ReplaceAll(`Cannot delete a subnet with 2 attached network interface\(s\). Detach or delete`, " ", `\s+`)),
+				ExpectError: regexp.MustCompile(strings.ReplaceAll(`HTTP 409 \(Duplicate Resource\): Cannot delete a subnet with 2 attached network interface\(s\). Detach or delete`, " ", `\s+`)),
 			},
 		},
 	})

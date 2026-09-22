@@ -151,7 +151,7 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 			if deleted {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusNotFound)
-				fmt.Fprint(w, `{"success":false,"message":"Security group not found","error":{"code":"RESOURCE_NOT_FOUND","statusCode":404,"details":null}}`)
+				fmt.Fprint(w, `{"success":false,"message":"Security group not found","error":{"code":"Resource Not Found","statusCode":404,"details":null}}`)
 				return
 			}
 			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "", "data": detail})
@@ -183,7 +183,7 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 				state.mu.Unlock()
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusNotFound)
-				fmt.Fprint(w, `{"success":false,"message":"Security group not found","error":{"code":"RESOURCE_NOT_FOUND","statusCode":404,"details":null}}`)
+				fmt.Fprint(w, `{"success":false,"message":"Security group not found","error":{"code":"Resource Not Found","statusCode":404,"details":null}}`)
 				return
 			}
 			if refuse {
@@ -195,7 +195,7 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 			if refuse {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusConflict)
-				fmt.Fprint(w, `{"success":false,"message":"The VPC's default security group cannot be deleted while it is the default","error":{"code":"DUPLICATE_RESOURCE","statusCode":409,"details":null}}`)
+				fmt.Fprint(w, `{"success":false,"message":"The VPC's default security group cannot be deleted while it is the default","error":{"code":"Duplicate Resource","statusCode":409,"details":null}}`)
 				return
 			}
 			testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
@@ -433,7 +433,7 @@ func TestVpcNsgResourcePlanSurfacesDefaultGroupRefusal(t *testing.T) {
 			{
 				Config:      nsgPlanTestConfig(server.URL, "default", nsgPlanTestRuleHTTPS),
 				Destroy:     true,
-				ExpectError: regexp.MustCompile(strings.ReplaceAll(`default security group cannot be deleted while it is the default`, " ", `\s+`)),
+				ExpectError: regexp.MustCompile(strings.ReplaceAll(`HTTP 409 \(Duplicate Resource\): The VPC's default security group cannot be deleted while it is the default`, " ", `\s+`)),
 			},
 		},
 	})
