@@ -248,6 +248,30 @@ func TestVpcDeleteTreatsARowThatVanishedAsDeleted(t *testing.T) {
 	}
 }
 
+// The status read decides what the refusal means. A read that fails decides
+// nothing, and the refusal names a state the provider never confirmed.
+func TestVpcDeleteSurfacesAFailedStatusReadAfterTheRefusal(t *testing.T) {
+	t.Parallel()
+
+	// The status read is the first read of the row.
+	mock := &vpcDeleteMock{refusals: 1, failReadsFrom: 1}
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{T: t, Handler: mock.handler(t)})
+
+	err := DeleteVpc(gpcnClient, context.Background(), vpcUnitTestID)
+	if err == nil {
+		t.Fatalf("Expected the failed status read to reach the caller")
+	}
+	if client.IsNotFound(err) {
+		t.Errorf("Expected a failure that differs from a row that is gone, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "502") {
+		t.Errorf("error = %q, want the gateway status in it", err.Error())
+	}
+	if count := mock.deleteCount(); count != 1 {
+		t.Errorf("DELETE count = %d, want 1", count)
+	}
+}
+
 // A read that fails mid-wait says nothing about the teardown. A provider that
 // took the failure for the 404 would drop a live VPC from state.
 func TestVpcDeleteSurfacesAFailedReadDuringTheTeardownWait(t *testing.T) {
