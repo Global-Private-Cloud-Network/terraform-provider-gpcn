@@ -558,12 +558,15 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	// it fails. The steps run in order through one runner, so one early return owns
 	// that repair. The runner keeps the response of the read-back for the mapping.
 	var getVirtualMachineResponse *virtualmachines.ReadVirtualMachinesResponse
+	acquiredPublicIpID := ""
 	updateSteps := []func() diag.Diagnostics{
 		func() diag.Diagnostics {
 			return virtualmachines.UpdateL2SegmentsIfChanged(r.client, ctx, state.ID.ValueString(), state, plan, liveInterfaces)
 		},
 		func() diag.Diagnostics {
-			return virtualmachines.UpdatePublicIPIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+			var publicIpDiags diag.Diagnostics
+			acquiredPublicIpID, publicIpDiags = virtualmachines.UpdatePublicIPIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+			return publicIpDiags
 		},
 		func() diag.Diagnostics {
 			return virtualmachines.UpdateSizeIfChanged(r.client, ctx, plan.ID.ValueString(), state, plan, liveDetail)
@@ -581,6 +584,15 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 					virtualmachines.ErrSummaryRetrievingVMInfoFailed,
 					fmt.Errorf("%s: %w", virtualmachines.ErrDetailVMInfoFailedCanImport, readBackErr).Error(),
 				)
+				// The address is on the machine, and this update writes no state. No
+				// attribute records it, so this diagnostic is the only place it appears.
+				if acquiredPublicIpID != "" {
+					readBackDiags.AddError(
+						virtualmachines.ErrSummaryUnableToUpdatePublicIPConfiguration,
+						fmt.Sprintf(virtualmachines.ErrDetailPublicIpOrphaned, acquiredPublicIpID,
+							plan.ID.ValueString(), virtualmachines.ErrPhrasePublicIpReadBackFailed, readBackErr.Error()),
+					)
+				}
 			}
 			return readBackDiags
 		},

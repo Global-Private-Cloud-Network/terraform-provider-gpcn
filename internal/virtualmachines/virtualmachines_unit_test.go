@@ -1109,7 +1109,7 @@ func TestUpdatePublicIPIfChangedReportsMissingPrimaryInterface(t *testing.T) {
 	state := createTestVMModel("test-vm", testVMImage, false)
 	plan := createTestVMModel("test-vm", testVMImage, true)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if !diags.HasError() {
 		t.Fatal("Expected an error diagnostic when no interface is primary")
 	}
@@ -1152,7 +1152,7 @@ func TestUpdatePublicIPIfChangedRefusesAnL2PrimaryInterface(t *testing.T) {
 	state := createTestVMModel("test-vm", testVMImage, false)
 	plan := createTestVMModel("test-vm", testVMImage, true)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if !diags.HasError() {
 		t.Fatal("Expected an error diagnostic when the primary interface is not on a VPC")
 	}
@@ -1932,10 +1932,11 @@ func publicIpMockServer(t *testing.T, carriedID, acquiredID string, failedJobs .
 	return server, gpcnClient, &verbs
 }
 
-// A read-back that fails after an acquisition leaves state behind the platform. The
-// next apply then asks for an address the interface already carries. GPCN answers 409
-// for a second address, so the acquire reads the live interface and not state.
-func TestUpdatePublicIPIfChangedSkipsTheAcquireWhenThePrimaryCarriesAnAddress(t *testing.T) {
+// A machine can carry an address Terraform did not acquire. The operator attaches one
+// with gpcn_vpc_public_ip_attachment, or a read-back fails after an acquisition. The
+// provider cannot tell the two apart. Adopting the address makes the next destroy
+// release what another resource owns, so the update refuses and names it.
+func TestUpdatePublicIPIfChangedRefusesAnAddressItDidNotAcquire(t *testing.T) {
 	const vmID = "vm-carries-an-address"
 
 	server, gpcnClient, verbs := publicIpUpdateMockServer(t, testPublicIpAcquiredID)
@@ -1944,9 +1945,16 @@ func TestUpdatePublicIPIfChangedSkipsTheAcquireWhenThePrimaryCarriesAnAddress(t 
 	state := createTestVMModel("test-vm", testVMImage, false)
 	plan := createTestVMModel("test-vm", testVMImage, true)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
-	if diags.HasError() {
-		t.Fatalf("Expected no error diagnostic, got %v", diags.Errors())
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if !diags.HasError() {
+		t.Fatal("Expected an error diagnostic when the primary carries a foreign address")
+	}
+	if summary := diags.Errors()[0].Summary(); summary != ErrSummaryUnableToUpdatePublicIPConfiguration {
+		t.Errorf("Expected '%s', got '%s'", ErrSummaryUnableToUpdatePublicIPConfiguration, summary)
+	}
+	want := fmt.Sprintf(ErrDetailPrimaryInterfaceCarriesAForeignAddress, vmID, testPublicIpAcquiredID)
+	if detail := diags.Errors()[0].Detail(); detail != want {
+		t.Errorf("Expected '%s', got '%s'", want, detail)
 	}
 	if len(*verbs) != 0 {
 		t.Errorf("Expected no address verb, got %v", *verbs)
@@ -1967,11 +1975,64 @@ func TestUpdatePublicIPIfChangedExchangesAHeldAddressForAnAcquiredOne(t *testing
 	state.PublicIpId = types.StringValue(heldID)
 	plan := createTestVMModel("test-vm", testVMImage, true)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if diags.HasError() {
 		t.Fatalf("Expected no error diagnostic, got %v", diags.Errors())
 	}
 	want := []string{"detach " + heldID, "acquire", "attach " + testPublicIpAcquiredID}
+	if !slices.Equal(*verbs, want) {
+		t.Errorf("Expected %v, got %v", want, *verbs)
+	}
+}
+
+// An exchange whose read-back fails leaves state behind the machine. The retry then
+// finds the machine carrying the address the plan names. The operator owns that
+// address, and GPCN releases an attached address, so a release here destroys it. GPCN
+// also answers 409 for a second attach of an address a machine carries, so the retry
+// issues no verb at all.
+func TestUpdatePublicIPIfChangedKeepsTheHeldAddressOnAnExchangeRetry(t *testing.T) {
+	const vmID = "vm-exchange-retry"
+	const heldID = "ip-held-1"
+
+	server, gpcnClient, verbs := publicIpUpdateMockServer(t, heldID)
+	defer server.Close()
+
+	state := createTestVMModel("test-vm", testVMImage, true)
+	plan := createTestVMModel("test-vm", testVMImage, false)
+	plan.PublicIpId = types.StringValue(heldID)
+
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if diags.HasError() {
+		t.Fatalf("Expected no error diagnostic, got %v", diags.Errors())
+	}
+	if len(*verbs) != 0 {
+		t.Errorf("Expected no address verb, got %v", *verbs)
+	}
+}
+
+// An operator can name a held address in the same change that gives the acquired one
+// up. Terraform took the acquired address, so it goes back. The machine carries one
+// address at a time, so the release frees the interface for the held one.
+func TestUpdatePublicIPIfChangedReleasesTheAcquiredAddressWhenThePlanNamesAnother(t *testing.T) {
+	const vmID = "vm-acquired-for-held"
+	const heldID = "ip-held-1"
+
+	server, gpcnClient, verbs := publicIpUpdateMockServer(t, testPublicIpAcquiredID)
+	defer server.Close()
+
+	state := createTestVMModel("test-vm", testVMImage, true)
+	plan := createTestVMModel("test-vm", testVMImage, false)
+	plan.PublicIpId = types.StringValue(heldID)
+
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if diags.HasError() {
+		t.Fatalf("Expected no error diagnostic, got %v", diags.Errors())
+	}
+	want := []string{
+		"detach " + testPublicIpAcquiredID,
+		"release " + testPublicIpAcquiredID,
+		"attach " + heldID,
+	}
 	if !slices.Equal(*verbs, want) {
 		t.Errorf("Expected %v, got %v", want, *verbs)
 	}
@@ -1988,7 +2049,7 @@ func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheAcquireJobFails(t *testing
 	state := createTestVMModel("test-vm", testVMImage, false)
 	plan := createTestVMModel("test-vm", testVMImage, true)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if !diags.HasError() {
 		t.Fatal("Expected an error diagnostic when the acquisition job fails")
 	}
@@ -2017,7 +2078,7 @@ func TestUpdatePublicIPIfChangedReportsABareFailureWhenTheAcquireNamesNoAddress(
 	state := createTestVMModel("test-vm", testVMImage, false)
 	plan := createTestVMModel("test-vm", testVMImage, true)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if !diags.HasError() {
 		t.Fatal("Expected an error diagnostic when the acquisition job fails")
 	}
@@ -2045,7 +2106,7 @@ func TestUpdatePublicIPIfChangedReleasesTheAddressWhenTheAttachFails(t *testing.
 	state := createTestVMModel("test-vm", testVMImage, false)
 	plan := createTestVMModel("test-vm", testVMImage, true)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if !diags.HasError() {
 		t.Fatal("Expected an error diagnostic when the attach fails")
 	}
@@ -2074,7 +2135,7 @@ func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheReleaseAlsoFails(t *testin
 	state := createTestVMModel("test-vm", testVMImage, false)
 	plan := createTestVMModel("test-vm", testVMImage, true)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if !diags.HasError() {
 		t.Fatal("Expected an error diagnostic when the release also fails")
 	}
@@ -2106,7 +2167,7 @@ func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheReleaseAfterDetachFails(t 
 	state := createTestVMModel("test-vm", testVMImage, true)
 	plan := createTestVMModel("test-vm", testVMImage, false)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if !diags.HasError() {
 		t.Fatal("Expected an error diagnostic when the release fails")
 	}
@@ -2148,8 +2209,8 @@ func TestPublicIpOrphanDetailBytes(t *testing.T) {
 			expected: "public IP %s was acquired for virtual machine %s but attaching it failed: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip.",
 		},
 		{name: "acquisition phrase", actual: ErrPhrasePublicIpAcquisitionFailed, expected: "its acquisition job failed"},
-		{name: "attach phrase", actual: ErrPhrasePublicIpAttachFailed, expected: "attaching it failed"},
 		{name: "release phrase", actual: ErrPhrasePublicIpReleaseFailed, expected: "releasing it failed"},
+		{name: "read-back phrase", actual: ErrPhrasePublicIpReadBackFailed, expected: "reading the machine back failed"},
 	}
 
 	for _, tc := range tests {
@@ -2158,5 +2219,15 @@ func TestPublicIpOrphanDetailBytes(t *testing.T) {
 				t.Errorf("Expected '%s', got '%s'", tc.expected, tc.actual)
 			}
 		})
+	}
+}
+
+// The refusal is the only place the operator reads the id of the address the machine
+// carries. The sentence also names the two ways out of it.
+func TestPrimaryInterfaceCarriesAForeignAddressDetailBytes(t *testing.T) {
+	const expected = "the primary network interface of virtual machine %s already carries public IP %s, which Terraform did not acquire; name it in public_ip_id or detach it before asking for an acquired address"
+
+	if ErrDetailPrimaryInterfaceCarriesAForeignAddress != expected {
+		t.Errorf("Expected '%s', got '%s'", expected, ErrDetailPrimaryInterfaceCarriesAForeignAddress)
 	}
 }
