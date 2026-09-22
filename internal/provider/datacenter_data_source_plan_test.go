@@ -646,6 +646,10 @@ func TestDatacentersDataSourceOmitsUnsetCapabilityFilters(t *testing.T) {
 		},
 	})
 
+	// A data source that fabricates its rows sends nothing. An assertion on
+	// what a request omits then passes on no request at all.
+	datacenterPlanTestAssertOnlyListPath(t, rec)
+
 	_, queries := rec.snapshot()
 	for _, query := range queries {
 		if strings.Contains(query, "vpcCapable") || strings.Contains(query, "l2Capable") {

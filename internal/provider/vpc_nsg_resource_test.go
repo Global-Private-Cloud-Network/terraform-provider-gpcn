@@ -21,9 +21,10 @@ data "gpcn_datacenters" "test" {
 }
 
 resource "gpcn_vpc" "test" {
-  name          = %q
-  datacenter_id = data.gpcn_datacenters.test.datacenters[0].id
-  cidr          = %q
+  name                = %q
+  datacenter_id       = data.gpcn_datacenters.test.datacenters[0].id
+  cidr                = %q
+  acknowledge_overlap = true
 }
 
 resource "gpcn_vpc_nsg" "test" {
@@ -58,15 +59,57 @@ func vpcNsgAccTestRulePing(vpcCidr string) string {
   }`, vpcCidr)
 }
 
+// vpcNsgAccOctetSlot names the block each acceptance case in this file owns. A
+// case that draws its block at random meets an earlier run about half the
+// time. The repository has no sweepers.
+var vpcNsgAccOctetSlot = map[string]int{
+	"TestVpcNsgResource": 0,
+}
+
+// This file owns the window at base 96. The VPC, subnet and machine files own
+// 64, 80 and 112.
+const (
+	vpcNsgAccOctetBase  = 96
+	vpcNsgAccOctetSlots = 16
+)
+
+// vpcNsgAccOctetFor returns the octet of the named case. Every call site reads
+// this one function, so a case cannot take a block the table never gave it.
+func vpcNsgAccOctetFor(t testing.TB, name string) int {
+	t.Helper()
+	slot, named := vpcNsgAccOctetSlot[name]
+	if !named {
+		t.Fatalf("Expected %s to own a slot in vpcNsgAccOctetSlot", name)
+	}
+	return vpcNsgAccOctetBase + slot
+}
+
+// A shared slot puts two parallel cases in one /16, which GPCN refuses.
+// A slot outside the window takes a block another file owns. The compiler
+// accepts either, so this guard pins the set.
+func TestVpcNsgAcceptanceOctetsAreUnique(t *testing.T) {
+	owner := map[int]string{}
+	for name, slot := range vpcNsgAccOctetSlot {
+		if slot < 0 || slot >= vpcNsgAccOctetSlots {
+			t.Errorf("Expected %s to take a slot below %d, got %d", name, vpcNsgAccOctetSlots, slot)
+		}
+		octet := vpcNsgAccOctetFor(t, name)
+		if other, taken := owner[octet]; taken {
+			t.Errorf("Expected %s and %s to take different octets, both take %d", name, other, octet)
+		}
+		owner[octet] = name
+	}
+}
+
 func TestVpcNsgResource(t *testing.T) {
 	t.Parallel()
 	suffix := acctest.RandString(8)
 	vpcName := fmt.Sprintf("tf-vpc-%s", suffix)
 	nsgName := fmt.Sprintf("tf-nsg-%s", suffix)
 	nsgNameUpdated := fmt.Sprintf("tf-nsg-updated-%s", suffix)
-	// This test function owns the window at base 96.
-	n := acctest.RandIntRange(0, 16)
-	vpcCidr := fmt.Sprintf("10.%d.0.0/16", 96+n)
+	// A fixed block meets only what an earlier run of this case left behind,
+	// which the configuration acknowledges.
+	vpcCidr := fmt.Sprintf("10.%d.0.0/16", vpcNsgAccOctetFor(t, t.Name()))
 	pingRule := vpcNsgAccTestRulePing(vpcCidr)
 
 	resource.Test(t, resource.TestCase{

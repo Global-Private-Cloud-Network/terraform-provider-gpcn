@@ -21,16 +21,57 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 )
 
+// vpcAccOctetSlot names the block each acceptance case in this file owns. A
+// case that draws its block at random meets an earlier run about half the
+// time. The repository has no sweepers.
+var vpcAccOctetSlot = map[string]int{
+	"TestVpcResource": 0,
+}
+
+// This file owns the window at base 64. The subnet, group and machine files
+// own 80, 96 and 112.
+const (
+	vpcAccOctetBase  = 64
+	vpcAccOctetSlots = 16
+)
+
+// vpcAccOctetFor returns the octet of the named case. Every call site reads
+// this one function, so a case cannot take a block the table never gave it.
+func vpcAccOctetFor(t testing.TB, name string) int {
+	t.Helper()
+	slot, named := vpcAccOctetSlot[name]
+	if !named {
+		t.Fatalf("Expected %s to own a slot in vpcAccOctetSlot", name)
+	}
+	return vpcAccOctetBase + slot
+}
+
+// A shared slot puts two parallel cases in one /16, which GPCN refuses.
+// A slot outside the window takes a block another file owns. The compiler
+// accepts either, so this guard pins the set.
+func TestVpcAcceptanceOctetsAreUnique(t *testing.T) {
+	owner := map[int]string{}
+	for name, slot := range vpcAccOctetSlot {
+		if slot < 0 || slot >= vpcAccOctetSlots {
+			t.Errorf("Expected %s to take a slot below %d, got %d", name, vpcAccOctetSlots, slot)
+		}
+		octet := vpcAccOctetFor(t, name)
+		if other, taken := owner[octet]; taken {
+			t.Errorf("Expected %s and %s to take different octets, both take %d", name, other, octet)
+		}
+		owner[octet] = name
+	}
+}
+
 func TestVpcResource(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
 	vpcName := fmt.Sprintf("vpc-basic-%s", rName)
 	vpcNameUpdated := fmt.Sprintf("vpc-basic-updated-%s", rName)
-	// The overlap check covers the whole entity and the repo has no sweepers.
-	// One fixed range fails every run after the first. Each test function draws
-	// inside its own 16-wide window, so parallel cases never collide.
-	n := acctest.RandIntRange(0, 16)
-	vpcCidr := fmt.Sprintf("10.%d.0.0/16", 64+n)
+	// The overlap check covers the whole entity. A fixed block meets only what
+	// an earlier run of this case left behind, which the configuration
+	// acknowledges.
+	vpcCidr := fmt.Sprintf("10.%d.0.0/16", vpcAccOctetFor(t, t.Name()))
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -45,10 +86,11 @@ func TestVpcResource(t *testing.T) {
 			}
 
 			resource "gpcn_vpc" "test" {
-				name          = "%s"
-				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				cidr          = "%s"
-				description   = "terraform acceptance"
+				name                = "%s"
+				datacenter_id       = data.gpcn_datacenters.central_us.datacenters[0].id
+				cidr                = "%s"
+				description         = "terraform acceptance"
+				acknowledge_overlap = true
 			}
 			`, vpcName, vpcCidr),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
@@ -69,10 +111,12 @@ func TestVpcResource(t *testing.T) {
 			},
 			// ImportState testing
 			{
-				ResourceName:            gpcnVpcTest,
-				ImportState:             true,
-				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"created_time", "last_updated"},
+				ResourceName:      gpcnVpcTest,
+				ImportState:       true,
+				ImportStateVerify: true,
+				// The API never answers with acknowledge_overlap, so an import
+				// leaves it null while the configuration sets it.
+				ImportStateVerifyIgnore: []string{"created_time", "last_updated", "acknowledge_overlap"},
 			},
 			// Update and Read testing
 			{
@@ -84,10 +128,11 @@ func TestVpcResource(t *testing.T) {
 			}
 
 			resource "gpcn_vpc" "test" {
-				name          = "%s"
-				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-				cidr          = "%s"
-				description   = "terraform acceptance, renamed"
+				name                = "%s"
+				datacenter_id       = data.gpcn_datacenters.central_us.datacenters[0].id
+				cidr                = "%s"
+				description         = "terraform acceptance, renamed"
+				acknowledge_overlap = true
 			}
 			`, vpcNameUpdated, vpcCidr),
 				ConfigPlanChecks: resource.ConfigPlanChecks{

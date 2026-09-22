@@ -329,21 +329,48 @@ resource "gpcn_l2_segment" "test" {
 }
 
 // The platform adopts a legacy custom network under the name it already has.
-// An adopted name carries characters the create regex refuses. The segment must
-// still round-trip, so the provider adds no regex of its own.
-func TestL2SegmentResourcePlanCreatesAnAdoptedName(t *testing.T) {
+// An adopted name carries characters the create regex refuses, so it reaches
+// Terraform through an import alone. The provider adds no regex of its own,
+// and the imported name round-trips into the configuration.
+func TestL2SegmentResourcePlanImportsAnAdoptedName(t *testing.T) {
 	t.Parallel()
-	server, _ := startL2SegmentPlanMockServer(t)
+	server, state := startL2SegmentPlanMockServer(t)
 
 	const adoptedName = "dmz_vlan_100"
+	state.setName(adoptedName)
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{
+				Config:             l2PlanTestConfig(server.URL, adoptedName),
+				ResourceName:       gpcnL2SegmentTest,
+				ImportState:        true,
+				ImportStateId:      l2PlanTestSegmentID,
+				ImportStatePersist: true,
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported state, got %d", len(states))
+					}
+					for attribute, want := range map[string]string{
+						"id":   l2PlanTestSegmentID,
+						"name": adoptedName,
+					} {
+						if got := states[0].Attributes[attribute]; got != want {
+							return fmt.Errorf("imported %s = %q, want %q", attribute, got, want)
+						}
+					}
+					return nil
+				},
+			},
+			{
 				Config: l2PlanTestConfig(server.URL, adoptedName),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnL2SegmentTest, plancheck.ResourceActionNoop),
+					},
+				},
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(gpcnL2SegmentTest, "id", l2PlanTestSegmentID),
 					resource.TestCheckResourceAttr(gpcnL2SegmentTest, "name", adoptedName),
 				),
 			},
@@ -612,7 +639,7 @@ func TestL2SegmentResourceSchemaNamesTheResourceGroupDrop(t *testing.T) {
 	schemaResponse := &fwresource.SchemaResponse{}
 	NewL2SegmentResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
 
-	const want = "A segment that sits in a resource group imports without the group; the provider does not manage resource groups in this release."
+	const want = "gpcn_l2_segment does not expose resource_group_id in this release; a segment that sits in a resource group imports without it."
 	if got := schemaResponse.Schema.Description; !strings.Contains(got, want) {
 		t.Errorf("Description = %q, want it to contain %q", got, want)
 	}
