@@ -405,7 +405,8 @@ func TestRefreshNsgModelFromResponseUpdatesDescriptionUnit(t *testing.T) {
 
 // One operation carries one correlation id. A helper that mints its own breaks
 // the support log. The resource method then has no link to the job it waits
-// for. The create and the rules replace are the two paths that poll.
+// for. The create, the rename, the rules replace and the delete are pinned
+// here.
 func TestCreateNsgCarriesOneCorrelationIDUnit(t *testing.T) {
 	t.Parallel()
 
@@ -475,6 +476,60 @@ func TestCreateNsgCarriesOneCorrelationIDUnit(t *testing.T) {
 	}
 	if replacePollID != callerID {
 		t.Errorf("rules poll correlation id = %q, want the caller's %q", replacePollID, callerID)
+	}
+
+	var renameID string
+	_, renameClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			renameID = r.Header.Get("x-Correlation-ID")
+			testutil.WriteJSONResponse(w, map[string]any{
+				"success": true,
+				"message": "Security group updated successfully",
+				"data":    map[string]any{"id": unitTestNsgID, "name": "nsg-b"},
+			})
+		},
+	})
+
+	renameCtx := client.WithCorrelationID(context.Background())
+	renameCallerID := client.GetCorrelationID(renameCtx)
+	if err := RenameNsg(renameClient, renameCtx, unitTestVpcID, unitTestNsgID, "nsg-b", ""); err != nil {
+		t.Fatalf("expected the rename to succeed, got %v", err)
+	}
+	if renameID != renameCallerID {
+		t.Errorf("rename correlation id = %q, want the caller's %q", renameID, renameCallerID)
+	}
+
+	var deleteID, deletePollID string
+	_, deleteClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == client.JOBS_BASE_URL_V1 {
+				if deletePollID == "" {
+					deletePollID = r.Header.Get("x-Correlation-ID")
+				}
+				testutil.HandleJobResponse(w, "job-delete", unitTestNsgID, true)
+				return
+			}
+			deleteID = r.Header.Get("x-Correlation-ID")
+			testutil.WriteJSONResponse(w, map[string]any{
+				"success": true,
+				"message": "Operation initiated successfully",
+				"data":    map[string]any{"jobId": "job-delete"},
+			})
+		},
+	})
+
+	deleteCtx := client.WithCorrelationID(context.Background())
+	deleteCallerID := client.GetCorrelationID(deleteCtx)
+	if err := DeleteNsg(deleteClient, deleteCtx, unitTestVpcID, unitTestNsgID); err != nil {
+		t.Fatalf("expected the delete to succeed, got %v", err)
+	}
+	if deleteID != deleteCallerID {
+		t.Errorf("delete correlation id = %q, want the caller's %q", deleteID, deleteCallerID)
+	}
+	if deletePollID != deleteCallerID {
+		t.Errorf("delete poll correlation id = %q, want the caller's %q", deletePollID, deleteCallerID)
 	}
 }
 
