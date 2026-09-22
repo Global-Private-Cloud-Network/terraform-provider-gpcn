@@ -1834,6 +1834,9 @@ const (
 	testPublicIpJobAttach  = "job-attach"
 	testPublicIpJobDetach  = "job-detach"
 	testPublicIpJobRelease = "job-release"
+	// An attach of an address the acquire did not name issues this job instead. A test
+	// can then refuse the held attach alone.
+	testPublicIpJobHeldAttach = "job-attach-held"
 )
 
 // publicIpPrimaryInterfaceBody reports one primary VPC interface. An empty carriedID
@@ -1913,8 +1916,13 @@ func publicIpMockServer(t *testing.T, carriedID, acquiredID string, failedJobs .
 					"data": acquired,
 				})
 			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/attach"):
-				verbs = append(verbs, "attach "+publicIpVerbTarget(r.URL.Path, addressesPath, "/attach"))
-				testutil.HandleCreateJobResponse(w, testPublicIpJobAttach, "attach issued")
+				target := publicIpVerbTarget(r.URL.Path, addressesPath, "/attach")
+				verbs = append(verbs, "attach "+target)
+				attachJob := testPublicIpJobAttach
+				if target != acquiredID {
+					attachJob = testPublicIpJobHeldAttach
+				}
+				testutil.HandleCreateJobResponse(w, attachJob, "attach issued")
 			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/detach"):
 				verbs = append(verbs, "detach "+publicIpVerbTarget(r.URL.Path, addressesPath, "/detach"))
 				testutil.HandleCreateJobResponse(w, testPublicIpJobDetach, "detach issued")
@@ -2118,6 +2126,39 @@ func TestUpdatePublicIPIfChangedReleasesTheAddressWhenTheAttachFails(t *testing.
 		t.Errorf("Expected the detail to report the release, got '%s'", detail)
 	}
 	want := []string{"acquire", "attach " + testPublicIpAcquiredID, "release " + testPublicIpAcquiredID}
+	if !slices.Equal(*verbs, want) {
+		t.Errorf("Expected %v, got %v", want, *verbs)
+	}
+}
+
+// An unknown allocate_public_ip passes the validator. One plan can then ask for an
+// acquired address and name a held one. GPCN refuses the second attach. The acquire
+// already happened, so the function hands that address back and the caller unwinds it.
+func TestUpdatePublicIPIfChangedReturnsTheAcquiredAddressWhenTheHeldAttachFails(t *testing.T) {
+	const vmID = "vm-held-attach-fails"
+	const heldID = "ip-held-1"
+
+	server, gpcnClient, verbs := publicIpUpdateMockServer(t, "", testPublicIpJobHeldAttach)
+	defer server.Close()
+
+	state := createTestVMModel("test-vm", testVMImage, false)
+	plan := createTestVMModel("test-vm", testVMImage, true)
+	plan.PublicIpId = types.StringValue(heldID)
+
+	acquired, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if !diags.HasError() {
+		t.Fatal("Expected an error diagnostic when the held attach fails")
+	}
+	if summary := diags.Errors()[0].Summary(); summary != ErrSummaryUnableToUpdatePublicIPConfiguration {
+		t.Errorf("Expected '%s', got '%s'", ErrSummaryUnableToUpdatePublicIPConfiguration, summary)
+	}
+	if acquired.ID != testPublicIpAcquiredID {
+		t.Errorf("Expected the acquired id '%s', got '%s'", testPublicIpAcquiredID, acquired.ID)
+	}
+	if acquired.VpcID != testPublicIpVpcID {
+		t.Errorf("Expected the VPC id '%s', got '%s'", testPublicIpVpcID, acquired.VpcID)
+	}
+	want := []string{"acquire", "attach " + testPublicIpAcquiredID, "attach " + heldID}
 	if !slices.Equal(*verbs, want) {
 		t.Errorf("Expected %v, got %v", want, *verbs)
 	}
