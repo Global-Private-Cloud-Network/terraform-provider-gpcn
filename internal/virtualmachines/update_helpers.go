@@ -152,8 +152,9 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 	}
 	vpcID := primary.VpcID.ValueString()
 	primaryNetworkInterfaceId := primary.ID.ValueString()
-	// The address the interface carries now. Each verb below that gives one up clears
-	// this value. The acquire then reads what the interface holds at that moment.
+	// This value names the address the interface carries now. The held detach below
+	// clears it when that detach gives up the same address. The acquire then reads
+	// what the interface holds at that moment.
 	carriedID := primary.PublicIPID
 
 	// The machine gives up what it no longer asks for before it takes anything on. One
@@ -163,7 +164,6 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 		if err := vpcpublicips.DetachPublicIp(gpcnClient, ctx, vpcID, acquiredID); err != nil {
 			return publicIpFailure(diags, err)
 		}
-		carriedID = types.StringNull()
 		if err := vpcpublicips.ReleasePublicIp(gpcnClient, ctx, vpcID, acquiredID); err != nil {
 			// The detach already took the address off the interface. No later gate finds
 			// it, so this diagnostic is the last record of it.
