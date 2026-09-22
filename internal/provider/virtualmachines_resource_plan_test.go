@@ -2611,8 +2611,8 @@ func vmPlanTestSentencePattern(sentence string) *regexp.Regexp {
 }
 
 // vmPlanTestUnwindSentence renders the unwind report around the detail of the step that
-// failed. The two patterns below leave no wildcard where that detail goes. An unwind
-// that drops the detail, or that reports the summary, cannot match.
+// failed. The patterns built from it leave no wildcard where that detail goes. An
+// unwind that drops the detail, or that reports the summary, cannot match.
 func vmPlanTestUnwindSentence(stepDetail string) string {
 	return fmt.Sprintf(virtualmachines.ErrDetailAcquiredAddressReleasedAfterStepFailure,
 		vmPlanTestAcquiredIpID, vmPlanTestID, stepDetail)
