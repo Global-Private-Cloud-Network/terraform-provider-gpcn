@@ -56,7 +56,7 @@ const vpcTearingDownRefusalBody = `{"success":false,` +
 // (src/components/vpc/vpc.service.ts:669).
 const vpcPlanTestParkedReason = "VPC removal could not be started; retry the delete"
 
-// The text a job carries when its worker died before any terminal stage
+// The text a job carries when its worker dies before any terminal stage
 // (src/models/resourceJobs.model.ts:198-199).
 const vpcPlanTestAbandonedJobError = "Job was dispatched but never reached a terminal stage " +
 	"(worker crash or restart) \u2014 reclaimed by the stale-job sweep."
@@ -282,8 +282,8 @@ func (m *vpcMock) handleDelete(w http.ResponseWriter) {
 }
 
 // handleJob answers the poll for the job the request names. A teardown job the
-// test armed to fail answers the terminal failure shape. The row it leaves
-// behind parks in deleting with the reason the job wrote.
+// test arms to fail answers the terminal failure shape. The row it leaves
+// behind parks in deleting with the reason the job writes.
 func (m *vpcMock) handleJob(w http.ResponseWriter, r *http.Request) {
 	jobID := vpcPlanTestCreateJobID
 	if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
@@ -906,7 +906,7 @@ func TestVpcResourcePlanWaitsOutATeardownAlreadyRunning(t *testing.T) {
 		},
 	})
 
-	// The status read plus two polls that meet the 404.
+	// The status read plus the two polls that end at the 404.
 	if count := mock.readsWhileTearingDown(); count != 3 {
 		t.Errorf("reads while tearing down = %d, want 3", count)
 	}
