@@ -145,7 +145,7 @@ func UpdateVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string,
 
 // DeleteVpc claims the VPC and waits for the teardown job. A VPC that is still
 // being created answers VPC_NOT_ACTIVE. Only the end of its create job clears
-// that refusal. A VPC already being torn down answers the same refusal, and the
+// that refusal. A VPC already being torn down answers the same refusal. The
 // teardown it names is the work the caller asked for.
 func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteVpcWithID, vpcID))

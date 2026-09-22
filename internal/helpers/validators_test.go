@@ -60,8 +60,8 @@ func TestNoOuterWhitespaceValidatorUnit(t *testing.T) {
 			wantDetail:  "name must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)",
 		},
 		{
-			// Go trims U+0085 and JavaScript does not, so GPCN stores the value
-			// unchanged and a refusal here refuses what the API accepts.
+			// Go trims U+0085 and JavaScript does not. GPCN therefore stores the
+			// value unchanged, and a refusal here refuses what the API accepts.
 			name: "leading next line", summary: "Invalid VPC %s", attribute: "name",
 			value: types.StringValue("\u0085vpc"),
 		},

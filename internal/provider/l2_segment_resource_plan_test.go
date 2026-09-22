@@ -329,8 +329,8 @@ resource "gpcn_l2_segment" "test" {
 }
 
 // The platform adopts a legacy custom network under the name it already had.
-// An adopted name carries characters the create regex refuses, and the segment
-// must still round-trip, so the provider adds no regex of its own.
+// An adopted name carries characters the create regex refuses. The segment must
+// still round-trip, so the provider adds no regex of its own.
 func TestL2SegmentResourcePlanCreatesAnAdoptedName(t *testing.T) {
 	t.Parallel()
 	server, _ := startL2SegmentPlanMockServer(t)

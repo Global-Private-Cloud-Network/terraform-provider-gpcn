@@ -618,8 +618,8 @@ func TestDatacentersDataSourceDoesNotBlameGpuEnabledForCapabilityMiss(t *testing
 }
 
 // An unset capability filter must send no key at all. A key sent as false asks
-// the API for the datacenters that lack the capability, and the answer then
-// hides every datacenter that has it.
+// for the datacenters that lack the capability. The answer then hides every
+// datacenter that has it.
 func TestDatacentersDataSourceOmitsUnsetCapabilityFilters(t *testing.T) {
 	t.Parallel()
 
