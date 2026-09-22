@@ -578,7 +578,7 @@ func TestVpcResourcePlanSurfacesOverlapRefusal(t *testing.T) {
 		},
 	})
 
-	// The mock refuses every create, so a provider that answered the gate
+	// The mock refuses every create, so a provider that answers the gate
 	// itself would still fail the step above. Only the request log shows it.
 	if count := mock.requestCount("POST /v1/resource/vpcs/"); count != 1 {
 		t.Errorf("create POST count = %d, want 1", count)
@@ -942,7 +942,7 @@ func TestVpcResourcePlanReclaimsAParkedTeardown(t *testing.T) {
 }
 
 // A teardown job that fails leaves the VPC in place. The provider reports the
-// job error instead of a destroy it never achieved. The row stays in state for
+// job error instead of a destroy it never achieves. The row stays in state for
 // the next apply to claim again.
 func TestVpcResourcePlanReportsAParkedReclaimWhoseJobFails(t *testing.T) {
 	t.Parallel()

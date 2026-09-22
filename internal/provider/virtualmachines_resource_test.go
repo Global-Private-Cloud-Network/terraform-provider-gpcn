@@ -67,13 +67,6 @@ func vpcTestOctetFor(t testing.TB, name string) int {
 	return vmOctetBase + slot
 }
 
-// vpcTestOctet returns the second octet of the case's own /16. The map above names every
-// slot. No call site chooses one, so no edit puts two cases in one block. The window
-// belongs to this file, so parallel cases in other files never collide.
-func vpcTestOctet(t *testing.T) int {
-	t.Helper()
-	return vpcTestOctetFor(t, t.Name())
-}
 
 // A shared slot puts two parallel cases in one /16, and GPCN refuses the second VPC.
 // The compiler accepts a duplicate, so the release pins the set.
@@ -116,7 +109,7 @@ data "gpcn_virtualmachine_sizes" "vm_size" {
 func TestVirtualMachinesResource(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet(t)
+	vpcOctet := vpcTestOctetFor(t, t.Name())
 	sshKeyName := fmt.Sprintf("vm-basic-key-%s", rName)
 	volumeName := fmt.Sprintf("vm-basic-vol-%s", rName)
 	vmName := fmt.Sprintf("vm-basic-%s", rName)
@@ -280,7 +273,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet(t)
+	vpcOctet := vpcTestOctetFor(t, t.Name())
 	sshKeyName := fmt.Sprintf("vm-public-ip-key-%s", rName)
 	vmName := fmt.Sprintf("vm-public-ip-%s", rName)
 
@@ -349,7 +342,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet(t)
+	vpcOctet := vpcTestOctetFor(t, t.Name())
 	sshKeyName := fmt.Sprintf("vm-size-upgrade-key-%s", rName)
 	vmName := fmt.Sprintf("vm-size-upgrade-%s", rName)
 
@@ -445,7 +438,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet(t)
+	vpcOctet := vpcTestOctetFor(t, t.Name())
 	sshKeyName := fmt.Sprintf("vm-vol-attach-key-%s", rName)
 	vol1Name := fmt.Sprintf("vm-vol-attach-vol1-%s", rName)
 	vol2Name := fmt.Sprintf("vm-vol-attach-vol2-%s", rName)
@@ -557,7 +550,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 func TestVirtualMachinesAuth(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet(t)
+	vpcOctet := vpcTestOctetFor(t, t.Name())
 	sshKeyName := fmt.Sprintf("vm-auth-key-%s", rName)
 	vmName := fmt.Sprintf("vm-auth-%s", rName)
 

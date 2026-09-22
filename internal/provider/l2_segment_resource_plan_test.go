@@ -328,7 +328,7 @@ resource "gpcn_l2_segment" "test" {
 	})
 }
 
-// The platform adopts a legacy custom network under the name it already had.
+// The platform adopts a legacy custom network under the name it already has.
 // An adopted name carries characters the create regex refuses. The segment must
 // still round-trip, so the provider adds no regex of its own.
 func TestL2SegmentResourcePlanCreatesAnAdoptedName(t *testing.T) {
@@ -605,7 +605,7 @@ func TestL2SegmentResourcePlanReplacesOnDatacenterChange(t *testing.T) {
 }
 
 // The sentence is pinned byte for byte. An import of a grouped segment plans a
-// no-op, so nothing else tells the reader the group was dropped.
+// no-op, so nothing else tells the reader the group is dropped.
 func TestL2SegmentResourceSchemaNamesTheResourceGroupDrop(t *testing.T) {
 	t.Parallel()
 
