@@ -73,8 +73,8 @@ const (
 	vpcNsgAccOctetSlots = 16
 )
 
-// vpcNsgAccOctetFor returns the octet of the named case. Every call site reads
-// this one function, so a case cannot take a block the table never gave it.
+// vpcNsgAccOctetFor returns the octet of the named case. It fails a case
+// the table does not name.
 func vpcNsgAccOctetFor(t testing.TB, name string) int {
 	t.Helper()
 	slot, named := vpcNsgAccOctetSlot[name]
@@ -84,9 +84,10 @@ func vpcNsgAccOctetFor(t testing.TB, name string) int {
 	return vpcNsgAccOctetBase + slot
 }
 
-// A shared slot puts two parallel cases in one /16, which GPCN refuses.
-// A slot outside the window takes a block another file owns. The compiler
-// accepts either, so this guard pins the set.
+// The guard reads the table alone, not the call sites. It refuses a slot
+// outside this file's window, because that slot takes a block another file
+// owns. It refuses two entries that take one octet. The compiler accepts
+// both.
 func TestVpcNsgAcceptanceOctetsAreUnique(t *testing.T) {
 	owner := map[int]string{}
 	for name, slot := range vpcNsgAccOctetSlot {
