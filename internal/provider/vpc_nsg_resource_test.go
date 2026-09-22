@@ -68,7 +68,10 @@ var vpcNsgAccOctetSlot = map[string]int{
 
 // This file owns the window at base 96. The VPC, subnet and machine files own
 // 64, 80 and 112.
-const vpcNsgAccOctetBase = 96
+const (
+	vpcNsgAccOctetBase  = 96
+	vpcNsgAccOctetSlots = 16
+)
 
 // vpcNsgAccOctetFor returns the octet of the named case. Every call site reads
 // this one function, so a case cannot take a block the table never gave it.
@@ -79,6 +82,23 @@ func vpcNsgAccOctetFor(t testing.TB, name string) int {
 		t.Fatalf("Expected %s to own a slot in vpcNsgAccOctetSlot", name)
 	}
 	return vpcNsgAccOctetBase + slot
+}
+
+// A shared slot puts two parallel cases in one /16, which GPCN refuses.
+// A slot outside the window takes a block another file owns. The compiler
+// accepts either, so this guard pins the set.
+func TestVpcNsgAcceptanceOctetsAreUnique(t *testing.T) {
+	owner := map[int]string{}
+	for name, slot := range vpcNsgAccOctetSlot {
+		if slot < 0 || slot >= vpcNsgAccOctetSlots {
+			t.Errorf("Expected %s to take a slot below %d, got %d", name, vpcNsgAccOctetSlots, slot)
+		}
+		octet := vpcNsgAccOctetFor(t, name)
+		if other, taken := owner[octet]; taken {
+			t.Errorf("Expected %s and %s to take different octets, both take %d", name, other, octet)
+		}
+		owner[octet] = name
+	}
 }
 
 func TestVpcNsgResource(t *testing.T) {
