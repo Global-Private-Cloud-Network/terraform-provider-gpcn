@@ -2047,8 +2047,9 @@ func TestUpdatePublicIPIfChangedReleasesTheAcquiredAddressWhenThePlanNamesAnothe
 
 // The API inserts the address row before it dispatches the job, so a failed acquisition
 // leaves a real address. A failed acquire parks the row and holds its provider
-// reference, and the release is the exit. The address therefore goes back, and the user
-// has nothing to clean up.
+// reference, and the release is the exit. The provider makes one release attempt. A
+// release that reaches the row before the platform parks it is refused, and the report
+// names the address.
 func TestUpdatePublicIPIfChangedReleasesTheAddressWhenTheAcquireJobFails(t *testing.T) {
 	const vmID = "vm-acquire-job-fails"
 
