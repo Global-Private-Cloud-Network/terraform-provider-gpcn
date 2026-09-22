@@ -414,8 +414,9 @@ func TestMapSubnetResponseToModelFillsPrefixOnImportUnit(t *testing.T) {
 	}
 }
 
-// One create carries one correlation id. A poll that mints its own breaks the
-// support log. The create call then has no link to the job it waits for.
+// One operation carries one correlation id. A helper that mints its own breaks
+// the support log. The resource method then has no link to the job it waits
+// for. The create and the rebind are the two paths that poll.
 func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
 	t.Parallel()
 
@@ -460,6 +461,38 @@ func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
 	}
 	if pollID != createID {
 		t.Errorf("poll correlation id = %q, want the create's %q", pollID, createID)
+	}
+
+	var rebindID, rebindPollID string
+	_, rebindClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == client.JOBS_BASE_URL_V1 {
+				if rebindPollID == "" {
+					rebindPollID = r.Header.Get("x-Correlation-ID")
+				}
+				testutil.HandleJobResponse(w, "job-rebind", unitTestSubnetID, true)
+				return
+			}
+			rebindID = r.Header.Get("x-Correlation-ID")
+			testutil.WriteJSONResponse(w, map[string]any{
+				"success": true,
+				"message": "Operation initiated successfully",
+				"data":    map[string]any{"jobId": "job-rebind"},
+			})
+		},
+	})
+
+	rebindCtx := client.WithCorrelationID(context.Background())
+	callerID := client.GetCorrelationID(rebindCtx)
+	if err := RebindSubnetNsg(rebindClient, rebindCtx, unitTestVpcID, unitTestSubnetID, unitTestNsgID); err != nil {
+		t.Fatalf("expected the rebind to succeed, got %v", err)
+	}
+	if rebindID != callerID {
+		t.Errorf("rebind correlation id = %q, want the caller's %q", rebindID, callerID)
+	}
+	if rebindPollID != callerID {
+		t.Errorf("rebind poll correlation id = %q, want the caller's %q", rebindPollID, callerID)
 	}
 }
 

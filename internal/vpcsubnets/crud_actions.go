@@ -198,7 +198,6 @@ func listSubnetsPage(gpcnClient *client.GpcnClient, ctx context.Context, vpcID s
 // UpdateSubnet renames and relabels the subnet. The route is synchronous and
 // answers with the whole row, because a rename here never reaches the provider.
 func UpdateSubnet(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, subnetID, name, description string) (*ApiSubnet, error) {
-	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateSubnetWithID, subnetID))
 
 	updateSubnetRequestBody := map[string]any{
@@ -239,7 +238,6 @@ func UpdateSubnet(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, sub
 // RebindSubnetNsg moves the subnet to another security group. The row's group
 // moves last, inside the workflow, so a failed job leaves the old binding.
 func RebindSubnetNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, subnetID, nsgID string) error {
-	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, fmt.Sprintf(LogStartingRebindSubnetNsg, subnetID, nsgID))
 
 	rebindRequestBody, err := json.Marshal(map[string]any{"nsgId": nsgID})
@@ -269,7 +267,6 @@ func RebindSubnetNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 // DeleteSubnet tears the subnet down. The API refuses a subnet that still holds
 // live interfaces, and that refusal reaches the operator unchanged.
 func DeleteSubnet(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, subnetID string) error {
-	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteSubnetWithID, subnetID))
 
 	request, err := http.NewRequestWithContext(ctx, "DELETE", subnetPath(vpcID, subnetID), nil)
