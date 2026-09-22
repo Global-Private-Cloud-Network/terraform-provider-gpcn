@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -241,6 +242,31 @@ func TestVpcDeleteTreatsARowThatVanishedAsDeleted(t *testing.T) {
 
 	if err := DeleteVpc(gpcnClient, context.Background(), vpcUnitTestID); err != nil {
 		t.Fatalf("Expected a row that vanished to count as deleted, got %v", err)
+	}
+	if count := mock.deleteCount(); count != 1 {
+		t.Errorf("DELETE count = %d, want 1", count)
+	}
+}
+
+// A read that fails mid-wait says nothing about the teardown. A provider that
+// took the failure for the 404 would drop a live VPC from state.
+func TestVpcDeleteSurfacesAFailedReadDuringTheTeardownWait(t *testing.T) {
+	t.Parallel()
+
+	// The status read is the first, so the wait meets the gateway on its own
+	// first read.
+	mock := &vpcDeleteMock{refusals: 1, status: VPC_STATUS_DELETING, failReadsFrom: 2}
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{T: t, Handler: mock.handler(t)})
+
+	err := DeleteVpc(gpcnClient, context.Background(), vpcUnitTestID)
+	if err == nil {
+		t.Fatalf("Expected the failed read to reach the caller")
+	}
+	if client.IsNotFound(err) {
+		t.Errorf("Expected a failure that differs from a row that is gone, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "502") {
+		t.Errorf("error = %q, want the gateway status in it", err.Error())
 	}
 	if count := mock.deleteCount(); count != 1 {
 		t.Errorf("DELETE count = %d, want 1", count)
