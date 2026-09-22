@@ -67,7 +67,6 @@ func vpcTestOctetFor(t testing.TB, name string) int {
 	return vmOctetBase + slot
 }
 
-
 // A shared slot puts two parallel cases in one /16, and GPCN refuses the second VPC.
 // The compiler accepts a duplicate, so the release pins the set.
 func TestVirtualMachineAcceptanceOctetsAreUnique(t *testing.T) {
