@@ -28,6 +28,8 @@ const (
 	LogIssuedDeleteVpcJob       = "Successfully issued the job to delete the GPCN VPC"
 	LogVpcActiveJobPollFailed   = "The create job for VPC ID %s stopped before the delete retry: %s"
 	LogWaitingForVpcActiveJob   = "VPC ID %s is still creating - waiting for job %s before the delete retry"
+	LogWaitingForVpcTeardown    = "VPC ID %s is already being deleted - waiting for the row to go"
+	LogVpcTeardownFinished      = "The teardown of VPC ID %s finished and the row is gone"
 	LogStartingDeleteGPCNVpc    = "Starting Delete GPCN VPC"
 	LogFinishedDeleteGPCNVpc    = "Successfully finished Delete GPCN VPC"
 	LogVpcAlreadyDeleted        = "GPCN VPC was already deleted outside of Terraform"

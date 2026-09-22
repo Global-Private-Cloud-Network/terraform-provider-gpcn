@@ -46,6 +46,12 @@ const vpcEmptyUpdateRefusalBody = `{"success":false,` +
 const vpcNotFoundBody = `{"success":false,"message":"VPC not found",` +
 	`"error":{"code":"NOT_FOUND","statusCode":404,"details":null}}`
 
+// A VPC already being torn down refuses a second claim
+// (src/components/vpc/vpc.service.ts:129-130,547).
+const vpcTearingDownRefusalBody = `{"success":false,` +
+	`"message":"The VPC is not active (status: deleting); this operation needs an active VPC.",` +
+	`"error":{"code":"VPC_NOT_ACTIVE","statusCode":409,"details":null}}`
+
 // vpcMock serves the VPC endpoints an apply walks. It keeps the name the last
 // create or update sent. The read after an apply then agrees with the
 // configuration, and the refresh plan stays empty.
@@ -55,6 +61,7 @@ type vpcMock struct {
 	mutex          sync.Mutex
 	name           string
 	description    string
+	status         string
 	cidr           string
 	nameservers    []string
 	createRefusal  string
@@ -64,24 +71,35 @@ type vpcMock struct {
 	createBody     map[string]any
 	createBodies   []map[string]any
 	requests       []string
+	// tearingDownDeletes counts the deletes that answer the refusal a live
+	// teardown raises. The first of them parks the row in deleting.
+	tearingDownDeletes int
+	tearingDown        bool
+	// deletingGets is how many reads still answer deleting. The row answers 404
+	// after them, which is the end of the teardown.
+	deletingGets   int
+	getsWhileGoing int
 }
 
 // vpcMockRefusals seeds the answers the mock refuses with. A test states them
 // before the server starts, because the handler goroutine reads them.
 type vpcMockRefusals struct {
-	create         string
-	deletes        int
-	deleteNotFound bool
+	create             string
+	deletes            int
+	deleteNotFound     bool
+	tearingDownDeletes int
 }
 
 func startVpcPlanMockServer(t *testing.T, refusals vpcMockRefusals) *vpcMock {
 	t.Helper()
 
 	mock := &vpcMock{
-		cidr:           vpcPlanTestCidr,
-		createRefusal:  refusals.create,
-		deleteRefusals: refusals.deletes,
-		deleteNotFound: refusals.deleteNotFound,
+		cidr:               vpcPlanTestCidr,
+		status:             "active",
+		createRefusal:      refusals.create,
+		deleteRefusals:     refusals.deletes,
+		deleteNotFound:     refusals.deleteNotFound,
+		tearingDownDeletes: refusals.tearingDownDeletes,
 	}
 	vpcPath := "/v1/resource/vpcs/" + vpcPlanTestID
 
@@ -157,6 +175,14 @@ func (m *vpcMock) handleCreate(w http.ResponseWriter, r *http.Request) {
 func (m *vpcMock) handleGet(w http.ResponseWriter) {
 	m.mutex.Lock()
 	notFound := m.getNotFound
+	if m.tearingDown {
+		m.getsWhileGoing++
+		if m.deletingGets > 0 {
+			m.deletingGets--
+		} else {
+			notFound = true
+		}
+	}
 	m.mutex.Unlock()
 
 	if notFound {
@@ -190,13 +216,24 @@ func (m *vpcMock) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 func (m *vpcMock) handleDelete(w http.ResponseWriter) {
 	m.mutex.Lock()
-	refuse := m.deleteRefusals > 0
+	tearingDown := m.tearingDownDeletes > 0
+	if tearingDown {
+		m.tearingDownDeletes--
+		m.status = "deleting"
+		m.tearingDown = true
+		m.deletingGets = 1
+	}
+	refuse := !tearingDown && m.deleteRefusals > 0
 	if refuse {
 		m.deleteRefusals--
 	}
 	notFound := m.deleteNotFound
 	m.mutex.Unlock()
 
+	if tearingDown {
+		writeVpcRefusal(w, http.StatusConflict, vpcTearingDownRefusalBody)
+		return
+	}
 	if refuse {
 		writeVpcRefusal(w, http.StatusConflict, vpcNotEmptyRefusalBody)
 		return
@@ -225,7 +262,7 @@ func (m *vpcMock) vpcBody() map[string]any {
 		"description":     m.description,
 		"cidr":            m.cidr,
 		"datacenter":      map[string]any{"id": vpcPlanTestDatacenterID, "code": "kansas", "name": "Kansas"},
-		"status":          "active",
+		"status":          m.status,
 		"failureReason":   nil,
 		"egressIp":        nil,
 		"activeJobId":     nil,
@@ -295,6 +332,13 @@ func (m *vpcMock) setGetNotFound(notFound bool) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.getNotFound = notFound
+}
+
+// readsWhileTearingDown is how many reads the provider made after the refusal.
+func (m *vpcMock) readsWhileTearingDown() int {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	return m.getsWhileGoing
 }
 
 func (m *vpcMock) requestCount(request string) int {
@@ -772,4 +816,31 @@ func TestVpcResourcePlanRefusesAnIllegalNameserverList(t *testing.T) {
 			},
 		},
 	})
+}
+
+// A teardown another caller started refuses the second claim, and the refusal
+// names the very work the destroy asked for. The provider waits for the row to
+// go instead of handing the reader an error about its own request.
+func TestVpcResourcePlanWaitsOutATeardownAlreadyRunning(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{tearingDownDeletes: 1})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vpcPlanTestConfig(mock.url, "vpc-tearing-down"),
+			},
+			{
+				Config:  vpcPlanTestConfig(mock.url, "vpc-tearing-down"),
+				Destroy: true,
+			},
+		},
+	})
+
+	// The status read plus the read that met the 404. A provider that swallowed
+	// the refusal without waiting makes neither.
+	if count := mock.readsWhileTearingDown(); count != 2 {
+		t.Errorf("reads while tearing down = %d, want 2", count)
+	}
 }
