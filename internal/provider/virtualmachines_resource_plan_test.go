@@ -2546,7 +2546,23 @@ func TestVirtualMachineResourcePlanSkipsTheAcquireWhenTheMachineCarriesTheAddres
 // startVirtualMachineDestroyBodyMockServer keeps whichever address the create asked for
 // and records the body of the delete. A test then reads what the destroy asked GPCN to
 // do with that address.
-func startVirtualMachineDestroyBodyMockServer(t *testing.T) (*httptest.Server, func() (string, bool)) {
+// vmLegacyPlanTestInterfacesBody reports a primary interface on a legacy network. A
+// machine created by 1.3.0 has one, and its address is not a VPC address.
+func vmLegacyPlanTestInterfacesBody(addressID, address string) map[string]any {
+	body := vmPublicIpPlanTestInterfacesBody(addressID, address)
+	row := body["data"].([]map[string]any)[0]
+	row["world"] = "legacy"
+	row["vpcId"] = nil
+	row["vpcName"] = nil
+	row["vpcSubnetId"] = nil
+	row["subnetName"] = nil
+	row["networkId"] = "net-1"
+	row["networkName"] = "legacy-net"
+	row["networkType"] = "standard"
+	return body
+}
+
+func startVirtualMachineDestroyBodyMockServer(t *testing.T, legacyPrimary bool) (*httptest.Server, func() (string, bool)) {
 	t.Helper()
 
 	var mu sync.Mutex
@@ -2585,6 +2601,10 @@ func startVirtualMachineDestroyBodyMockServer(t *testing.T) (*httptest.Server, f
 			mu.Lock()
 			currentID, currentAddress := boundID, boundAddress
 			mu.Unlock()
+			if legacyPrimary {
+				testutil.WriteJSONResponse(w, vmLegacyPlanTestInterfacesBody(currentID, currentAddress))
+				return
+			}
 			testutil.WriteJSONResponse(w, vmPublicIpPlanTestInterfacesBody(currentID, currentAddress))
 		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
 			mu.Lock()
@@ -2622,22 +2642,25 @@ func startVirtualMachineDestroyBodyMockServer(t *testing.T) (*httptest.Server, f
 
 // A destroy gives back only what Terraform acquired. An address the operator holds
 // survives the machine. The delete that carries one names no disposition at all, and
-// GPCN keeps it.
+// GPCN keeps it. A legacy machine has no VPC address, and the release key costs it the
+// vpc-public-ip:delete permission for nothing.
 func TestVirtualMachineResourcePlanDestroyReleasesAcquiredIp(t *testing.T) {
 	tests := []struct {
-		name       string
-		allocate   bool
-		publicIpID string
-		wantBody   string
+		name          string
+		allocate      bool
+		publicIpID    string
+		legacyPrimary bool
+		wantBody      string
 	}{
-		{"an acquired address is released", true, "", `{"releasePublicIps":true}`},
-		{"a held address is kept", false, vmPlanTestHeldIpID, ""},
+		{"an acquired address is released", true, "", false, `{"releasePublicIps":true}`},
+		{"a held address is kept", false, vmPlanTestHeldIpID, false, ""},
+		{"a legacy machine asks for nothing", true, "", true, ""},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			shortenVirtualMachinePolling(t)
-			server, recorded := startVirtualMachineDestroyBodyMockServer(t)
+			server, recorded := startVirtualMachineDestroyBodyMockServer(t, tc.legacyPrimary)
 
 			config := vmPublicIpPlanTestConfig(server.URL, "vm-plan-destroy-address", tc.allocate, tc.publicIpID)
 

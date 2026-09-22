@@ -215,6 +215,36 @@ func resolveImageId(gpcnClient *client.GpcnClient, ctx context.Context, current 
 	return types.StringNull(), diags
 }
 
+// ReleasesAcquiredAddress reports whether the destroy asks GPCN to give the address
+// back. Terraform releases only an address it acquired, and only a VPC interface holds
+// one. The release key also needs the vpc-public-ip:delete permission, which a legacy
+// machine must not have to spend.
+// Returns the decision and any diagnostics encountered while reading the interfaces.
+func ReleasesAcquiredAddress(ctx context.Context, state ResourceModel) (bool, diag.Diagnostics) {
+	var diags diag.Diagnostics
+
+	if !state.AllocatePublicIp.ValueBool() {
+		return false, diags
+	}
+	if state.NetworkInterfaces.IsNull() || state.NetworkInterfaces.IsUnknown() {
+		return false, diags
+	}
+
+	var interfaces []networks.ReadVirtualMachineNetworkDataResponseTF
+	diags.Append(state.NetworkInterfaces.ElementsAs(ctx, &interfaces, false)...)
+	if diags.HasError() {
+		return false, diags
+	}
+
+	primaryIdx := slices.IndexFunc(interfaces, func(iface networks.ReadVirtualMachineNetworkDataResponseTF) bool {
+		return iface.IsPrimary.ValueBool()
+	})
+	if primaryIdx < 0 {
+		return false, diags
+	}
+	return interfaces[primaryIdx].World.ValueString() == networks.NicWorldVpc, diags
+}
+
 func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient, virtualMachineID string, model ResourceModel) (ResourceModel, diag.Diagnostics) {
 	var allDiags diag.Diagnostics
 
