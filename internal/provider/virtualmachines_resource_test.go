@@ -20,9 +20,9 @@ var gpcnVirtualMachineTest = "gpcn_virtualmachine.test"
 // vpcAndSubnet returns the VPC and the subnet a virtual machine is born on. A machine
 // lives in exactly one VPC, so every case that creates one creates these two first.
 // GPCN checks a CIDR for overlap across the whole entity, and the repository has no
-// sweepers. Each case therefore takes its own name and its own fixed block. The only
-// block a case meets is its own, left by an earlier run that failed. The configuration
-// acknowledges that overlap.
+// sweepers. Each case therefore takes its own name and its own fixed block. A case
+// meets only its own block, and only when an earlier run of that case failed and left
+// one. The configuration acknowledges that overlap.
 func vpcAndSubnet(suffix string, octet int) string {
 	return fmt.Sprintf(`
 resource "gpcn_vpc" "vm_vpc" {
