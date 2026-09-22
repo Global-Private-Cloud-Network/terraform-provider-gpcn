@@ -91,6 +91,10 @@ type nsgPlanTestServerState struct {
 	// failureReason stands for the sentence GPCN files against a parked group.
 	// An empty value reads back as the API's null.
 	failureReason string
+	// emptyFailureReason renders the reason as "" rather than null. The
+	// provider treats both as no reason, and only this switch reaches the
+	// empty-string half of that guard.
+	emptyFailureReason bool
 	// failNextRead answers the next group read with a 500. The build still
 	// ran, so the group is there and only the read-back fails.
 	failNextRead bool
@@ -118,6 +122,8 @@ func (s *nsgPlanTestServerState) detail() map[string]any {
 	var failureReason any
 	if s.failureReason != "" {
 		failureReason = s.failureReason
+	} else if s.emptyFailureReason {
+		failureReason = ""
 	}
 	return map[string]any{
 		"nsg": map[string]any{
@@ -888,15 +894,8 @@ func TestVpcNsgReadWarnsOnFailedGroupUnit(t *testing.T) {
 
 	ctx := context.Background()
 
-	readInState := func(rowState, failureReason string) fwresource.ReadResponse {
+	readGroup := func(group *nsgPlanTestServerState) fwresource.ReadResponse {
 		t.Helper()
-
-		group := &nsgPlanTestServerState{
-			name:          "nsg-plan-a",
-			rules:         []map[string]any{},
-			rowState:      rowState,
-			failureReason: failureReason,
-		}
 
 		_, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 			T: t,
@@ -945,6 +944,15 @@ func TestVpcNsgReadWarnsOnFailedGroupUnit(t *testing.T) {
 		return readResponse
 	}
 
+	readInState := func(rowState, failureReason string) fwresource.ReadResponse {
+		return readGroup(&nsgPlanTestServerState{
+			name:          "nsg-plan-a",
+			rules:         []map[string]any{},
+			rowState:      rowState,
+			failureReason: failureReason,
+		})
+	}
+
 	failed := readInState("failed", nsgPlanTestFailedReason)
 	warnings := failed.Diagnostics.Warnings()
 	if len(warnings) != 1 {
@@ -967,6 +975,22 @@ func TestVpcNsgReadWarnsOnFailedGroupUnit(t *testing.T) {
 	wantNoReasonDetail := "Security group 66666666-6666-4666-8666-666666666666 is in the failed state. Apply its rules again or delete the group and create it again."
 	if got := noReasonWarnings[0].Detail(); got != wantNoReasonDetail {
 		t.Errorf("detail with no reason = %q, want %q", got, wantNoReasonDetail)
+	}
+
+	// A reason that arrives as "" takes the same warning. Nothing else in the
+	// suite sends that shape, so the guard's second half rests on this arm.
+	emptyReason := readGroup(&nsgPlanTestServerState{
+		name:               "nsg-plan-a",
+		rules:              []map[string]any{},
+		rowState:           "failed",
+		emptyFailureReason: true,
+	})
+	emptyReasonWarnings := emptyReason.Diagnostics.Warnings()
+	if len(emptyReasonWarnings) != 1 {
+		t.Fatalf("warnings with an empty reason = %v, want exactly one", emptyReasonWarnings)
+	}
+	if got := emptyReasonWarnings[0].Detail(); got != wantNoReasonDetail {
+		t.Errorf("detail with an empty reason = %q, want %q", got, wantNoReasonDetail)
 	}
 
 	ready := readInState("ready", "")
