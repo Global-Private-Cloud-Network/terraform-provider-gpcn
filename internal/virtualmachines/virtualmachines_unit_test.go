@@ -1977,6 +1977,32 @@ func TestUpdatePublicIPIfChangedExchangesAHeldAddressForAnAcquiredOne(t *testing
 	}
 }
 
+// An exchange whose read-back failed leaves state behind the machine. The retry then
+// finds the machine carrying the address the plan names. The operator owns that
+// address, and GPCN releases an attached address, so a release here destroys it.
+func TestUpdatePublicIPIfChangedKeepsTheHeldAddressOnAnExchangeRetry(t *testing.T) {
+	const vmID = "vm-exchange-retry"
+	const heldID = "ip-held-1"
+
+	server, gpcnClient, verbs := publicIpUpdateMockServer(t, heldID)
+	defer server.Close()
+
+	state := createTestVMModel("test-vm", testVMImage, true)
+	plan := createTestVMModel("test-vm", testVMImage, false)
+	plan.PublicIpId = types.StringValue(heldID)
+
+	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if diags.HasError() {
+		t.Fatalf("Expected no error diagnostic, got %v", diags.Errors())
+	}
+	if slices.Contains(*verbs, "release "+heldID) {
+		t.Errorf("Expected no release of the held address, got %v", *verbs)
+	}
+	if slices.Contains(*verbs, "detach "+heldID) {
+		t.Errorf("Expected no detach of the held address, got %v", *verbs)
+	}
+}
+
 // The API inserts the address row before it dispatches the job, so a failed acquisition
 // leaves a real address. The diagnostic is the only record of it.
 func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheAcquireJobFails(t *testing.T) {
