@@ -20,14 +20,16 @@ var gpcnVirtualMachineTest = "gpcn_virtualmachine.test"
 // vpcAndSubnet returns the VPC and the subnet a virtual machine is born on. A machine
 // lives in exactly one VPC, so every case that creates one creates these two first.
 // GPCN checks a CIDR for overlap across the whole entity, and the repository has no
-// sweepers. Each case therefore takes its own name and its own block. The octet draws
-// from the window at base 112. One fixed block would fail every run after the first.
+// sweepers. Each case therefore takes its own name and its own fixed block. The only
+// block a case meets is its own, left by an earlier run that failed. The configuration
+// acknowledges that overlap.
 func vpcAndSubnet(suffix string, octet int) string {
 	return fmt.Sprintf(`
 resource "gpcn_vpc" "vm_vpc" {
-	name          = "terraform-demo-vpc-%[1]s"
-	datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
-	cidr          = "10.%[2]d.0.0/16"
+	name                = "terraform-demo-vpc-%[1]s"
+	datacenter_id       = data.gpcn_datacenters.central_us.datacenters[0].id
+	cidr                = "10.%[2]d.0.0/16"
+	acknowledge_overlap = true
 }
 
 resource "gpcn_vpc_subnet" "vm_subnet" {
@@ -38,41 +40,43 @@ resource "gpcn_vpc_subnet" "vm_subnet" {
 `, suffix, octet)
 }
 
-// Each case in this file owns one block of the window, named below. Six parallel cases
-// that each drew a block at random took the same one about half the time, and GPCN
-// answers 409 for a VPC that overlaps another. Slots 5 to 7 wait for the next cases.
+// vmOctetSlot names the block each of the five acceptance cases owns. Cases that draw a
+// block at random take the same one about half the time. GPCN answers 409 for a VPC
+// that overlaps another. Slots 5 to 7 wait for the next cases.
+var vmOctetSlot = map[string]int{
+	"TestVirtualMachinesAuth":                     0,
+	"TestVirtualMachinesVolumeAttachment":         1,
+	"TestVirtualMachinesSizeUpgrade":              2,
+	"TestVirtualMachinesChangePublicIpAllocation": 3,
+	"TestVirtualMachinesResource":                 4,
+}
+
 const (
-	vmOctetAuth                     = 0
-	vmOctetVolumeAttachment         = 1
-	vmOctetSizeUpgrade              = 2
-	vmOctetChangePublicIpAllocation = 3
-	vmOctetResource                 = 4
-	vmOctetSlots                    = 8
+	vmOctetBase  = 112
+	vmOctetSlots = 8
 )
 
-// vpcTestOctet returns the second octet of the case's own /16. The window starts at 112
-// and belongs to this file, so parallel cases in other files never collide.
-func vpcTestOctet(slot int) int {
-	return 112 + slot
+// vpcTestOctet returns the second octet of the case's own /16. The map above names every
+// slot. No call site chooses one, so no edit puts two cases in one block. The window
+// belongs to this file, so parallel cases in other files never collide.
+func vpcTestOctet(t *testing.T) int {
+	t.Helper()
+	slot, named := vmOctetSlot[t.Name()]
+	if !named {
+		t.Fatalf("Expected %s to own a slot in vmOctetSlot", t.Name())
+	}
+	return vmOctetBase + slot
 }
 
 // A shared slot puts two parallel cases in one /16, and GPCN refuses the second VPC.
 // The compiler accepts a duplicate, so the release pins the set.
 func TestVirtualMachineAcceptanceOctetsAreUnique(t *testing.T) {
-	slots := map[string]int{
-		"TestVirtualMachinesAuth":                     vmOctetAuth,
-		"TestVirtualMachinesVolumeAttachment":         vmOctetVolumeAttachment,
-		"TestVirtualMachinesSizeUpgrade":              vmOctetSizeUpgrade,
-		"TestVirtualMachinesChangePublicIpAllocation": vmOctetChangePublicIpAllocation,
-		"TestVirtualMachinesResource":                 vmOctetResource,
-	}
-
 	owner := map[int]string{}
-	for name, slot := range slots {
+	for name, slot := range vmOctetSlot {
 		if slot < 0 || slot >= vmOctetSlots {
 			t.Errorf("Expected %s to take a slot below %d, got %d", name, vmOctetSlots, slot)
 		}
-		octet := vpcTestOctet(slot)
+		octet := vmOctetBase + slot
 		if other, taken := owner[octet]; taken {
 			t.Errorf("Expected %s and %s to take different octets, both take %d", name, other, octet)
 		}
@@ -105,7 +109,7 @@ data "gpcn_virtualmachine_sizes" "vm_size" {
 func TestVirtualMachinesResource(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet(vmOctetResource)
+	vpcOctet := vpcTestOctet(t)
 	sshKeyName := fmt.Sprintf("vm-basic-key-%s", rName)
 	volumeName := fmt.Sprintf("vm-basic-vol-%s", rName)
 	vmName := fmt.Sprintf("vm-basic-%s", rName)
@@ -269,7 +273,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet(vmOctetChangePublicIpAllocation)
+	vpcOctet := vpcTestOctet(t)
 	sshKeyName := fmt.Sprintf("vm-public-ip-key-%s", rName)
 	vmName := fmt.Sprintf("vm-public-ip-%s", rName)
 
@@ -338,7 +342,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet(vmOctetSizeUpgrade)
+	vpcOctet := vpcTestOctet(t)
 	sshKeyName := fmt.Sprintf("vm-size-upgrade-key-%s", rName)
 	vmName := fmt.Sprintf("vm-size-upgrade-%s", rName)
 
@@ -434,7 +438,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet(vmOctetVolumeAttachment)
+	vpcOctet := vpcTestOctet(t)
 	sshKeyName := fmt.Sprintf("vm-vol-attach-key-%s", rName)
 	vol1Name := fmt.Sprintf("vm-vol-attach-vol1-%s", rName)
 	vol2Name := fmt.Sprintf("vm-vol-attach-vol2-%s", rName)
@@ -546,7 +550,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 func TestVirtualMachinesAuth(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet(vmOctetAuth)
+	vpcOctet := vpcTestOctet(t)
 	sshKeyName := fmt.Sprintf("vm-auth-key-%s", rName)
 	vmName := fmt.Sprintf("vm-auth-%s", rName)
 
