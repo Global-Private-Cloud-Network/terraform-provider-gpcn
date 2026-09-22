@@ -1942,6 +1942,30 @@ func TestUpdatePublicIPIfChangedSkipsTheAcquireWhenThePrimaryCarriesAnAddress(t 
 	}
 }
 
+// An operator who swaps a held address for an acquired one gives the held one up first.
+// The machine carries one address at a time. The acquire therefore reads what the
+// interface holds at that moment, not what it held at entry.
+func TestUpdatePublicIPIfChangedExchangesAHeldAddressForAnAcquiredOne(t *testing.T) {
+	const vmID = "vm-exchanges-an-address"
+	const heldID = "ip-held-1"
+
+	server, gpcnClient, verbs := publicIpUpdateMockServer(t, heldID)
+	defer server.Close()
+
+	state := createTestVMModel("test-vm", testVMImage, false)
+	state.PublicIpId = types.StringValue(heldID)
+	plan := createTestVMModel("test-vm", testVMImage, true)
+
+	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if diags.HasError() {
+		t.Fatalf("Expected no error diagnostic, got %v", diags.Errors())
+	}
+	want := []string{"detach " + heldID, "acquire", "attach " + testPublicIpAcquiredID}
+	if !slices.Equal(*verbs, want) {
+		t.Errorf("Expected %v, got %v", want, *verbs)
+	}
+}
+
 // The API inserts the address row before it dispatches the job, so a failed acquisition
 // leaves a real address. The diagnostic is the only record of it.
 func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheAcquireJobFails(t *testing.T) {
