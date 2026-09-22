@@ -47,10 +47,11 @@ const (
 // GPCN reports one address row whatever bound the address. A
 // gpcn_vpc_public_ip_attachment binds one, and an unwind whose release also failed
 // leaves another. The provider cannot tell them apart, so the refusal names only what
-// it observes. Adopting the address makes the next destroy release what
-// gpcn_vpc_public_ip owns. The remedy puts the release first. A failed release parks
-// the row for a retry, and an import then adopts a row the platform tears down.
-const ErrDetailPrimaryInterfaceCarriesAForeignAddress = "the primary network interface of virtual machine %s already carries public IP %s; release it, or import it as gpcn_vpc_public_ip and name it in public_ip_id"
+// it observes. The remedy puts the release first. A failed release parks the row for
+// a retry, and an import then adopts a row the platform tears down. The last sentence
+// covers the address another resource manages: releasing that one makes both resources
+// leave state, and the next apply acquires a different address without a word.
+const ErrDetailPrimaryInterfaceCarriesAForeignAddress = "the primary network interface of virtual machine %s already carries public IP %s. Release that address, or import it as gpcn_vpc_public_ip and name it in public_ip_id. If another resource already manages it, drop allocate_public_ip from this machine instead."
 
 // A start that fails after the provider stopped the machine leaves it stopped. The
 // remedy differs by path. Create taints the machine, so the next apply replaces it.

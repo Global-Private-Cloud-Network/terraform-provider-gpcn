@@ -2320,7 +2320,7 @@ func TestPublicIpOrphanDetailBytes(t *testing.T) {
 // The refusal is the only place the operator reads the id of the address the machine
 // carries. The sentence also names the two ways out of it.
 func TestPrimaryInterfaceCarriesAForeignAddressDetailBytes(t *testing.T) {
-	const expected = "the primary network interface of virtual machine %s already carries public IP %s; release it, or import it as gpcn_vpc_public_ip and name it in public_ip_id"
+	const expected = "the primary network interface of virtual machine %s already carries public IP %s. Release that address, or import it as gpcn_vpc_public_ip and name it in public_ip_id. If another resource already manages it, drop allocate_public_ip from this machine instead."
 
 	if ErrDetailPrimaryInterfaceCarriesAForeignAddress != expected {
 		t.Errorf("Expected '%s', got '%s'", expected, ErrDetailPrimaryInterfaceCarriesAForeignAddress)
