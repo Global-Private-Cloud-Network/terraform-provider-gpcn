@@ -56,6 +56,11 @@ const vpcTearingDownRefusalBody = `{"success":false,` +
 // (src/components/vpc/vpc.service.ts:669).
 const vpcPlanTestParkedReason = "VPC removal could not be started; retry the delete"
 
+// The text a job carries when its worker died before any terminal stage
+// (src/models/resourceJobs.model.ts:198-199).
+const vpcPlanTestAbandonedJobError = "Job was dispatched but never reached a terminal stage " +
+	"(worker crash or restart) \u2014 reclaimed by the stale-job sweep."
+
 // vpcMock serves the VPC endpoints an apply walks. It keeps the name the last
 // create or update sent. The read after an apply then agrees with the
 // configuration, and the refresh plan stays empty.
@@ -87,6 +92,9 @@ type vpcMock struct {
 	// after them, which is the end of the teardown.
 	deletingGets   int
 	getsWhileGoing int
+	// deleteJobFailures counts the teardown jobs that answer a failure. A row
+	// such a job leaves behind never reaches 404.
+	deleteJobFailures int
 }
 
 // vpcMockRefusals seeds the answers the mock refuses with. A test states them
@@ -97,6 +105,7 @@ type vpcMockRefusals struct {
 	deleteNotFound        bool
 	tearingDownDeletes    int
 	parkedTeardownDeletes int
+	deleteJobFailures     int
 }
 
 func startVpcPlanMockServer(t *testing.T, refusals vpcMockRefusals) *vpcMock {
@@ -110,6 +119,7 @@ func startVpcPlanMockServer(t *testing.T, refusals vpcMockRefusals) *vpcMock {
 		deleteNotFound:        refusals.deleteNotFound,
 		tearingDownDeletes:    refusals.tearingDownDeletes,
 		parkedTeardownDeletes: refusals.parkedTeardownDeletes,
+		deleteJobFailures:     refusals.deleteJobFailures,
 	}
 	vpcPath := "/v1/resource/vpcs/" + vpcPlanTestID
 
@@ -122,7 +132,7 @@ func startVpcPlanMockServer(t *testing.T, refusals vpcMockRefusals) *vpcMock {
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/vpcs/":
 			mock.handleCreate(w, r)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
-			testutil.HandleJobResponse(w, vpcPlanTestCreateJobID, vpcPlanTestID, true)
+			mock.handleJob(w, r)
 		case r.Method == http.MethodGet && r.URL.Path == vpcPath:
 			mock.handleGet(w)
 		case r.Method == http.MethodPut && r.URL.Path == vpcPath:
@@ -269,6 +279,43 @@ func (m *vpcMock) handleDelete(w http.ResponseWriter) {
 		"meta":    nil,
 		"data":    map[string]any{"jobId": vpcPlanTestDeleteJobID},
 	})
+}
+
+// handleJob answers the poll for the job the request names. A teardown job the
+// test armed to fail answers the terminal failure shape. The row it leaves
+// behind parks in deleting with the reason the job wrote.
+func (m *vpcMock) handleJob(w http.ResponseWriter, r *http.Request) {
+	jobID := vpcPlanTestCreateJobID
+	if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
+		jobID, _ = ids[0].(string)
+	}
+
+	m.mutex.Lock()
+	failing := jobID == vpcPlanTestDeleteJobID && m.deleteJobFailures > 0
+	if failing {
+		m.deleteJobFailures--
+		m.tearingDown = false
+		m.deletingGets = 0
+		m.failureReason = vpcPlanTestAbandonedJobError
+	}
+	m.mutex.Unlock()
+
+	if failing {
+		testutil.WriteJSONResponse(w, map[string]any{
+			"success": true,
+			"message": "Job status retrieved",
+			"data": map[string]any{"jobs": []map[string]any{{
+				"jobId":        jobID,
+				"isCompleted":  false,
+				"isTerminal":   true,
+				"hasFailed":    true,
+				"errorMessage": vpcPlanTestAbandonedJobError,
+			}}},
+		})
+		return
+	}
+
+	testutil.HandleJobResponse(w, jobID, vpcPlanTestID, true)
 }
 
 // egressIp stays null, so the state must keep it null too. failureReason is
@@ -892,4 +939,38 @@ func TestVpcResourcePlanReclaimsAParkedTeardown(t *testing.T) {
 	if count := mock.readsWhileTearingDown(); count != 1 {
 		t.Errorf("reads while tearing down = %d, want 1", count)
 	}
+}
+
+// A teardown job that fails leaves the VPC in place. The provider reports the
+// job error instead of a destroy it never achieved. The row stays in state for
+// the next apply to claim again.
+func TestVpcResourcePlanReportsAParkedReclaimWhoseJobFails(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{parkedTeardownDeletes: 1, deleteJobFailures: 1})
+	config := vpcPlanTestConfig(mock.url, "vpc-reclaim-job-fails")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+			},
+			{
+				Config:      config,
+				Destroy:     true,
+				ExpectError: regexp.MustCompile(`(?s)job\s+operation\s+failed.*never\s+reached\s+a\s+terminal\s+stage`),
+			},
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcTest, plancheck.ResourceActionNoop),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcTest, "id", vpcPlanTestID),
+				),
+			},
+		},
+	})
 }
