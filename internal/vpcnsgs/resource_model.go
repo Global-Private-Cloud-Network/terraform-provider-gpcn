@@ -81,6 +81,23 @@ func isUnset(value types.String) bool {
 	return value.IsNull() || value.IsUnknown()
 }
 
+// FailedNsgWarning reports a group GPCN gave up on. The row reads back
+// cleanly, so the apply says nothing. The operator then holds a group whose
+// rules never reached the fabric.
+func FailedNsgWarning(response *NsgDetail) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if response.Nsg.State != StateFailed {
+		return diags
+	}
+
+	if response.Nsg.FailureReason == nil || *response.Nsg.FailureReason == "" {
+		diags.AddWarning(WarnSummaryNsgFailed, fmt.Sprintf(WarnDetailNsgFailedNoReason, response.Nsg.ID))
+		return diags
+	}
+	diags.AddWarning(WarnSummaryNsgFailed, fmt.Sprintf(WarnDetailNsgFailed, response.Nsg.ID, *response.Nsg.FailureReason))
+	return diags
+}
+
 // DefaultNsgRulesWarning reports what a replace costs on the VPC's own default
 // group. GPCN stages the platform posture there as ordinary rule rows. The
 // rules route holds no guard, so the configured set replaces them.
@@ -142,6 +159,21 @@ func RuleRequestBodies(rules []RuleModel) []map[string]any {
 		bodies = append(bodies, body)
 	}
 	return bodies
+}
+
+// MapIssuedNsgToModel records the ID the 202 answered with. The build job has
+// not run, so nothing about the group is read and every other Computed
+// attribute is null. The rules stay as the configuration wrote them.
+func MapIssuedNsgToModel(nsgID string, model ResourceModel) ResourceModel {
+	model.ID = types.StringValue(nsgID)
+	model.IsDefault = types.BoolNull()
+	model.State = types.StringNull()
+	model.FailureReason = types.StringNull()
+	model.RuleCount = types.Int64Null()
+	model.SubnetCount = types.Int64Null()
+	model.CreatedTime = types.StringNull()
+	model.LastUpdated = types.StringNull()
+	return model
 }
 
 // MapNsgResponseToModel writes the Computed attributes. It fills the

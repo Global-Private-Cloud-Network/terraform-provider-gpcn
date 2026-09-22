@@ -140,6 +140,9 @@ func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 						"remote_cidr": schema.StringAttribute{
 							Description: "Remote address range the rule applies to, given as an IPv4 CIDR at its network address (e.g., 0.0.0.0/0 or 203.0.113.0/24)",
 							Required:    true,
+							Validators: []validator.String{
+								helpers.NoOuterWhitespaceValidator{Summary: vpcnsgs.ErrSummaryInvalidNsgRuleAttribute, Attribute: "remote_cidr"},
+							},
 						},
 						"description": schema.StringAttribute{
 							Description: "Additional information about the rule. GPCN edits it in place, because it is not part of the rule's identity",
@@ -194,11 +197,37 @@ func (r *vpcNsgResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	detail, err := vpcnsgs.CreateNsg(r.client, ctx, plan.VpcID.ValueString(), plan.Name.ValueString(), plan.Description.ValueString(), rules)
+	issued, err := vpcnsgs.IssueCreateNsg(r.client, ctx, plan.VpcID.ValueString(), plan.Name.ValueString(), plan.Description.ValueString(), rules)
 	if err != nil {
 		resp.Diagnostics.AddError(vpcnsgs.ErrSummaryUnableToCreateNsg, err.Error())
 		return
 	}
+
+	// GPCN inserts the group row before it dispatches the build job. The row
+	// then holds the name until someone deletes it. State must name the group,
+	// or the next apply collides with a row Terraform cannot see.
+	resp.Diagnostics.Append(resp.State.Set(ctx, vpcnsgs.MapIssuedNsgToModel(issued.NsgID, plan))...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if err := vpcnsgs.PollCreateNsg(r.client, ctx, issued.JobID); err != nil {
+		resp.Diagnostics.AddError(
+			vpcnsgs.ErrSummaryUnableToCreateNsg,
+			fmt.Sprintf(vpcnsgs.ErrDetailNsgCreatedJobFailed, issued.NsgID, err),
+		)
+		return
+	}
+
+	detail, err := vpcnsgs.GetNsg(r.client, ctx, plan.VpcID.ValueString(), issued.NsgID)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			vpcnsgs.ErrSummaryUnableToCreateNsg,
+			fmt.Sprintf(vpcnsgs.ErrDetailNsgCreatedReadBackFailed, issued.NsgID, err),
+		)
+		return
+	}
+	tflog.Info(ctx, vpcnsgs.LogSuccessfullyRetrievedNsgCreate)
 
 	plan, diags = vpcnsgs.MapNsgResponseToModel(ctx, detail, plan)
 	resp.Diagnostics.Append(diags...)
@@ -252,6 +281,8 @@ func (r *vpcNsgResource) Read(ctx context.Context, req resource.ReadRequest, res
 	if resp.Diagnostics.HasError() {
 		return
 	}
+
+	resp.Diagnostics.Append(vpcnsgs.FailedNsgWarning(detail)...)
 
 	diags = resp.State.Set(ctx, state)
 	resp.Diagnostics.Append(diags...)

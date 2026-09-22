@@ -173,11 +173,38 @@ func (r *vpcSubnetResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 
-	subnet, err := vpcsubnets.CreateSubnet(r.client, ctx, plan)
+	issued, err := vpcsubnets.IssueCreateSubnet(r.client, ctx, plan)
 	if err != nil {
 		resp.Diagnostics.AddError(vpcsubnets.ErrSummaryUnableToCreateSubnet, err.Error())
 		return
 	}
+
+	// GPCN inserts the row before it dispatches the carve job. The row then
+	// holds the name and the CIDR until someone deletes it. State must name the
+	// subnet, or the next apply collides with a row Terraform cannot see.
+	resp.Diagnostics.Append(resp.State.Set(ctx, vpcsubnets.MapIssuedSubnetToModel(&issued.Subnet, plan))...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	subnetID := issued.Subnet.ID
+	if err := vpcsubnets.PollCreateSubnet(r.client, ctx, issued.JobID); err != nil {
+		resp.Diagnostics.AddError(
+			vpcsubnets.ErrSummaryUnableToCreateSubnet,
+			fmt.Sprintf(vpcsubnets.ErrDetailSubnetCreatedJobFailed, subnetID, err),
+		)
+		return
+	}
+
+	subnet, err := vpcsubnets.GetSubnet(r.client, ctx, plan.VpcID.ValueString(), subnetID)
+	if err != nil {
+		resp.Diagnostics.AddError(
+			vpcsubnets.ErrSummaryUnableToCreateSubnet,
+			fmt.Sprintf(vpcsubnets.ErrDetailSubnetCreatedReadBackFailed, subnetID, err),
+		)
+		return
+	}
+	tflog.Info(ctx, vpcsubnets.LogSuccessfullyRetrievedSubnetCreate)
 
 	plan = vpcsubnets.MapSubnetResponseToModel(subnet, plan)
 

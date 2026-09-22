@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -410,5 +411,88 @@ func TestMapSubnetResponseToModelFillsPrefixOnImportUnit(t *testing.T) {
 	configured := MapSubnetResponseToModel(response, ResourceModel{Prefix: types.Int64Value(27)})
 	if got := configured.Prefix.ValueInt64(); got != 27 {
 		t.Errorf("expected a configured prefix to survive, got %d", got)
+	}
+}
+
+// One create carries one correlation id. A poll that mints its own breaks the
+// support log. The create call then has no link to the job it waits for.
+func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
+	t.Parallel()
+
+	var createID, pollID string
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == client.JOBS_BASE_URL_V1 {
+				if pollID == "" {
+					pollID = r.Header.Get("x-Correlation-ID")
+				}
+				testutil.HandleJobResponse(w, "job-create", unitTestSubnetID, true)
+				return
+			}
+			createID = r.Header.Get("x-Correlation-ID")
+			testutil.WriteJSONResponse(w, map[string]any{
+				"success": true,
+				"message": "Operation initiated successfully",
+				"data": map[string]any{
+					"jobId":  "job-create",
+					"subnet": map[string]any{"id": unitTestSubnetID, "cidr": "10.50.1.0/24", "nsgId": unitTestNsgID},
+				},
+			})
+		},
+	})
+
+	ctx := client.WithCorrelationID(context.Background())
+	issued, err := IssueCreateSubnet(gpcnClient, ctx, ResourceModel{
+		VpcID:       types.StringValue(unitTestVpcID),
+		Name:        types.StringValue("subnet-a"),
+		Description: types.StringValue(""),
+	})
+	if err != nil {
+		t.Fatalf("expected the create to be issued, got %v", err)
+	}
+	if err := PollCreateSubnet(gpcnClient, ctx, issued.JobID); err != nil {
+		t.Fatalf("expected the carve poll to succeed, got %v", err)
+	}
+
+	if createID == "" {
+		t.Fatal("the create carried no correlation id")
+	}
+	if pollID != createID {
+		t.Errorf("poll correlation id = %q, want the create's %q", pollID, createID)
+	}
+}
+
+// A 202 that names no subnet leaves the caller with nothing to write to state.
+// The create must stop there, before the poll files a row Terraform cannot
+// name.
+func TestIssueCreateSubnetRejectsResponseWithoutIDUnit(t *testing.T) {
+	t.Parallel()
+
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, _ *http.Request) {
+			testutil.WriteJSONResponse(w, map[string]any{
+				"success": true,
+				"message": "Operation initiated successfully",
+				"data": map[string]any{
+					"jobId":  "job-create",
+					"subnet": map[string]any{"cidr": "10.50.1.0/24", "nsgId": unitTestNsgID},
+				},
+			})
+		},
+	})
+
+	_, err := IssueCreateSubnet(gpcnClient, context.Background(), ResourceModel{
+		VpcID:       types.StringValue(unitTestVpcID),
+		Name:        types.StringValue("subnet-a"),
+		Description: types.StringValue(""),
+	})
+
+	if err == nil {
+		t.Fatal("expected an error, got none")
+	}
+	if err.Error() != ErrDetailNoSubnetIDInCreate {
+		t.Errorf("error = %q, want %q", err.Error(), ErrDetailNoSubnetIDInCreate)
 	}
 }

@@ -84,6 +84,27 @@ func SubnetFailedWarning(response *ApiSubnet) diag.Diagnostics {
 	return diags
 }
 
+// MapIssuedSubnetToModel records what the 202 already knows. That is the ID,
+// the reserved block and the group the row is bound to. The carve job has not
+// run, so every attribute the plan left unknown is null.
+func MapIssuedSubnetToModel(response *ApiSubnet, model ResourceModel) ResourceModel {
+	model.ID = types.StringValue(response.ID)
+	model.CIDR = types.StringValue(response.CIDR)
+	model.NsgID = types.StringValue(response.NsgID)
+	// A prefix the configuration names is known. Nulling it would plan a
+	// replacement, because a change of prefix replaces the subnet.
+	if model.Prefix.IsUnknown() {
+		model.Prefix = types.Int64Null()
+	}
+	model.NsgName = types.StringNull()
+	model.State = types.StringNull()
+	model.AttachedNicCount = types.Int64Null()
+	model.FailureReason = types.StringNull()
+	model.CreatedTime = types.StringNull()
+	model.LastUpdated = types.StringNull()
+	return model
+}
+
 // MapSubnetResponseToModel writes the Computed attributes. It fills the
 // configurable ones only when the caller chose no value. An import and a
 // Create both leave that behind. A configured CIDR must survive.

@@ -24,11 +24,24 @@ import (
 )
 
 const (
-	nsgPlanTestVpcID     = "55555555-5555-4555-8555-555555555555"
-	nsgPlanTestID        = "66666666-6666-4666-8666-666666666666"
-	nsgPlanTestTimestamp = "2026-01-02T15:04:05Z"
-	gpcnVpcNsgTest       = "gpcn_vpc_nsg.test"
+	nsgPlanTestVpcID        = "55555555-5555-4555-8555-555555555555"
+	nsgPlanTestID           = "66666666-6666-4666-8666-666666666666"
+	nsgPlanTestTimestamp    = "2026-01-02T15:04:05Z"
+	nsgPlanTestFailedReason = "the provider rejected the group"
+	gpcnVpcNsgTest          = "gpcn_vpc_nsg.test"
 )
+
+// regexpNsgCreatedButReadBackFailed pins the R155 sentence for a group the
+// platform built and then would not serve back.
+var regexpNsgCreatedButReadBackFailed = regexp.MustCompile(`(?s)security\s+group\s+` + nsgPlanTestID +
+	`\s+was\s+created\s+and\s+is\s+in\s+state,\s+but\s+reading\s+it\s+back\s+failed.*` +
+	`Terraform\s+has\s+marked\s+the\s+group\s+tainted,\s+so\s+the\s+next\s+apply\s+deletes\s+it\s+and\s+creates\s+it\s+again\.`)
+
+// regexpNsgCreatedButJobFailed pins the R145 sentence for a group build the
+// platform gave up on after it inserted the row.
+var regexpNsgCreatedButJobFailed = regexp.MustCompile(`(?s)security\s+group\s+` + nsgPlanTestID +
+	`\s+was\s+created\s+and\s+is\s+in\s+state,\s+but\s+its\s+creation\s+job\s+failed.*` +
+	`Terraform\s+has\s+marked\s+the\s+group\s+tainted,\s+so\s+the\s+next\s+apply\s+deletes\s+it\s+and\s+creates\s+it\s+again\.`)
 
 const (
 	nsgPlanTestRuleHTTPS = `
@@ -69,6 +82,18 @@ type nsgPlanTestServerState struct {
 	// already removed gives that answer.
 	missingOnDelete bool
 	deleted         bool
+	// failCreateJob makes the build job stop badly. GPCN inserts the group
+	// before it dispatches that job, so the group exists either way.
+	failCreateJob bool
+	// rowState is the lifecycle state the group reads back in. A group parks
+	// in "failed" when its build job or a rule replace stops badly.
+	rowState string
+	// failureReason stands for the sentence GPCN files against a parked group.
+	// An empty value reads back as the API's null.
+	failureReason string
+	// failNextRead answers the next group read with a 500. The build still
+	// ran, so the group is there and only the read-back fails.
+	failNextRead bool
 }
 
 func (s *nsgPlanTestServerState) storeRules(body map[string]any) {
@@ -90,14 +115,18 @@ func (s *nsgPlanTestServerState) detail() map[string]any {
 	if s.description != "" {
 		description = s.description
 	}
+	var failureReason any
+	if s.failureReason != "" {
+		failureReason = s.failureReason
+	}
 	return map[string]any{
 		"nsg": map[string]any{
 			"id":            nsgPlanTestID,
 			"name":          s.name,
 			"description":   description,
 			"isDefault":     s.isDefault,
-			"state":         "ready",
-			"failureReason": nil,
+			"state":         s.rowState,
+			"failureReason": failureReason,
 			"ruleCount":     len(s.rules),
 			"subnetCount":   s.subnetCount,
 			"activeJobId":   nil,
@@ -111,7 +140,7 @@ func (s *nsgPlanTestServerState) detail() map[string]any {
 func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerState) {
 	t.Helper()
 
-	state := &nsgPlanTestServerState{rules: []map[string]any{}}
+	state := &nsgPlanTestServerState{rules: []map[string]any{}, rowState: "ready"}
 
 	collection := "/v1/resource/vpcs/" + nsgPlanTestVpcID + "/nsgs/"
 	groupPath := collection + nsgPlanTestID
@@ -135,13 +164,21 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 			})
 		case r.Method == http.MethodGet && r.URL.Path == groupPath:
 			state.mu.Lock()
+			failRead := state.failNextRead
+			state.failNextRead = false
 			deleted := state.deleted
 			detail := state.detail()
 			state.mu.Unlock()
+			if failRead {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				fmt.Fprint(w, `{"success":false,"message":"Internal server error","error":{"code":"Internal Error","statusCode":500,"details":null}}`)
+				return
+			}
 			if deleted {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusNotFound)
-				fmt.Fprint(w, `{"success":false,"message":"Security group not found","error":{"code":"RESOURCE_NOT_FOUND","statusCode":404,"details":null}}`)
+				fmt.Fprint(w, `{"success":false,"message":"Security group not found","error":{"code":"Resource Not Found","statusCode":404,"details":null}}`)
 				return
 			}
 			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "", "data": detail})
@@ -173,7 +210,7 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 				state.mu.Unlock()
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusNotFound)
-				fmt.Fprint(w, `{"success":false,"message":"Security group not found","error":{"code":"RESOURCE_NOT_FOUND","statusCode":404,"details":null}}`)
+				fmt.Fprint(w, `{"success":false,"message":"Security group not found","error":{"code":"Resource Not Found","statusCode":404,"details":null}}`)
 				return
 			}
 			if refuse {
@@ -185,12 +222,12 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 			if refuse {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusConflict)
-				fmt.Fprint(w, `{"success":false,"message":"The VPC's default security group cannot be deleted while it is the default","error":{"code":"DUPLICATE_RESOURCE","statusCode":409,"details":null}}`)
+				fmt.Fprint(w, `{"success":false,"message":"The VPC's default security group cannot be deleted while it is the default","error":{"code":"Duplicate Resource","statusCode":409,"details":null}}`)
 				return
 			}
 			testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
-			testutil.HandleJobResponse(w, "job-1", nsgPlanTestID, true)
+			nsgPlanTestHandleJob(w, r, state)
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -200,8 +237,61 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 	return server, state
 }
 
+// failTheCreateJob arms the build failure under the lock. The mock server
+// reads the flag from another goroutine.
+func (s *nsgPlanTestServerState) failTheCreateJob() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failCreateJob = true
+}
+
+// failTheNextRead arms the read failure under the lock. The mock server reads
+// the flag from another goroutine.
+func (s *nsgPlanTestServerState) failTheNextRead() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failNextRead = true
+}
+
+// nsgPlanTestHandleJob answers the poll for the job the request names. Only
+// the build job can stop badly, so every other job completes.
+func nsgPlanTestHandleJob(w http.ResponseWriter, r *http.Request, state *nsgPlanTestServerState) {
+	jobID := "job-1"
+	if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
+		jobID, _ = ids[0].(string)
+	}
+
+	state.mu.Lock()
+	failCreate := state.failCreateJob
+	state.mu.Unlock()
+
+	if jobID == "job-create" && failCreate {
+		testutil.WriteJSONResponse(w, map[string]any{
+			"success": true,
+			"message": "Job status retrieved",
+			"data": map[string]any{"jobs": []map[string]any{{
+				"jobId":        jobID,
+				"isCompleted":  false,
+				"isTerminal":   true,
+				"hasFailed":    true,
+				"errorMessage": nsgPlanTestFailedReason,
+			}}},
+		})
+		return
+	}
+
+	testutil.HandleJobResponse(w, jobID, nsgPlanTestID, true)
+}
+
 func nsgPlanTestConfig(host, name, rules string) string {
 	return nsgPlanTestConfigWithDescription(host, name, "", rules)
+}
+
+// nsgPlanTestConfigWithoutRetries drops the retry budget. The client retries a
+// 500 answer, which would hide a read-back that fails once.
+func nsgPlanTestConfigWithoutRetries(host, name, rules string) string {
+	config := nsgPlanTestConfig(host, name, rules)
+	return strings.Replace(config, "  api_key = \"test-key\"\n", "  api_key = \"test-key\"\n  max_retries = 0\n", 1)
 }
 
 func nsgPlanTestConfigWithDescription(host, name, description, rules string) string {
@@ -385,7 +475,7 @@ func TestVpcNsgResourcePlanSurfacesDefaultGroupRefusal(t *testing.T) {
 			{
 				Config:      nsgPlanTestConfig(server.URL, "default", nsgPlanTestRuleHTTPS),
 				Destroy:     true,
-				ExpectError: regexp.MustCompile(strings.ReplaceAll(`default security group cannot be deleted while it is the default`, " ", `\s+`)),
+				ExpectError: regexp.MustCompile(strings.ReplaceAll(`HTTP 409 \(Duplicate Resource\): The VPC's default security group cannot be deleted while it is the default`, " ", `\s+`)),
 			},
 		},
 	})
@@ -514,6 +604,13 @@ func TestVpcNsgResourcePlanRefusesOuterWhitespace(t *testing.T) {
     description = "ping "
   }`
 
+	whitespaceCidrRule := `
+  rule {
+    direction   = "ingress"
+    protocol    = "icmp"
+    remote_cidr = " 0.0.0.0/0"
+  }`
+
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
@@ -528,6 +625,10 @@ func TestVpcNsgResourcePlanRefusesOuterWhitespace(t *testing.T) {
 			{
 				Config:      nsgPlanTestConfig(server.URL, "nsg-plan-a", whitespaceRule),
 				ExpectError: whitespaceRefusal("Invalid security group rule description", "description"),
+			},
+			{
+				Config:      nsgPlanTestConfig(server.URL, "nsg-plan-a", whitespaceCidrRule),
+				ExpectError: whitespaceRefusal("Invalid security group rule remote_cidr", "remote_cidr"),
 			},
 		},
 	})
@@ -702,4 +803,200 @@ func TestVpcNsgModifyPlanWarnsBeforeReplacingDefaultRulesUnit(t *testing.T) {
 	if got := ordinary.Diagnostics.WarningsCount(); got != 0 {
 		t.Errorf("warnings for an ordinary group = %d, want 0", got)
 	}
+}
+
+// GPCN inserts the group row before it dispatches the build job. The row then
+// holds the name until someone deletes it. A failed job must therefore leave
+// the id in state. The destroy then deletes the group instead of leaving the
+// next apply to collide with it.
+func TestVpcNsgResourcePlanKeepsTheIdWhenTheCreateJobFails(t *testing.T) {
+	t.Parallel()
+	server, state := startNsgPlanMockServer(t)
+	state.failTheCreateJob()
+
+	config := nsgPlanTestConfig(server.URL, "build-failed", nsgPlanTestRuleHTTPS)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexpNsgCreatedButJobFailed,
+			},
+			{
+				Config:  config,
+				Destroy: true,
+				Check:   checkNsgDestroyDeletedTheGroup(state),
+			},
+		},
+	})
+}
+
+// checkNsgDestroyDeletedTheGroup proves the failed create wrote the id to
+// state. The mock routes the delete by that id. A create that keeps the id to
+// itself leaves the destroy nothing to delete.
+func checkNsgDestroyDeletedTheGroup(state *nsgPlanTestServerState) func(*terraform.State) error {
+	return func(*terraform.State) error {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		if !state.deleted {
+			return fmt.Errorf("expected the destroy to delete the security group, but the mock still serves it")
+		}
+		return nil
+	}
+}
+
+// A build GPCN gave up on still reads back cleanly. The operator learns of it
+// through the state and the reason the API files against the row.
+func TestVpcNsgResourcePlanReadsFailedGroup(t *testing.T) {
+	t.Parallel()
+	server, state := startNsgPlanMockServer(t)
+
+	config := nsgPlanTestConfig(server.URL, "nsg-plan-a", nsgPlanTestRuleHTTPS)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "state", "ready"),
+					resource.TestCheckNoResourceAttr(gpcnVpcNsgTest, "failure_reason"),
+				),
+			},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					state.rowState = "failed"
+					state.failureReason = nsgPlanTestFailedReason
+				},
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "state", "failed"),
+					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "failure_reason", nsgPlanTestFailedReason),
+				),
+			},
+		},
+	})
+}
+
+// The plan harness carries no warning assertion, so Read is driven directly. A
+// test on the constructor alone leaves the call site unguarded.
+func TestVpcNsgReadWarnsOnFailedGroupUnit(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	readInState := func(rowState, failureReason string) fwresource.ReadResponse {
+		t.Helper()
+
+		group := &nsgPlanTestServerState{
+			name:          "nsg-plan-a",
+			rules:         []map[string]any{},
+			rowState:      rowState,
+			failureReason: failureReason,
+		}
+
+		_, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+			T: t,
+			Handler: func(w http.ResponseWriter, _ *http.Request) {
+				testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "", "data": group.detail()})
+			},
+		})
+
+		groupResource := &vpcNsgResource{client: gpcnClient}
+
+		var schemaResponse fwresource.SchemaResponse
+		groupResource.Schema(ctx, fwresource.SchemaRequest{}, &schemaResponse)
+
+		rules, diags := types.SetValueFrom(ctx, vpcnsgs.RuleObjectType(), []vpcnsgs.RuleModel{})
+		if diags.HasError() {
+			t.Fatalf("failed to build the rule set: %v", diags)
+		}
+
+		priorState := tfsdk.State{Schema: schemaResponse.Schema}
+		diags = priorState.Set(ctx, vpcnsgs.ResourceModel{
+			ID:            types.StringValue(nsgPlanTestID),
+			VpcID:         types.StringValue(nsgPlanTestVpcID),
+			Name:          types.StringValue("nsg-plan-a"),
+			Description:   types.StringValue(""),
+			Rules:         rules,
+			IsDefault:     types.BoolValue(false),
+			State:         types.StringValue("ready"),
+			FailureReason: types.StringNull(),
+			RuleCount:     types.Int64Value(0),
+			SubnetCount:   types.Int64Value(0),
+			CreatedTime:   types.StringValue("Friday, 02-Jan-26 15:04:05 UTC"),
+			LastUpdated:   types.StringValue("Friday, 02-Jan-26 15:04:05 UTC"),
+		})
+		if diags.HasError() {
+			t.Fatalf("failed to build the prior state: %v", diags)
+		}
+
+		readResponse := fwresource.ReadResponse{
+			State: tfsdk.State{Schema: schemaResponse.Schema, Raw: priorState.Raw},
+		}
+		groupResource.Read(ctx, fwresource.ReadRequest{State: priorState}, &readResponse)
+
+		if readResponse.Diagnostics.HasError() {
+			t.Fatalf("Read reported errors: %v", readResponse.Diagnostics.Errors())
+		}
+		return readResponse
+	}
+
+	failed := readInState("failed", nsgPlanTestFailedReason)
+	warnings := failed.Diagnostics.Warnings()
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %v, want exactly one", warnings)
+	}
+	if got := warnings[0].Summary(); got != "Security group is in the failed state" {
+		t.Errorf("summary = %q, want %q", got, "Security group is in the failed state")
+	}
+	wantDetail := "Security group 66666666-6666-4666-8666-666666666666 is in the failed state: the provider rejected the group. Apply its rules again or delete the group and create it again."
+	if got := warnings[0].Detail(); got != wantDetail {
+		t.Errorf("detail = %q, want %q", got, wantDetail)
+	}
+
+	// GPCN can park a group with no reason recorded.
+	noReason := readInState("failed", "")
+	noReasonWarnings := noReason.Diagnostics.Warnings()
+	if len(noReasonWarnings) != 1 {
+		t.Fatalf("warnings with no reason = %v, want exactly one", noReasonWarnings)
+	}
+	wantNoReasonDetail := "Security group 66666666-6666-4666-8666-666666666666 is in the failed state. Apply its rules again or delete the group and create it again."
+	if got := noReasonWarnings[0].Detail(); got != wantNoReasonDetail {
+		t.Errorf("detail with no reason = %q, want %q", got, wantNoReasonDetail)
+	}
+
+	ready := readInState("ready", "")
+	if got := ready.Diagnostics.WarningsCount(); got != 0 {
+		t.Errorf("warnings for a ready group = %d, want 0", got)
+	}
+}
+
+// GPCN answers the read-back after a build that worked. A failure there leaves
+// the group and the id in state. The error therefore carries the tainted
+// remedy, not a bare HTTP failure.
+func TestVpcNsgResourcePlanKeepsTheIdWhenTheReadBackFails(t *testing.T) {
+	t.Parallel()
+	server, state := startNsgPlanMockServer(t)
+	state.failTheNextRead()
+
+	config := nsgPlanTestConfigWithoutRetries(server.URL, "read-back-failed", nsgPlanTestRuleHTTPS)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexpNsgCreatedButReadBackFailed,
+			},
+			{
+				Config:  config,
+				Destroy: true,
+				Check:   checkNsgDestroyDeletedTheGroup(state),
+			},
+		},
+	})
 }

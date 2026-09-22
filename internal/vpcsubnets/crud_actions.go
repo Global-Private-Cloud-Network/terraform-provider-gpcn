@@ -66,11 +66,19 @@ func subnetPath(vpcID, subnetID string) string {
 	return subnetCollectionPath(vpcID) + subnetID
 }
 
-// CreateSubnet posts the subnet, waits for the carve job, then re-reads the row
-// through the listing. The 202 already names the ID and the reserved CIDR, and
-// the re-read reports the state the job left behind.
-func CreateSubnet(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*ApiSubnet, error) {
-	ctx = client.WithCorrelationID(ctx)
+// IssuedSubnet is what the 202 answers with. The platform inserts the row
+// before it dispatches the carve job. The ID, the reserved CIDR and the group
+// binding are real whatever the job does next.
+type IssuedSubnet struct {
+	JobID  string
+	Subnet ApiSubnet
+}
+
+// IssueCreateSubnet posts the subnet and returns the 202 without waiting. The
+// caller writes the ID to state before PollCreateSubnet waits for the carve.
+// The two halves inherit the caller's correlation ID, so one create reads as
+// one thread in the support log.
+func IssueCreateSubnet(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*IssuedSubnet, error) {
 	tflog.Info(ctx, LogStartingCreateSubnet)
 
 	vpcID := model.VpcID.ValueString()
@@ -113,20 +121,25 @@ func CreateSubnet(gpcnClient *client.GpcnClient, ctx context.Context, model Reso
 	if err := json.Unmarshal(body, &created); err != nil {
 		return nil, err
 	}
+	// The ID is what Create writes to state before the poll. Without one the
+	// row exists and Terraform cannot name it, so the create stops here.
+	if created.Data.Subnet.ID == "" {
+		return nil, fmt.Errorf("%s", ErrDetailNoSubnetIDInCreate)
+	}
 	tflog.Info(ctx, LogIssuedCreateSubnetJob)
 
-	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionCreateSubnet, created.Data.JobID); err != nil {
-		return nil, fmt.Errorf("create subnet polling failed: %w", err)
+	return &IssuedSubnet{JobID: created.Data.JobID, Subnet: created.Data.Subnet}, nil
+}
+
+// PollCreateSubnet waits for the carve job. It stands apart from the issue so
+// the caller can put the subnet ID in state before the wait.
+func PollCreateSubnet(gpcnClient *client.GpcnClient, ctx context.Context, jobID string) error {
+	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionCreateSubnet, jobID); err != nil {
+		return fmt.Errorf("create subnet polling failed: %w", err)
 	}
+
 	tflog.Info(ctx, LogLongPollingCompletedCreateSubnet)
-
-	subnet, err := GetSubnet(gpcnClient, ctx, vpcID, created.Data.Subnet.ID)
-	if err != nil {
-		return nil, err
-	}
-
-	tflog.Info(ctx, LogSuccessfullyRetrievedSubnetCreate)
-	return subnet, nil
+	return nil
 }
 
 // GetSubnet pages the VPC's subnet listing and matches the ID. The API wires no

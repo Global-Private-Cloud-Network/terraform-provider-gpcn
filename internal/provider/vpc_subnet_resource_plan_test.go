@@ -22,6 +22,18 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
+// regexpSubnetCreatedButReadBackFailed pins the R155 sentence for a row the
+// platform carved and then would not serve back.
+var regexpSubnetCreatedButReadBackFailed = regexp.MustCompile(`(?s)subnet\s+` + subnetPlanTestID +
+	`\s+was\s+created\s+and\s+is\s+in\s+state,\s+but\s+reading\s+it\s+back\s+failed.*` +
+	`Terraform\s+has\s+marked\s+the\s+subnet\s+tainted,\s+so\s+the\s+next\s+apply\s+deletes\s+it\s+and\s+creates\s+it\s+again\.`)
+
+// regexpSubnetCreatedButJobFailed pins the R145 sentence for a carve the
+// platform gave up on after it inserted the row.
+var regexpSubnetCreatedButJobFailed = regexp.MustCompile(`(?s)subnet\s+` + subnetPlanTestID +
+	`\s+was\s+created\s+and\s+is\s+in\s+state,\s+but\s+its\s+creation\s+job\s+failed.*` +
+	`Terraform\s+has\s+marked\s+the\s+subnet\s+tainted,\s+so\s+the\s+next\s+apply\s+deletes\s+it\s+and\s+creates\s+it\s+again\.`)
+
 const (
 	subnetPlanTestVpcID        = "11111111-1111-4111-8111-111111111111"
 	subnetPlanTestID           = "22222222-2222-4222-8222-222222222222"
@@ -56,8 +68,14 @@ type subnetPlanTestServerState struct {
 	// missingOnDelete answers the DELETE with a 404. A subnet another operator
 	// already removed gives that answer.
 	missingOnDelete bool
-	createBody      map[string]any
-	rebindBody      map[string]any
+	// failCreateJob makes the carve job stop badly. The platform inserts the
+	// row before it dispatches that job, so the id exists either way.
+	failCreateJob bool
+	// failNextRead answers the next listing with a 500. The carve still ran,
+	// so the row is there and only the read-back fails.
+	failNextRead bool
+	createBody   map[string]any
+	rebindBody   map[string]any
 }
 
 func (s *subnetPlanTestServerState) row() map[string]any {
@@ -117,11 +135,19 @@ func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestS
 			})
 		case r.Method == http.MethodGet && r.URL.Path == collection:
 			state.mu.Lock()
+			failRead := state.failNextRead
+			state.failNextRead = false
 			rows := []map[string]any{}
 			if !state.deleted {
 				rows = append(rows, state.row())
 			}
 			state.mu.Unlock()
+			if failRead {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				fmt.Fprint(w, `{"success":false,"message":"Internal server error","error":{"code":"Internal Error","statusCode":500,"details":null}}`)
+				return
+			}
 			testutil.WriteJSONResponse(w, map[string]any{
 				"success": true,
 				"message": "",
@@ -156,7 +182,7 @@ func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestS
 				state.mu.Unlock()
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusNotFound)
-				fmt.Fprint(w, `{"success":false,"message":"Subnet not found","error":{"code":"RESOURCE_NOT_FOUND","statusCode":404,"details":null}}`)
+				fmt.Fprint(w, `{"success":false,"message":"Subnet not found","error":{"code":"Resource Not Found","statusCode":404,"details":null}}`)
 				return
 			}
 			if refuse {
@@ -168,12 +194,12 @@ func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestS
 			if refuse {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusConflict)
-				fmt.Fprintf(w, `{"success":false,"message":"Cannot delete a subnet with %d attached network interface(s). Detach or delete the VMs first.","error":{"code":"DUPLICATE_RESOURCE","statusCode":409,"details":null}}`, count)
+				fmt.Fprintf(w, `{"success":false,"message":"Cannot delete a subnet with %d attached network interface(s). Detach or delete the VMs first.","error":{"code":"Duplicate Resource","statusCode":409,"details":null}}`, count)
 				return
 			}
 			testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
-			testutil.HandleJobResponse(w, "job-1", subnetPlanTestID, true)
+			subnetPlanTestHandleJob(w, r, state)
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -181,6 +207,52 @@ func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestS
 	t.Cleanup(server.Close)
 
 	return server, state
+}
+
+// failTheCreateJob arms the carve failure under the lock. The mock server
+// reads the flag from another goroutine.
+func (s *subnetPlanTestServerState) failTheCreateJob() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failCreateJob = true
+}
+
+// failTheNextRead arms the listing failure under the lock. The mock server
+// reads the flag from another goroutine.
+func (s *subnetPlanTestServerState) failTheNextRead() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failNextRead = true
+}
+
+// subnetPlanTestHandleJob answers the poll for the job the request names. Only
+// the carve job can stop badly, so every other job completes.
+func subnetPlanTestHandleJob(w http.ResponseWriter, r *http.Request, state *subnetPlanTestServerState) {
+	jobID := "job-1"
+	if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
+		jobID, _ = ids[0].(string)
+	}
+
+	state.mu.Lock()
+	failCreate := state.failCreateJob
+	state.mu.Unlock()
+
+	if jobID == "job-create" && failCreate {
+		testutil.WriteJSONResponse(w, map[string]any{
+			"success": true,
+			"message": "Job status retrieved",
+			"data": map[string]any{"jobs": []map[string]any{{
+				"jobId":        jobID,
+				"isCompleted":  false,
+				"isTerminal":   true,
+				"hasFailed":    true,
+				"errorMessage": subnetPlanTestFailedReason,
+			}}},
+		})
+		return
+	}
+
+	testutil.HandleJobResponse(w, jobID, subnetPlanTestID, true)
 }
 
 // whitespaceRefusal builds the pattern for a whitespace refusal. Terraform
@@ -207,6 +279,13 @@ resource "gpcn_vpc_subnet" "test" {
   %s
 }
 `, host, subnetPlanTestVpcID, name, subnetPlanTestCIDR, extra)
+}
+
+// subnetPlanTestConfigWithoutRetries drops the retry budget. The client retries
+// a 500 answer, which would hide a read-back that fails once.
+func subnetPlanTestConfigWithoutRetries(host, name string) string {
+	config := subnetPlanTestConfig(host, name, "")
+	return strings.Replace(config, "  api_key = \"test-key\"\n", "  api_key = \"test-key\"\n  max_retries = 0\n", 1)
 }
 
 // subnetPlanTestConfigWithoutCidr asks the allocator for a block rather than
@@ -357,7 +436,7 @@ func TestVpcSubnetResourcePlanSurfacesDeleteRefusal(t *testing.T) {
 			{
 				Config:      subnetPlanTestConfig(server.URL, "subnet-plan-a", ""),
 				Destroy:     true,
-				ExpectError: regexp.MustCompile(strings.ReplaceAll(`Cannot delete a subnet with 2 attached network interface\(s\). Detach or delete`, " ", `\s+`)),
+				ExpectError: regexp.MustCompile(strings.ReplaceAll(`HTTP 409 \(Duplicate Resource\): Cannot delete a subnet with 2 attached network interface\(s\). Detach or delete`, " ", `\s+`)),
 			},
 		},
 	})
@@ -905,5 +984,166 @@ func TestVpcSubnetReadWarnsOnFailedSubnetUnit(t *testing.T) {
 	ready := readInState("ready", "")
 	if got := ready.Diagnostics.WarningsCount(); got != 0 {
 		t.Errorf("warnings for a ready subnet = %d, want 0", got)
+	}
+}
+
+// The platform inserts the subnet row before it dispatches the carve job. The
+// row then holds the name and the CIDR until someone deletes it. A failed job
+// must therefore leave the id in state. The destroy then deletes the row
+// instead of leaving the next apply to collide with it.
+func TestVpcSubnetResourcePlanKeepsTheIdWhenTheCreateJobFails(t *testing.T) {
+	t.Parallel()
+	server, state := startSubnetPlanMockServer(t)
+	state.failTheCreateJob()
+
+	config := subnetPlanTestConfig(server.URL, "carve-failed", "")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexpSubnetCreatedButJobFailed,
+			},
+			{
+				Config:  config,
+				Destroy: true,
+				Check:   checkSubnetDestroyDeletedTheRow(state),
+			},
+		},
+	})
+}
+
+// checkSubnetDestroyDeletedTheRow proves the failed create wrote the id to
+// state. The mock routes the delete by that id. A create that keeps the id to
+// itself leaves the destroy nothing to delete.
+func checkSubnetDestroyDeletedTheRow(state *subnetPlanTestServerState) func(*terraform.State) error {
+	return func(*terraform.State) error {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		if !state.deleted {
+			return fmt.Errorf("expected the destroy to delete the subnet row, but the mock still lists it")
+		}
+		return nil
+	}
+}
+
+// The platform answers the read-back after a carve that worked. A failure
+// there leaves the row and the id in state. The error therefore carries the
+// tainted remedy, not a bare HTTP failure.
+func TestVpcSubnetResourcePlanKeepsTheIdWhenTheReadBackFails(t *testing.T) {
+	t.Parallel()
+	server, state := startSubnetPlanMockServer(t)
+	state.failTheNextRead()
+
+	config := subnetPlanTestConfigWithoutRetries(server.URL, "read-back-failed")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexpSubnetCreatedButReadBackFailed,
+			},
+			{
+				Config:  config,
+				Destroy: true,
+				Check:   checkSubnetDestroyDeletedTheRow(state),
+			},
+		},
+	})
+}
+
+// The pre-poll write nulls the Computed attributes the carve has not filled
+// yet. A prefix the configuration names is already known, so nulling it would
+// plan a replacement on the next apply.
+func TestVpcSubnetCreateKeepsTheConfiguredPrefixWhenTheCarveFailsUnit(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	row := &subnetPlanTestServerState{
+		name:     "prefix-carve",
+		nsgID:    subnetPlanTestDefaultNsg,
+		nsgName:  "default",
+		cidr:     "10.50.1.0/26",
+		rowState: "creating",
+	}
+
+	_, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"message": "Job status retrieved",
+					"data": map[string]any{"jobs": []map[string]any{{
+						"jobId":        "job-create",
+						"isCompleted":  false,
+						"isTerminal":   true,
+						"hasFailed":    true,
+						"errorMessage": subnetPlanTestFailedReason,
+					}}},
+				})
+			case r.Method == http.MethodPost:
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"message": "Operation initiated successfully",
+					"data":    map[string]any{"jobId": "job-create", "subnet": row.row()},
+				})
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+
+	subnetResource := &vpcSubnetResource{client: gpcnClient}
+
+	var schemaResponse fwresource.SchemaResponse
+	subnetResource.Schema(ctx, fwresource.SchemaRequest{}, &schemaResponse)
+
+	plan := tfsdk.Plan{Schema: schemaResponse.Schema}
+	diags := plan.Set(ctx, vpcsubnets.ResourceModel{
+		ID:               types.StringUnknown(),
+		VpcID:            types.StringValue(subnetPlanTestVpcID),
+		Name:             types.StringValue("prefix-carve"),
+		Description:      types.StringValue(""),
+		CIDR:             types.StringUnknown(),
+		Prefix:           types.Int64Value(26),
+		NsgID:            types.StringUnknown(),
+		NsgName:          types.StringUnknown(),
+		State:            types.StringUnknown(),
+		AttachedNicCount: types.Int64Unknown(),
+		FailureReason:    types.StringUnknown(),
+		CreatedTime:      types.StringUnknown(),
+		LastUpdated:      types.StringUnknown(),
+	})
+	if diags.HasError() {
+		t.Fatalf("failed to build the plan: %v", diags)
+	}
+
+	createResponse := fwresource.CreateResponse{
+		State: tfsdk.State{Schema: schemaResponse.Schema, Raw: plan.Raw},
+	}
+	subnetResource.Create(ctx, fwresource.CreateRequest{Plan: plan}, &createResponse)
+
+	if !createResponse.Diagnostics.HasError() {
+		t.Fatalf("expected the failed carve to report an error, got none")
+	}
+
+	var stored vpcsubnets.ResourceModel
+	if diags := createResponse.State.Get(ctx, &stored); diags.HasError() {
+		t.Fatalf("failed to read the written state: %v", diags)
+	}
+
+	if got := stored.Prefix; !got.Equal(types.Int64Value(26)) {
+		t.Errorf("prefix = %v, want 26", got)
+	}
+	// The carve has not run, so the attributes only it fills stay null.
+	if !stored.State.IsNull() {
+		t.Errorf("state = %v, want null", stored.State)
+	}
+	if !stored.AttachedNicCount.IsNull() {
+		t.Errorf("attached_nic_count = %v, want null", stored.AttachedNicCount)
 	}
 }
