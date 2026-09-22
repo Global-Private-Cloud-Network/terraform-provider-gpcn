@@ -2607,7 +2607,7 @@ func vmPlanTestSentencePattern(sentence string) *regexp.Regexp {
 	for i, word := range words {
 		words[i] = regexp.QuoteMeta(word)
 	}
-	return regexp.MustCompile(`(?s)` + strings.Join(words, `\s+`))
+	return regexp.MustCompile(strings.Join(words, `\s+`))
 }
 
 // vmPlanTestUnwindSentence renders the unwind report around the detail of the step that
