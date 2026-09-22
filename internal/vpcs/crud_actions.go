@@ -162,8 +162,10 @@ func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string)
 			tflog.Info(ctx, fmt.Sprintf(LogVpcTeardownFinished, vpcID))
 			return nil
 		}
+		// A read that fails says nothing about the row. The refusal is stale,
+		// and only the read failure names what the provider met.
 		if readErr != nil {
-			return err
+			return readErr
 		}
 		switch {
 		// A teardown that parked writes a failure reason, and no job then
