@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
@@ -40,7 +41,7 @@ func (v NoOuterWhitespaceValidator) ValidateString(_ context.Context, request va
 	}
 
 	value := request.ConfigValue.ValueString()
-	if strings.TrimSpace(value) == value {
+	if strings.TrimFunc(value, isJavaScriptWhitespace) == value {
 		return
 	}
 
@@ -49,4 +50,18 @@ func (v NoOuterWhitespaceValidator) ValidateString(_ context.Context, request va
 		fmt.Sprintf(v.Summary, v.Attribute),
 		fmt.Sprintf(ErrDetailOuterWhitespace, v.Attribute),
 	)
+}
+
+// isJavaScriptWhitespace reports the code points GPCN's own trim removes. The
+// API trims with JavaScript, whose set is Unicode White_Space with U+FEFF added
+// and U+0085 removed. A pasted byte order mark would otherwise never settle. A
+// refused U+0085 is a refusal the API does not make.
+func isJavaScriptWhitespace(r rune) bool {
+	if r == '\ufeff' {
+		return true
+	}
+	if r == '\u0085' {
+		return false
+	}
+	return unicode.IsSpace(r)
 }
