@@ -1,0 +1,34 @@
+name: Feature request
+description: A resource, attribute or behaviour the provider should have.
+title: "feat: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The outcome you want in Terraform terms, not the implementation.
+      placeholder: "I want to manage X so that Y."
+    validations:
+      required: true
+  - type: textarea
+    id: today
+    attributes:
+      label: What do you do today instead?
+      description: Portal steps, API calls, a workaround, or nothing.
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed configuration
+      description: If you have a shape in mind, sketch the resource or attribute.
+      render: hcl
+  - type: dropdown
+    id: api
+    attributes:
+      label: Does the GPCN API already support this?
+      options:
+        - "Yes, the API can do it"
+        - "No, the API would need to change too"
+        - "Not sure"
+    validations:
+      required: true

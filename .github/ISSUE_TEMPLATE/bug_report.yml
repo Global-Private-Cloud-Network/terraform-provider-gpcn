@@ -1,0 +1,62 @@
+name: Bug report
+description: The provider did something wrong, or an error message did not help.
+title: "bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. The three things that make a bug fixable quickly are the exact configuration, the exact command, and the exact error text. Please redact API keys, account identifiers and IP addresses.
+  - type: input
+    id: provider-version
+    attributes:
+      label: Provider version
+      description: From `terraform version` or your `required_providers` block.
+      placeholder: "1.4.0"
+    validations:
+      required: true
+  - type: input
+    id: terraform-version
+    attributes:
+      label: Terraform version
+      placeholder: "1.16.3"
+    validations:
+      required: true
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Terraform configuration
+      description: The smallest configuration that shows the problem.
+      render: hcl
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The commands you ran, in order.
+      placeholder: |
+        1. terraform apply
+        2. change `name`
+        3. terraform plan
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened
+      description: Paste the diagnostic verbatim. With `TF_LOG=DEBUG` the provider logs each request and response, minus the key; include the relevant lines if you have them.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Did it work on an earlier version? Does it happen every time?

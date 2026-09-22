@@ -1,50 +1,91 @@
-# GPCN Terraform Provider
+# Terraform Provider for GPCN
 
-This repository contains a Terraform provider used to provision GPCN resources. Example tf files can be found in the `examples` directory.
+[![Terraform Registry](https://img.shields.io/badge/registry-Global--Private--Cloud--Network%2Fgpcn-blue)](https://registry.terraform.io/providers/Global-Private-Cloud-Network/gpcn/latest)
+[![Tests](https://github.com/Global-Private-Cloud-Network/terraform-provider-gpcn/actions/workflows/test.yml/badge.svg)](https://github.com/Global-Private-Cloud-Network/terraform-provider-gpcn/actions/workflows/test.yml)
+[![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-brightgreen)](LICENSE)
 
-## Environment Setup
+Manage [Global Private Cloud Network](https://gpcn.com) infrastructure with Terraform: VPCs, subnets, security groups, public IP addresses, L2 segments, virtual machines, GPU instances, volumes, SSH keys and resource groups.
 
-The below instructions are for installing the GPCN terraform provider locally for development purposes. If you are interested in using GPCN for resource management, refer to the [documentation](./docs/) to get started.
+- **Documentation:** every resource and data source, with examples, on the [Terraform Registry](https://registry.terraform.io/providers/Global-Private-Cloud-Network/gpcn/latest/docs).
+- **Examples:** runnable configurations under [`examples/`](examples/).
+- **Changes:** [CHANGELOG.md](CHANGELOG.md), including upgrade notes between versions.
 
-Install [go](https://go.dev/) and [terraform](https://developer.hashicorp.com/terraform/install).
+## Requirements
 
-In the root of this project, run `go mod tidy` and `go install .` This will install your terraform provider locally.
+- Terraform 1.5 or later
+- A GPCN account and an API key with the permissions for the resources you manage (each resource's documentation names them)
 
-Run the command `go env GOBIN`. This will output your local Go binary installation directory. If you've just installed Go for the first time, this will likely be unchanged at `~/go/bin`. Create a file named `.terraformrc` here. In it, you will add the following lines:
+## Usage
 
-```
-provider_installation {
-  dev_overrides {
-      "gpcn.com/dev/gpcn"   = "<<output of go env GOBIN>>"
-  }
-
-  # For all other providers, install them directly from their origin provider
-  # registries as normal. If you omit this, Terraform will _only_ use
-  # the dev_overrides block, and so no other providers will be available.
-  direct {}
-}
-```
-
-You should also change the required_providers block in the resource.tf file you're testing to
-
-```
+```hcl
 terraform {
   required_providers {
     gpcn = {
-      source  = "gpcn.com/dev/gpcn"
+      source  = "Global-Private-Cloud-Network/gpcn"
+      version = "~> 1.4"
     }
   }
 }
+
+provider "gpcn" {}
+
+data "gpcn_datacenters" "chicago" {
+  name        = "Chicago"
+  vpc_capable = true
+}
+
+resource "gpcn_vpc" "main" {
+  name          = "main"
+  datacenter_id = data.gpcn_datacenters.chicago.datacenters[0].id
+  cidr          = "10.10.0.0/16"
+}
+
+resource "gpcn_vpc_subnet" "app" {
+  vpc_id = gpcn_vpc.main.id
+  name   = "app"
+  cidr   = "10.10.1.0/24"
+}
 ```
 
-This means when you run the provider examples locally and access the GPCN provider, it will use the compiled binary from your local GOBIN directory.
+### Authentication
 
-An API key (GPCN_API_KEY) and address of the base URL (GPCN_HOST) must be exposed as environment variables to run the provider or any associated resource.tf files. They can also optionally be passed in as parameters to the `provider "gpcn" {}` block in resource.tf, but it is considered better practice to expose them at runtime through the environment.
+The provider reads its credentials from the environment:
 
-## Examples
+```bash
+export GPCN_HOST="https://api.gpcn.com"
+export GPCN_API_KEY="..."
+```
 
-Examples can be found in the `examples` directory. You can create new resources through `terraform plan` and `terraform apply` and destroy them with `terraform destroy`. You can also optionally create a resource outside of Terraform and import it with `terraform import <resource_name> <id>`. More information can be found on [Hashicorp's website](https://developer.hashicorp.com/terraform) for instructions on using terraform providers.
+Both can also be set as `host` and `api_key` in the `provider "gpcn"` block. Keep the key out of configuration files that are committed to version control.
 
-## Testing
+### Timeouts and retries
 
-Testing can be done by running `make testacc` in the root of this project using [make](https://www.gnu.org/software/make/manual/html_node/Running.html). You can run an individual test by running `make testaccnamed TEST={test_name}` instead. Depending on the test, you may want to increase the default timeout of 10m via the `-timeout 60m` flag, where 60m corresponds to 60 minutes. These are _acceptance_ tests so they will actually create and destroy resources and require the correct environment variables to be set for the target environment. This will take a long time. Terraform testing framework automatically destroys resources after running, but you should still exercise caution when running the full test suite. More information on Terraform acceptance tests can be found [here](https://developer.hashicorp.com/terraform/plugin/sdkv2/testing/acceptance-tests).
+Long-running operations (creating machines, volumes and networks) are polled until they finish. The provider block accepts `request_timeout`, `polling_timeout` and `max_retries`; see the [provider documentation](https://registry.terraform.io/providers/Global-Private-Cloud-Network/gpcn/latest/docs) for defaults.
+
+## Upgrading
+
+Read the entry for the new version in [CHANGELOG.md](CHANGELOG.md) before you upgrade. Minor releases can require configuration changes; the changelog says which, and how to migrate existing state.
+
+## Getting help
+
+- Something does not work as documented: open a [bug report](https://github.com/Global-Private-Cloud-Network/terraform-provider-gpcn/issues/new?template=bug_report.yml).
+- The provider is missing something: open a [feature request](https://github.com/Global-Private-Cloud-Network/terraform-provider-gpcn/issues/new?template=feature_request.yml).
+- A security problem: follow [SECURITY.md](SECURITY.md). Please do not open a public issue.
+
+## Contributing
+
+Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the development setup, how to run the unit and acceptance tests, the commit conventions and the review process. Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
+
+## Development
+
+```bash
+make            # format, lint, build and install into your GOBIN, regenerate docs
+make test       # unit tests, no credentials needed
+make testacc    # acceptance tests: create real resources against GPCN_HOST
+```
+
+To run your local build, add a dev override to `~/.terraformrc` pointing `gpcn.com/dev/gpcn` at your `GOBIN` and use that source in the configuration under test. Details in [CONTRIBUTING.md](CONTRIBUTING.md#development-setup).
+
+## License
+
+[Mozilla Public License 2.0](LICENSE)
