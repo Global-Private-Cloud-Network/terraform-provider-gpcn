@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 
@@ -601,4 +602,19 @@ func TestL2SegmentResourcePlanReplacesOnDatacenterChange(t *testing.T) {
 			},
 		},
 	})
+}
+
+// TestL2SegmentResourceSchemaNamesTheResourceGroupDrop pins the sentence byte
+// for byte. An import of a grouped segment plans a no-op, so nothing else tells
+// the reader the group was dropped.
+func TestL2SegmentResourceSchemaNamesTheResourceGroupDrop(t *testing.T) {
+	t.Parallel()
+
+	schemaResponse := &fwresource.SchemaResponse{}
+	NewL2SegmentResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
+
+	const want = "A segment that sits in a resource group imports without the group; the provider does not manage resource groups in this release."
+	if got := schemaResponse.Schema.Description; !strings.Contains(got, want) {
+		t.Errorf("Description = %q, want it to contain %q", got, want)
+	}
 }
