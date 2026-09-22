@@ -1594,7 +1594,7 @@ func TestVirtualMachineStopDecisionSkipsAMachineWithHotplug(t *testing.T) {
 	}
 }
 
-// DEV sends a null skuId for a machine whose SKU it cannot resolve. The provider
+// GPCN sends a null skuId for a machine whose SKU it cannot resolve. The provider
 // reads that null as an empty string. Live drift alone must never stop a machine. A
 // rename would otherwise stop and start such a machine on every apply.
 func TestVirtualMachineStopDecisionSkipsARenameOfAnUnresolvedSku(t *testing.T) {
@@ -1623,7 +1623,7 @@ func TestVirtualMachineStopDecisionSkipsARenameOfADriftedSegmentSet(t *testing.T
 }
 
 // vmPlanTestReadBodyWithUnresolvedSku reports a machine whose SKU GPCN cannot resolve.
-// DEV sends a null skuId and placeholder values for such a machine.
+// GPCN sends a null skuId and placeholder values for such a machine.
 func vmPlanTestReadBodyWithUnresolvedSku(name, status string, hotplug int) map[string]any {
 	body := vmPlanTestReadBodyWithHotplug(name, status, "", hotplug)
 	configuration := body["data"].(map[string]any)["configuration"].(map[string]any)

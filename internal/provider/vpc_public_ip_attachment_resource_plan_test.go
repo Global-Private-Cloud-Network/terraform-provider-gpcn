@@ -214,7 +214,7 @@ func TestVPCPublicIpAttachmentResourcePlanSurfacesAttachRefusal(t *testing.T) {
 	})
 }
 
-// DEV refuses a second attach until the address detaches. A binding the
+// GPCN refuses a second attach until the address detaches. A binding the
 // read-back could not confirm must still reach state. The destroy then
 // detaches it instead of wedging every later apply.
 func TestVPCPublicIpAttachmentResourcePlanKeepsBindingWhenReadBackFails(t *testing.T) {

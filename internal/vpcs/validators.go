@@ -62,7 +62,7 @@ func (v SuperCidrValidator) ValidateString(_ context.Context, req validator.Stri
 	}
 }
 
-// parseCidr mirrors the backend parser (src/components/vpc/cidr.utils.ts:35-55).
+// parseCidr mirrors the backend's CIDR parser.
 // The backend refuses a leading-zero octet, because an inet_aton parser reads
 // such an octet as octal.
 func parseCidr(cidr string) (cidrRange, bool) {

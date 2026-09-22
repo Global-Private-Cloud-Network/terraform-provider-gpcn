@@ -36,8 +36,7 @@ const vpcNotEmptyRefusalBody = `{"success":false,` +
 	`"error":{"code":"VPC_NOT_EMPTY","statusCode":409,` +
 	`"details":{"blockers":{"subnets":1,"publicIps":0,"nsgs":0},"inFlight":{"subnets":0,"publicIps":0,"nsgs":0}}}}`
 
-// The API refuses an update body that carries no updatable key
-// (src/components/vpc/vpc.validation.ts:68-81).
+// The API refuses an update body that carries no updatable key.
 const vpcEmptyUpdateRefusalBody = `{"success":false,` +
 	`"message":"Invalid Parameters: At least one of name, description or resourceGroupId must be provided",` +
 	`"error":{"code":"Validation Error","statusCode":422,` +
@@ -46,18 +45,15 @@ const vpcEmptyUpdateRefusalBody = `{"success":false,` +
 const vpcNotFoundBody = `{"success":false,"message":"VPC not found",` +
 	`"error":{"code":"Resource Not Found","statusCode":404,"details":null}}`
 
-// A VPC already being torn down refuses a second claim
-// (src/components/vpc/vpc.service.ts:129-130,547).
+// A VPC already being torn down refuses a second claim.
 const vpcTearingDownRefusalBody = `{"success":false,` +
 	`"message":"The VPC is not active (status: deleting); this operation needs an active VPC.",` +
 	`"error":{"code":"VPC_NOT_ACTIVE","statusCode":409,"details":null}}`
 
-// The marker a teardown writes when its dispatch dies before the engine
-// (src/components/vpc/vpc.service.ts:669).
+// The marker a teardown writes when its dispatch dies before the engine.
 const vpcPlanTestParkedReason = "VPC removal could not be started; retry the delete"
 
-// The text a job carries when its worker dies before any terminal stage
-// (src/models/resourceJobs.model.ts:198-199).
+// The text a job carries when its worker dies before any terminal stage.
 const vpcPlanTestAbandonedJobError = "Job was dispatched but never reached a terminal stage " +
 	"(worker crash or restart) \u2014 reclaimed by the stale-job sweep."
 

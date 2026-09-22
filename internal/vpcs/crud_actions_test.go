@@ -18,8 +18,7 @@ const vpcNotActiveBody = `{"success":false,` +
 	`"message":"The VPC is not active (status: creating); this operation needs an active VPC.",` +
 	`"error":{"code":"VPC_NOT_ACTIVE","statusCode":409,"details":null}}`
 
-// A row that no longer exists answers with these bytes
-// (src/components/vpc/vpc.access.ts:25, src/common/errorCodes.ts:55).
+// A row that no longer exists answers with these bytes.
 const vpcGoneBody = `{"success":false,"message":"VPC not found",` +
 	`"error":{"code":"Resource Not Found","statusCode":404,"details":null}}`
 

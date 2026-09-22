@@ -46,10 +46,9 @@ const (
 	ErrDetailVpcTeardownTimeout = "a teardown was already running, and the VPC was still present after %s"
 )
 
-// The messages GPCN's own super-CIDR refinement raises, byte for byte
-// (src/components/vpc/vpc.validation.ts:31,38,45). A refused plan names the
-// rule in the API's own words. The API trims a CIDR before it parses one, and
-// this validator does not. The plan therefore refuses a padded CIDR the API
+// The messages GPCN's own super-CIDR refinement raises, byte for byte. A refused
+// plan names the rule in the API's own words. The API trims a CIDR before it parses
+// one, and this validator does not. The plan therefore refuses a padded CIDR the API
 // would accept.
 const (
 	ErrDetailVpcCidrShape      = "must be a valid IPv4 CIDR whose address is the network address (e.g. 10.50.0.0/16)"

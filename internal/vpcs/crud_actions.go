@@ -15,9 +15,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-// vpcPayload is the VPC object every VPC endpoint answers with
-// (src/components/vpc/vpc.controller.ts:43-59). Only the detail read and the
-// create 202 carry dnsNameservers.
+// vpcPayload is the VPC object every VPC endpoint answers with. Only the detail
+// read and the create 202 carry dnsNameservers.
 type vpcPayload struct {
 	ID          string  `json:"id"`
 	Name        string  `json:"name"`
@@ -170,7 +169,7 @@ func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string)
 		switch {
 		// A teardown that parked writes a failure reason, and no job then
 		// drives the row. The platform re-admits a delete on it, so a wait
-		// would never end (src/components/vpc/vpc.service.ts:242-243).
+		// would never end.
 		case vpcResponse.Data.Status == VPC_STATUS_DELETING && vpcResponse.Data.FailureReason == nil:
 			tflog.Info(ctx, fmt.Sprintf(LogWaitingForVpcTeardown, vpcID))
 			return awaitVpcGone(gpcnClient, ctx, vpcID)
