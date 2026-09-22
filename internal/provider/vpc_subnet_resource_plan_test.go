@@ -1053,3 +1053,97 @@ func TestVpcSubnetResourcePlanKeepsTheIdWhenTheReadBackFails(t *testing.T) {
 		},
 	})
 }
+
+// The pre-poll write nulls the Computed attributes the carve has not filled
+// yet. A prefix the configuration names is already known, so nulling it would
+// plan a replacement on the next apply.
+func TestVpcSubnetCreateKeepsTheConfiguredPrefixWhenTheCarveFailsUnit(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	row := &subnetPlanTestServerState{
+		name:     "prefix-carve",
+		nsgID:    subnetPlanTestDefaultNsg,
+		nsgName:  "default",
+		cidr:     "10.50.1.0/26",
+		rowState: "creating",
+	}
+
+	_, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"message": "Job status retrieved",
+					"data": map[string]any{"jobs": []map[string]any{{
+						"jobId":        "job-create",
+						"isCompleted":  false,
+						"isTerminal":   true,
+						"hasFailed":    true,
+						"errorMessage": subnetPlanTestFailedReason,
+					}}},
+				})
+			case r.Method == http.MethodPost:
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true,
+					"message": "Operation initiated successfully",
+					"data":    map[string]any{"jobId": "job-create", "subnet": row.row()},
+				})
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+
+	subnetResource := &vpcSubnetResource{client: gpcnClient}
+
+	var schemaResponse fwresource.SchemaResponse
+	subnetResource.Schema(ctx, fwresource.SchemaRequest{}, &schemaResponse)
+
+	plan := tfsdk.Plan{Schema: schemaResponse.Schema}
+	diags := plan.Set(ctx, vpcsubnets.ResourceModel{
+		ID:               types.StringUnknown(),
+		VpcID:            types.StringValue(subnetPlanTestVpcID),
+		Name:             types.StringValue("prefix-carve"),
+		Description:      types.StringValue(""),
+		CIDR:             types.StringUnknown(),
+		Prefix:           types.Int64Value(26),
+		NsgID:            types.StringUnknown(),
+		NsgName:          types.StringUnknown(),
+		State:            types.StringUnknown(),
+		AttachedNicCount: types.Int64Unknown(),
+		FailureReason:    types.StringUnknown(),
+		CreatedTime:      types.StringUnknown(),
+		LastUpdated:      types.StringUnknown(),
+	})
+	if diags.HasError() {
+		t.Fatalf("failed to build the plan: %v", diags)
+	}
+
+	createResponse := fwresource.CreateResponse{
+		State: tfsdk.State{Schema: schemaResponse.Schema, Raw: plan.Raw},
+	}
+	subnetResource.Create(ctx, fwresource.CreateRequest{Plan: plan}, &createResponse)
+
+	if !createResponse.Diagnostics.HasError() {
+		t.Fatalf("expected the failed carve to report an error, got none")
+	}
+
+	var stored vpcsubnets.ResourceModel
+	if diags := createResponse.State.Get(ctx, &stored); diags.HasError() {
+		t.Fatalf("failed to read the written state: %v", diags)
+	}
+
+	if got := stored.Prefix; !got.Equal(types.Int64Value(26)) {
+		t.Errorf("prefix = %v, want 26", got)
+	}
+	// The carve has not run, so the attributes only it fills stay null.
+	if !stored.State.IsNull() {
+		t.Errorf("state = %v, want null", stored.State)
+	}
+	if !stored.AttachedNicCount.IsNull() {
+		t.Errorf("attached_nic_count = %v, want null", stored.AttachedNicCount)
+	}
+}
