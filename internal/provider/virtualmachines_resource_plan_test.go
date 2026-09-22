@@ -2199,6 +2199,11 @@ type vmPublicIpMockArms struct {
 	refuseSizeOnce        bool
 	refuseAttributesOnce  bool
 	refuseReleaseOnce     bool
+	refuseStart           bool
+	// noHotplug reports an image that takes no network hotplug, so an update stops the
+	// machine. That arm alone records stop and start. Every destroy stops the machine,
+	// and a stop recorded there would follow the verbs the other arms pin.
+	noHotplug bool
 }
 
 // startVirtualMachinePublicIpMockServer serves the VPC address verbs and records them in
@@ -2215,6 +2220,10 @@ func startVirtualMachinePublicIpMockServer(t *testing.T, arms vmPublicIpMockArms
 	name := ""
 	status := virtualmachines.VMStatusRunning.String()
 	skuId := vmPlanTestSizeID
+	hotplug := 1
+	if arms.noHotplug {
+		hotplug = 0
+	}
 	boundID := ""
 	boundAddress := ""
 	refuseNextRead := false
@@ -2305,8 +2314,26 @@ func startVirtualMachinePublicIpMockServer(t *testing.T, arms vmPublicIpMockArms
 			testutil.WriteJSONResponse(w, vmPublicIpPlanTestInterfacesBody(currentID, currentAddress))
 		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
 			mu.Lock()
+			if arms.noHotplug {
+				events = append(events, "stop")
+			}
 			status = virtualmachines.VMStatusShutoff.String()
 			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/start":
+			mu.Lock()
+			if arms.noHotplug {
+				events = append(events, "start")
+			}
+			if !arms.refuseStart {
+				status = virtualmachines.VMStatusRunning.String()
+			}
+			mu.Unlock()
+			if arms.refuseStart {
+				w.WriteHeader(http.StatusInternalServerError)
+				testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "start refused"})
+				return
+			}
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
 			mu.Lock()
@@ -2340,7 +2367,7 @@ func startVirtualMachinePublicIpMockServer(t *testing.T, arms vmPublicIpMockArms
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, currentSku))
+			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, currentSku, hotplug))
 		case r.Method == http.MethodPut && r.URL.Path == vmPlanTestPath:
 			body := testutil.ReadRequestBody(r)
 			mu.Lock()
@@ -2583,10 +2610,15 @@ func vmPlanTestAcquiredAddressVerbs() []string {
 
 // The resize follows the acquire, so a refused resize leaves an address the update never
 // records. The runner gives it back, and the machine ends where it started. State keeps
-// allocate_public_ip false, and the third step proves the plan is empty again.
+// allocate_public_ip false, and the third step proves the plan is empty again. The
+// fourth step asks for an address once more. It acquires a fresh one and meets no
+// refusal, because the unwind left the interface carrying nothing.
 func TestVirtualMachineResourcePlanReleasesTheAcquiredAddressWhenTheResizeFails(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server, recorded := startVirtualMachinePublicIpMockServer(t, vmPublicIpMockArms{refuseSizeOnce: true})
+
+	afterUnwind := 0
+	retryVerbs := []string{"acquire", "attach " + vmPlanTestAcquiredIpID + " nic-1"}
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -2603,13 +2635,32 @@ func TestVirtualMachineResourcePlanReleasesTheAcquiredAddressWhenTheResizeFails(
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "allocate_public_ip", "false"),
 					resource.TestCheckNoResourceAttr(gpcnVirtualMachineTest, "public_ip"),
+					func(*terraform.State) error {
+						afterUnwind = len(recorded())
+						return nil
+					},
+				),
+			},
+			{
+				Config: vmPublicIpSizePlanTestConfig(server.URL, "vm-plan-resize-fails", true, "", vmPlanTestSizeID),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "allocate_public_ip", "true"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "public_ip", vmPlanTestAcquiredIpAddress),
+					func(*terraform.State) error {
+						retry := recorded()[afterUnwind:]
+						if !slices.Equal(retry, retryVerbs) {
+							return fmt.Errorf("expected %v, got %v", retryVerbs, retry)
+						}
+						return nil
+					},
 				),
 			},
 		},
 	})
 
-	if verbs := recorded(); !slices.Equal(verbs, vmPlanTestAcquiredAddressVerbs()) {
-		t.Errorf("Expected %v, got %v", vmPlanTestAcquiredAddressVerbs(), verbs)
+	want := append(vmPlanTestAcquiredAddressVerbs(), retryVerbs...)
+	if verbs := recorded(); !slices.Equal(verbs, want) {
+		t.Errorf("Expected %v, got %v", want, verbs)
 	}
 }
 
@@ -2673,6 +2724,124 @@ func TestVirtualMachineResourcePlanReleasesTheAcquiredAddressWhenTheReadBackFail
 
 	if verbs := recorded(); !slices.Equal(verbs, vmPlanTestAcquiredAddressVerbs()) {
 		t.Errorf("Expected %v, got %v", vmPlanTestAcquiredAddressVerbs(), verbs)
+	}
+}
+
+// vmPlanTestStoppedResizeVerbs lists what a failed resize leaves on a machine the
+// update stopped. The start comes before the release. The machine owes the user its
+// availability, and the release is a long-polled job behind it.
+func vmPlanTestStoppedResizeVerbs() []string {
+	return []string{
+		"stop",
+		"acquire",
+		"attach " + vmPlanTestAcquiredIpID + " nic-1",
+		"start",
+		"release " + vmPlanTestAcquiredIpID,
+	}
+}
+
+// vmPlanTestStartCount counts the starts a verb list records.
+func vmPlanTestStartCount(verbs []string) int {
+	starts := 0
+	for _, verb := range verbs {
+		if verb == "start" {
+			starts++
+		}
+	}
+	return starts
+}
+
+// An image without network hotplug makes the update stop the machine, and the resize
+// then fails after the acquire. The machine runs again before the runner gives the
+// address back. The step sets no ExpectError, because ErrorCheck never runs for a step
+// that sets one.
+func TestVirtualMachineResourcePlanStartsTheMachineBeforeItReleasesTheAddress(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachinePublicIpMockServer(t, vmPublicIpMockArms{
+		refuseSizeOnce: true,
+		noHotplug:      true,
+	})
+
+	errorCheckRan := false
+	var verbsAtFailure []string
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		ErrorCheck: func(err error) error {
+			errorCheckRan = true
+			verbsAtFailure = recorded()
+			if !vmPlanTestAcquiredAddressReleasedPattern.MatchString(err.Error()) {
+				t.Errorf("Expected the released detail, got '%s'", err.Error())
+			}
+			if vmPlanTestLeftStoppedPattern.MatchString(err.Error()) {
+				t.Errorf("Expected no left-stopped diagnostic, got '%s'", err.Error())
+			}
+			return nil
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: vmPublicIpSizePlanTestConfig(server.URL, "vm-plan-stopped-resize", false, "", vmPlanTestSizeID),
+			},
+			{
+				Config: vmPublicIpSizePlanTestConfig(server.URL, "vm-plan-stopped-resize", true, "", vmPlanTestSizeID2),
+			},
+		},
+	})
+
+	if !errorCheckRan {
+		t.Error("Expected the apply to fail and ErrorCheck to run")
+	}
+	if !slices.Equal(verbsAtFailure, vmPlanTestStoppedResizeVerbs()) {
+		t.Errorf("Expected %v, got %v", vmPlanTestStoppedResizeVerbs(), verbsAtFailure)
+	}
+	if starts := vmPlanTestStartCount(verbsAtFailure); starts != 1 {
+		t.Errorf("Expected exactly 1 start, got %d", starts)
+	}
+}
+
+// The start and the release both fail after the resize. The machine stays stopped and
+// the address stays at the platform. The operator repairs each by hand, so the report
+// carries both.
+func TestVirtualMachineResourcePlanReportsTheStoppedMachineAndTheAddressWhenBothFail(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachinePublicIpMockServer(t, vmPublicIpMockArms{
+		refuseSizeOnce:    true,
+		refuseReleaseOnce: true,
+		refuseStart:       true,
+		noHotplug:         true,
+	})
+
+	errorCheckRan := false
+	var verbsAtFailure []string
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		ErrorCheck: func(err error) error {
+			errorCheckRan = true
+			verbsAtFailure = recorded()
+			if !vmPlanTestAcquiredAddressReleaseFailedPattern.MatchString(err.Error()) {
+				t.Errorf("Expected the named address, got '%s'", err.Error())
+			}
+			if !vmPlanTestLeftStoppedPattern.MatchString(err.Error()) {
+				t.Errorf("Expected the left-stopped diagnostic, got '%s'", err.Error())
+			}
+			return nil
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: vmPublicIpSizePlanTestConfig(server.URL, "vm-plan-stopped-both-fail", false, "", vmPlanTestSizeID),
+			},
+			{
+				Config: vmPublicIpSizePlanTestConfig(server.URL, "vm-plan-stopped-both-fail", true, "", vmPlanTestSizeID2),
+			},
+		},
+	})
+
+	if !errorCheckRan {
+		t.Error("Expected the apply to fail and ErrorCheck to run")
+	}
+	if !slices.Equal(verbsAtFailure, vmPlanTestStoppedResizeVerbs()) {
+		t.Errorf("Expected %v, got %v", vmPlanTestStoppedResizeVerbs(), verbsAtFailure)
 	}
 }
 
