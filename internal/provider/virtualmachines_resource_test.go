@@ -56,8 +56,8 @@ const (
 	vmOctetSlots = 8
 )
 
-// vpcTestOctetFor returns the octet of the named case. The guard below and every call
-// site read this one function. A wrapper that ignores its slot fails the guard.
+// vpcTestOctetFor returns the octet of the named case. It fails a case the table does
+// not name.
 func vpcTestOctetFor(t testing.TB, name string) int {
 	t.Helper()
 	slot, named := vmOctetSlot[name]
@@ -67,8 +67,9 @@ func vpcTestOctetFor(t testing.TB, name string) int {
 	return vmOctetBase + slot
 }
 
-// A shared slot puts two parallel cases in one /16, and GPCN refuses the second VPC.
-// The compiler accepts a duplicate, so the release pins the set.
+// The guard reads the table alone, not the call sites. It refuses a slot outside this
+// file's window, because that slot takes a block another file owns. It refuses two
+// entries that take one octet. The compiler accepts both.
 func TestVirtualMachineAcceptanceOctetsAreUnique(t *testing.T) {
 	owner := map[int]string{}
 	for name, slot := range vmOctetSlot {
