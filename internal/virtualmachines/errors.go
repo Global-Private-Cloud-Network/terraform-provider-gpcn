@@ -70,8 +70,10 @@ const (
 	ErrDetailPublicIpOrphaned                  = "public IP %s was acquired for virtual machine %s but %s: %s. Release it in the portal or import it as gpcn_vpc_public_ip."
 	ErrDetailPublicIpAttachFailedReleased      = "public IP %s was acquired for virtual machine %s but attaching it failed: %s; the address was released."
 	ErrDetailPublicIpAttachFailedReleaseFailed = "public IP %s was acquired for virtual machine %s but attaching it failed: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip."
-	ErrPhrasePublicIpAcquisitionFailed         = "its acquisition job failed"
 	ErrPhrasePublicIpReleaseFailed             = "releasing it failed"
+
+	ErrDetailPublicIpAcquireJobFailedReleased      = "public IP %s was acquired for virtual machine %s but its acquisition job failed: %s; the address was released."
+	ErrDetailPublicIpAcquireJobFailedReleaseFailed = "public IP %s was acquired for virtual machine %s but its acquisition job failed: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip."
 )
 
 // A step that fails after a successful acquire leaves an address the update records
