@@ -1985,9 +1985,11 @@ func TestUpdatePublicIPIfChangedExchangesAHeldAddressForAnAcquiredOne(t *testing
 	}
 }
 
-// An exchange whose read-back failed leaves state behind the machine. The retry then
+// An exchange whose read-back fails leaves state behind the machine. The retry then
 // finds the machine carrying the address the plan names. The operator owns that
-// address, and GPCN releases an attached address, so a release here destroys it.
+// address, and GPCN releases an attached address, so a release here destroys it. GPCN
+// also answers 409 for a second attach of an address a machine carries, so the retry
+// issues no verb at all.
 func TestUpdatePublicIPIfChangedKeepsTheHeldAddressOnAnExchangeRetry(t *testing.T) {
 	const vmID = "vm-exchange-retry"
 	const heldID = "ip-held-1"
@@ -2003,11 +2005,8 @@ func TestUpdatePublicIPIfChangedKeepsTheHeldAddressOnAnExchangeRetry(t *testing.
 	if diags.HasError() {
 		t.Fatalf("Expected no error diagnostic, got %v", diags.Errors())
 	}
-	if slices.Contains(*verbs, "release "+heldID) {
-		t.Errorf("Expected no release of the held address, got %v", *verbs)
-	}
-	if slices.Contains(*verbs, "detach "+heldID) {
-		t.Errorf("Expected no detach of the held address, got %v", *verbs)
+	if len(*verbs) != 0 {
+		t.Errorf("Expected no address verb, got %v", *verbs)
 	}
 }
 

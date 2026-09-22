@@ -206,7 +206,10 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 			return "", diags
 		}
 	}
-	if heldChanged && !plan.PublicIpId.IsNull() {
+	// GPCN answers 409 for a second attach of an address a machine carries. A retry of a
+	// change whose read-back failed finds that address already in place.
+	if heldChanged && !plan.PublicIpId.IsNull() &&
+		carriedID.ValueString() != plan.PublicIpId.ValueString() {
 		if err := vpcpublicips.AttachPublicIp(gpcnClient, ctx, vpcID, plan.PublicIpId.ValueString(), primaryNetworkInterfaceId); err != nil {
 			return "", publicIpFailure(diags, err)
 		}
