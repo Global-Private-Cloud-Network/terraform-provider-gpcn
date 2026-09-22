@@ -81,6 +81,23 @@ func isUnset(value types.String) bool {
 	return value.IsNull() || value.IsUnknown()
 }
 
+// FailedNsgWarning reports a group GPCN gave up on. The row reads back
+// cleanly, so the apply says nothing. The operator then holds a group whose
+// rules never reached the fabric.
+func FailedNsgWarning(response *NsgDetail) diag.Diagnostics {
+	var diags diag.Diagnostics
+	if response.Nsg.State != StateFailed {
+		return diags
+	}
+
+	if response.Nsg.FailureReason == nil || *response.Nsg.FailureReason == "" {
+		diags.AddWarning(WarnSummaryNsgFailed, fmt.Sprintf(WarnDetailNsgFailedNoReason, response.Nsg.ID))
+		return diags
+	}
+	diags.AddWarning(WarnSummaryNsgFailed, fmt.Sprintf(WarnDetailNsgFailed, response.Nsg.ID, *response.Nsg.FailureReason))
+	return diags
+}
+
 // DefaultNsgRulesWarning reports what a replace costs on the VPC's own default
 // group. GPCN stages the platform posture there as ordinary rule rows. The
 // rules route holds no guard, so the configured set replaces them.

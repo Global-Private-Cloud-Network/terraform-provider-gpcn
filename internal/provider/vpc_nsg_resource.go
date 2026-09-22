@@ -279,6 +279,8 @@ func (r *vpcNsgResource) Read(ctx context.Context, req resource.ReadRequest, res
 		return
 	}
 
+	resp.Diagnostics.Append(vpcnsgs.FailedNsgWarning(detail)...)
+
 	diags = resp.State.Set(ctx, state)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {

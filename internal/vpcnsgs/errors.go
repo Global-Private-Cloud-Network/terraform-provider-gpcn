@@ -31,6 +31,14 @@ const (
 	ErrDetailRulePortOrder          = "portRangeMin must not exceed portRangeMax"
 )
 
+// Warning strings for a group GPCN parked. The platform reconciles a parked
+// group back to ready once the rules apply, so the remedy names that first.
+const (
+	WarnSummaryNsgFailed        = "Security group is in the failed state"
+	WarnDetailNsgFailed         = "Security group %s is in the failed state: %s. Apply its rules again or delete the group and create it again."
+	WarnDetailNsgFailedNoReason = "Security group %s is in the failed state. Apply its rules again or delete the group and create it again."
+)
+
 // Warning strings for a rules replace against the VPC's own default group. The
 // two quoted sentences are the descriptions GPCN stages with the VPC. GPCN
 // removes only the rows the desired set leaves out, so the sentence promises no

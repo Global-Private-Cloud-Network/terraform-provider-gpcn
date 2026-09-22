@@ -9,6 +9,11 @@ const (
 	rulesPathSegment = "/rules"
 )
 
+// StateFailed is the state a group parks in when its build job or a rule
+// replace stops badly. The row stays readable, so only a warning tells the
+// operator about it.
+const StateFailed = "failed"
+
 // Rule vocabularies. The API stores the wildcard protocol as "all".
 var (
 	RuleDirections = []string{"ingress", "egress"}

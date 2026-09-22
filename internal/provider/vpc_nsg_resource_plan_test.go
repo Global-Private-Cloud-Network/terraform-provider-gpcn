@@ -79,6 +79,12 @@ type nsgPlanTestServerState struct {
 	// failCreateJob makes the build job stop badly. GPCN inserts the group
 	// before it dispatches that job, so the group exists either way.
 	failCreateJob bool
+	// rowState is the lifecycle state the group reads back in. A group parks
+	// in "failed" when its build job or a rule replace stops badly.
+	rowState string
+	// failureReason stands for the sentence GPCN files against a parked group.
+	// An empty value reads back as the API's null.
+	failureReason string
 }
 
 func (s *nsgPlanTestServerState) storeRules(body map[string]any) {
@@ -100,14 +106,18 @@ func (s *nsgPlanTestServerState) detail() map[string]any {
 	if s.description != "" {
 		description = s.description
 	}
+	var failureReason any
+	if s.failureReason != "" {
+		failureReason = s.failureReason
+	}
 	return map[string]any{
 		"nsg": map[string]any{
 			"id":            nsgPlanTestID,
 			"name":          s.name,
 			"description":   description,
 			"isDefault":     s.isDefault,
-			"state":         "ready",
-			"failureReason": nil,
+			"state":         s.rowState,
+			"failureReason": failureReason,
 			"ruleCount":     len(s.rules),
 			"subnetCount":   s.subnetCount,
 			"activeJobId":   nil,
@@ -121,7 +131,7 @@ func (s *nsgPlanTestServerState) detail() map[string]any {
 func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerState) {
 	t.Helper()
 
-	state := &nsgPlanTestServerState{rules: []map[string]any{}}
+	state := &nsgPlanTestServerState{rules: []map[string]any{}, rowState: "ready"}
 
 	collection := "/v1/resource/vpcs/" + nsgPlanTestVpcID + "/nsgs/"
 	groupPath := collection + nsgPlanTestID
@@ -801,5 +811,134 @@ func checkNsgDestroyDeletedTheGroup(state *nsgPlanTestServerState) func(*terrafo
 			return fmt.Errorf("expected the destroy to delete the security group, but the mock still serves it")
 		}
 		return nil
+	}
+}
+
+// A build GPCN gave up on still reads back cleanly. The operator learns of it
+// through the state and the reason the API files against the row.
+func TestVpcNsgResourcePlanReadsFailedGroup(t *testing.T) {
+	t.Parallel()
+	server, state := startNsgPlanMockServer(t)
+
+	config := nsgPlanTestConfig(server.URL, "nsg-plan-a", nsgPlanTestRuleHTTPS)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "state", "ready"),
+					resource.TestCheckNoResourceAttr(gpcnVpcNsgTest, "failure_reason"),
+				),
+			},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					state.rowState = "failed"
+					state.failureReason = nsgPlanTestFailedReason
+				},
+				Config: config,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "state", "failed"),
+					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "failure_reason", nsgPlanTestFailedReason),
+				),
+			},
+		},
+	})
+}
+
+// The plan harness carries no warning assertion, so Read is driven directly. A
+// test on the constructor alone leaves the call site unguarded.
+func TestVpcNsgReadWarnsOnFailedGroupUnit(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	readInState := func(rowState, failureReason string) fwresource.ReadResponse {
+		t.Helper()
+
+		group := &nsgPlanTestServerState{
+			name:          "nsg-plan-a",
+			rules:         []map[string]any{},
+			rowState:      rowState,
+			failureReason: failureReason,
+		}
+
+		_, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+			T: t,
+			Handler: func(w http.ResponseWriter, _ *http.Request) {
+				testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "", "data": group.detail()})
+			},
+		})
+
+		groupResource := &vpcNsgResource{client: gpcnClient}
+
+		var schemaResponse fwresource.SchemaResponse
+		groupResource.Schema(ctx, fwresource.SchemaRequest{}, &schemaResponse)
+
+		rules, diags := types.SetValueFrom(ctx, vpcnsgs.RuleObjectType(), []vpcnsgs.RuleModel{})
+		if diags.HasError() {
+			t.Fatalf("failed to build the rule set: %v", diags)
+		}
+
+		priorState := tfsdk.State{Schema: schemaResponse.Schema}
+		diags = priorState.Set(ctx, vpcnsgs.ResourceModel{
+			ID:            types.StringValue(nsgPlanTestID),
+			VpcID:         types.StringValue(nsgPlanTestVpcID),
+			Name:          types.StringValue("nsg-plan-a"),
+			Description:   types.StringValue(""),
+			Rules:         rules,
+			IsDefault:     types.BoolValue(false),
+			State:         types.StringValue("ready"),
+			FailureReason: types.StringNull(),
+			RuleCount:     types.Int64Value(0),
+			SubnetCount:   types.Int64Value(0),
+			CreatedTime:   types.StringValue("Friday, 02-Jan-26 15:04:05 UTC"),
+			LastUpdated:   types.StringValue("Friday, 02-Jan-26 15:04:05 UTC"),
+		})
+		if diags.HasError() {
+			t.Fatalf("failed to build the prior state: %v", diags)
+		}
+
+		readResponse := fwresource.ReadResponse{
+			State: tfsdk.State{Schema: schemaResponse.Schema, Raw: priorState.Raw},
+		}
+		groupResource.Read(ctx, fwresource.ReadRequest{State: priorState}, &readResponse)
+
+		if readResponse.Diagnostics.HasError() {
+			t.Fatalf("Read reported errors: %v", readResponse.Diagnostics.Errors())
+		}
+		return readResponse
+	}
+
+	failed := readInState("failed", nsgPlanTestFailedReason)
+	warnings := failed.Diagnostics.Warnings()
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %v, want exactly one", warnings)
+	}
+	if got := warnings[0].Summary(); got != "Security group is in the failed state" {
+		t.Errorf("summary = %q, want %q", got, "Security group is in the failed state")
+	}
+	wantDetail := "Security group 66666666-6666-4666-8666-666666666666 is in the failed state: the provider rejected the group. Apply its rules again or delete the group and create it again."
+	if got := warnings[0].Detail(); got != wantDetail {
+		t.Errorf("detail = %q, want %q", got, wantDetail)
+	}
+
+	// GPCN can park a group with no reason recorded.
+	noReason := readInState("failed", "")
+	noReasonWarnings := noReason.Diagnostics.Warnings()
+	if len(noReasonWarnings) != 1 {
+		t.Fatalf("warnings with no reason = %v, want exactly one", noReasonWarnings)
+	}
+	wantNoReasonDetail := "Security group 66666666-6666-4666-8666-666666666666 is in the failed state. Apply its rules again or delete the group and create it again."
+	if got := noReasonWarnings[0].Detail(); got != wantNoReasonDetail {
+		t.Errorf("detail with no reason = %q, want %q", got, wantNoReasonDetail)
+	}
+
+	ready := readInState("ready", "")
+	if got := ready.Diagnostics.WarningsCount(); got != 0 {
+		t.Errorf("warnings for a ready group = %d, want 0", got)
 	}
 }
