@@ -24,11 +24,18 @@ import (
 )
 
 const (
-	nsgPlanTestVpcID     = "55555555-5555-4555-8555-555555555555"
-	nsgPlanTestID        = "66666666-6666-4666-8666-666666666666"
-	nsgPlanTestTimestamp = "2026-01-02T15:04:05Z"
-	gpcnVpcNsgTest       = "gpcn_vpc_nsg.test"
+	nsgPlanTestVpcID        = "55555555-5555-4555-8555-555555555555"
+	nsgPlanTestID           = "66666666-6666-4666-8666-666666666666"
+	nsgPlanTestTimestamp    = "2026-01-02T15:04:05Z"
+	nsgPlanTestFailedReason = "the provider rejected the group"
+	gpcnVpcNsgTest          = "gpcn_vpc_nsg.test"
 )
+
+// regexpNsgCreatedButJobFailed pins the R145 sentence for a group build the
+// platform gave up on after it inserted the row.
+var regexpNsgCreatedButJobFailed = regexp.MustCompile(`(?s)security\s+group\s+` + nsgPlanTestID +
+	`\s+was\s+created\s+and\s+is\s+in\s+state,\s+but\s+its\s+creation\s+job\s+failed.*` +
+	`Terraform\s+has\s+marked\s+the\s+group\s+tainted,\s+so\s+the\s+next\s+apply\s+deletes\s+it\s+and\s+creates\s+it\s+again\.`)
 
 const (
 	nsgPlanTestRuleHTTPS = `
@@ -69,6 +76,9 @@ type nsgPlanTestServerState struct {
 	// already removed gives that answer.
 	missingOnDelete bool
 	deleted         bool
+	// failCreateJob makes the build job stop badly. GPCN inserts the group
+	// before it dispatches that job, so the group exists either way.
+	failCreateJob bool
 }
 
 func (s *nsgPlanTestServerState) storeRules(body map[string]any) {
@@ -190,7 +200,7 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 			}
 			testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
-			testutil.HandleJobResponse(w, "job-1", nsgPlanTestID, true)
+			nsgPlanTestHandleJob(w, r, state)
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -198,6 +208,44 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 	t.Cleanup(server.Close)
 
 	return server, state
+}
+
+// failTheCreateJob arms the build failure under the lock. The mock server
+// reads the flag from another goroutine.
+func (s *nsgPlanTestServerState) failTheCreateJob() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failCreateJob = true
+}
+
+// nsgPlanTestHandleJob answers the poll for the job the request names. Only
+// the build job can stop badly, so every other job completes.
+func nsgPlanTestHandleJob(w http.ResponseWriter, r *http.Request, state *nsgPlanTestServerState) {
+	jobID := "job-1"
+	if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
+		jobID, _ = ids[0].(string)
+	}
+
+	state.mu.Lock()
+	failCreate := state.failCreateJob
+	state.mu.Unlock()
+
+	if jobID == "job-create" && failCreate {
+		testutil.WriteJSONResponse(w, map[string]any{
+			"success": true,
+			"message": "Job status retrieved",
+			"data": map[string]any{"jobs": []map[string]any{{
+				"jobId":        jobID,
+				"isCompleted":  false,
+				"isTerminal":   true,
+				"hasFailed":    true,
+				"errorMessage": nsgPlanTestFailedReason,
+			}}},
+		})
+		return
+	}
+
+	testutil.HandleJobResponse(w, jobID, nsgPlanTestID, true)
 }
 
 func nsgPlanTestConfig(host, name, rules string) string {
@@ -701,5 +749,46 @@ func TestVpcNsgModifyPlanWarnsBeforeReplacingDefaultRulesUnit(t *testing.T) {
 	ordinary := modifyPlan(false, ruleSet("0.0.0.0/0"), ruleSet("10.60.0.0/16"))
 	if got := ordinary.Diagnostics.WarningsCount(); got != 0 {
 		t.Errorf("warnings for an ordinary group = %d, want 0", got)
+	}
+}
+
+// GPCN inserts the group row before it dispatches the build job, and the row
+// holds the name until someone deletes it. A failed job must therefore leave
+// the id in state. The destroy then deletes the group instead of leaving the
+// next apply to collide with it.
+func TestVpcNsgResourcePlanKeepsTheIdWhenTheCreateJobFails(t *testing.T) {
+	t.Parallel()
+	server, state := startNsgPlanMockServer(t)
+	state.failTheCreateJob()
+
+	config := nsgPlanTestConfig(server.URL, "build-failed", nsgPlanTestRuleHTTPS)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexpNsgCreatedButJobFailed,
+			},
+			{
+				Config:  config,
+				Destroy: true,
+				Check:   checkNsgDestroyDeletedTheGroup(state),
+			},
+		},
+	})
+}
+
+// checkNsgDestroyDeletedTheGroup proves the failed create wrote the id to
+// state. The mock routes the delete by that id. A create that keeps the id to
+// itself leaves the destroy nothing to delete.
+func checkNsgDestroyDeletedTheGroup(state *nsgPlanTestServerState) func(*terraform.State) error {
+	return func(*terraform.State) error {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		if !state.deleted {
+			return fmt.Errorf("expected the destroy to delete the security group, but the mock still serves it")
+		}
+		return nil
 	}
 }

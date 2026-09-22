@@ -144,6 +144,21 @@ func RuleRequestBodies(rules []RuleModel) []map[string]any {
 	return bodies
 }
 
+// MapIssuedNsgToModel records the ID the 202 answered with. The build job has
+// not run, so nothing about the group is read and every other Computed
+// attribute is null. The rules stay as the configuration wrote them.
+func MapIssuedNsgToModel(nsgID string, model ResourceModel) ResourceModel {
+	model.ID = types.StringValue(nsgID)
+	model.IsDefault = types.BoolNull()
+	model.State = types.StringNull()
+	model.FailureReason = types.StringNull()
+	model.RuleCount = types.Int64Null()
+	model.SubnetCount = types.Int64Null()
+	model.CreatedTime = types.StringNull()
+	model.LastUpdated = types.StringNull()
+	return model
+}
+
 // MapNsgResponseToModel writes the Computed attributes. It fills the
 // configurable ones only when the caller chose no value. An import and a
 // Create both leave that behind.

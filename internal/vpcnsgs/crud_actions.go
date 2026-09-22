@@ -70,10 +70,18 @@ func nsgPath(vpcID, nsgID string) string {
 	return nsgCollectionPath(vpcID) + nsgID
 }
 
-// CreateNsg posts the group with its rules inline, waits for the job, then
-// reads the group back. One call creates both, because the rules route is a
-// replace rather than an append.
-func CreateNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, name, description string, rules []RuleModel) (*NsgDetail, error) {
+// IssuedNsg is what the 202 answers with. GPCN inserts the group row before it
+// dispatches the build job, so the ID is real whatever the job does next.
+type IssuedNsg struct {
+	JobID string
+	NsgID string
+}
+
+// IssueCreateNsg posts the group with its rules inline and returns the 202
+// without waiting. One call creates both, because the rules route is a replace
+// rather than an append. The caller writes the ID to state before PollCreateNsg
+// waits for the build.
+func IssueCreateNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, name, description string, rules []RuleModel) (*IssuedNsg, error) {
 	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, LogStartingCreateNsg)
 
@@ -110,18 +118,20 @@ func CreateNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, name, 
 	}
 	tflog.Info(ctx, LogIssuedCreateNsgJob)
 
-	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionCreateNsg, created.Data.JobID); err != nil {
-		return nil, fmt.Errorf("create security group polling failed: %w", err)
+	return &IssuedNsg{JobID: created.Data.JobID, NsgID: created.Data.NsgID}, nil
+}
+
+// PollCreateNsg waits for the build job. It stands apart from the issue so the
+// caller can put the group ID in state before the wait.
+func PollCreateNsg(gpcnClient *client.GpcnClient, ctx context.Context, jobID string) error {
+	ctx = client.WithCorrelationID(ctx)
+
+	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionCreateNsg, jobID); err != nil {
+		return fmt.Errorf("create security group polling failed: %w", err)
 	}
+
 	tflog.Info(ctx, LogLongPollingCompletedCreateNsg)
-
-	detail, err := GetNsg(gpcnClient, ctx, vpcID, created.Data.NsgID)
-	if err != nil {
-		return nil, err
-	}
-
-	tflog.Info(ctx, LogSuccessfullyRetrievedNsgCreate)
-	return detail, nil
+	return nil
 }
 
 // GetNsg reads the group and its complete rule set.

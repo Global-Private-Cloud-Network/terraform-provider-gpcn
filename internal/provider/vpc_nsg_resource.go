@@ -194,11 +194,34 @@ func (r *vpcNsgResource) Create(ctx context.Context, req resource.CreateRequest,
 		return
 	}
 
-	detail, err := vpcnsgs.CreateNsg(r.client, ctx, plan.VpcID.ValueString(), plan.Name.ValueString(), plan.Description.ValueString(), rules)
+	issued, err := vpcnsgs.IssueCreateNsg(r.client, ctx, plan.VpcID.ValueString(), plan.Name.ValueString(), plan.Description.ValueString(), rules)
 	if err != nil {
 		resp.Diagnostics.AddError(vpcnsgs.ErrSummaryUnableToCreateNsg, err.Error())
 		return
 	}
+
+	// GPCN inserts the group row before it dispatches the build job, and the
+	// row holds the name until someone deletes it. State must name the group,
+	// or the next apply collides with a row Terraform cannot see.
+	resp.Diagnostics.Append(resp.State.Set(ctx, vpcnsgs.MapIssuedNsgToModel(issued.NsgID, plan))...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	if err := vpcnsgs.PollCreateNsg(r.client, ctx, issued.JobID); err != nil {
+		resp.Diagnostics.AddError(
+			vpcnsgs.ErrSummaryUnableToCreateNsg,
+			fmt.Sprintf(vpcnsgs.ErrDetailNsgCreatedJobFailed, issued.NsgID, err),
+		)
+		return
+	}
+
+	detail, err := vpcnsgs.GetNsg(r.client, ctx, plan.VpcID.ValueString(), issued.NsgID)
+	if err != nil {
+		resp.Diagnostics.AddError(vpcnsgs.ErrSummaryUnableToCreateNsg, err.Error())
+		return
+	}
+	tflog.Info(ctx, vpcnsgs.LogSuccessfullyRetrievedNsgCreate)
 
 	plan, diags = vpcnsgs.MapNsgResponseToModel(ctx, detail, plan)
 	resp.Diagnostics.Append(diags...)
