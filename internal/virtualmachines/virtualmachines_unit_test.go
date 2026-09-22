@@ -1888,8 +1888,8 @@ func publicIpUpdateMockServer(t *testing.T, carriedID string, failedJobs ...stri
 }
 
 // publicIpMockServer is publicIpUpdateMockServer with the id the acquire 202 names. An
-// empty acquiredID leaves the sibling field out, as GPCN does for a request it refused
-// before it inserted the row.
+// empty acquiredID leaves the sibling field out. GPCN does that for a request it
+// refused before it inserted the row.
 func publicIpMockServer(t *testing.T, carriedID, acquiredID string, failedJobs ...string) (*httptest.Server, *client.GpcnClient, *[]string) {
 	t.Helper()
 
@@ -2124,7 +2124,7 @@ func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheReleaseAfterDetachFails(t 
 	}
 }
 
-// An orphaned address costs money and hides from Terraform, so the release pins the
+// An orphaned address costs money and hides from Terraform. The release pins the
 // sentences that tell the operator where it is.
 func TestPublicIpOrphanDetailBytes(t *testing.T) {
 	tests := []struct {

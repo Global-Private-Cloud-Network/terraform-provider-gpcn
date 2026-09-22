@@ -2597,9 +2597,9 @@ func startVirtualMachineCreateOnSubnetMockServer(t *testing.T) (*httptest.Server
 	return server, recorded
 }
 
-// The three networking attributes reach GPCN by three different routes: subnet_id in
-// the create body, l2_segment_ids through the attach loop after it, and
-// allocate_public_ip as a flag the API never reports back. One create pins all three in
+// The three networking attributes reach GPCN by three different routes. subnet_id goes
+// in the create body. l2_segment_ids goes through the attach loop after it.
+// allocate_public_ip is a flag the API never reports back. One create pins all three in
 // state together.
 func TestVirtualMachineResourcePlanCreateOnSubnet(t *testing.T) {
 	shortenVirtualMachinePolling(t)
@@ -2735,9 +2735,6 @@ func TestVirtualMachineResourcePlanSkipsTheAcquireWhenTheMachineCarriesTheAddres
 	})
 }
 
-// startVirtualMachineDestroyBodyMockServer keeps whichever address the create asked for
-// and records the body of the delete. A test then reads what the destroy asked GPCN to
-// do with that address.
 // vmLegacyPlanTestInterfacesBody reports a primary interface on a legacy network. A
 // machine created by 1.3.0 has one, and its address is not a VPC address.
 func vmLegacyPlanTestInterfacesBody(addressID, address string) map[string]any {
@@ -2762,6 +2759,9 @@ type vmDestroyBodyMock struct {
 	readBackFails bool
 }
 
+// startVirtualMachineDestroyBodyMockServer keeps whichever address the create asked for
+// and records the body of the delete. A test then reads what the destroy asked GPCN to
+// do with that address.
 func startVirtualMachineDestroyBodyMockServer(t *testing.T, arm vmDestroyBodyMock) (*httptest.Server, func() (string, bool)) {
 	t.Helper()
 
@@ -2889,9 +2889,9 @@ func TestVirtualMachineResourcePlanDestroyReleasesAcquiredIp(t *testing.T) {
 	}
 }
 
-// A read-back that fails leaves state with no interface list, and the destroy must
-// still give back an address Terraform acquired. The live list the destroy already
-// fetched names the world, so state is only the fallback.
+// A read-back that fails leaves state with no interface list. The destroy must still
+// give back an address Terraform acquired. The live list the destroy already fetched
+// names the world, so state is only the fallback.
 func TestVirtualMachineResourcePlanDestroyReadsTheLiveInterfaceWorld(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -3152,9 +3152,9 @@ func TestVirtualMachineResourcePlanRenameKeepsThePinnedPublicIp(t *testing.T) {
 	})
 }
 
-// The tail of an update writes state before it starts the machine, so a start that
-// fails changes nothing the next apply has to repeat. The remedy therefore sends the
-// user to the portal alone, and the plan that follows is a no-op.
+// The tail of an update writes state before it starts the machine. A start that fails
+// therefore changes nothing the next apply repeats. The remedy sends the user to the
+// portal alone, and the plan that follows is a no-op.
 func TestVirtualMachineResourcePlanUpdateReportsFailedRestart(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server, _ := startVirtualMachineSegmentHotplugMockServer(t, 0, false)

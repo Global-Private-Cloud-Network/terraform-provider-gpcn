@@ -219,8 +219,8 @@ func resolveImageId(gpcnClient *client.GpcnClient, ctx context.Context, current 
 // back. Terraform releases only an address it acquired, and only a VPC interface holds
 // one. The release key also needs the vpc-public-ip:delete permission, which a legacy
 // machine must not have to spend. The live list the caller already fetched names the
-// world. State answers only when that list names no primary, because a machine whose
-// last read-back failed still carries the address Terraform acquired.
+// world. State answers only when that list names no primary. A machine whose last
+// read-back failed still carries the address Terraform acquired.
 // Returns the decision and any diagnostics encountered while reading the interfaces.
 func ReleasesAcquiredAddress(ctx context.Context, state ResourceModel, live []networks.ReadVirtualMachineNetworkDataResponseTF) (bool, diag.Diagnostics) {
 	var diags diag.Diagnostics

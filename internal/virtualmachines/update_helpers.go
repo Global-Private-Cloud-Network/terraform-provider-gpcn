@@ -153,7 +153,7 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 	vpcID := primary.VpcID.ValueString()
 	primaryNetworkInterfaceId := primary.ID.ValueString()
 	// The address the interface carries now. Each verb below that gives one up clears
-	// this value, so the acquire reads what the interface holds at that moment.
+	// this value. The acquire then reads what the interface holds at that moment.
 	carriedID := primary.PublicIPID
 
 	// The machine gives up what it no longer asks for before it takes anything on. One
@@ -207,8 +207,8 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 }
 
 // acquireAndAttachPublicIp takes an address and binds it to the interface. The API
-// inserts the address row before it dispatches the job, so every failure after the
-// request leaves a real address. No attribute records it, so each diagnostic names it.
+// inserts the address row before it dispatches the job. Every failure after the request
+// therefore leaves a real address. No attribute records it, so each diagnostic names it.
 // Returns diagnostics if any errors occurred.
 func acquireAndAttachPublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vmID, vpcID, nicID string) diag.Diagnostics {
 	var diags diag.Diagnostics

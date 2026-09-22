@@ -750,7 +750,7 @@ func TestVirtualMachineAddressDescriptions(t *testing.T) {
 
 // An import fills l2_segment_ids from the interfaces, and the attribute carries a
 // default of the empty list. A configuration that leaves it out therefore detaches
-// every segment on the next apply, so the release pins the sentence that says so.
+// every segment on the next apply. The release pins the sentence that says so.
 func TestVirtualMachineSegmentIdsDescription(t *testing.T) {
 	schemaResponse := &fwresource.SchemaResponse{}
 	NewVirtualMachinesResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
