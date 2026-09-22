@@ -562,6 +562,13 @@ func TestVpcNsgResourcePlanRefusesOuterWhitespace(t *testing.T) {
     description = "ping "
   }`
 
+	whitespaceCidrRule := `
+  rule {
+    direction   = "ingress"
+    protocol    = "icmp"
+    remote_cidr = " 0.0.0.0/0"
+  }`
+
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
@@ -576,6 +583,10 @@ func TestVpcNsgResourcePlanRefusesOuterWhitespace(t *testing.T) {
 			{
 				Config:      nsgPlanTestConfig(server.URL, "nsg-plan-a", whitespaceRule),
 				ExpectError: whitespaceRefusal("Invalid security group rule description", "description"),
+			},
+			{
+				Config:      nsgPlanTestConfig(server.URL, "nsg-plan-a", whitespaceCidrRule),
+				ExpectError: whitespaceRefusal("Invalid security group rule remote_cidr", "remote_cidr"),
 			},
 		},
 	})
