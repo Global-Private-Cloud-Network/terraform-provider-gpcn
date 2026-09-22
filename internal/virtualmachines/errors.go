@@ -61,9 +61,9 @@ const (
 	ErrDetailVMLeftStoppedRetry  = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform plan and check the proposed changes before applying."
 )
 
-// An address the provider acquired exists at the platform even when the verb that
+// An address the provider acquired exists at the platform even when the step that
 // follows fails. No attribute records it, so the diagnostic is the only place the
-// operator reads its id. The phrases below name which verb refused.
+// operator reads its id. The phrases below name the step that failed.
 const (
 	ErrDetailPublicIpOrphaned                  = "public IP %s was acquired for virtual machine %s but %s: %s. Release it in the portal or import it as gpcn_vpc_public_ip."
 	ErrDetailPublicIpAttachFailedReleased      = "public IP %s was acquired for virtual machine %s but attaching it failed: %s; the address was released."
@@ -71,6 +71,7 @@ const (
 	ErrPhrasePublicIpAcquisitionFailed         = "its acquisition job failed"
 	ErrPhrasePublicIpAttachFailed              = "attaching it failed"
 	ErrPhrasePublicIpReleaseFailed             = "releasing it failed"
+	ErrPhrasePublicIpReadBackFailed            = "reading the machine back failed"
 )
 
 // Warning detail message templates

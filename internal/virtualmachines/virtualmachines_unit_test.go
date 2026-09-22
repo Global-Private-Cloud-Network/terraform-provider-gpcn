@@ -1109,7 +1109,7 @@ func TestUpdatePublicIPIfChangedReportsMissingPrimaryInterface(t *testing.T) {
 	state := createTestVMModel("test-vm", testVMImage, false)
 	plan := createTestVMModel("test-vm", testVMImage, true)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if !diags.HasError() {
 		t.Fatal("Expected an error diagnostic when no interface is primary")
 	}
@@ -1152,7 +1152,7 @@ func TestUpdatePublicIPIfChangedRefusesAnL2PrimaryInterface(t *testing.T) {
 	state := createTestVMModel("test-vm", testVMImage, false)
 	plan := createTestVMModel("test-vm", testVMImage, true)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if !diags.HasError() {
 		t.Fatal("Expected an error diagnostic when the primary interface is not on a VPC")
 	}
@@ -1945,7 +1945,7 @@ func TestUpdatePublicIPIfChangedRefusesAnAddressItDidNotAcquire(t *testing.T) {
 	state := createTestVMModel("test-vm", testVMImage, false)
 	plan := createTestVMModel("test-vm", testVMImage, true)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if !diags.HasError() {
 		t.Fatal("Expected an error diagnostic when the primary carries a foreign address")
 	}
@@ -1975,7 +1975,7 @@ func TestUpdatePublicIPIfChangedExchangesAHeldAddressForAnAcquiredOne(t *testing
 	state.PublicIpId = types.StringValue(heldID)
 	plan := createTestVMModel("test-vm", testVMImage, true)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if diags.HasError() {
 		t.Fatalf("Expected no error diagnostic, got %v", diags.Errors())
 	}
@@ -1999,7 +1999,7 @@ func TestUpdatePublicIPIfChangedKeepsTheHeldAddressOnAnExchangeRetry(t *testing.
 	plan := createTestVMModel("test-vm", testVMImage, false)
 	plan.PublicIpId = types.StringValue(heldID)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if diags.HasError() {
 		t.Fatalf("Expected no error diagnostic, got %v", diags.Errors())
 	}
@@ -2022,7 +2022,7 @@ func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheAcquireJobFails(t *testing
 	state := createTestVMModel("test-vm", testVMImage, false)
 	plan := createTestVMModel("test-vm", testVMImage, true)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if !diags.HasError() {
 		t.Fatal("Expected an error diagnostic when the acquisition job fails")
 	}
@@ -2051,7 +2051,7 @@ func TestUpdatePublicIPIfChangedReportsABareFailureWhenTheAcquireNamesNoAddress(
 	state := createTestVMModel("test-vm", testVMImage, false)
 	plan := createTestVMModel("test-vm", testVMImage, true)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if !diags.HasError() {
 		t.Fatal("Expected an error diagnostic when the acquisition job fails")
 	}
@@ -2079,7 +2079,7 @@ func TestUpdatePublicIPIfChangedReleasesTheAddressWhenTheAttachFails(t *testing.
 	state := createTestVMModel("test-vm", testVMImage, false)
 	plan := createTestVMModel("test-vm", testVMImage, true)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if !diags.HasError() {
 		t.Fatal("Expected an error diagnostic when the attach fails")
 	}
@@ -2108,7 +2108,7 @@ func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheReleaseAlsoFails(t *testin
 	state := createTestVMModel("test-vm", testVMImage, false)
 	plan := createTestVMModel("test-vm", testVMImage, true)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if !diags.HasError() {
 		t.Fatal("Expected an error diagnostic when the release also fails")
 	}
@@ -2140,7 +2140,7 @@ func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheReleaseAfterDetachFails(t 
 	state := createTestVMModel("test-vm", testVMImage, true)
 	plan := createTestVMModel("test-vm", testVMImage, false)
 
-	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
 	if !diags.HasError() {
 		t.Fatal("Expected an error diagnostic when the release fails")
 	}
@@ -2184,6 +2184,7 @@ func TestPublicIpOrphanDetailBytes(t *testing.T) {
 		{name: "acquisition phrase", actual: ErrPhrasePublicIpAcquisitionFailed, expected: "its acquisition job failed"},
 		{name: "attach phrase", actual: ErrPhrasePublicIpAttachFailed, expected: "attaching it failed"},
 		{name: "release phrase", actual: ErrPhrasePublicIpReleaseFailed, expected: "releasing it failed"},
+		{name: "read-back phrase", actual: ErrPhrasePublicIpReadBackFailed, expected: "reading the machine back failed"},
 	}
 
 	for _, tc := range tests {

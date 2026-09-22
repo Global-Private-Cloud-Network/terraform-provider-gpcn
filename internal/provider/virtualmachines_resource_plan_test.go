@@ -2195,8 +2195,10 @@ func vmPublicIpPlanTestInterfacesBody(addressID, address string) map[string]any 
 // startVirtualMachinePublicIpMockServer serves the VPC address verbs and records them in
 // order. The legacy per-NIC routes answer nothing but a test failure. GPCN refuses them
 // on a VPC interface, so the provider must never reach for one. A create that names an
-// address binds it, and the image list answers the import.
-func startVirtualMachinePublicIpMockServer(t *testing.T) (*httptest.Server, func() []string) {
+// address binds it, and the image list answers the import. refuseReadAfterAttach makes
+// the first read of the machine after an attach answer 500, which is the read-back of
+// the update. It answers one read only, so the destroy still reaches the machine.
+func startVirtualMachinePublicIpMockServer(t *testing.T, refuseReadAfterAttach bool) (*httptest.Server, func() []string) {
 	t.Helper()
 
 	var mu sync.Mutex
@@ -2204,6 +2206,7 @@ func startVirtualMachinePublicIpMockServer(t *testing.T) (*httptest.Server, func
 	status := virtualmachines.VMStatusRunning.String()
 	boundID := ""
 	boundAddress := ""
+	refuseNextRead := false
 	var events []string
 
 	addressesPath := "/v1/resource/vpcs/" + vmPlanTestVpcID + "/public-ips"
@@ -2248,6 +2251,7 @@ func startVirtualMachinePublicIpMockServer(t *testing.T) (*httptest.Server, func
 			if addressID == vmPlanTestHeldIpID {
 				boundAddress = vmPlanTestHeldIpAddress
 			}
+			refuseNextRead = refuseReadAfterAttach
 			mu.Unlock()
 			testutil.HandleCreateJobResponse(w, "job-ip", "attach issued")
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/detach") && strings.HasPrefix(r.URL.Path, addressesPath+"/"):
@@ -2284,7 +2288,13 @@ func startVirtualMachinePublicIpMockServer(t *testing.T) (*httptest.Server, func
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
 			mu.Lock()
 			currentName, currentStatus := name, status
+			refused := refuseNextRead
+			refuseNextRead = false
 			mu.Unlock()
+			if refused {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
 			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, vmPlanTestSizeID))
 		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
 			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
@@ -2339,7 +2349,7 @@ resource "gpcn_virtualmachine" "test" {
 // it.
 func TestVirtualMachineResourcePlanTogglesPublicIpViaVpcVerbs(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	server, recorded := startVirtualMachinePublicIpMockServer(t)
+	server, recorded := startVirtualMachinePublicIpMockServer(t, false)
 
 	var afterCreate, afterAcquire int
 
@@ -2392,7 +2402,7 @@ func TestVirtualMachineResourcePlanTogglesPublicIpViaVpcVerbs(t *testing.T) {
 // acquire.
 func TestVirtualMachineResourcePlanAttachesAndDetachesAHeldAddress(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	server, recorded := startVirtualMachinePublicIpMockServer(t)
+	server, recorded := startVirtualMachinePublicIpMockServer(t, false)
 
 	var afterCreate, afterAttach int
 
@@ -2444,7 +2454,7 @@ func TestVirtualMachineResourcePlanAttachesAndDetachesAHeldAddress(t *testing.T)
 // allocate_public_ip would release an address the operator owns on the next destroy.
 func TestVirtualMachineResourcePlanImportRecordsAHeldAddress(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	server, _ := startVirtualMachinePublicIpMockServer(t)
+	server, _ := startVirtualMachinePublicIpMockServer(t, false)
 
 	config := vmPublicIpPlanTestConfig(server.URL, "vm-plan-import-address", false, vmPlanTestHeldIpID)
 
@@ -2478,6 +2488,38 @@ func TestVirtualMachineResourcePlanImportRecordsAHeldAddress(t *testing.T) {
 			},
 		},
 	})
+}
+
+// vmPlanTestAcquiredAddressReadBackPattern matches the orphan report that follows a
+// refused read-back, after Terraform wraps it.
+var vmPlanTestAcquiredAddressReadBackPattern = regexp.MustCompile(
+	`(?s)public\s+IP\s+` + vmPlanTestAcquiredIpID + `\s+was\s+acquired\s+for\s+virtual\s+machine\s+` +
+		vmPlanTestID + `\s+but\s+reading\s+the\s+machine\s+back\s+failed`)
+
+// The acquire and the attach both succeed, and the read-back then fails. State keeps
+// allocate_public_ip false, so no destroy gives the address back. The diagnostic is the
+// only record of it, so it names the id.
+func TestVirtualMachineResourcePlanNamesTheAddressWhenTheReadBackFails(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachinePublicIpMockServer(t, true)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-read-back-fails", false, ""),
+			},
+			{
+				Config:      vmPublicIpPlanTestConfig(server.URL, "vm-plan-read-back-fails", true, ""),
+				ExpectError: vmPlanTestAcquiredAddressReadBackPattern,
+			},
+		},
+	})
+
+	want := []string{"acquire", "attach " + vmPlanTestAcquiredIpID + " nic-1"}
+	if verbs := recorded(); !slices.Equal(verbs, want) {
+		t.Errorf("Expected %v, got %v", want, verbs)
+	}
 }
 
 // vmCreateOnSubnetInterfacesBody reports the birth interface, its acquired address and
