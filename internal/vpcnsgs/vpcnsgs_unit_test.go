@@ -3,6 +3,7 @@ package vpcnsgs
 import (
 	"context"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -214,14 +215,20 @@ func TestRuleRequestBodiesOmitNullKeysUnit(t *testing.T) {
 func TestReplaceNsgRulesSendsCompleteSetUnit(t *testing.T) {
 	t.Parallel()
 
+	// The server goroutine writes what the handler records. The HTTP round trip
+	// does not synchronize that write with the test goroutine. Every read of a
+	// recorded value takes this lock.
+	var handlerMu sync.Mutex
 	var sentBody map[string]any
 	var sentPath string
 	server, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodPut {
+				handlerMu.Lock()
 				sentPath = r.URL.Path
 				sentBody = testutil.ReadRequestBody(r)
+				handlerMu.Unlock()
 				testutil.WriteJSONResponse(w, map[string]any{
 					"success": true,
 					"message": "Operation initiated successfully",
@@ -247,13 +254,17 @@ func TestReplaceNsgRulesSendsCompleteSetUnit(t *testing.T) {
 		t.Fatalf("expected the rules replace to succeed, got %v", err)
 	}
 
+	handlerMu.Lock()
+	gotPath, gotBody := sentPath, sentBody
+	handlerMu.Unlock()
+
 	wantPath := BaseURLV1 + unitTestVpcID + "/nsgs/" + unitTestNsgID + "/rules"
-	if sentPath != wantPath {
-		t.Errorf("expected path %q, got %q", wantPath, sentPath)
+	if gotPath != wantPath {
+		t.Errorf("expected path %q, got %q", wantPath, gotPath)
 	}
-	sent, ok := sentBody["rules"].([]any)
+	sent, ok := gotBody["rules"].([]any)
 	if !ok {
-		t.Fatalf("expected a rules array in the body, got %T", sentBody["rules"])
+		t.Fatalf("expected a rules array in the body, got %T", gotBody["rules"])
 	}
 	if len(sent) != 2 {
 		t.Errorf("expected the complete set of two rules, got %d", len(sent))
@@ -410,18 +421,23 @@ func TestRefreshNsgModelFromResponseUpdatesDescriptionUnit(t *testing.T) {
 func TestCreateNsgCarriesOneCorrelationIDUnit(t *testing.T) {
 	t.Parallel()
 
+	var handlerMu sync.Mutex
 	var createID, pollID string
 	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == client.JOBS_BASE_URL_V1 {
+				handlerMu.Lock()
 				if pollID == "" {
 					pollID = r.Header.Get("x-Correlation-ID")
 				}
+				handlerMu.Unlock()
 				testutil.HandleJobResponse(w, "job-create", unitTestNsgID, true)
 				return
 			}
+			handlerMu.Lock()
 			createID = r.Header.Get("x-Correlation-ID")
+			handlerMu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{
 				"success": true,
 				"message": "Operation initiated successfully",
@@ -439,11 +455,15 @@ func TestCreateNsgCarriesOneCorrelationIDUnit(t *testing.T) {
 		t.Fatalf("expected the build poll to succeed, got %v", err)
 	}
 
-	if createID == "" {
+	handlerMu.Lock()
+	gotCreateID, gotPollID := createID, pollID
+	handlerMu.Unlock()
+
+	if gotCreateID == "" {
 		t.Fatal("the create carried no correlation id")
 	}
-	if pollID != createID {
-		t.Errorf("poll correlation id = %q, want the create's %q", pollID, createID)
+	if gotPollID != gotCreateID {
+		t.Errorf("poll correlation id = %q, want the create's %q", gotPollID, gotCreateID)
 	}
 
 	var replaceID, replacePollID string
@@ -451,13 +471,17 @@ func TestCreateNsgCarriesOneCorrelationIDUnit(t *testing.T) {
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == client.JOBS_BASE_URL_V1 {
+				handlerMu.Lock()
 				if replacePollID == "" {
 					replacePollID = r.Header.Get("x-Correlation-ID")
 				}
+				handlerMu.Unlock()
 				testutil.HandleJobResponse(w, "job-rules", unitTestNsgID, true)
 				return
 			}
+			handlerMu.Lock()
 			replaceID = r.Header.Get("x-Correlation-ID")
+			handlerMu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{
 				"success": true,
 				"message": "Operation initiated successfully",
@@ -471,18 +495,24 @@ func TestCreateNsgCarriesOneCorrelationIDUnit(t *testing.T) {
 	if err := ReplaceNsgRules(replaceClient, replaceCtx, unitTestVpcID, unitTestNsgID, nil); err != nil {
 		t.Fatalf("expected the rules replace to succeed, got %v", err)
 	}
-	if replaceID != callerID {
-		t.Errorf("rules replace correlation id = %q, want the caller's %q", replaceID, callerID)
+	handlerMu.Lock()
+	gotReplaceID, gotReplacePollID := replaceID, replacePollID
+	handlerMu.Unlock()
+
+	if gotReplaceID != callerID {
+		t.Errorf("rules replace correlation id = %q, want the caller's %q", gotReplaceID, callerID)
 	}
-	if replacePollID != callerID {
-		t.Errorf("rules poll correlation id = %q, want the caller's %q", replacePollID, callerID)
+	if gotReplacePollID != callerID {
+		t.Errorf("rules poll correlation id = %q, want the caller's %q", gotReplacePollID, callerID)
 	}
 
 	var renameID string
 	_, renameClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
+			handlerMu.Lock()
 			renameID = r.Header.Get("x-Correlation-ID")
+			handlerMu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{
 				"success": true,
 				"message": "Security group updated successfully",
@@ -496,8 +526,12 @@ func TestCreateNsgCarriesOneCorrelationIDUnit(t *testing.T) {
 	if err := RenameNsg(renameClient, renameCtx, unitTestVpcID, unitTestNsgID, "nsg-b", ""); err != nil {
 		t.Fatalf("expected the rename to succeed, got %v", err)
 	}
-	if renameID != renameCallerID {
-		t.Errorf("rename correlation id = %q, want the caller's %q", renameID, renameCallerID)
+	handlerMu.Lock()
+	gotRenameID := renameID
+	handlerMu.Unlock()
+
+	if gotRenameID != renameCallerID {
+		t.Errorf("rename correlation id = %q, want the caller's %q", gotRenameID, renameCallerID)
 	}
 
 	var deleteID, deletePollID string
@@ -505,13 +539,17 @@ func TestCreateNsgCarriesOneCorrelationIDUnit(t *testing.T) {
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == client.JOBS_BASE_URL_V1 {
+				handlerMu.Lock()
 				if deletePollID == "" {
 					deletePollID = r.Header.Get("x-Correlation-ID")
 				}
+				handlerMu.Unlock()
 				testutil.HandleJobResponse(w, "job-delete", unitTestNsgID, true)
 				return
 			}
+			handlerMu.Lock()
 			deleteID = r.Header.Get("x-Correlation-ID")
+			handlerMu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{
 				"success": true,
 				"message": "Operation initiated successfully",
@@ -525,11 +563,15 @@ func TestCreateNsgCarriesOneCorrelationIDUnit(t *testing.T) {
 	if err := DeleteNsg(deleteClient, deleteCtx, unitTestVpcID, unitTestNsgID); err != nil {
 		t.Fatalf("expected the delete to succeed, got %v", err)
 	}
-	if deleteID != deleteCallerID {
-		t.Errorf("delete correlation id = %q, want the caller's %q", deleteID, deleteCallerID)
+	handlerMu.Lock()
+	gotDeleteID, gotDeletePollID := deleteID, deletePollID
+	handlerMu.Unlock()
+
+	if gotDeleteID != deleteCallerID {
+		t.Errorf("delete correlation id = %q, want the caller's %q", gotDeleteID, deleteCallerID)
 	}
-	if deletePollID != deleteCallerID {
-		t.Errorf("delete poll correlation id = %q, want the caller's %q", deletePollID, deleteCallerID)
+	if gotDeletePollID != deleteCallerID {
+		t.Errorf("delete poll correlation id = %q, want the caller's %q", gotDeletePollID, deleteCallerID)
 	}
 }
 

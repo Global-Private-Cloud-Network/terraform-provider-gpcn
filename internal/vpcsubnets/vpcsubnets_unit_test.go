@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"testing"
 	"time"
 
@@ -139,12 +140,18 @@ func TestRefreshSubnetModelFromResponseUpdatesNameAndNsgUnit(t *testing.T) {
 func TestGetSubnetPagesListingUnit(t *testing.T) {
 	t.Parallel()
 
+	// The server goroutine writes what the handler records. The HTTP round trip
+	// does not synchronize that write with the test goroutine. Every read of a
+	// recorded value takes this lock.
+	var handlerMu sync.Mutex
 	var pagesServed []string
 	server, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			page := r.URL.Query().Get("page")
+			handlerMu.Lock()
 			pagesServed = append(pagesServed, page)
+			handlerMu.Unlock()
 			if page == "2" {
 				testutil.WriteJSONResponse(w, unitTestListBody([]map[string]any{{
 					"id":               unitTestSubnetID,
@@ -170,8 +177,12 @@ func TestGetSubnetPagesListingUnit(t *testing.T) {
 	if subnet.CIDR != "10.50.1.0/24" {
 		t.Errorf("expected the row from page 2, got %+v", subnet)
 	}
-	if len(pagesServed) != 2 {
-		t.Errorf("expected two pages to be requested, got %v", pagesServed)
+	handlerMu.Lock()
+	servedPages := append([]string(nil), pagesServed...)
+	handlerMu.Unlock()
+
+	if len(servedPages) != 2 {
+		t.Errorf("expected two pages to be requested, got %v", servedPages)
 	}
 }
 
@@ -213,13 +224,16 @@ func unitTestListBody(rows []map[string]any, totalPages int) map[string]any {
 func TestUpdateSubnetSendsNameAndDescriptionUnit(t *testing.T) {
 	t.Parallel()
 
+	var handlerMu sync.Mutex
 	var sentBody map[string]any
 	var sentPath string
 	server, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
+			handlerMu.Lock()
 			sentPath = r.URL.Path
 			sentBody = testutil.ReadRequestBody(r)
+			handlerMu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{
 				"success": true,
 				"data": map[string]any{
@@ -243,17 +257,21 @@ func TestUpdateSubnetSendsNameAndDescriptionUnit(t *testing.T) {
 	if subnet.Name != "subnet-b" {
 		t.Errorf("expected the updated row, got %+v", subnet)
 	}
+	handlerMu.Lock()
+	gotPath, gotBody := sentPath, sentBody
+	handlerMu.Unlock()
+
 	wantPath := fmt.Sprintf("%s%s/subnets/%s", BaseURLV1, unitTestVpcID, unitTestSubnetID)
-	if sentPath != wantPath {
-		t.Errorf("expected path %q, got %q", wantPath, sentPath)
+	if gotPath != wantPath {
+		t.Errorf("expected path %q, got %q", wantPath, gotPath)
 	}
-	if got, _ := sentBody["name"].(string); got != "subnet-b" {
+	if got, _ := gotBody["name"].(string); got != "subnet-b" {
 		t.Errorf("expected the name in the body, got %q", got)
 	}
-	if got, _ := sentBody["description"].(string); got != "new description" {
+	if got, _ := gotBody["description"].(string); got != "new description" {
 		t.Errorf("expected the description in the body, got %q", got)
 	}
-	if _, present := sentBody["cidr"]; present {
+	if _, present := gotBody["cidr"]; present {
 		t.Error("expected no cidr key in the update body")
 	}
 }
@@ -420,18 +438,23 @@ func TestMapSubnetResponseToModelFillsPrefixOnImportUnit(t *testing.T) {
 func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
 	t.Parallel()
 
+	var handlerMu sync.Mutex
 	var createID, pollID string
 	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == client.JOBS_BASE_URL_V1 {
+				handlerMu.Lock()
 				if pollID == "" {
 					pollID = r.Header.Get("x-Correlation-ID")
 				}
+				handlerMu.Unlock()
 				testutil.HandleJobResponse(w, "job-create", unitTestSubnetID, true)
 				return
 			}
+			handlerMu.Lock()
 			createID = r.Header.Get("x-Correlation-ID")
+			handlerMu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{
 				"success": true,
 				"message": "Operation initiated successfully",
@@ -456,11 +479,15 @@ func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
 		t.Fatalf("expected the carve poll to succeed, got %v", err)
 	}
 
-	if createID == "" {
+	handlerMu.Lock()
+	gotCreateID, gotPollID := createID, pollID
+	handlerMu.Unlock()
+
+	if gotCreateID == "" {
 		t.Fatal("the create carried no correlation id")
 	}
-	if pollID != createID {
-		t.Errorf("poll correlation id = %q, want the create's %q", pollID, createID)
+	if gotPollID != gotCreateID {
+		t.Errorf("poll correlation id = %q, want the create's %q", gotPollID, gotCreateID)
 	}
 
 	var rebindID, rebindPollID string
@@ -468,13 +495,17 @@ func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == client.JOBS_BASE_URL_V1 {
+				handlerMu.Lock()
 				if rebindPollID == "" {
 					rebindPollID = r.Header.Get("x-Correlation-ID")
 				}
+				handlerMu.Unlock()
 				testutil.HandleJobResponse(w, "job-rebind", unitTestSubnetID, true)
 				return
 			}
+			handlerMu.Lock()
 			rebindID = r.Header.Get("x-Correlation-ID")
+			handlerMu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{
 				"success": true,
 				"message": "Operation initiated successfully",
@@ -488,18 +519,24 @@ func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
 	if err := RebindSubnetNsg(rebindClient, rebindCtx, unitTestVpcID, unitTestSubnetID, unitTestNsgID); err != nil {
 		t.Fatalf("expected the rebind to succeed, got %v", err)
 	}
-	if rebindID != callerID {
-		t.Errorf("rebind correlation id = %q, want the caller's %q", rebindID, callerID)
+	handlerMu.Lock()
+	gotRebindID, gotRebindPollID := rebindID, rebindPollID
+	handlerMu.Unlock()
+
+	if gotRebindID != callerID {
+		t.Errorf("rebind correlation id = %q, want the caller's %q", gotRebindID, callerID)
 	}
-	if rebindPollID != callerID {
-		t.Errorf("rebind poll correlation id = %q, want the caller's %q", rebindPollID, callerID)
+	if gotRebindPollID != callerID {
+		t.Errorf("rebind poll correlation id = %q, want the caller's %q", gotRebindPollID, callerID)
 	}
 
 	var updateID string
 	_, updateClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
+			handlerMu.Lock()
 			updateID = r.Header.Get("x-Correlation-ID")
+			handlerMu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{
 				"success": true,
 				"message": "Subnet updated successfully",
@@ -513,8 +550,12 @@ func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
 	if _, err := UpdateSubnet(updateClient, updateCtx, unitTestVpcID, unitTestSubnetID, "subnet-b", ""); err != nil {
 		t.Fatalf("expected the update to succeed, got %v", err)
 	}
-	if updateID != updateCallerID {
-		t.Errorf("update correlation id = %q, want the caller's %q", updateID, updateCallerID)
+	handlerMu.Lock()
+	gotUpdateID := updateID
+	handlerMu.Unlock()
+
+	if gotUpdateID != updateCallerID {
+		t.Errorf("update correlation id = %q, want the caller's %q", gotUpdateID, updateCallerID)
 	}
 
 	var deleteID, deletePollID string
@@ -522,13 +563,17 @@ func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == client.JOBS_BASE_URL_V1 {
+				handlerMu.Lock()
 				if deletePollID == "" {
 					deletePollID = r.Header.Get("x-Correlation-ID")
 				}
+				handlerMu.Unlock()
 				testutil.HandleJobResponse(w, "job-delete", unitTestSubnetID, true)
 				return
 			}
+			handlerMu.Lock()
 			deleteID = r.Header.Get("x-Correlation-ID")
+			handlerMu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{
 				"success": true,
 				"message": "Operation initiated successfully",
@@ -542,11 +587,15 @@ func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
 	if err := DeleteSubnet(deleteClient, deleteCtx, unitTestVpcID, unitTestSubnetID); err != nil {
 		t.Fatalf("expected the delete to succeed, got %v", err)
 	}
-	if deleteID != deleteCallerID {
-		t.Errorf("delete correlation id = %q, want the caller's %q", deleteID, deleteCallerID)
+	handlerMu.Lock()
+	gotDeleteID, gotDeletePollID := deleteID, deletePollID
+	handlerMu.Unlock()
+
+	if gotDeleteID != deleteCallerID {
+		t.Errorf("delete correlation id = %q, want the caller's %q", gotDeleteID, deleteCallerID)
 	}
-	if deletePollID != deleteCallerID {
-		t.Errorf("delete poll correlation id = %q, want the caller's %q", deletePollID, deleteCallerID)
+	if gotDeletePollID != deleteCallerID {
+		t.Errorf("delete poll correlation id = %q, want the caller's %q", gotDeletePollID, deleteCallerID)
 	}
 }
 
