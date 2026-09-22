@@ -197,3 +197,17 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 ```shell
 terraform import gpcn_virtualmachine.example "c13808d9-3b7d-42c5-a21d-f0961308a38a"
 ```
+
+## Upgrading from 1.3.0
+
+This release manages machines on VPC subnets only. A machine created by 1.3.0 sits on a legacy network: it has no subnet, `subnet_id` is required, and GPCN refuses to move a legacy machine onto a subnet. The first plan under 1.4.0 therefore proposes to destroy and recreate the machine.
+
+Remove the machine from state before that plan. The machine keeps running, and GPCN manages it outside Terraform from then on:
+
+```shell
+terraform state rm gpcn_virtualmachine.<name>
+```
+
+Then delete or rewrite the block. A new block needs `subnet_id` from a `gpcn_vpc_subnet`, and applying it creates a new machine on that subnet. Move data by attaching a `gpcn_volume` to the new machine.
+
+A machine that 1.4.0 created imports back with `subnet_id`, `l2_segment_ids` and `public_ip_id` filled from the platform. An import never infers `allocate_public_ip`: destroying an imported machine leaves its address held.
