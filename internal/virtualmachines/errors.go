@@ -44,10 +44,11 @@ const (
 	ErrDetailVMCreatedAttachFailed           = "virtual machine %s was created and is in state, but attaching %s failed: %s. Terraform has marked the machine tainted: run terraform untaint on it and apply again to attach the remaining networks, or let the next apply replace it."
 )
 
-// GPCN reports one address row for an address the operator attached and for the
-// leftover of a failed read-back. The provider cannot tell them apart. It refuses the
-// acquire and names the address. Adopting a held one makes the next destroy release
-// what gpcn_vpc_public_ip owns.
+// GPCN reports one address row whatever bound the address. A
+// gpcn_vpc_public_ip_attachment binds one, and an unwind whose release also failed
+// leaves another. The provider cannot tell them apart. It refuses the acquire and names
+// the address. Adopting a held one makes the next destroy release what
+// gpcn_vpc_public_ip owns.
 const ErrDetailPrimaryInterfaceCarriesAForeignAddress = "the primary network interface of virtual machine %s already carries public IP %s that this configuration did not attach; import it as gpcn_vpc_public_ip and name it in public_ip_id, or release it"
 
 // A start that fails after the provider stopped the machine leaves it stopped. The
