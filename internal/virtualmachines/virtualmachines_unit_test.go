@@ -2182,7 +2182,6 @@ func TestPublicIpOrphanDetailBytes(t *testing.T) {
 			expected: "public IP %s was acquired for virtual machine %s but attaching it failed: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip.",
 		},
 		{name: "acquisition phrase", actual: ErrPhrasePublicIpAcquisitionFailed, expected: "its acquisition job failed"},
-		{name: "attach phrase", actual: ErrPhrasePublicIpAttachFailed, expected: "attaching it failed"},
 		{name: "release phrase", actual: ErrPhrasePublicIpReleaseFailed, expected: "releasing it failed"},
 		{name: "read-back phrase", actual: ErrPhrasePublicIpReadBackFailed, expected: "reading the machine back failed"},
 	}

@@ -69,7 +69,6 @@ const (
 	ErrDetailPublicIpAttachFailedReleased      = "public IP %s was acquired for virtual machine %s but attaching it failed: %s; the address was released."
 	ErrDetailPublicIpAttachFailedReleaseFailed = "public IP %s was acquired for virtual machine %s but attaching it failed: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip."
 	ErrPhrasePublicIpAcquisitionFailed         = "its acquisition job failed"
-	ErrPhrasePublicIpAttachFailed              = "attaching it failed"
 	ErrPhrasePublicIpReleaseFailed             = "releasing it failed"
 	ErrPhrasePublicIpReadBackFailed            = "reading the machine back failed"
 )
