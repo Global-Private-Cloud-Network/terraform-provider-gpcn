@@ -2600,6 +2600,52 @@ var vmPlanTestAcquiredAddressReleaseFailedPattern = regexp.MustCompile(
 	`(?s)public\s+IP\s+` + vmPlanTestAcquiredIpID + `\s+was\s+acquired\s+for\s+virtual\s+machine\s+` +
 		vmPlanTestID + `\s+but\s+the\s+update\s+failed\s+afterwards:.*releasing\s+it\s+failed\s+too`)
 
+// vmPlanTestSentencePattern matches one rendered sentence whatever line breaks
+// Terraform puts inside it.
+func vmPlanTestSentencePattern(sentence string) *regexp.Regexp {
+	words := strings.Fields(sentence)
+	for i, word := range words {
+		words[i] = regexp.QuoteMeta(word)
+	}
+	return regexp.MustCompile(strings.Join(words, `\s+`))
+}
+
+// vmPlanTestUnwindSentence renders the unwind report around the detail of the step that
+// failed. The patterns built from it leave no wildcard where that detail goes. An
+// unwind that drops the detail, or that reports the summary, cannot match.
+func vmPlanTestUnwindSentence(stepDetail string) string {
+	return fmt.Sprintf(virtualmachines.ErrDetailAcquiredAddressReleasedAfterStepFailure,
+		vmPlanTestAcquiredIpID, vmPlanTestID, stepDetail)
+}
+
+// vmPlanTestRetriesExhausted prefixes every refusal the client gives up on. The plan
+// tests configure no retry, so the first answer of the mock exhausts them.
+const vmPlanTestRetriesExhausted = "maximum retry attempts exceeded: "
+
+// vmPlanTestResizeUnwindPattern holds the report to the resize refusal the mock answers.
+var vmPlanTestResizeUnwindPattern = vmPlanTestSentencePattern(
+	vmPlanTestUnwindSentence(vmPlanTestRetriesExhausted + "HTTP 500: resize refused"))
+
+// vmPlanTestReadBackUnwindPattern holds the report to the read-back refusal. That mock
+// answers no body, so the step detail ends with the bare status.
+var vmPlanTestReadBackUnwindPattern = vmPlanTestSentencePattern(
+	vmPlanTestUnwindSentence(virtualmachines.ErrDetailVMInfoFailedCanImport + ": " +
+		vmPlanTestRetriesExhausted + "HTTP error 500"))
+
+// vmPlanTestUnwindNamedSentence renders the unwind report that names the address. A
+// release that fails too carries the detail of the step and the refusal of the release.
+func vmPlanTestUnwindNamedSentence(stepDetail, releaseDetail string) string {
+	return fmt.Sprintf(virtualmachines.ErrDetailAcquiredAddressReleaseFailedAfterStepFailure,
+		vmPlanTestAcquiredIpID, vmPlanTestID, stepDetail, releaseDetail)
+}
+
+// vmPlanTestReadBackReleaseFailedPattern holds the named report after a refused
+// read-back and a refused release. Neither detail has a wildcard in front of it.
+var vmPlanTestReadBackReleaseFailedPattern = vmPlanTestSentencePattern(
+	vmPlanTestUnwindNamedSentence(
+		virtualmachines.ErrDetailVMInfoFailedCanImport+": "+vmPlanTestRetriesExhausted+"HTTP error 500",
+		vmPlanTestRetriesExhausted+"HTTP 500: release refused"))
+
 // vmPlanTestAcquiredAddressVerbs lists the verbs an unwound acquire leaves behind. The
 // runner issues the release in every arm. Only the platform's answer differs.
 func vmPlanTestAcquiredAddressVerbs() []string {
@@ -2630,7 +2676,7 @@ func TestVirtualMachineResourcePlanReleasesTheAcquiredAddressWhenTheResizeFails(
 			},
 			{
 				Config:      vmPublicIpSizePlanTestConfig(server.URL, "vm-plan-resize-fails", true, "", vmPlanTestSizeID2),
-				ExpectError: vmPlanTestAcquiredAddressReleasedPattern,
+				ExpectError: vmPlanTestResizeUnwindPattern,
 			},
 			{
 				Config: vmPublicIpSizePlanTestConfig(server.URL, "vm-plan-resize-fails", false, "", vmPlanTestSizeID),
@@ -2713,7 +2759,7 @@ func TestVirtualMachineResourcePlanReleasesTheAcquiredAddressWhenTheReadBackFail
 			},
 			{
 				Config:      vmPublicIpPlanTestConfig(server.URL, "vm-plan-read-back-fails", true, ""),
-				ExpectError: vmPlanTestAcquiredAddressReleasedPattern,
+				ExpectError: vmPlanTestReadBackUnwindPattern,
 			},
 			{
 				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-read-back-fails", false, ""),
@@ -2802,6 +2848,58 @@ func TestVirtualMachineResourcePlanStartsTheMachineBeforeItReleasesTheAddress(t 
 	}
 }
 
+// vmPlanTestResizeErrorPattern matches the refused resize after Terraform wraps it.
+var vmPlanTestResizeErrorPattern = vmPlanTestSentencePattern(
+	virtualmachines.ErrSummaryErrorUpdatingVMSize)
+
+// The resize fails on a machine the update stopped, and the start then fails as well.
+// The release still succeeds. One apply leaves the operator three repairs. They are the
+// step that failed, the machine left stopped, and the address given back.
+func TestVirtualMachineResourcePlanReportsTheStoppedMachineAndTheReleasedAddress(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachinePublicIpMockServer(t, vmPublicIpMockArms{
+		refuseSizeOnce: true,
+		refuseStart:    true,
+		noHotplug:      true,
+	})
+
+	errorCheckRan := false
+	var verbsAtFailure []string
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		ErrorCheck: func(err error) error {
+			errorCheckRan = true
+			verbsAtFailure = recorded()
+			if !vmPlanTestResizeErrorPattern.MatchString(err.Error()) {
+				t.Errorf("Expected the resize error, got '%s'", err.Error())
+			}
+			if !vmPlanTestLeftStoppedPattern.MatchString(err.Error()) {
+				t.Errorf("Expected the left-stopped diagnostic, got '%s'", err.Error())
+			}
+			if !vmPlanTestResizeUnwindPattern.MatchString(err.Error()) {
+				t.Errorf("Expected the released detail, got '%s'", err.Error())
+			}
+			return nil
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: vmPublicIpSizePlanTestConfig(server.URL, "vm-plan-stopped-released", false, "", vmPlanTestSizeID),
+			},
+			{
+				Config: vmPublicIpSizePlanTestConfig(server.URL, "vm-plan-stopped-released", true, "", vmPlanTestSizeID2),
+			},
+		},
+	})
+
+	if !errorCheckRan {
+		t.Error("Expected the apply to fail and ErrorCheck to run")
+	}
+	if !slices.Equal(verbsAtFailure, vmPlanTestStoppedResizeVerbs()) {
+		t.Errorf("Expected %v, got %v", vmPlanTestStoppedResizeVerbs(), verbsAtFailure)
+	}
+}
+
 // The start and the release both fail after the resize. The machine stays stopped and
 // the address stays at the platform. The operator repairs each by hand, so the report
 // carries both.
@@ -2865,7 +2963,7 @@ func TestVirtualMachineResourcePlanNamesTheAcquiredAddressWhenTheReleaseFails(t 
 			},
 			{
 				Config:      vmPublicIpPlanTestConfig(server.URL, "vm-plan-release-fails", true, ""),
-				ExpectError: vmPlanTestAcquiredAddressReleaseFailedPattern,
+				ExpectError: vmPlanTestReadBackReleaseFailedPattern,
 			},
 		},
 	})
@@ -3147,12 +3245,11 @@ func startVirtualMachineCarriedAddressMockServer(t *testing.T) (*httptest.Server
 	return server, recorded
 }
 
-// vmPlanTestForeignAddressPattern matches the refusal of a carried address after
-// Terraform wraps it.
-var vmPlanTestForeignAddressPattern = regexp.MustCompile(
-	`(?s)already\s+carries\s+public\s+IP\s+` + vmPlanTestAcquiredIpID +
-		`\s+that\s+this\s+configuration\s+did\s+not\s+attach` +
-		`.*name\s+it\s+in\s+public_ip_id,\s+or\s+release\s+it`)
+// vmPlanTestForeignAddressPattern holds the whole refusal of a carried address, so a
+// remedy that goes missing cannot pass.
+var vmPlanTestForeignAddressPattern = vmPlanTestSentencePattern(
+	fmt.Sprintf(virtualmachines.ErrDetailPrimaryInterfaceCarriesAForeignAddress,
+		vmPlanTestID, vmPlanTestAcquiredIpID))
 
 // A machine can carry an address Terraform did not acquire. A
 // gpcn_vpc_public_ip_attachment binds one, and an unwind whose release also failed

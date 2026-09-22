@@ -2046,8 +2046,11 @@ func TestUpdatePublicIPIfChangedReleasesTheAcquiredAddressWhenThePlanNamesAnothe
 }
 
 // The API inserts the address row before it dispatches the job, so a failed acquisition
-// leaves a real address. The diagnostic is the only record of it.
-func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheAcquireJobFails(t *testing.T) {
+// leaves a real address. A failed acquire parks the row and holds its provider
+// reference, and the release is the exit. The provider makes one release attempt. A
+// release that reaches the row before the platform parks it is refused, and the report
+// names the address.
+func TestUpdatePublicIPIfChangedReleasesTheAddressWhenTheAcquireJobFails(t *testing.T) {
 	const vmID = "vm-acquire-job-fails"
 
 	server, gpcnClient, verbs := publicIpUpdateMockServer(t, "", testPublicIpJobAcquire)
@@ -2065,11 +2068,45 @@ func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheAcquireJobFails(t *testing
 	if !strings.HasPrefix(detail, wantPrefix) {
 		t.Errorf("Expected the detail to start with '%s', got '%s'", wantPrefix, detail)
 	}
+	if !strings.HasSuffix(detail, "; the address was released.") {
+		t.Errorf("Expected the detail to report the release, got '%s'", detail)
+	}
+	want := []string{"acquire", "release " + testPublicIpAcquiredID}
+	if !slices.Equal(*verbs, want) {
+		t.Errorf("Expected %v, got %v", want, *verbs)
+	}
+}
+
+// A release that fails after a failed acquisition leaves the address at the platform.
+// No attribute records it, so this diagnostic is the only place the operator reads its
+// id.
+func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheAcquireJobAndTheReleaseFail(t *testing.T) {
+	const vmID = "vm-acquire-job-and-release-fail"
+
+	server, gpcnClient, verbs := publicIpUpdateMockServer(t, "", testPublicIpJobAcquire, testPublicIpJobRelease)
+	defer server.Close()
+
+	state := createTestVMModel("test-vm", testVMImage, false)
+	plan := createTestVMModel("test-vm", testVMImage, true)
+
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if !diags.HasError() {
+		t.Fatal("Expected an error diagnostic when the release also fails")
+	}
+	detail := diags.Errors()[0].Detail()
+	wantPrefix := fmt.Sprintf("public IP %s was acquired for virtual machine %s but its acquisition job failed: ", testPublicIpAcquiredID, vmID)
+	if !strings.HasPrefix(detail, wantPrefix) {
+		t.Errorf("Expected the detail to start with '%s', got '%s'", wantPrefix, detail)
+	}
+	if !strings.Contains(detail, "; releasing it failed too: ") {
+		t.Errorf("Expected the detail to report the failed release, got '%s'", detail)
+	}
 	if !strings.HasSuffix(detail, ". Release it in the portal or import it as gpcn_vpc_public_ip.") {
 		t.Errorf("Expected the detail to end with the remedy sentence, got '%s'", detail)
 	}
-	if !slices.Equal(*verbs, []string{"acquire"}) {
-		t.Errorf("Expected the acquire alone, got %v", *verbs)
+	want := []string{"acquire", "release " + testPublicIpAcquiredID}
+	if !slices.Equal(*verbs, want) {
+		t.Errorf("Expected %v, got %v", want, *verbs)
 	}
 }
 
@@ -2248,8 +2285,17 @@ func TestPublicIpOrphanDetailBytes(t *testing.T) {
 			actual:   ErrDetailPublicIpAttachFailedReleaseFailed,
 			expected: "public IP %s was acquired for virtual machine %s but attaching it failed: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip.",
 		},
-		{name: "acquisition phrase", actual: ErrPhrasePublicIpAcquisitionFailed, expected: "its acquisition job failed"},
 		{name: "release phrase", actual: ErrPhrasePublicIpReleaseFailed, expected: "releasing it failed"},
+		{
+			name:     "the acquisition job failed and the release succeeded",
+			actual:   ErrDetailPublicIpAcquireJobFailedReleased,
+			expected: "public IP %s was acquired for virtual machine %s but its acquisition job failed: %s; the address was released.",
+		},
+		{
+			name:     "the acquisition job failed and the release failed too",
+			actual:   ErrDetailPublicIpAcquireJobFailedReleaseFailed,
+			expected: "public IP %s was acquired for virtual machine %s but its acquisition job failed: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip.",
+		},
 		{
 			name:     "released after a step failed",
 			actual:   ErrDetailAcquiredAddressReleasedAfterStepFailure,
@@ -2274,7 +2320,7 @@ func TestPublicIpOrphanDetailBytes(t *testing.T) {
 // The refusal is the only place the operator reads the id of the address the machine
 // carries. The sentence also names the two ways out of it.
 func TestPrimaryInterfaceCarriesAForeignAddressDetailBytes(t *testing.T) {
-	const expected = "the primary network interface of virtual machine %s already carries public IP %s that this configuration did not attach; import it as gpcn_vpc_public_ip and name it in public_ip_id, or release it"
+	const expected = "the primary network interface of virtual machine %s already carries public IP %s; release it, or import it as gpcn_vpc_public_ip and name it in public_ip_id"
 
 	if ErrDetailPrimaryInterfaceCarriesAForeignAddress != expected {
 		t.Errorf("Expected '%s', got '%s'", expected, ErrDetailPrimaryInterfaceCarriesAForeignAddress)

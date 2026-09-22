@@ -229,8 +229,10 @@ func UpdatePublicIPIfChanged(gpcnClient *client.GpcnClient, ctx context.Context,
 }
 
 // acquireAndAttachPublicIp takes an address and binds it to the interface. The API
-// inserts the address row before it dispatches the job. Every failure after the request
-// therefore leaves a real address. No attribute records it, so each diagnostic names it.
+// inserts the address row before it dispatches the job. A request the platform refuses
+// outright inserts no row. A job that fails leaves a real address, and so does a failed
+// attach. The function gives that address back. Only a release that fails too leaves
+// one to find, and that report names it.
 // Returns the id of the address it bound, and diagnostics if any errors occurred.
 func acquireAndAttachPublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vmID, vpcID, nicID string) (string, diag.Diagnostics) {
 	var diags diag.Diagnostics
@@ -241,9 +243,18 @@ func acquireAndAttachPublicIp(gpcnClient *client.GpcnClient, ctx context.Context
 		if acquiredID == "" {
 			return "", publicIpFailure(diags, err)
 		}
+		// A failed acquire parks the row and keeps its provider reference. The release
+		// is the exit, and the platform takes one from that state.
+		if releaseErr := vpcpublicips.ReleasePublicIp(gpcnClient, ctx, vpcID, acquiredID); releaseErr != nil {
+			diags.AddError(
+				ErrSummaryUnableToUpdatePublicIPConfiguration,
+				fmt.Sprintf(ErrDetailPublicIpAcquireJobFailedReleaseFailed, acquiredID, vmID, err.Error(), releaseErr.Error()),
+			)
+			return "", diags
+		}
 		diags.AddError(
 			ErrSummaryUnableToUpdatePublicIPConfiguration,
-			fmt.Sprintf(ErrDetailPublicIpOrphaned, acquiredID, vmID, ErrPhrasePublicIpAcquisitionFailed, err.Error()),
+			fmt.Sprintf(ErrDetailPublicIpAcquireJobFailedReleased, acquiredID, vmID, err.Error()),
 		)
 		return "", diags
 	}

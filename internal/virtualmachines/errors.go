@@ -46,10 +46,11 @@ const (
 
 // GPCN reports one address row whatever bound the address. A
 // gpcn_vpc_public_ip_attachment binds one, and an unwind whose release also failed
-// leaves another. The provider cannot tell them apart. It refuses the acquire and names
-// the address. Adopting a held one makes the next destroy release what
-// gpcn_vpc_public_ip owns.
-const ErrDetailPrimaryInterfaceCarriesAForeignAddress = "the primary network interface of virtual machine %s already carries public IP %s that this configuration did not attach; import it as gpcn_vpc_public_ip and name it in public_ip_id, or release it"
+// leaves another. The provider cannot tell them apart, so the refusal names only what
+// it observes. Adopting the address makes the next destroy release what
+// gpcn_vpc_public_ip owns. The remedy puts the release first. A failed release parks
+// the row for a retry, and an import then adopts a row the platform tears down.
+const ErrDetailPrimaryInterfaceCarriesAForeignAddress = "the primary network interface of virtual machine %s already carries public IP %s; release it, or import it as gpcn_vpc_public_ip and name it in public_ip_id"
 
 // A start that fails after the provider stopped the machine leaves it stopped. The
 // remedy differs by path. Create taints the machine, so the next apply replaces it.
@@ -62,15 +63,19 @@ const (
 	ErrDetailVMLeftStoppedRetry  = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform plan and check the proposed changes before applying."
 )
 
-// An address the provider acquired exists at the platform even when the step that
-// follows fails. No attribute records it, so the diagnostic is the only place the
-// operator reads its id. The phrases below name the step that failed.
+// An address the provider took, or gave up, can outlive the verb that failed. The
+// provider gives that address back, and the report says so. Only a release that fails
+// too leaves one to find. No attribute records that address, so the report is the only
+// place the operator reads its id. One phrase remains below, and it names the release
+// that failed after a successful detach.
 const (
 	ErrDetailPublicIpOrphaned                  = "public IP %s was acquired for virtual machine %s but %s: %s. Release it in the portal or import it as gpcn_vpc_public_ip."
 	ErrDetailPublicIpAttachFailedReleased      = "public IP %s was acquired for virtual machine %s but attaching it failed: %s; the address was released."
 	ErrDetailPublicIpAttachFailedReleaseFailed = "public IP %s was acquired for virtual machine %s but attaching it failed: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip."
-	ErrPhrasePublicIpAcquisitionFailed         = "its acquisition job failed"
 	ErrPhrasePublicIpReleaseFailed             = "releasing it failed"
+
+	ErrDetailPublicIpAcquireJobFailedReleased      = "public IP %s was acquired for virtual machine %s but its acquisition job failed: %s; the address was released."
+	ErrDetailPublicIpAcquireJobFailedReleaseFailed = "public IP %s was acquired for virtual machine %s but its acquisition job failed: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip."
 )
 
 // A step that fails after a successful acquire leaves an address the update records
