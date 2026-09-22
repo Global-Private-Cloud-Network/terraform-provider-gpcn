@@ -612,7 +612,7 @@ func TestL2SegmentResourceSchemaNamesTheResourceGroupDrop(t *testing.T) {
 	schemaResponse := &fwresource.SchemaResponse{}
 	NewL2SegmentResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
 
-	const want = "A segment that sits in a resource group imports without the group; the provider does not manage resource groups in this release."
+	const want = "gpcn_l2_segment does not expose resource_group_id in this release; a segment that sits in a resource group imports without it."
 	if got := schemaResponse.Schema.Description; !strings.Contains(got, want) {
 		t.Errorf("Description = %q, want it to contain %q", got, want)
 	}
