@@ -2446,6 +2446,103 @@ func TestVirtualMachineResourcePlanImportRecordsAHeldAddress(t *testing.T) {
 	})
 }
 
+// startVirtualMachineCarriedAddressMockServer reports an address on the primary
+// interface from the first read. It stands for a machine whose acquisition succeeded
+// and whose read-back did not, so state lags the platform. Every address verb is
+// recorded, because the platform refuses a second address on that interface.
+func startVirtualMachineCarriedAddressMockServer(t *testing.T) (*httptest.Server, func() []string) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	status := virtualmachines.VMStatusRunning.String()
+	var events []string
+
+	addressesPath := "/v1/resource/vpcs/" + vmPlanTestVpcID + "/public-ips"
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case strings.HasPrefix(r.URL.Path, addressesPath):
+			mu.Lock()
+			events = append(events, r.Method+" "+r.URL.Path)
+			mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-ip", "address issued")
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			testutil.WriteJSONResponse(w, vmPublicIpPlanTestInterfacesBody(vmPlanTestAcquiredIpID, vmPlanTestAcquiredIpAddress))
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
+			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, vmPlanTestSizeID))
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	recorded := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), events...)
+	}
+
+	return server, recorded
+}
+
+// A read-back that fails after an acquisition leaves allocate_public_ip false in state
+// while the machine carries the address. Asking for one again therefore reads the
+// interface: a second acquire mints an address GPCN then refuses to attach.
+func TestVirtualMachineResourcePlanSkipsTheAcquireWhenTheMachineCarriesTheAddress(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachineCarriedAddressMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-carried-address", false, ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "allocate_public_ip", "false"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "public_ip", vmPlanTestAcquiredIpAddress),
+				),
+			},
+			{
+				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-carried-address", true, ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "allocate_public_ip", "true"),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "public_ip", vmPlanTestAcquiredIpAddress),
+					func(*terraform.State) error {
+						if verbs := recorded(); len(verbs) != 0 {
+							return fmt.Errorf("expected no address verb, got %v", verbs)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
 // startVirtualMachineDestroyBodyMockServer keeps whichever address the create asked for
 // and records the body of the delete. A test then reads what the destroy asked GPCN to
 // do with that address.

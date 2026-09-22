@@ -1793,3 +1793,274 @@ func TestVirtualMachineLeftStoppedBytes(t *testing.T) {
 		})
 	}
 }
+
+const (
+	testPublicIpVpcID      = "vpc-address-1"
+	testPublicIpAcquiredID = "ip-acquired-1"
+	testPublicIpJobAcquire = "job-acquire"
+	testPublicIpJobAttach  = "job-attach"
+	testPublicIpJobDetach  = "job-detach"
+	testPublicIpJobRelease = "job-release"
+)
+
+// publicIpPrimaryInterfaceBody reports one primary VPC interface. An empty carriedID
+// leaves both address columns out, as GPCN does for an interface with no address.
+func publicIpPrimaryInterfaceBody(carriedID string) map[string]any {
+	row := map[string]any{
+		"id": "nic-primary", "networkInterface": 1, "isPrimary": 1,
+		"world": networks.NicWorldVpc, "vpcId": testPublicIpVpcID,
+		"vpcSubnetId": "subnet-uuid-test",
+	}
+	if carriedID != "" {
+		row["publicIp"] = "203.0.113.10"
+		row["publicIpId"] = carriedID
+	}
+	return map[string]any{
+		"success": true, "message": "Network interfaces retrieved",
+		"data": []map[string]any{row},
+	}
+}
+
+// publicIpVerbTarget returns the address id a verb route names.
+func publicIpVerbTarget(routePath, addressesPath, verb string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(routePath, addressesPath+"/"), verb)
+}
+
+// writePublicIpJobStatus answers one poll. A job the test names reports a failure, so
+// the verb that issued it refuses like the platform does.
+func writePublicIpJobStatus(w http.ResponseWriter, r *http.Request, failedJobs []string) {
+	jobID := ""
+	if jobIds, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(jobIds) > 0 {
+		jobID, _ = jobIds[0].(string)
+	}
+	if !slices.Contains(failedJobs, jobID) {
+		testutil.HandleJobResponse(w, jobID, "", true)
+		return
+	}
+	testutil.WriteJSONResponse(w, map[string]any{
+		"success": true, "message": "Job status retrieved",
+		"data": map[string]any{"jobs": []map[string]any{{
+			"jobId": jobID, "isCompleted": false, "isTerminal": true,
+			"hasFailed": true, "errorMessage": jobID + " refused",
+		}}},
+	})
+}
+
+// publicIpUpdateMockServer serves the VPC address verbs and records them in order. The
+// primary interface carries the given address. Each job id in failedJobs answers a
+// failed job, so a test chooses which verb refuses.
+func publicIpUpdateMockServer(t *testing.T, carriedID string, failedJobs ...string) (*httptest.Server, *client.GpcnClient, *[]string) {
+	t.Helper()
+
+	addressesPath := "/v1/resource/vpcs/" + testPublicIpVpcID + "/public-ips"
+	verbs := []string{}
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/network-interfaces"):
+				testutil.WriteJSONResponse(w, publicIpPrimaryInterfaceBody(carriedID))
+			case r.Method == http.MethodPost && r.URL.Path == addressesPath:
+				verbs = append(verbs, "acquire")
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true, "message": "Operation initiated successfully",
+					"data": map[string]any{
+						"publicIpId": testPublicIpAcquiredID, "jobId": testPublicIpJobAcquire,
+					},
+				})
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/attach"):
+				verbs = append(verbs, "attach "+publicIpVerbTarget(r.URL.Path, addressesPath, "/attach"))
+				testutil.HandleCreateJobResponse(w, testPublicIpJobAttach, "attach issued")
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/detach"):
+				verbs = append(verbs, "detach "+publicIpVerbTarget(r.URL.Path, addressesPath, "/detach"))
+				testutil.HandleCreateJobResponse(w, testPublicIpJobDetach, "detach issued")
+			case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, addressesPath+"/"):
+				verbs = append(verbs, "release "+strings.TrimPrefix(r.URL.Path, addressesPath+"/"))
+				testutil.HandleCreateJobResponse(w, testPublicIpJobRelease, "release issued")
+			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+				writePublicIpJobStatus(w, r, failedJobs)
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+
+	return server, gpcnClient, &verbs
+}
+
+// A read-back that fails after an acquisition leaves state behind the platform. The
+// next apply then asks for an address the interface already carries. GPCN answers 409
+// for a second address, so the acquire reads the live interface and not state.
+func TestUpdatePublicIPIfChangedSkipsTheAcquireWhenThePrimaryCarriesAnAddress(t *testing.T) {
+	const vmID = "vm-carries-an-address"
+
+	server, gpcnClient, verbs := publicIpUpdateMockServer(t, testPublicIpAcquiredID)
+	defer server.Close()
+
+	state := createTestVMModel("test-vm", testVMImage, false)
+	plan := createTestVMModel("test-vm", testVMImage, true)
+
+	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if diags.HasError() {
+		t.Fatalf("Expected no error diagnostic, got %v", diags.Errors())
+	}
+	if len(*verbs) != 0 {
+		t.Errorf("Expected no address verb, got %v", *verbs)
+	}
+}
+
+// The API inserts the address row before it dispatches the job, so a failed acquisition
+// leaves a real address. The diagnostic is the only record of it.
+func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheAcquireJobFails(t *testing.T) {
+	const vmID = "vm-acquire-job-fails"
+
+	server, gpcnClient, verbs := publicIpUpdateMockServer(t, "", testPublicIpJobAcquire)
+	defer server.Close()
+
+	state := createTestVMModel("test-vm", testVMImage, false)
+	plan := createTestVMModel("test-vm", testVMImage, true)
+
+	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if !diags.HasError() {
+		t.Fatal("Expected an error diagnostic when the acquisition job fails")
+	}
+	detail := diags.Errors()[0].Detail()
+	wantPrefix := fmt.Sprintf("public IP %s was acquired for virtual machine %s but its acquisition job failed: ", testPublicIpAcquiredID, vmID)
+	if !strings.HasPrefix(detail, wantPrefix) {
+		t.Errorf("Expected the detail to start with '%s', got '%s'", wantPrefix, detail)
+	}
+	if !strings.HasSuffix(detail, ". Release it in the portal or import it as gpcn_vpc_public_ip.") {
+		t.Errorf("Expected the detail to end with the remedy sentence, got '%s'", detail)
+	}
+	if !slices.Equal(*verbs, []string{"acquire"}) {
+		t.Errorf("Expected the acquire alone, got %v", *verbs)
+	}
+}
+
+// An acquired address that no interface carries is unusable and unrecorded, so it goes
+// back before the report. The user then has nothing to clean up.
+func TestUpdatePublicIPIfChangedReleasesTheAddressWhenTheAttachFails(t *testing.T) {
+	const vmID = "vm-attach-fails"
+
+	server, gpcnClient, verbs := publicIpUpdateMockServer(t, "", testPublicIpJobAttach)
+	defer server.Close()
+
+	state := createTestVMModel("test-vm", testVMImage, false)
+	plan := createTestVMModel("test-vm", testVMImage, true)
+
+	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if !diags.HasError() {
+		t.Fatal("Expected an error diagnostic when the attach fails")
+	}
+	detail := diags.Errors()[0].Detail()
+	wantPrefix := fmt.Sprintf("public IP %s was acquired for virtual machine %s but attaching it failed: ", testPublicIpAcquiredID, vmID)
+	if !strings.HasPrefix(detail, wantPrefix) {
+		t.Errorf("Expected the detail to start with '%s', got '%s'", wantPrefix, detail)
+	}
+	if !strings.HasSuffix(detail, "; the address was released.") {
+		t.Errorf("Expected the detail to report the release, got '%s'", detail)
+	}
+	want := []string{"acquire", "attach " + testPublicIpAcquiredID, "release " + testPublicIpAcquiredID}
+	if !slices.Equal(*verbs, want) {
+		t.Errorf("Expected %v, got %v", want, *verbs)
+	}
+}
+
+// A release that fails after a failed attach leaves the address in holdings. The
+// diagnostic names it, because no later destroy reaches it.
+func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheReleaseAlsoFails(t *testing.T) {
+	const vmID = "vm-release-also-fails"
+
+	server, gpcnClient, verbs := publicIpUpdateMockServer(t, "", testPublicIpJobAttach, testPublicIpJobRelease)
+	defer server.Close()
+
+	state := createTestVMModel("test-vm", testVMImage, false)
+	plan := createTestVMModel("test-vm", testVMImage, true)
+
+	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if !diags.HasError() {
+		t.Fatal("Expected an error diagnostic when the release also fails")
+	}
+	detail := diags.Errors()[0].Detail()
+	wantPrefix := fmt.Sprintf("public IP %s was acquired for virtual machine %s but attaching it failed: ", testPublicIpAcquiredID, vmID)
+	if !strings.HasPrefix(detail, wantPrefix) {
+		t.Errorf("Expected the detail to start with '%s', got '%s'", wantPrefix, detail)
+	}
+	if !strings.Contains(detail, "; releasing it failed too: ") {
+		t.Errorf("Expected the detail to report the failed release, got '%s'", detail)
+	}
+	if !strings.HasSuffix(detail, ". Release it in the portal or import it as gpcn_vpc_public_ip.") {
+		t.Errorf("Expected the detail to end with the remedy sentence, got '%s'", detail)
+	}
+	want := []string{"acquire", "attach " + testPublicIpAcquiredID, "release " + testPublicIpAcquiredID}
+	if !slices.Equal(*verbs, want) {
+		t.Errorf("Expected %v, got %v", want, *verbs)
+	}
+}
+
+// A detach that succeeds takes the address off the interface, so a later gate finds
+// nothing to release. The failed release is therefore the last record of the address.
+func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheReleaseAfterDetachFails(t *testing.T) {
+	const vmID = "vm-release-after-detach-fails"
+
+	server, gpcnClient, verbs := publicIpUpdateMockServer(t, testPublicIpAcquiredID, testPublicIpJobRelease)
+	defer server.Close()
+
+	state := createTestVMModel("test-vm", testVMImage, true)
+	plan := createTestVMModel("test-vm", testVMImage, false)
+
+	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if !diags.HasError() {
+		t.Fatal("Expected an error diagnostic when the release fails")
+	}
+	detail := diags.Errors()[0].Detail()
+	wantPrefix := fmt.Sprintf("public IP %s was acquired for virtual machine %s but releasing it failed: ", testPublicIpAcquiredID, vmID)
+	if !strings.HasPrefix(detail, wantPrefix) {
+		t.Errorf("Expected the detail to start with '%s', got '%s'", wantPrefix, detail)
+	}
+	if !strings.HasSuffix(detail, ". Release it in the portal or import it as gpcn_vpc_public_ip.") {
+		t.Errorf("Expected the detail to end with the remedy sentence, got '%s'", detail)
+	}
+	want := []string{"detach " + testPublicIpAcquiredID, "release " + testPublicIpAcquiredID}
+	if !slices.Equal(*verbs, want) {
+		t.Errorf("Expected %v, got %v", want, *verbs)
+	}
+}
+
+// An orphaned address costs money and hides from Terraform, so the release pins the
+// sentences that tell the operator where it is.
+func TestPublicIpOrphanDetailBytes(t *testing.T) {
+	tests := []struct {
+		name     string
+		actual   string
+		expected string
+	}{
+		{
+			name:     "orphaned",
+			actual:   ErrDetailPublicIpOrphaned,
+			expected: "public IP %s was acquired for virtual machine %s but %s: %s. Release it in the portal or import it as gpcn_vpc_public_ip.",
+		},
+		{
+			name:     "attach failed and the release succeeded",
+			actual:   ErrDetailPublicIpAttachFailedReleased,
+			expected: "public IP %s was acquired for virtual machine %s but attaching it failed: %s; the address was released.",
+		},
+		{
+			name:     "attach failed and the release failed too",
+			actual:   ErrDetailPublicIpAttachFailedReleaseFailed,
+			expected: "public IP %s was acquired for virtual machine %s but attaching it failed: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip.",
+		},
+		{name: "acquisition phrase", actual: ErrPhrasePublicIpAcquisitionFailed, expected: "its acquisition job failed"},
+		{name: "attach phrase", actual: ErrPhrasePublicIpAttachFailed, expected: "attaching it failed"},
+		{name: "release phrase", actual: ErrPhrasePublicIpReleaseFailed, expected: "releasing it failed"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.actual != tc.expected {
+				t.Errorf("Expected '%s', got '%s'", tc.expected, tc.actual)
+			}
+		})
+	}
+}
