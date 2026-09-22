@@ -17,6 +17,15 @@ const vpcNotActiveBody = `{"success":false,` +
 	`"message":"The VPC is not active (status: creating); this operation needs an active VPC.",` +
 	`"error":{"code":"VPC_NOT_ACTIVE","statusCode":409,"details":null}}`
 
+// The answer a row that no longer exists carries
+// (src/components/vpc/vpc.access.ts:25, src/common/errorCodes.ts:55).
+const vpcGoneBody = `{"success":false,"message":"VPC not found",` +
+	`"error":{"code":"Resource Not Found","statusCode":404,"details":null}}`
+
+// A gateway between the provider and the API answers for itself, so the body
+// carries no GPCN envelope.
+const vpcGatewayFailureBody = "Bad Gateway"
+
 // vpcDeleteMock answers the first delete with the refusal a creating VPC
 // raises, and the second with the teardown job.
 type vpcDeleteMock struct {
@@ -26,6 +35,13 @@ type vpcDeleteMock struct {
 	status      string
 	activeJobID any
 	deletes     int
+	// gets counts the reads of the row.
+	gets int
+	// readGone is true when the row has already gone.
+	readGone bool
+	// failReadsFrom is the read from which the gateway answers instead of the
+	// row. Zero means every read reaches the API.
+	failReadsFrom int
 }
 
 // deleteCount reads the counter the handler goroutine writes. The mutex orders
@@ -60,10 +76,24 @@ func (m *vpcDeleteMock) handler(t *testing.T) func(http.ResponseWriter, *http.Re
 			})
 		case r.Method == http.MethodGet:
 			m.mutex.Lock()
+			m.gets++
 			status := m.status
 			activeJobID := m.activeJobID
+			gone := m.readGone
+			failed := m.failReadsFrom > 0 && m.gets >= m.failReadsFrom
 			m.mutex.Unlock()
 
+			if failed {
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = w.Write([]byte(vpcGatewayFailureBody))
+				return
+			}
+			if gone {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(vpcGoneBody))
+				return
+			}
 			testutil.WriteJSONResponse(w, map[string]any{
 				"success": true,
 				"message": "",
@@ -198,5 +228,21 @@ func TestDeleteVpcReportsATeardownThatOutlivesThePollingTimeout(t *testing.T) {
 		}
 	case <-time.After(vpcTeardownTestCap):
 		t.Fatalf("DeleteVpc did not return within %s", vpcTeardownTestCap)
+	}
+}
+
+// The teardown another caller started can end between the refusal and the
+// status read. The row is gone, which is the state the destroy asked for.
+func TestVpcDeleteTreatsARowThatVanishedAsDeleted(t *testing.T) {
+	t.Parallel()
+
+	mock := &vpcDeleteMock{refusals: 1, status: VPC_STATUS_DELETING, readGone: true}
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{T: t, Handler: mock.handler(t)})
+
+	if err := DeleteVpc(gpcnClient, context.Background(), vpcUnitTestID); err != nil {
+		t.Fatalf("Expected a row that vanished to count as deleted, got %v", err)
+	}
+	if count := mock.deleteCount(); count != 1 {
+		t.Errorf("DELETE count = %d, want 1", count)
 	}
 }

@@ -156,6 +156,12 @@ func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string)
 			return err
 		}
 		vpcResponse, readErr := GetVpc(gpcnClient, ctx, vpcID)
+		// The teardown can end between the refusal and this read. The row is
+		// then gone, which is what the delete asked for.
+		if client.IsNotFound(readErr) {
+			tflog.Info(ctx, fmt.Sprintf(LogVpcTeardownFinished, vpcID))
+			return nil
+		}
 		if readErr != nil {
 			return err
 		}
