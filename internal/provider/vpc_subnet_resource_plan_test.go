@@ -1029,8 +1029,8 @@ func checkSubnetDestroyDeletedTheRow(state *subnetPlanTestServerState) func(*ter
 }
 
 // The platform answers the read-back after a carve that worked. A failure
-// there leaves the row and the id in state, so the error carries the tainted
-// remedy rather than a bare HTTP failure.
+// there leaves the row and the id in state. The error therefore carries the
+// tainted remedy, not a bare HTTP failure.
 func TestVpcSubnetResourcePlanKeepsTheIdWhenTheReadBackFails(t *testing.T) {
 	t.Parallel()
 	server, state := startSubnetPlanMockServer(t)

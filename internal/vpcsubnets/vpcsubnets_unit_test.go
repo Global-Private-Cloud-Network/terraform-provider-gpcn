@@ -414,8 +414,8 @@ func TestMapSubnetResponseToModelFillsPrefixOnImportUnit(t *testing.T) {
 	}
 }
 
-// One create carries one correlation id. A poll that mints its own leaves the
-// support log with no link between the create call and the job it waits for.
+// One create carries one correlation id. A poll that mints its own breaks the
+// support log. The create call then has no link to the job it waits for.
 func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
 	t.Parallel()
 

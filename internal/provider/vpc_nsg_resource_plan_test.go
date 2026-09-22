@@ -976,8 +976,8 @@ func TestVpcNsgReadWarnsOnFailedGroupUnit(t *testing.T) {
 }
 
 // GPCN answers the read-back after a build that worked. A failure there leaves
-// the group and the id in state, so the error carries the tainted remedy
-// rather than a bare HTTP failure.
+// the group and the id in state. The error therefore carries the tainted
+// remedy, not a bare HTTP failure.
 func TestVpcNsgResourcePlanKeepsTheIdWhenTheReadBackFails(t *testing.T) {
 	t.Parallel()
 	server, state := startNsgPlanMockServer(t)
