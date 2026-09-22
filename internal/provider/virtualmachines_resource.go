@@ -140,7 +140,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				},
 			},
 			"public_ip_id": schema.StringAttribute{
-				Description: "ID of a held gpcn_vpc_public_ip to attach to the primary interface. Cannot be set together with allocate_public_ip. The address outlives the virtual machine, because the operator holds it. An import fills this from the address the primary interface carries. Name this address in the configuration after an import; otherwise the next apply detaches it. Import that address as a gpcn_vpc_public_ip too when Terraform should own its release",
+				Description: "ID of a held gpcn_vpc_public_ip to attach to the primary interface. Cannot be set together with allocate_public_ip. The address outlives the virtual machine, because the operator holds it. An import fills this from the address the primary interface carries. Name this address in the configuration after an import; otherwise the next apply detaches it. Import that address as a gpcn_vpc_public_ip too when Terraform should own its release. Do not name an address that a gpcn_vpc_public_ip_attachment also binds; one resource owns a binding",
 				Optional:    true,
 				Validators: []validator.String{
 					virtualmachines.PublicIpIdConflictsValidator{},
@@ -558,14 +558,14 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	// it fails. The steps run in order through one runner, so one early return owns
 	// that repair. The runner keeps the response of the read-back for the mapping.
 	var getVirtualMachineResponse *virtualmachines.ReadVirtualMachinesResponse
-	acquiredPublicIpID := ""
+	var acquiredAddress virtualmachines.AcquiredAddress
 	updateSteps := []func() diag.Diagnostics{
 		func() diag.Diagnostics {
 			return virtualmachines.UpdateL2SegmentsIfChanged(r.client, ctx, state.ID.ValueString(), state, plan, liveInterfaces)
 		},
 		func() diag.Diagnostics {
 			var publicIpDiags diag.Diagnostics
-			acquiredPublicIpID, publicIpDiags = virtualmachines.UpdatePublicIPIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+			acquiredAddress, publicIpDiags = virtualmachines.UpdatePublicIPIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
 			return publicIpDiags
 		},
 		func() diag.Diagnostics {
@@ -584,25 +584,20 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 					virtualmachines.ErrSummaryRetrievingVMInfoFailed,
 					fmt.Errorf("%s: %w", virtualmachines.ErrDetailVMInfoFailedCanImport, readBackErr).Error(),
 				)
-				// The address is on the machine, and this update writes no state. No
-				// attribute records it, so this diagnostic is the only place it appears.
-				if acquiredPublicIpID != "" {
-					readBackDiags.AddError(
-						virtualmachines.ErrSummaryUnableToUpdatePublicIPConfiguration,
-						fmt.Sprintf(virtualmachines.ErrDetailPublicIpOrphaned, acquiredPublicIpID,
-							plan.ID.ValueString(), virtualmachines.ErrPhrasePublicIpReadBackFailed, readBackErr.Error()),
-					)
-				}
 			}
 			return readBackDiags
 		},
 	}
 
-	// A start that fails is the only report the user gets. It follows the diagnostics
-	// of the step that fails. The change is not in state. An earlier step can still have
-	// succeeded, so the remedy sends the user to the next plan.
+	// A failed step leaves two things to repair, and the machine comes first. The start
+	// runs before the unwind, because a release that hangs would hold the stopped
+	// machine down. One rule then covers every failure after a successful acquire: it
+	// hands back an address the update records nowhere. The change is not in state. An
+	// earlier step can still have succeeded, so the remedy sends the user to the next
+	// plan.
 	for _, updateStep := range updateSteps {
-		resp.Diagnostics.Append(updateStep()...)
+		stepDiags := updateStep()
+		resp.Diagnostics.Append(stepDiags...)
 		if !resp.Diagnostics.HasError() {
 			continue
 		}
@@ -615,6 +610,8 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 				)
 			}
 		}
+		resp.Diagnostics.Append(virtualmachines.UnwindAcquiredAddress(
+			r.client, ctx, state.ID.ValueString(), acquiredAddress, stepDiags)...)
 		return
 	}
 

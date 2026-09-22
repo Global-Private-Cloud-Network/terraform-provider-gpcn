@@ -44,11 +44,12 @@ const (
 	ErrDetailVMCreatedAttachFailed           = "virtual machine %s was created and is in state, but attaching %s failed: %s. Terraform has marked the machine tainted: run terraform untaint on it and apply again to attach the remaining networks, or let the next apply replace it."
 )
 
-// GPCN reports one address row for an address the operator attached and for the
-// leftover of a failed read-back. The provider cannot tell them apart. It refuses the
-// acquire and names the address, because adopting a held one makes the next destroy
-// release what gpcn_vpc_public_ip owns.
-const ErrDetailPrimaryInterfaceCarriesAForeignAddress = "the primary network interface of virtual machine %s already carries public IP %s, which Terraform did not acquire; name it in public_ip_id or detach it before asking for an acquired address"
+// GPCN reports one address row whatever bound the address. A
+// gpcn_vpc_public_ip_attachment binds one, and an unwind whose release also failed
+// leaves another. The provider cannot tell them apart. It refuses the acquire and names
+// the address. Adopting a held one makes the next destroy release what
+// gpcn_vpc_public_ip owns.
+const ErrDetailPrimaryInterfaceCarriesAForeignAddress = "the primary network interface of virtual machine %s already carries public IP %s that this configuration did not attach; import it as gpcn_vpc_public_ip and name it in public_ip_id, or release it"
 
 // A start that fails after the provider stopped the machine leaves it stopped. The
 // remedy differs by path. Create taints the machine, so the next apply replaces it.
@@ -70,7 +71,15 @@ const (
 	ErrDetailPublicIpAttachFailedReleaseFailed = "public IP %s was acquired for virtual machine %s but attaching it failed: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip."
 	ErrPhrasePublicIpAcquisitionFailed         = "its acquisition job failed"
 	ErrPhrasePublicIpReleaseFailed             = "releasing it failed"
-	ErrPhrasePublicIpReadBackFailed            = "reading the machine back failed"
+)
+
+// A step that fails after a successful acquire leaves an address the update records
+// nowhere. The runner gives that address back, so the machine ends where it started and
+// the retry acquires afresh. Only a release that fails too leaves one to find, and that
+// report names it.
+const (
+	ErrDetailAcquiredAddressReleasedAfterStepFailure      = "public IP %s was acquired for virtual machine %s but the update failed afterwards: %s; the address was released."
+	ErrDetailAcquiredAddressReleaseFailedAfterStepFailure = "public IP %s was acquired for virtual machine %s but the update failed afterwards: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip."
 )
 
 // Warning detail message templates

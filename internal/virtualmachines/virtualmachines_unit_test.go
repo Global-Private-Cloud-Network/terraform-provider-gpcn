@@ -1834,6 +1834,9 @@ const (
 	testPublicIpJobAttach  = "job-attach"
 	testPublicIpJobDetach  = "job-detach"
 	testPublicIpJobRelease = "job-release"
+	// An attach of an address the acquire did not name issues this job instead. A test
+	// can then refuse the held attach alone.
+	testPublicIpJobHeldAttach = "job-attach-held"
 )
 
 // publicIpPrimaryInterfaceBody reports one primary VPC interface. An empty carriedID
@@ -1913,8 +1916,13 @@ func publicIpMockServer(t *testing.T, carriedID, acquiredID string, failedJobs .
 					"data": acquired,
 				})
 			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/attach"):
-				verbs = append(verbs, "attach "+publicIpVerbTarget(r.URL.Path, addressesPath, "/attach"))
-				testutil.HandleCreateJobResponse(w, testPublicIpJobAttach, "attach issued")
+				target := publicIpVerbTarget(r.URL.Path, addressesPath, "/attach")
+				verbs = append(verbs, "attach "+target)
+				attachJob := testPublicIpJobAttach
+				if target != acquiredID {
+					attachJob = testPublicIpJobHeldAttach
+				}
+				testutil.HandleCreateJobResponse(w, attachJob, "attach issued")
 			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/detach"):
 				verbs = append(verbs, "detach "+publicIpVerbTarget(r.URL.Path, addressesPath, "/detach"))
 				testutil.HandleCreateJobResponse(w, testPublicIpJobDetach, "detach issued")
@@ -2123,6 +2131,39 @@ func TestUpdatePublicIPIfChangedReleasesTheAddressWhenTheAttachFails(t *testing.
 	}
 }
 
+// An unknown allocate_public_ip passes the validator. One plan can then ask for an
+// acquired address and name a held one. GPCN refuses the second attach. The acquire
+// already happened, so the function hands that address back and the caller unwinds it.
+func TestUpdatePublicIPIfChangedReturnsTheAcquiredAddressWhenTheHeldAttachFails(t *testing.T) {
+	const vmID = "vm-held-attach-fails"
+	const heldID = "ip-held-1"
+
+	server, gpcnClient, verbs := publicIpUpdateMockServer(t, "", testPublicIpJobHeldAttach)
+	defer server.Close()
+
+	state := createTestVMModel("test-vm", testVMImage, false)
+	plan := createTestVMModel("test-vm", testVMImage, true)
+	plan.PublicIpId = types.StringValue(heldID)
+
+	acquired, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if !diags.HasError() {
+		t.Fatal("Expected an error diagnostic when the held attach fails")
+	}
+	if summary := diags.Errors()[0].Summary(); summary != ErrSummaryUnableToUpdatePublicIPConfiguration {
+		t.Errorf("Expected '%s', got '%s'", ErrSummaryUnableToUpdatePublicIPConfiguration, summary)
+	}
+	if acquired.ID != testPublicIpAcquiredID {
+		t.Errorf("Expected the acquired id '%s', got '%s'", testPublicIpAcquiredID, acquired.ID)
+	}
+	if acquired.VpcID != testPublicIpVpcID {
+		t.Errorf("Expected the VPC id '%s', got '%s'", testPublicIpVpcID, acquired.VpcID)
+	}
+	want := []string{"acquire", "attach " + testPublicIpAcquiredID, "attach " + heldID}
+	if !slices.Equal(*verbs, want) {
+		t.Errorf("Expected %v, got %v", want, *verbs)
+	}
+}
+
 // A release that fails after a failed attach leaves the address in holdings. The
 // diagnostic names it, because no later destroy reaches it.
 func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheReleaseAlsoFails(t *testing.T) {
@@ -2209,7 +2250,16 @@ func TestPublicIpOrphanDetailBytes(t *testing.T) {
 		},
 		{name: "acquisition phrase", actual: ErrPhrasePublicIpAcquisitionFailed, expected: "its acquisition job failed"},
 		{name: "release phrase", actual: ErrPhrasePublicIpReleaseFailed, expected: "releasing it failed"},
-		{name: "read-back phrase", actual: ErrPhrasePublicIpReadBackFailed, expected: "reading the machine back failed"},
+		{
+			name:     "released after a step failed",
+			actual:   ErrDetailAcquiredAddressReleasedAfterStepFailure,
+			expected: "public IP %s was acquired for virtual machine %s but the update failed afterwards: %s; the address was released.",
+		},
+		{
+			name:     "release failed after a step failed",
+			actual:   ErrDetailAcquiredAddressReleaseFailedAfterStepFailure,
+			expected: "public IP %s was acquired for virtual machine %s but the update failed afterwards: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip.",
+		},
 	}
 
 	for _, tc := range tests {
@@ -2224,7 +2274,7 @@ func TestPublicIpOrphanDetailBytes(t *testing.T) {
 // The refusal is the only place the operator reads the id of the address the machine
 // carries. The sentence also names the two ways out of it.
 func TestPrimaryInterfaceCarriesAForeignAddressDetailBytes(t *testing.T) {
-	const expected = "the primary network interface of virtual machine %s already carries public IP %s, which Terraform did not acquire; name it in public_ip_id or detach it before asking for an acquired address"
+	const expected = "the primary network interface of virtual machine %s already carries public IP %s that this configuration did not attach; import it as gpcn_vpc_public_ip and name it in public_ip_id, or release it"
 
 	if ErrDetailPrimaryInterfaceCarriesAForeignAddress != expected {
 		t.Errorf("Expected '%s', got '%s'", expected, ErrDetailPrimaryInterfaceCarriesAForeignAddress)
