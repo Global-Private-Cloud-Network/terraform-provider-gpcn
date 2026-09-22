@@ -37,8 +37,8 @@ func TestSSHKeyNameValidator(t *testing.T) {
 		// GPCN trims with JavaScript, which removes a byte order mark. A mark
 		// the provider keeps makes the stored name differ from the plan.
 		{name: "leading_byte_order_mark", input: "\ufeffdemo-key", wantDetail: whitespaceDetail},
-		// JavaScript keeps U+0085 and Go trims it. The name regex refuses the
-		// character, so the whitespace refusal never reaches this row.
+		// JavaScript keeps U+0085, and the shared trim set follows JavaScript, so
+		// the whitespace refusal never fires. The name regex refuses the character.
 		{name: "leading_next_line", input: "\u0085demo-key", wantDetail: charactersDetail},
 		{name: "unicode_letter", input: "café", wantDetail: charactersDetail},
 		{name: "interior_unicode_letter", input: "café-key", wantDetail: charactersDetail},

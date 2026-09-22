@@ -2196,9 +2196,9 @@ func vmPublicIpPlanTestInterfacesBody(addressID, address string) map[string]any 
 // order. The legacy per-NIC routes answer nothing but a test failure. GPCN refuses them
 // on a VPC interface, so the provider must never reach for one. A create that names an
 // address binds it, and the image list answers the import. refuseReadAfterChange makes
-// the first read of the machine after an attach or a rename answer 500, which is the
-// read-back of the update. It answers one read only, so the destroy still reaches the
-// machine.
+// the first read of the machine after an attach or a rename answer 500. That read is
+// the read-back of the update. It answers one read only, so the destroy still reaches
+// the machine.
 func startVirtualMachinePublicIpMockServer(t *testing.T, refuseReadAfterChange bool) (*httptest.Server, func() []string) {
 	t.Helper()
 

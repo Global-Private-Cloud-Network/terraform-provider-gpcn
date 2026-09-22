@@ -416,7 +416,7 @@ func TestMapSubnetResponseToModelFillsPrefixOnImportUnit(t *testing.T) {
 
 // One operation carries one correlation id. A helper that mints its own breaks
 // the support log. The resource method then has no link to the job it waits
-// for. The create, the update, the rebind and the delete are pinned here.
+// for. This test pins the create, the update, the rebind and the delete.
 func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
 	t.Parallel()
 

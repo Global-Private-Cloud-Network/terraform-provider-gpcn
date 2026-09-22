@@ -1987,9 +1987,8 @@ func TestUpdatePublicIPIfChangedExchangesAHeldAddressForAnAcquiredOne(t *testing
 
 // An exchange whose read-back fails leaves state behind the machine. The retry then
 // finds the machine carrying the address the plan names. The operator owns that
-// address, and GPCN releases an attached address, so a release here destroys it. GPCN
-// also answers 409 for a second attach of an address a machine carries, so the retry
-// issues no verb at all.
+// address, and GPCN releases an attached address, so a release here destroys it. A
+// second attach of a carried address answers 409. The retry therefore issues no verb.
 func TestUpdatePublicIPIfChangedKeepsTheHeldAddressOnAnExchangeRetry(t *testing.T) {
 	const vmID = "vm-exchange-retry"
 	const heldID = "ip-held-1"

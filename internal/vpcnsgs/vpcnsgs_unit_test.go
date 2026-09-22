@@ -405,8 +405,8 @@ func TestRefreshNsgModelFromResponseUpdatesDescriptionUnit(t *testing.T) {
 
 // One operation carries one correlation id. A helper that mints its own breaks
 // the support log. The resource method then has no link to the job it waits
-// for. The create, the rename, the rules replace and the delete are pinned
-// here.
+// for. This test pins the create, the rename, the rules replace and the
+// delete.
 func TestCreateNsgCarriesOneCorrelationIDUnit(t *testing.T) {
 	t.Parallel()
 
