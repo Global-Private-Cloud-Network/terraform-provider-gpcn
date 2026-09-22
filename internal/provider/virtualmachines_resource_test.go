@@ -38,11 +38,46 @@ resource "gpcn_vpc_subnet" "vm_subnet" {
 `, suffix, octet)
 }
 
-// vpcTestOctet draws the second octet of a case's own /16 out of the 16-wide window this
-// file owns. Each resource file draws from a different window, so parallel cases in
-// different files never collide.
-func vpcTestOctet() int {
-	return 112 + acctest.RandIntRange(0, 16)
+// Each case in this file owns one block of the window, named below. Six parallel cases
+// that each drew a block at random took the same one about half the time, and GPCN
+// answers 409 for a VPC that overlaps another. Slots 5 to 7 wait for the next cases.
+const (
+	vmOctetAuth                     = 0
+	vmOctetVolumeAttachment         = 1
+	vmOctetSizeUpgrade              = 2
+	vmOctetChangePublicIpAllocation = 3
+	vmOctetResource                 = 4
+	vmOctetSlots                    = 8
+)
+
+// vpcTestOctet returns the second octet of the case's own /16. The window starts at 112
+// and belongs to this file, so parallel cases in other files never collide.
+func vpcTestOctet(slot int) int {
+	return 112 + slot
+}
+
+// A shared slot puts two parallel cases in one /16, and GPCN refuses the second VPC.
+// The compiler accepts a duplicate, so the release pins the set.
+func TestVirtualMachineAcceptanceOctetsAreUnique(t *testing.T) {
+	slots := map[string]int{
+		"TestVirtualMachinesAuth":                     vmOctetAuth,
+		"TestVirtualMachinesVolumeAttachment":         vmOctetVolumeAttachment,
+		"TestVirtualMachinesSizeUpgrade":              vmOctetSizeUpgrade,
+		"TestVirtualMachinesChangePublicIpAllocation": vmOctetChangePublicIpAllocation,
+		"TestVirtualMachinesResource":                 vmOctetResource,
+	}
+
+	owner := map[int]string{}
+	for name, slot := range slots {
+		if slot < 0 || slot >= vmOctetSlots {
+			t.Errorf("Expected %s to take a slot below %d, got %d", name, vmOctetSlots, slot)
+		}
+		octet := vpcTestOctet(slot)
+		if other, taken := owner[octet]; taken {
+			t.Errorf("Expected %s and %s to take different octets, both take %d", name, other, octet)
+		}
+		owner[octet] = name
+	}
 }
 
 // dataCenterImagesAndSize returns the common datacenter, image, and size datasource lookup blocks for Chicago.
@@ -70,7 +105,7 @@ data "gpcn_virtualmachine_sizes" "vm_size" {
 func TestVirtualMachinesResource(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet()
+	vpcOctet := vpcTestOctet(vmOctetResource)
 	sshKeyName := fmt.Sprintf("vm-basic-key-%s", rName)
 	volumeName := fmt.Sprintf("vm-basic-vol-%s", rName)
 	vmName := fmt.Sprintf("vm-basic-%s", rName)
@@ -234,7 +269,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet()
+	vpcOctet := vpcTestOctet(vmOctetChangePublicIpAllocation)
 	sshKeyName := fmt.Sprintf("vm-public-ip-key-%s", rName)
 	vmName := fmt.Sprintf("vm-public-ip-%s", rName)
 
@@ -303,7 +338,7 @@ func TestVirtualMachinesChangePublicIpAllocation(t *testing.T) {
 func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet()
+	vpcOctet := vpcTestOctet(vmOctetSizeUpgrade)
 	sshKeyName := fmt.Sprintf("vm-size-upgrade-key-%s", rName)
 	vmName := fmt.Sprintf("vm-size-upgrade-%s", rName)
 
@@ -399,7 +434,7 @@ func TestVirtualMachinesSizeUpgrade(t *testing.T) {
 func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet()
+	vpcOctet := vpcTestOctet(vmOctetVolumeAttachment)
 	sshKeyName := fmt.Sprintf("vm-vol-attach-key-%s", rName)
 	vol1Name := fmt.Sprintf("vm-vol-attach-vol1-%s", rName)
 	vol2Name := fmt.Sprintf("vm-vol-attach-vol2-%s", rName)
@@ -511,7 +546,7 @@ func TestVirtualMachinesVolumeAttachment(t *testing.T) {
 func TestVirtualMachinesAuth(t *testing.T) {
 	t.Parallel()
 	rName := acctest.RandString(8)
-	vpcOctet := vpcTestOctet()
+	vpcOctet := vpcTestOctet(vmOctetAuth)
 	sshKeyName := fmt.Sprintf("vm-auth-key-%s", rName)
 	vmName := fmt.Sprintf("vm-auth-%s", rName)
 
