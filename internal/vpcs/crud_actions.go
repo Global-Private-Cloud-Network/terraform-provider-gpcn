@@ -145,8 +145,8 @@ func UpdateVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string,
 
 // DeleteVpc claims the VPC and waits for the teardown job. A VPC that is still
 // being created answers VPC_NOT_ACTIVE. Only the end of its create job clears
-// that refusal. A VPC already being torn down answers the same refusal. The
-// teardown it names is the work the caller asked for.
+// that refusal. A VPC already being torn down answers the same refusal, and the
+// row itself says whether a job drives that teardown.
 func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteVpcWithID, vpcID))
 
@@ -159,17 +159,23 @@ func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string)
 		if readErr != nil {
 			return err
 		}
-		if vpcResponse.Data.Status == VPC_STATUS_DELETING {
+		switch {
+		// A teardown that parked writes a failure reason, and no job then
+		// drives the row. The platform re-admits a delete on it, so a wait
+		// would never end (src/components/vpc/vpc.service.ts:242-243).
+		case vpcResponse.Data.Status == VPC_STATUS_DELETING && vpcResponse.Data.FailureReason == nil:
 			tflog.Info(ctx, fmt.Sprintf(LogWaitingForVpcTeardown, vpcID))
 			return awaitVpcGone(gpcnClient, ctx, vpcID)
-		}
-		if vpcResponse.Data.Status != VPC_STATUS_CREATING || vpcResponse.Data.ActiveJobId == nil {
+		case vpcResponse.Data.Status == VPC_STATUS_DELETING:
+			tflog.Info(ctx, fmt.Sprintf(LogReclaimingParkedVpcTeardown, vpcID, *vpcResponse.Data.FailureReason))
+		case vpcResponse.Data.Status == VPC_STATUS_CREATING && vpcResponse.Data.ActiveJobId != nil:
+			activeJobID := *vpcResponse.Data.ActiveJobId
+			tflog.Info(ctx, fmt.Sprintf(LogWaitingForVpcActiveJob, vpcID, activeJobID))
+			if pollErr := AwaitVpcJob(gpcnClient, ctx, ACTION_CREATE_VPC, activeJobID); pollErr != nil {
+				tflog.Warn(ctx, fmt.Sprintf(LogVpcActiveJobPollFailed, vpcID, pollErr.Error()))
+			}
+		default:
 			return err
-		}
-		activeJobID := *vpcResponse.Data.ActiveJobId
-		tflog.Info(ctx, fmt.Sprintf(LogWaitingForVpcActiveJob, vpcID, activeJobID))
-		if pollErr := AwaitVpcJob(gpcnClient, ctx, ACTION_CREATE_VPC, activeJobID); pollErr != nil {
-			tflog.Warn(ctx, fmt.Sprintf(LogVpcActiveJobPollFailed, vpcID, pollErr.Error()))
 		}
 		jobID, err = issueVpcDelete(gpcnClient, ctx, vpcID)
 		if err != nil {

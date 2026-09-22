@@ -52,6 +52,10 @@ const vpcTearingDownRefusalBody = `{"success":false,` +
 	`"message":"The VPC is not active (status: deleting); this operation needs an active VPC.",` +
 	`"error":{"code":"VPC_NOT_ACTIVE","statusCode":409,"details":null}}`
 
+// The marker a teardown writes when its dispatch dies before the engine
+// (src/components/vpc/vpc.service.ts:669).
+const vpcPlanTestParkedReason = "VPC removal could not be started; retry the delete"
+
 // vpcMock serves the VPC endpoints an apply walks. It keeps the name the last
 // create or update sent. The read after an apply then agrees with the
 // configuration, and the refresh plan stays empty.
@@ -74,7 +78,11 @@ type vpcMock struct {
 	// tearingDownDeletes counts the deletes that answer the refusal a live
 	// teardown raises. The first of them parks the row in deleting.
 	tearingDownDeletes int
-	tearingDown        bool
+	// parkedTeardownDeletes counts the deletes that lose the same race to a
+	// teardown whose dispatch dies. The row then carries a failure reason.
+	parkedTeardownDeletes int
+	failureReason         any
+	tearingDown           bool
 	// deletingGets is how many reads still answer deleting. The row answers 404
 	// after them, which is the end of the teardown.
 	deletingGets   int
@@ -84,22 +92,24 @@ type vpcMock struct {
 // vpcMockRefusals seeds the answers the mock refuses with. A test states them
 // before the server starts, because the handler goroutine reads them.
 type vpcMockRefusals struct {
-	create             string
-	deletes            int
-	deleteNotFound     bool
-	tearingDownDeletes int
+	create                string
+	deletes               int
+	deleteNotFound        bool
+	tearingDownDeletes    int
+	parkedTeardownDeletes int
 }
 
 func startVpcPlanMockServer(t *testing.T, refusals vpcMockRefusals) *vpcMock {
 	t.Helper()
 
 	mock := &vpcMock{
-		cidr:               vpcPlanTestCidr,
-		status:             "active",
-		createRefusal:      refusals.create,
-		deleteRefusals:     refusals.deletes,
-		deleteNotFound:     refusals.deleteNotFound,
-		tearingDownDeletes: refusals.tearingDownDeletes,
+		cidr:                  vpcPlanTestCidr,
+		status:                "active",
+		createRefusal:         refusals.create,
+		deleteRefusals:        refusals.deletes,
+		deleteNotFound:        refusals.deleteNotFound,
+		tearingDownDeletes:    refusals.tearingDownDeletes,
+		parkedTeardownDeletes: refusals.parkedTeardownDeletes,
 	}
 	vpcPath := "/v1/resource/vpcs/" + vpcPlanTestID
 
@@ -223,14 +233,24 @@ func (m *vpcMock) handleDelete(w http.ResponseWriter) {
 		m.tearingDown = true
 		m.deletingGets = 2
 	}
-	refuse := !tearingDown && m.deleteRefusals > 0
+	// The dispatch dies between the refusal and the read, so the row the next
+	// read answers with carries the parked marker.
+	parked := !tearingDown && m.parkedTeardownDeletes > 0
+	if parked {
+		m.parkedTeardownDeletes--
+		m.status = "deleting"
+		m.failureReason = vpcPlanTestParkedReason
+		m.tearingDown = true
+		m.deletingGets = 1
+	}
+	refuse := !tearingDown && !parked && m.deleteRefusals > 0
 	if refuse {
 		m.deleteRefusals--
 	}
 	notFound := m.deleteNotFound
 	m.mutex.Unlock()
 
-	if tearingDown {
+	if tearingDown || parked {
 		writeVpcRefusal(w, http.StatusConflict, vpcTearingDownRefusalBody)
 		return
 	}
@@ -251,7 +271,8 @@ func (m *vpcMock) handleDelete(w http.ResponseWriter) {
 	})
 }
 
-// egressIp and failureReason stay null, so the state must keep them null too.
+// egressIp stays null, so the state must keep it null too. failureReason is
+// null until a teardown parks the row.
 func (m *vpcMock) vpcBody() map[string]any {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -263,7 +284,7 @@ func (m *vpcMock) vpcBody() map[string]any {
 		"cidr":            m.cidr,
 		"datacenter":      map[string]any{"id": vpcPlanTestDatacenterID, "code": "kansas", "name": "Kansas"},
 		"status":          m.status,
-		"failureReason":   nil,
+		"failureReason":   m.failureReason,
 		"egressIp":        nil,
 		"activeJobId":     nil,
 		"resourceGroupId": nil,
@@ -841,5 +862,34 @@ func TestVpcResourcePlanWaitsOutATeardownAlreadyRunning(t *testing.T) {
 	// The status read plus two polls.
 	if count := mock.readsWhileTearingDown(); count != 3 {
 		t.Errorf("reads while tearing down = %d, want 3", count)
+	}
+}
+
+// A teardown whose dispatch fails parks the row in deleting with a reason.
+// No job then drives that row, so a wait for the 404 never ends. The platform
+// re-admits a delete on a parked row, and the provider claims it again.
+func TestVpcResourcePlanReclaimsAParkedTeardown(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{parkedTeardownDeletes: 1})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vpcPlanTestConfig(mock.url, "vpc-parked-teardown"),
+			},
+			{
+				Config:  vpcPlanTestConfig(mock.url, "vpc-parked-teardown"),
+				Destroy: true,
+			},
+		},
+	})
+
+	if count := mock.requestCount("DELETE /v1/resource/vpcs/" + vpcPlanTestID); count != 2 {
+		t.Errorf("DELETE count = %d, want 2", count)
+	}
+	// The status read alone. A provider that waited would poll the row as well.
+	if count := mock.readsWhileTearingDown(); count != 1 {
+		t.Errorf("reads while tearing down = %d, want 1", count)
 	}
 }
