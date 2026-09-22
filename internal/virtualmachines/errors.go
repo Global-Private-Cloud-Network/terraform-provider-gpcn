@@ -48,7 +48,7 @@ const (
 // leftover of a failed read-back. The provider cannot tell them apart. It refuses the
 // acquire and names the address, because adopting a held one makes the next destroy
 // release what gpcn_vpc_public_ip owns.
-const ErrDetailPrimaryInterfaceCarriesAForeignAddress = "the primary network interface of virtual machine %s already carries public IP %s, which Terraform did not acquire; name it in public_ip_id or detach it before asking for an acquired address"
+const ErrDetailPrimaryInterfaceCarriesAForeignAddress = "the primary network interface of virtual machine %s already carries public IP %s that this configuration did not attach; import it as gpcn_vpc_public_ip and name it in public_ip_id, or release it"
 
 // A start that fails after the provider stopped the machine leaves it stopped. The
 // remedy differs by path. Create taints the machine, so the next apply replaces it.

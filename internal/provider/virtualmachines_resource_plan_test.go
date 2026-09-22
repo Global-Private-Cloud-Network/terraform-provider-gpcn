@@ -2979,7 +2979,8 @@ func startVirtualMachineCarriedAddressMockServer(t *testing.T) (*httptest.Server
 // Terraform wraps it.
 var vmPlanTestForeignAddressPattern = regexp.MustCompile(
 	`(?s)already\s+carries\s+public\s+IP\s+` + vmPlanTestAcquiredIpID +
-		`.*name\s+it\s+in\s+public_ip_id\s+or\s+detach\s+it`)
+		`\s+that\s+this\s+configuration\s+did\s+not\s+attach` +
+		`.*name\s+it\s+in\s+public_ip_id,\s+or\s+release\s+it`)
 
 // A machine can carry an address Terraform did not acquire. The provider cannot tell a
 // held one from the leftover of a failed read-back. Adopting it makes the next destroy
