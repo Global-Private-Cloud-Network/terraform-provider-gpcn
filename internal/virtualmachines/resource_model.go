@@ -218,13 +218,18 @@ func resolveImageId(gpcnClient *client.GpcnClient, ctx context.Context, current 
 // ReleasesAcquiredAddress reports whether the destroy asks GPCN to give the address
 // back. Terraform releases only an address it acquired, and only a VPC interface holds
 // one. The release key also needs the vpc-public-ip:delete permission, which a legacy
-// machine must not have to spend.
+// machine must not have to spend. The live list the caller already fetched names the
+// world. State answers only when that list names no primary, because a machine whose
+// last read-back failed still carries the address Terraform acquired.
 // Returns the decision and any diagnostics encountered while reading the interfaces.
-func ReleasesAcquiredAddress(ctx context.Context, state ResourceModel) (bool, diag.Diagnostics) {
+func ReleasesAcquiredAddress(ctx context.Context, state ResourceModel, live []networks.ReadVirtualMachineNetworkDataResponseTF) (bool, diag.Diagnostics) {
 	var diags diag.Diagnostics
 
 	if !state.AllocatePublicIp.ValueBool() {
 		return false, diags
+	}
+	if world, named := primaryInterfaceWorld(live); named {
+		return world == networks.NicWorldVpc, diags
 	}
 	if state.NetworkInterfaces.IsNull() || state.NetworkInterfaces.IsUnknown() {
 		return false, diags
@@ -236,13 +241,20 @@ func ReleasesAcquiredAddress(ctx context.Context, state ResourceModel) (bool, di
 		return false, diags
 	}
 
+	world, named := primaryInterfaceWorld(interfaces)
+	return named && world == networks.NicWorldVpc, diags
+}
+
+// primaryInterfaceWorld names the world of the birth interface. A list with no primary
+// names none, and the caller then reads the other list.
+func primaryInterfaceWorld(interfaces []networks.ReadVirtualMachineNetworkDataResponseTF) (string, bool) {
 	primaryIdx := slices.IndexFunc(interfaces, func(iface networks.ReadVirtualMachineNetworkDataResponseTF) bool {
 		return iface.IsPrimary.ValueBool()
 	})
 	if primaryIdx < 0 {
-		return false, diags
+		return "", false
 	}
-	return interfaces[primaryIdx].World.ValueString() == networks.NicWorldVpc, diags
+	return interfaces[primaryIdx].World.ValueString(), true
 }
 
 func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient, virtualMachineID string, model ResourceModel) (ResourceModel, diag.Diagnostics) {

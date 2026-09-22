@@ -2754,7 +2754,15 @@ func vmLegacyPlanTestInterfacesBody(addressID, address string) map[string]any {
 	return body
 }
 
-func startVirtualMachineDestroyBodyMockServer(t *testing.T, legacyPrimary bool) (*httptest.Server, func() (string, bool)) {
+// vmDestroyBodyMock arms the destroy-body mock. A legacy primary reports the birth
+// interface on a legacy network. A failing read-back refuses the interface list until
+// the destroy stops the machine, so state holds no list at all.
+type vmDestroyBodyMock struct {
+	legacyPrimary bool
+	readBackFails bool
+}
+
+func startVirtualMachineDestroyBodyMockServer(t *testing.T, arm vmDestroyBodyMock) (*httptest.Server, func() (string, bool)) {
 	t.Helper()
 
 	var mu sync.Mutex
@@ -2791,9 +2799,15 @@ func startVirtualMachineDestroyBodyMockServer(t *testing.T, legacyPrimary bool) 
 			testutil.HandleCreateJobResponse(w, "job-ip", "address issued")
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
 			mu.Lock()
-			currentID, currentAddress := boundID, boundAddress
+			currentID, currentAddress, currentStatus := boundID, boundAddress, status
 			mu.Unlock()
-			if legacyPrimary {
+			// The destroy stops the machine before it reads the list. An armed read-back
+			// failure therefore refuses every read but that one.
+			if arm.readBackFails && currentStatus != virtualmachines.VMStatusShutoff.String() {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			if arm.legacyPrimary {
 				testutil.WriteJSONResponse(w, vmLegacyPlanTestInterfacesBody(currentID, currentAddress))
 				return
 			}
@@ -2852,7 +2866,7 @@ func TestVirtualMachineResourcePlanDestroyReleasesAcquiredIp(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			shortenVirtualMachinePolling(t)
-			server, recorded := startVirtualMachineDestroyBodyMockServer(t, tc.legacyPrimary)
+			server, recorded := startVirtualMachineDestroyBodyMockServer(t, vmDestroyBodyMock{legacyPrimary: tc.legacyPrimary})
 
 			config := vmPublicIpPlanTestConfig(server.URL, "vm-plan-destroy-address", tc.allocate, tc.publicIpID)
 
@@ -2860,6 +2874,51 @@ func TestVirtualMachineResourcePlanDestroyReleasesAcquiredIp(t *testing.T) {
 				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 				Steps: []resource.TestStep{
 					{Config: config},
+					{Config: config, Destroy: true},
+				},
+			})
+
+			body, deleted := recorded()
+			if !deleted {
+				t.Fatal("Expected the machine to be deleted")
+			}
+			if body != tc.wantBody {
+				t.Errorf("Expected the delete body '%s', got '%s'", tc.wantBody, body)
+			}
+		})
+	}
+}
+
+// A read-back that fails leaves state with no interface list, and the destroy must
+// still give back an address Terraform acquired. The live list the destroy already
+// fetched names the world, so state is only the fallback.
+func TestVirtualMachineResourcePlanDestroyReadsTheLiveInterfaceWorld(t *testing.T) {
+	tests := []struct {
+		name          string
+		legacyPrimary bool
+		wantBody      string
+	}{
+		{"a live VPC primary releases the address", false, `{"releasePublicIps":true}`},
+		{"a live legacy primary asks for nothing", true, ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			shortenVirtualMachinePolling(t)
+			server, recorded := startVirtualMachineDestroyBodyMockServer(t, vmDestroyBodyMock{
+				legacyPrimary: tc.legacyPrimary,
+				readBackFails: true,
+			})
+
+			config := vmPublicIpPlanTestConfig(server.URL, "vm-plan-destroy-live-world", true, "")
+
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config: config,
+						Check:  resource.TestCheckNoResourceAttr(gpcnVirtualMachineTest, "network_interfaces.0.world"),
+					},
 					{Config: config, Destroy: true},
 				},
 			})

@@ -713,7 +713,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	// them back. Terraform destroys the address it acquired and leaves a held
 	// public_ip_id to the operator who holds it.
 	var deleteRequestBody io.Reader
-	releasesAddress, releaseDiags := virtualmachines.ReleasesAcquiredAddress(ctx, state)
+	releasesAddress, releaseDiags := virtualmachines.ReleasesAcquiredAddress(ctx, state, networkInterfaces)
 	resp.Diagnostics.Append(releaseDiags...)
 	if resp.Diagnostics.HasError() {
 		return
