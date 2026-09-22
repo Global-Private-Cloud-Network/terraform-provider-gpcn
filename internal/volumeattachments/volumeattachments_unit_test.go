@@ -20,8 +20,8 @@ const (
 )
 
 // backendStatusRefusal is the byte-exact sentence GPCN answers with 400 when the
-// target machine is not settled. DEV src/services/volumes.service.ts:108-116 builds
-// it, and the single quotes around the status are part of it.
+// target machine is not settled. The single quotes around the status are
+// part of it.
 const backendStatusRefusal = "Cannot attach a volume while the VM is in status 'Provisioning'. " +
 	"The VM must be Running, Stopped, Shutoff."
 

@@ -18,14 +18,6 @@ const (
 	LogStartingGetVirtualMachinesAttachedToNetworks           = "Starting GetVirtualMachinesAttachedToNetworks for network ID %s"
 	LogSuccessfullyRetrievedVirtualMachinesAttachedToNetworks = "Successfully retrieved virtual machines attached to network with ID %s"
 
-	// AllocatePublicIp messages
-	LogStartingAllocatePublicIp      = "Starting AllocatePublicIp for virtualmachine ID %s and network interface ID %s"
-	LogSuccessfullyAllocatedPublicIp = "Successfully allocated a public IP address for virtualmachine ID %s and network interface ID %s"
-
-	// ReleasePublicIp messages
-	LogStartingReleasePublicIp      = "Starting ReleasePublicIp for virtualmachine ID %s and network interface ID %s"
-	LogSuccessfullyReleasedPublicIp = "Successfully released the public IP address for virtualmachine ID %s and network interface ID %s"
-
 	// UpdateNetwork messages
 	LogStartingUpdateNetworkWithID         = "Starting UpdateNetwork for network ID %s"
 	LogConstructedUpdateNetworkRequestBody = "Constructed Update GPCN Network request body successfully"
@@ -44,17 +36,9 @@ const (
 	LogStartingGetNetworkInterfacesWithID        = "Starting GetNetworkInterfaces for Virtual Machine ID %s"
 	LogSuccessfullyRetrievedAllNetworkInterfaces = "Successfully retrieved all network interfaces for Virtual Machine ID %s"
 
-	// AddNetworkInterface messages
-	LogStartingAddNetworkInterfaceWithIDs   = "Starting AddNetworkInterface for Virtual Machine ID %s with network ID %s"
+	// AddL2SegmentInterface messages
+	LogStartingAddL2SegmentInterfaceWithIDs = "Starting AddL2SegmentInterface for Virtual Machine ID %s with L2 segment ID %s"
 	LogSuccessfullyAttachedNetworkInterface = "Successfully attached network interface"
-
-	// SetNextNetworkInterfaceToPrimary messages
-	LogStartingSetNextNetworkInterfaceToPrimary = "Starting SetNextNetworkInterfaceToPrimary for Virtual Machine ID %s"
-	LogSettingNetworkInterfaceAsPrimary         = "Setting network interface with ID %s as primary"
-	LogSuccessfullySetNetworkInterfaceAsPrimary = "Successfully set network interface with ID %s as primary"
-	LogNetworkInterfaceAlreadyPrimary           = "A network interface of Virtual Machine ID %s is already primary. Skipping the promotion"
-	LogPromotingAddedNetworkInterface           = "The configured primary network of Virtual Machine ID %s had no surviving interface. Re-selecting a primary"
-	LogNoConfiguredNetworkInterfaceAfterRefresh = "The refreshed network interfaces of Virtual Machine ID %s name no configured network yet. Keeping the primary that the backend chose"
 
 	// RemoveNetworkInterface messages
 	LogStartingRemoveNetworkInterfaceWithIDs = "Starting RemoveNetworkInterface for Virtual Machine ID %s with network interface ID %s"

@@ -4,8 +4,6 @@ import (
 	"context"
 	"net/http"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -265,6 +263,92 @@ func TestGetNetworkInterfacesSortsByInterfaceIndex(t *testing.T) {
 	}
 }
 
+// A VPC interface leaves every legacy column null, and an unfinished reservation leaves
+// the MAC and the addresses null too. The provider must keep those nulls, because an
+// empty string reads as a value the platform never sent.
+func TestGetNetworkInterfacesKeepsNullsNullUnit(t *testing.T) {
+	const vmID = "vm-vpc-nulls"
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/network-interfaces") {
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true, "message": "Network interfaces retrieved",
+					"data": []map[string]any{{
+						"id":               "interface-vpc",
+						"networkInterface": 1,
+						"isPrimary":        1,
+						"macAddress":       nil,
+						"publicIp":         nil,
+						"publicIpId":       nil,
+						"privateIp":        "10.20.0.7",
+						"world":            "vpc",
+						"networkName":      nil,
+						"networkId":        nil,
+						"cidrBlock":        "10.20.0.0/24",
+						"gatewayIp":        nil,
+						"networkType":      nil,
+						"vpcSubnetId":      "subnet-1",
+						"subnetName":       "web",
+						"vpcId":            "vpc-1",
+						"vpcName":          "prod",
+						"l2SegmentId":      nil,
+						"l2SegmentName":    nil,
+					}},
+				})
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	interfaces, err := GetNetworkInterfaces(gpcnClient, context.Background(), vmID)
+	if err != nil {
+		t.Fatalf("GetNetworkInterfaces failed: %v", err)
+	}
+	if len(interfaces) != 1 {
+		t.Fatalf("Expected 1 interface, got %d", len(interfaces))
+	}
+	got := interfaces[0]
+
+	nullFields := map[string]types.String{
+		"mac_address":     got.MacAddress,
+		"public_ip":       got.PublicIP,
+		"public_ip_id":    got.PublicIPID,
+		"network_name":    got.NetworkName,
+		"network_id":      got.NetworkID,
+		"gateway_ip":      got.GatewayIP,
+		"network_type":    got.NetworkType,
+		"l2_segment_id":   got.L2SegmentID,
+		"l2_segment_name": got.L2SegmentName,
+	}
+	for name, value := range nullFields {
+		if !value.IsNull() {
+			t.Errorf("Expected %s to stay null, got '%s'", name, value.ValueString())
+		}
+	}
+
+	setFields := map[string][2]string{
+		"private_ip":    {got.PrivateIP.ValueString(), "10.20.0.7"},
+		"world":         {got.World.ValueString(), "vpc"},
+		"cidr_block":    {got.CIDRBlock.ValueString(), "10.20.0.0/24"},
+		"vpc_subnet_id": {got.VpcSubnetID.ValueString(), "subnet-1"},
+		"subnet_name":   {got.SubnetName.ValueString(), "web"},
+		"vpc_id":        {got.VpcID.ValueString(), "vpc-1"},
+		"vpc_name":      {got.VpcName.ValueString(), "prod"},
+	}
+	for name, pair := range setFields {
+		if pair[0] != pair[1] {
+			t.Errorf("Expected %s to be '%s', got '%s'", name, pair[1], pair[0])
+		}
+	}
+	if !got.IsPrimary.ValueBool() {
+		t.Error("Expected is_primary to be true for the integer 1")
+	}
+}
+
 func TestUpdateNetworkMockHTTP(t *testing.T) {
 	const networkID = "network-update-123"
 
@@ -400,66 +484,6 @@ func TestCreateNetworkDefaultRoute(t *testing.T) {
 	}
 }
 
-func newNetworkInterface(id, networkID string, isPrimary bool) ReadVirtualMachineNetworkDataResponseTF {
-	return ReadVirtualMachineNetworkDataResponseTF{
-		ID:               types.StringValue(id),
-		NetworkInterface: types.Int64Value(0),
-		IsPrimary:        types.BoolValue(isPrimary),
-		NetworkID:        types.StringValue(networkID),
-	}
-}
-
-func TestSetNextNetworkInterfaceToPrimarySkipsWhenAlreadyPrimary(t *testing.T) {
-	var requested atomic.Bool
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			requested.Store(true)
-			testutil.LogUnexpectedRequest(t, w, r)
-		},
-	})
-	defer server.Close()
-
-	allPrimary := []ReadVirtualMachineNetworkDataResponseTF{
-		newNetworkInterface("interface-a", "network-a", true),
-		newNetworkInterface("interface-b", "network-b", true),
-	}
-
-	err := SetNextNetworkInterfaceToPrimary(gpcnClient, context.Background(), "vm-all-primary", "network-a", allPrimary)
-	if err != nil {
-		t.Fatalf("Expected no error when a network interface is already primary, got '%v'", err)
-	}
-	if requested.Load() {
-		t.Error("Expected no HTTP request when every network interface is already primary")
-	}
-}
-
-func TestSetNextNetworkInterfaceToPrimaryNoCandidates(t *testing.T) {
-	var requested atomic.Bool
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			requested.Store(true)
-			testutil.LogUnexpectedRequest(t, w, r)
-		},
-	})
-	defer server.Close()
-
-	err := SetNextNetworkInterfaceToPrimary(gpcnClient, context.Background(), "vm-no-candidates", "network-a", nil)
-	if err == nil {
-		t.Fatal("Expected an error when the virtual machine has no candidate interface, got nil")
-	}
-	const want = "the virtual machine has no candidate network interface to promote"
-	if err.Error() != want {
-		t.Errorf("Expected the guard error '%s', got '%s'", want, err.Error())
-	}
-	if requested.Load() {
-		t.Error("Expected no HTTP request when the virtual machine has no candidate interface")
-	}
-}
-
 func TestRemoveNetworkInterfaceByNetworkIdMissingInterface(t *testing.T) {
 	const (
 		vmID      = "vm-missing-123"
@@ -546,530 +570,6 @@ func TestMapNetworkResponseToModelKeepsPlanValuesUnit(t *testing.T) {
 	}
 }
 
-// The mock server serves each request on its own goroutine, so the mutex
-// guards the slice.
-type requestRecorder struct {
-	mu       sync.Mutex
-	requests []string
-}
-
-func (r *requestRecorder) record(method, path string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.requests = append(r.requests, method+" "+path)
-}
-
-func (r *requestRecorder) recorded() []string {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return append([]string(nil), r.requests...)
-}
-
-func networkInterfacePath(vmID, networkInterfaceID string) string {
-	return VIRTUAL_MACHINES_BASE_URL_V1 + vmID + "/network-interfaces/" + networkInterfaceID
-}
-
-func interfaceListPath(vmID string) string {
-	return VIRTUAL_MACHINES_BASE_URL_V1 + vmID + "/network-interfaces"
-}
-
-// updateInterfacesMockHandler answers every call that UpdateNetworkInterfaces makes. The
-// listResponse names the interfaces that a re-fetch finds.
-func updateInterfacesMockHandler(t *testing.T, recorder *requestRecorder, listResponse []map[string]any) func(http.ResponseWriter, *http.Request) {
-	t.Helper()
-	return func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == "POST" && strings.HasPrefix(r.URL.Path, "/v1/resource/jobs/"):
-			testutil.HandleJobResponse(w, "job-1", "", true)
-		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/network-interfaces"):
-			recorder.record(r.Method, r.URL.Path)
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true, "message": "Network interfaces retrieved", "data": listResponse,
-			})
-		case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/network-interfaces"):
-			recorder.record(r.Method, r.URL.Path)
-			testutil.HandleCreateJobResponse(w, "job-1", "Add network interface job started")
-		case r.Method == "DELETE":
-			recorder.record(r.Method, r.URL.Path)
-			testutil.HandleCreateJobResponse(w, "job-1", "Remove network interface job started")
-		case r.Method == "PUT":
-			recorder.record(r.Method, r.URL.Path)
-			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "Primary interface updated"})
-		default:
-			testutil.LogUnexpectedRequest(t, w, r)
-		}
-	}
-}
-
-func TestUpdateNetworkInterfacesPromotesSurvivingInterfaceUnit(t *testing.T) {
-	const vmID = "vm-survivor"
-	var recorder requestRecorder
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T:       t,
-		Handler: updateInterfacesMockHandler(t, &recorder, nil),
-	})
-	defer server.Close()
-
-	networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
-		newNetworkInterface("interface-a", "network-a", true),
-		newNetworkInterface("interface-b", "network-b", false),
-		newNetworkInterface("interface-c", "network-c", false),
-	}
-
-	err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
-		[]string{"network-a", "network-b", "network-c"}, []string{"network-c"}, networkInterfaces)
-	if err != nil {
-		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
-	}
-
-	// A trailing GET says that the handoff flag no longer stops the second promotion.
-	want := []string{
-		"PUT " + networkInterfacePath(vmID, "interface-c"),
-		"DELETE " + networkInterfacePath(vmID, "interface-a"),
-		"DELETE " + networkInterfacePath(vmID, "interface-b"),
-	}
-	got := recorder.recorded()
-	if len(got) != len(want) {
-		t.Fatalf("Expected requests %v, got %v", want, got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("Expected request %d to be '%s', got '%s'", i, want[i], got[i])
-		}
-	}
-}
-
-func TestUpdateNetworkInterfacesPromotesAddedInterfaceUnit(t *testing.T) {
-	const vmID = "vm-single-nic"
-	var recorder requestRecorder
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: updateInterfacesMockHandler(t, &recorder, []map[string]any{
-			{"id": "interface-b", "networkInterface": 0, "networkId": "network-b"},
-		}),
-	})
-	defer server.Close()
-
-	networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
-		newNetworkInterface("interface-a", "network-a", true),
-	}
-
-	err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
-		[]string{"network-a"}, []string{"network-b"}, networkInterfaces)
-	if err != nil {
-		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
-	}
-
-	want := []string{
-		"DELETE " + networkInterfacePath(vmID, "interface-a"),
-		"POST " + interfaceListPath(vmID),
-		"GET " + interfaceListPath(vmID),
-		"PUT " + networkInterfacePath(vmID, "interface-b"),
-	}
-	got := recorder.recorded()
-	if len(got) != len(want) {
-		t.Fatalf("Expected requests %v, got %v", want, got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("Expected request %d to be '%s', got '%s'", i, want[i], got[i])
-		}
-	}
-}
-
-func TestUpdateNetworkInterfacesRemovesLastInterfaceUnit(t *testing.T) {
-	const vmID = "vm-no-interfaces-left"
-	var recorder requestRecorder
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T:       t,
-		Handler: updateInterfacesMockHandler(t, &recorder, nil),
-	})
-	defer server.Close()
-
-	networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
-		newNetworkInterface("interface-a", "network-a", true),
-	}
-
-	err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
-		[]string{"network-a"}, []string{}, networkInterfaces)
-	if err != nil {
-		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
-	}
-
-	want := []string{"DELETE " + networkInterfacePath(vmID, "interface-a")}
-	got := recorder.recorded()
-	if len(got) != 1 || got[0] != want[0] {
-		t.Errorf("Expected only %v, got %v", want, got)
-	}
-}
-
-// A promotion issues exactly one PUT.
-func singlePutRequest(t *testing.T, recorded []string) string {
-	t.Helper()
-	var puts []string
-	for _, request := range recorded {
-		if strings.HasPrefix(request, "PUT ") {
-			puts = append(puts, request)
-		}
-	}
-	if len(puts) != 1 {
-		t.Fatalf("Expected exactly one PUT request, got %v", recorded)
-	}
-	return puts[0]
-}
-
-func TestUpdateNetworkInterfacesSkipsPromotionWhenBackendPromotesUnit(t *testing.T) {
-	const vmID = "vm-backend-promotes"
-	var recorder requestRecorder
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: updateInterfacesMockHandler(t, &recorder, []map[string]any{
-			{"id": "interface-b", "networkInterface": 0, "networkId": "network-b", "isPrimary": 1},
-		}),
-	})
-	defer server.Close()
-
-	networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
-		newNetworkInterface("interface-a", "network-a", true),
-	}
-
-	err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
-		[]string{"network-a"}, []string{"network-b"}, networkInterfaces)
-	if err != nil {
-		t.Fatalf("UpdateNetworkInterfaces failed although the backend already set a primary: %v", err)
-	}
-
-	for _, request := range recorder.recorded() {
-		if strings.HasPrefix(request, "PUT ") {
-			t.Errorf("Expected no promotion request, got '%s'", request)
-		}
-	}
-}
-
-func TestUpdateNetworkInterfacesPromotesPreferredSurvivingInterfaceUnit(t *testing.T) {
-	const vmID = "vm-preferred-survivor"
-	var recorder requestRecorder
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T:       t,
-		Handler: updateInterfacesMockHandler(t, &recorder, nil),
-	})
-	defer server.Close()
-
-	networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
-		newNetworkInterface("interface-a", "network-a", true),
-		newNetworkInterface("interface-c", "network-c", false),
-		newNetworkInterface("interface-b", "network-b", false),
-	}
-
-	err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
-		[]string{"network-a", "network-b", "network-c"}, []string{"network-b", "network-c"}, networkInterfaces)
-	if err != nil {
-		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
-	}
-
-	want := "PUT " + networkInterfacePath(vmID, "interface-b")
-	if got := singlePutRequest(t, recorder.recorded()); got != want {
-		t.Errorf("Expected the promotion to target the configured primary with '%s', got '%s'", want, got)
-	}
-}
-
-func TestUpdateNetworkInterfacesPromotesPreferredAddedInterfaceUnit(t *testing.T) {
-	const vmID = "vm-preferred-added"
-	var recorder requestRecorder
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: updateInterfacesMockHandler(t, &recorder, []map[string]any{
-			{"id": "interface-b", "networkInterface": 0, "networkId": "network-b"},
-			{"id": "interface-c", "networkInterface": 0, "networkId": "network-c"},
-		}),
-	})
-	defer server.Close()
-
-	networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
-		newNetworkInterface("interface-a", "network-a", true),
-	}
-
-	err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
-		[]string{"network-a"}, []string{"network-c", "network-b"}, networkInterfaces)
-	if err != nil {
-		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
-	}
-
-	want := "PUT " + networkInterfacePath(vmID, "interface-c")
-	if got := singlePutRequest(t, recorder.recorded()); got != want {
-		t.Errorf("Expected the promotion to target the configured primary with '%s', got '%s'", want, got)
-	}
-}
-
-func TestUpdateNetworkInterfacesPromotesPreferredAddedInterfaceOverSurvivorUnit(t *testing.T) {
-	const vmID = "vm-preferred-added-over-survivor"
-	var recorder requestRecorder
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: updateInterfacesMockHandler(t, &recorder, []map[string]any{
-			{"id": "interface-b", "networkInterface": 0, "networkId": "network-b"},
-			{"id": "interface-c", "networkInterface": 1, "networkId": "network-c"},
-		}),
-	})
-	defer server.Close()
-
-	networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
-		newNetworkInterface("interface-a", "network-a", true),
-		newNetworkInterface("interface-b", "network-b", false),
-	}
-
-	err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
-		[]string{"network-a", "network-b"}, []string{"network-c", "network-b"}, networkInterfaces)
-	if err != nil {
-		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
-	}
-
-	want := "PUT " + networkInterfacePath(vmID, "interface-c")
-	if got := singlePutRequest(t, recorder.recorded()); got != want {
-		t.Errorf("Expected the promotion to target the added configured primary with '%s', got '%s'", want, got)
-	}
-}
-
-func TestUpdateNetworkInterfacesPromotesPreferredOverBackendPrimaryUnit(t *testing.T) {
-	const vmID = "vm-preferred-over-backend-primary"
-	var recorder requestRecorder
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: updateInterfacesMockHandler(t, &recorder, []map[string]any{
-			{"id": "interface-b", "networkInterface": 0, "networkId": "network-b"},
-			{"id": "interface-c", "networkInterface": 1, "networkId": "network-c", "isPrimary": 1},
-		}),
-	})
-	defer server.Close()
-
-	networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
-		newNetworkInterface("interface-a", "network-a", true),
-	}
-
-	err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
-		[]string{"network-a"}, []string{"network-b", "network-c"}, networkInterfaces)
-	if err != nil {
-		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
-	}
-
-	want := "PUT " + networkInterfacePath(vmID, "interface-b")
-	if got := singlePutRequest(t, recorder.recorded()); got != want {
-		t.Errorf("Expected the promotion to target the configured primary with '%s', got '%s'", want, got)
-	}
-}
-
-func TestUpdateNetworkInterfacesIgnoresInFlightDeleteOnRefreshUnit(t *testing.T) {
-	// The refreshed list still holds the removed interface, because its delete is in flight.
-	cases := []struct {
-		name             string
-		removedIsPrimary bool
-	}{
-		{name: "removed interface is still primary", removedIsPrimary: true},
-		{name: "removed interface is no longer primary", removedIsPrimary: false},
-	}
-
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			const vmID = "vm-lagging-delete"
-			var recorder requestRecorder
-
-			laggingInterface := map[string]any{"id": "interface-a", "networkInterface": 0, "networkId": "network-a"}
-			if c.removedIsPrimary {
-				laggingInterface["isPrimary"] = 1
-			}
-
-			server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-				T: t,
-				Handler: updateInterfacesMockHandler(t, &recorder, []map[string]any{
-					laggingInterface,
-					{"id": "interface-c", "networkInterface": 1, "networkId": "network-c"},
-				}),
-			})
-			defer server.Close()
-
-			networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
-				newNetworkInterface("interface-a", "network-a", true),
-			}
-
-			// The attach of network-b has not reached the list yet.
-			err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
-				[]string{"network-a"}, []string{"network-b", "network-c"}, networkInterfaces)
-			if err != nil {
-				t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
-			}
-
-			want := "PUT " + networkInterfacePath(vmID, "interface-c")
-			if got := singlePutRequest(t, recorder.recorded()); got != want {
-				t.Errorf("Expected the promotion to skip the removed interface and target '%s', got '%s'", want, got)
-			}
-		})
-	}
-}
-
-func TestSetNextNetworkInterfaceToPrimaryKeepsExistingPrimary(t *testing.T) {
-	var requested atomic.Bool
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			requested.Store(true)
-			testutil.LogUnexpectedRequest(t, w, r)
-		},
-	})
-	defer server.Close()
-
-	candidates := []ReadVirtualMachineNetworkDataResponseTF{
-		newNetworkInterface("interface-b", "network-b", true),
-		newNetworkInterface("interface-c", "network-c", false),
-	}
-
-	err := SetNextNetworkInterfaceToPrimary(gpcnClient, context.Background(), "vm-absent-preferred", "network-z", candidates)
-	if err != nil {
-		t.Fatalf("Expected no error when no candidate names the preferred network, got '%v'", err)
-	}
-	if requested.Load() {
-		t.Error("Expected no HTTP request when a candidate is already primary")
-	}
-}
-
-func TestUpdateNetworkInterfacesKeepsBackendPrimaryWhenRefreshLagsUnit(t *testing.T) {
-	const vmID = "vm-lagging-refresh"
-	var recorder requestRecorder
-
-	// The refreshed list still holds only the removed interface, because the backend lags.
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: updateInterfacesMockHandler(t, &recorder, []map[string]any{
-			{"id": "interface-a", "networkInterface": 0, "networkId": "network-a", "isPrimary": 1},
-		}),
-	})
-	defer server.Close()
-
-	networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
-		newNetworkInterface("interface-a", "network-a", true),
-	}
-
-	err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
-		[]string{"network-a"}, []string{"network-b"}, networkInterfaces)
-	if err != nil {
-		t.Fatalf("Expected no error when the refresh finds no configured interface, got '%v'", err)
-	}
-
-	for _, request := range recorder.recorded() {
-		if strings.HasPrefix(request, "PUT ") {
-			t.Errorf("Expected no promotion request, got '%s'", request)
-		}
-	}
-}
-
-func TestUpdateNetworkInterfacesKeepsPrimaryOnReorderUnit(t *testing.T) {
-	const vmID = "vm-reordered-primary"
-	var recorder requestRecorder
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: updateInterfacesMockHandler(t, &recorder, []map[string]any{
-			{"id": "interface-a", "networkInterface": 0, "networkId": "network-a", "isPrimary": 1},
-			{"id": "interface-b", "networkInterface": 1, "networkId": "network-b"},
-		}),
-	})
-	defer server.Close()
-
-	networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
-		newNetworkInterface("interface-a", "network-a", true),
-		newNetworkInterface("interface-b", "network-b", false),
-	}
-
-	err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
-		[]string{"network-a", "network-b"}, []string{"network-b", "network-a"}, networkInterfaces)
-	if err != nil {
-		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
-	}
-
-	if got := recorder.recorded(); len(got) != 0 {
-		t.Errorf("Expected no request when the reorder keeps the current primary, got %v", got)
-	}
-}
-
-func TestUpdateNetworkInterfacesKeepsPrimaryOnPrependUnit(t *testing.T) {
-	const vmID = "vm-prepended-primary"
-	var recorder requestRecorder
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T: t,
-		Handler: updateInterfacesMockHandler(t, &recorder, []map[string]any{
-			{"id": "interface-a", "networkInterface": 0, "networkId": "network-a", "isPrimary": 1},
-			{"id": "interface-b", "networkInterface": 1, "networkId": "network-b"},
-		}),
-	})
-	defer server.Close()
-
-	networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
-		newNetworkInterface("interface-a", "network-a", true),
-	}
-
-	err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
-		[]string{"network-a"}, []string{"network-b", "network-a"}, networkInterfaces)
-	if err != nil {
-		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
-	}
-
-	want := []string{"POST " + interfaceListPath(vmID)}
-	got := recorder.recorded()
-	if len(got) != len(want) {
-		t.Fatalf("Expected requests %v, got %v", want, got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("Expected request %d to be '%s', got '%s'", i, want[i], got[i])
-		}
-	}
-}
-
-func TestUpdateNetworkInterfacesSkipsRefreshWhenPrimaryIsUnchangedUnit(t *testing.T) {
-	const vmID = "vm-primary-unchanged"
-	var recorder requestRecorder
-
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
-		T:       t,
-		Handler: updateInterfacesMockHandler(t, &recorder, nil),
-	})
-	defer server.Close()
-
-	networkInterfaces := []ReadVirtualMachineNetworkDataResponseTF{
-		newNetworkInterface("interface-a", "network-a", true),
-		newNetworkInterface("interface-b", "network-b", false),
-	}
-
-	err := UpdateNetworkInterfaces(gpcnClient, context.Background(), vmID,
-		[]string{"network-a", "network-b"}, []string{"network-a", "network-c"}, networkInterfaces)
-	if err != nil {
-		t.Fatalf("UpdateNetworkInterfaces failed: %v", err)
-	}
-
-	want := []string{
-		"DELETE " + networkInterfacePath(vmID, "interface-b"),
-		"POST " + interfaceListPath(vmID),
-	}
-	got := recorder.recorded()
-	if len(got) != len(want) {
-		t.Fatalf("Expected requests %v, got %v", want, got)
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("Expected request %d to be '%s', got '%s'", i, want[i], got[i])
-		}
-	}
-}
-
 // TestUpdateNetworkOmitsEmptyCIDRBlockMockHTTP guards the update body against an empty
 // cidrBlock. The API stores an empty value for every custom network. Its update schema
 // validates the key against a CIDR pattern, so the empty value turns a rename into a 422.
@@ -1151,5 +651,42 @@ func TestCustomNetworkGoneWarningUnit(t *testing.T) {
 	want := "Network network-adopted-123 was not found. If it was adopted into an L2 segment by the platform, remove it from state and import the segment as gpcn_l2_segment: terraform state rm gpcn_network.<name> && terraform import gpcn_l2_segment.<name> <segment-id>."
 	if got := warning.Detail(); got != want {
 		t.Errorf("Expected detail '%s', got '%s'", want, got)
+	}
+}
+
+// GPCN accepts exactly one target key on an add-NIC body, and l2SegmentId names a
+// segment. A body that named a network would attach the wrong world, or be refused.
+func TestAddL2SegmentInterfaceSendsSegmentIdMockHTTP(t *testing.T) {
+	vmID := "vm-1"
+	segmentID := "segment-1"
+
+	var capturedBody map[string]any
+	var capturedPath string
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/"+vmID+"/network-interfaces" {
+				capturedPath = r.URL.Path
+				capturedBody = testutil.ReadRequestBody(r)
+				testutil.HandleCreateJobResponse(w, "job-1", "attach issued")
+				return
+			}
+			testutil.HandleJobResponse(w, "job-1", "", true)
+		},
+	})
+	defer server.Close()
+
+	if err := AddL2SegmentInterface(gpcnClient, context.Background(), vmID, segmentID); err != nil {
+		t.Fatalf("AddL2SegmentInterface returned an error: %v", err)
+	}
+
+	if capturedPath != "/v1/resource/virtual-machines/"+vmID+"/network-interfaces" {
+		t.Errorf("Expected the interface collection route, got '%s'", capturedPath)
+	}
+	if len(capturedBody) != 1 {
+		t.Errorf("Expected exactly one body key, got %v", capturedBody)
+	}
+	if capturedBody["l2SegmentId"] != segmentID {
+		t.Errorf("Expected l2SegmentId '%s', got %v", segmentID, capturedBody["l2SegmentId"])
 	}
 }

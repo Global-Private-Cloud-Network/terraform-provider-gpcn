@@ -3,6 +3,7 @@ package virtualmachines
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"time"
 
@@ -28,7 +29,9 @@ type ResourceModel struct {
 	Configuration     types.Map    `tfsdk:"configuration"`
 	AllocatePublicIp  types.Bool   `tfsdk:"allocate_public_ip"`
 	PublicIp          types.String `tfsdk:"public_ip"`
-	NetworkIds        types.List   `tfsdk:"network_ids"`
+	PublicIpId        types.String `tfsdk:"public_ip_id"`
+	SubnetId          types.String `tfsdk:"subnet_id"`
+	L2SegmentIds      types.List   `tfsdk:"l2_segment_ids"`
 	NetworkInterfaces types.List   `tfsdk:"network_interfaces"`
 	NetworkHotplug    types.Bool   `tfsdk:"network_hotplug"`
 	InitialAuth       types.Object `tfsdk:"initial_auth"`
@@ -103,7 +106,7 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 		model.Configuration = types.MapNull(types.StringType)
 	}
 
-	// If model doesn't already have these populated, set them
+	// Fill only the values the model does not already carry.
 	model, diags = setModelValuesNotPresent(ctx, gpcnClient, response, model)
 	allDiags.Append(diags...)
 
@@ -212,11 +215,36 @@ func resolveImageId(gpcnClient *client.GpcnClient, ctx context.Context, current 
 	return types.StringNull(), diags
 }
 
+// ReleasesAcquiredAddress reports whether the destroy asks GPCN to give the address
+// back. Terraform releases only an address it acquired, and only a VPC interface holds
+// one. The release key also needs the vpc-public-ip:delete permission, which a legacy
+// machine must not have to spend. Delete fetches the interfaces before it asks. It
+// returns when that read fails, so the live list is the only source.
+func ReleasesAcquiredAddress(state ResourceModel, live []networks.ReadVirtualMachineNetworkDataResponseTF) bool {
+	if !state.AllocatePublicIp.ValueBool() {
+		return false
+	}
+
+	world, named := primaryInterfaceWorld(live)
+	return named && world == networks.NicWorldVpc
+}
+
+// primaryInterfaceWorld names the world of the birth interface. A list with no primary
+// names none.
+func primaryInterfaceWorld(interfaces []networks.ReadVirtualMachineNetworkDataResponseTF) (string, bool) {
+	primaryIdx := slices.IndexFunc(interfaces, func(iface networks.ReadVirtualMachineNetworkDataResponseTF) bool {
+		return iface.IsPrimary.ValueBool()
+	})
+	if primaryIdx < 0 {
+		return "", false
+	}
+	return interfaces[primaryIdx].World.ValueString(), true
+}
+
 func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient, virtualMachineID string, model ResourceModel) (ResourceModel, diag.Diagnostics) {
 	var allDiags diag.Diagnostics
 
-	// Set the base public IP, might be replaced later
-	model.PublicIp = types.StringValue("")
+	model.PublicIp = types.StringNull()
 	interfaceElemType := types.ObjectType{AttrTypes: networks.ReadVirtualMachineNetworkDataResponseTF{}.AttrTypes()}
 	model.NetworkInterfaces = types.ListNull(interfaceElemType)
 	// Fetch network interfaces for the virtual machine
@@ -237,34 +265,44 @@ func setNetworkModelValuesNotPresent(ctx context.Context, gpcnClient *client.Gpc
 		model.NetworkInterfaces = interfaceList
 	}
 
-	if len(networkInterfaces) > 0 {
-		// Extract network IDs from network interfaces
-		var networkIds []string
-		hasPublicIp := false
-		for _, iface := range networkInterfaces {
-			networkIds = append(networkIds, iface.NetworkID.ValueString())
-			// Check if this interface has a public IP
-			if !iface.PublicIP.IsNull() && iface.PublicIP.ValueString() != "" {
-				hasPublicIp = true
-				// If it does, set the model's public IP here
-				model.PublicIp = iface.PublicIP
-			}
+	primaryIdx := slices.IndexFunc(networkInterfaces, func(iface networks.ReadVirtualMachineNetworkDataResponseTF) bool {
+		return iface.IsPrimary.ValueBool()
+	})
+	if primaryIdx >= 0 {
+		primary := networkInterfaces[primaryIdx]
+		// public_ip mirrors the address on the birth interface. A machine without one
+		// reports null, because GPCN sends null and not an empty address.
+		model.PublicIp = primary.PublicIP
+		// The detail projection carries no subnet, so an import learns the birth subnet
+		// here. A configured value must survive, because subnet_id requires replacement.
+		if model.SubnetId.IsNull() {
+			model.SubnetId = primary.VpcSubnetID
 		}
-		// network_ids holds the user's ordered intent, and element 0 names the primary interface.
-		// The API returns its own order, so it must not replace a configured list.
-		if model.NetworkIds.IsNull() {
-			var networkDiags diag.Diagnostics
-			model.NetworkIds, networkDiags = types.ListValueFrom(ctx, types.StringType, networkIds)
-			if networkDiags.HasError() {
-				allDiags.Append(networkDiags...)
-				model.NetworkIds = types.ListNull(types.StringType)
-			}
-		}
-
-		// allocate_public_ip records the user's intent, and public_ip reports the observed value.
-		// Only a null intent takes its value from the observation.
+		// allocate_public_ip records an intent that the API never reports. GPCN stores an
+		// acquired address and a held one in the same row. An import therefore records the
+		// address as held, and a destroy leaves it with the operator.
 		if model.AllocatePublicIp.IsNull() {
-			model.AllocatePublicIp = types.BoolValue(hasPublicIp)
+			model.AllocatePublicIp = types.BoolValue(false)
+			if model.PublicIpId.IsNull() && !primary.PublicIPID.IsNull() {
+				model.PublicIpId = primary.PublicIPID
+			}
+		}
+	}
+
+	// The configured list holds the user's ordered intent, so only an import takes the
+	// segments from the interface list.
+	if model.L2SegmentIds.IsNull() {
+		segmentIds := []string{}
+		for _, iface := range networkInterfaces {
+			if iface.World.ValueString() == networks.NicWorldL2 && !iface.L2SegmentID.IsNull() {
+				segmentIds = append(segmentIds, iface.L2SegmentID.ValueString())
+			}
+		}
+		var segmentDiags diag.Diagnostics
+		model.L2SegmentIds, segmentDiags = types.ListValueFrom(ctx, types.StringType, segmentIds)
+		if segmentDiags.HasError() {
+			allDiags.Append(segmentDiags...)
+			model.L2SegmentIds = types.ListNull(types.StringType)
 		}
 	}
 	return model, allDiags

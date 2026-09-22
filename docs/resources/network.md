@@ -134,6 +134,8 @@ terraform state rm gpcn_network.<name>
 terraform import gpcn_l2_segment.<name> <segment-id>
 ```
 
+gpcn_l2_segment does not expose resource_group_id in this release; a segment that sits in a resource group imports without it.
+
 Then run `terraform apply`. The plan is empty when the imported segment matches the block. Never destroy the old row: the segment carries live traffic, and a destroy tears the carrier down.
 
 Re-point every `gpcn_network.<name>.id` reference in outputs and modules. In a `gpcn_virtualmachine` block, move the id from `network_ids` to `l2_segment_ids`, which is where a segment attaches.

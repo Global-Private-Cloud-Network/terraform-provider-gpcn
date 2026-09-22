@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -22,6 +23,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/path"
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/booldefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/boolplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/listdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/mapplanmodifier"
@@ -125,23 +127,40 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				},
 			},
 			"allocate_public_ip": schema.BoolAttribute{
-				Description: "Whether to allocate a public IP address for the virtual machine",
-				Required:    true,
+				Description: "Whether to acquire an elastic public IP on the VPC that holds the birth interface and attach it to that interface. Changing this value in place needs the vpc-public-ip:create, vpc-public-ip:update and vpc-public-ip:delete permissions. Destroying the virtual machine releases an address acquired this way. Never inferred on import: an imported machine records its address as public_ip_id, so destroying it leaves the address held",
+				Optional:    true,
+				Computed:    true,
+				Default:     booldefault.StaticBool(false),
 			},
 			"public_ip": schema.StringAttribute{
-				Description: "The public IP address, if allocate_public_ip is True",
+				Description: "The public IP address on the primary interface. Null while the machine holds no address",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					virtualmachines.PublicIpPlanModifier{},
 				},
 			},
-			"network_ids": schema.ListAttribute{
-				Description: "List of network IDs to attach to the virtual machine. Maximum of 5 networks allowed. The first in the list is considered the 'primary' and if removed, the next will take its place",
+			"public_ip_id": schema.StringAttribute{
+				Description: "ID of a held gpcn_vpc_public_ip to attach to the primary interface. Cannot be set together with allocate_public_ip. The address outlives the virtual machine, because the operator holds it. An import fills this from the address the primary interface carries. Name this address in the configuration after an import; otherwise the next apply detaches it. Import that address as a gpcn_vpc_public_ip too when Terraform should own its release. Do not name an address that a gpcn_vpc_public_ip_attachment also binds; one resource owns a binding",
+				Optional:    true,
+				Validators: []validator.String{
+					virtualmachines.PublicIpIdConflictsValidator{},
+				},
+			},
+			"subnet_id": schema.StringAttribute{
+				Description: "Unique identifier of the VPC subnet the virtual machine is born on. Use the gpcn_vpc_subnet resource to create one. A machine lives in exactly one VPC, so changing this value requires replacing the virtual machine",
+				Required:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+			},
+			"l2_segment_ids": schema.ListAttribute{
+				Description: "IDs of the L2 segments the virtual machine carries. They attach after the machine is created, and the machine is stopped for a change unless its image supports network hotplug. After an import, name the segments the machine carries; otherwise the next apply detaches them. Maximum of 4, because the birth subnet interface holds one of the five interfaces GPCN allows",
 				ElementType: types.StringType,
 				Optional:    true,
 				Computed:    true,
 				Validators: []validator.List{
-					listvalidator.SizeAtMost(virtualmachines.MAX_NETWORKS_ATTACHED_ALLOWED),
+					// The birth subnet interface holds one of the five GPCN allows.
+					listvalidator.SizeAtMost(virtualmachines.MAX_NETWORKS_ATTACHED_ALLOWED - 1),
 					listvalidator.UniqueValues(),
 				},
 				Default: listdefault.StaticValue(types.ListValueMust(types.StringType, []attr.Value{})),
@@ -173,36 +192,68 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 							Description: "Whether this is the primary interface",
 							Computed:    true,
 						},
+						"mac_address": schema.StringAttribute{
+							Description: "The MAC address of the interface. Null while the platform has not materialized the port",
+							Computed:    true,
+						},
 						"public_ip": schema.StringAttribute{
 							Description: "The public IP address on the interface, if one is allocated",
 							Computed:    true,
 						},
 						"public_ip_id": schema.StringAttribute{
-							Description: "The ID of the allocated public IP address, if one is allocated",
+							Description: "The ID of the allocated public IP address, if one is allocated. On a 'vpc' interface this is a gpcn_vpc_public_ip ID",
 							Computed:    true,
 						},
 						"private_ip": schema.StringAttribute{
-							Description: "The private IP address on the interface",
+							Description: "The private IP address on the interface. Null when world is 'l2', because a segment has no subnet to draw an address from",
+							Computed:    true,
+						},
+						"world": schema.StringAttribute{
+							Description: "The kind of network the interface attaches to: 'legacy', 'vpc' or 'l2'. The identity attributes below are per world",
 							Computed:    true,
 						},
 						"network_name": schema.StringAttribute{
-							Description: "The name of the attached network",
+							Description: "The name of the attached legacy network. Null unless world is 'legacy'",
 							Computed:    true,
 						},
 						"network_id": schema.StringAttribute{
-							Description: "The ID of the attached network",
+							Description: "The ID of the attached legacy network. Null unless world is 'legacy'",
 							Computed:    true,
 						},
 						"cidr_block": schema.StringAttribute{
-							Description: "The CIDR block of the attached network",
+							Description: "The CIDR block of the attached legacy network or VPC subnet. Null when world is 'l2'",
 							Computed:    true,
 						},
 						"gateway_ip": schema.StringAttribute{
-							Description: "The gateway IP address of the attached network",
+							Description: "The gateway IP address of the attached legacy network. Null unless world is 'legacy'",
 							Computed:    true,
 						},
 						"network_type": schema.StringAttribute{
-							Description: "The type of the attached network",
+							Description: "The type of the attached legacy network. Null unless world is 'legacy'",
+							Computed:    true,
+						},
+						"vpc_subnet_id": schema.StringAttribute{
+							Description: "The ID of the VPC subnet the interface attaches to. Null unless world is 'vpc'",
+							Computed:    true,
+						},
+						"subnet_name": schema.StringAttribute{
+							Description: "The name of the VPC subnet the interface attaches to. Null unless world is 'vpc'",
+							Computed:    true,
+						},
+						"vpc_id": schema.StringAttribute{
+							Description: "The ID of the VPC that holds the subnet. Null unless world is 'vpc'",
+							Computed:    true,
+						},
+						"vpc_name": schema.StringAttribute{
+							Description: "The name of the VPC that holds the subnet. Null unless world is 'vpc'",
+							Computed:    true,
+						},
+						"l2_segment_id": schema.StringAttribute{
+							Description: "The ID of the L2 segment the interface attaches to. Null unless world is 'l2'",
+							Computed:    true,
+						},
+						"l2_segment_name": schema.StringAttribute{
+							Description: "The name of the L2 segment the interface attaches to. Null unless world is 'l2'",
 							Computed:    true,
 						},
 					},
@@ -314,87 +365,94 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
-	var networkIds []string
-	if !plan.NetworkIds.IsNull() {
-		listDiags := plan.NetworkIds.ElementsAs(ctx, &networkIds, true)
-		resp.Diagnostics.Append(listDiags...)
-		if resp.Diagnostics.HasError() {
-			return
-		}
-	}
-	// GPCN creates the machine on one birth network, then the loop attaches the rest.
-	// State holds the machine and the networks that attached, so a refused attach leaves
-	// no machine outside Terraform.
-	if len(networkIds) > 1 {
-		attached := []string{networkIds[0]}
-		var attachErr error
-		failedNetworkId := ""
-
-		// GPCN refuses an add-NIC on a running machine whose image has no network
-		// hotplug. The update path takes the same gate.
-		stopped := false
-		if !plan.NetworkHotplug.ValueBool() {
-			if stopErr := virtualmachines.StopVirtualMachine(r.client, ctx, plan.ID.ValueString()); stopErr != nil {
-				attachErr = fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStoppingVM, plan.ID.ValueString()), stopErr)
-				failedNetworkId = networkIds[1]
-			} else {
-				stopped = true
-			}
-		}
-
-		if attachErr == nil {
-			for _, networkId := range networkIds[1:] {
-				attachErr = networks.AddNetworkInterface(r.client, ctx, plan.ID.ValueString(), networkId)
-				if attachErr != nil {
-					failedNetworkId = networkId
-					break
-				}
-				attached = append(attached, networkId)
-			}
-		}
-
-		// The provider stops the machine for the attach, so it starts the machine again.
-		// A start that fails leaves the machine stopped, and the user learns that from
-		// the diagnostic below the state write.
-		var startErr error
-		if stopped {
-			startErr = virtualmachines.StartVirtualMachine(r.client, ctx, plan.ID.ValueString())
-		}
-
-		plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
-		resp.Diagnostics.Append(mapDiags...)
-
-		// network_ids names the networks the machine really holds. A configured list that
-		// outruns the attach loop leaves a later plan no difference to act on.
-		attachedIds, attachedDiags := types.ListValueFrom(ctx, types.StringType, attached)
-		resp.Diagnostics.Append(attachedDiags...)
-		if !attachedDiags.HasError() {
-			plan.NetworkIds = attachedIds
-		}
-
-		diags = resp.State.Set(ctx, plan)
-		resp.Diagnostics.Append(diags...)
-
-		if startErr != nil {
-			resp.Diagnostics.AddError(
-				virtualmachines.ErrSummaryVMLeftStopped,
-				fmt.Sprintf(virtualmachines.ErrDetailVMLeftStoppedCreate, plan.ID.ValueString(), startErr.Error()),
-			)
-		}
-
-		if attachErr != nil {
-			resp.Diagnostics.AddError(
-				virtualmachines.ErrSummaryVMCreatedAttachFailed,
-				fmt.Sprintf(virtualmachines.ErrDetailVMCreatedAttachFailed, plan.ID.ValueString(), failedNetworkId, attachErr.Error()),
-			)
-			return
-		}
-		if resp.Diagnostics.HasError() {
-			return
-		}
+	resp.Diagnostics.Append(r.attachSegmentsAfterCreate(ctx, getVirtualMachineResponse, plan, resp)...)
+	if resp.Diagnostics.HasError() {
+		return
 	}
 
 	tflog.Info(ctx, virtualmachines.LogSuccessfullyFinishedCreateGPCNVirtualMachine)
+}
+
+// The create body carries no segment, so every segment attaches after the machine
+// exists. State already holds the machine, and it holds the segments that attached. A
+// refused attach therefore leaves nothing outside Terraform, and leaves a later plan
+// work to do.
+func (r *virtualMachinesResource) attachSegmentsAfterCreate(ctx context.Context, response *virtualmachines.ReadVirtualMachinesResponse, plan virtualmachines.ResourceModel, resp *resource.CreateResponse) diag.Diagnostics {
+	var diags diag.Diagnostics
+
+	var segmentIds []string
+	if !plan.L2SegmentIds.IsNull() && !plan.L2SegmentIds.IsUnknown() {
+		diags.Append(plan.L2SegmentIds.ElementsAs(ctx, &segmentIds, true)...)
+		if diags.HasError() {
+			return diags
+		}
+	}
+	if len(segmentIds) == 0 {
+		return diags
+	}
+
+	virtualMachineID := plan.ID.ValueString()
+	attached := []string{}
+	var attachErr error
+	failedSegmentId := ""
+
+	// GPCN refuses an add-NIC on a running machine whose image has no network hotplug.
+	// The update path takes the same gate.
+	stopped := false
+	if !plan.NetworkHotplug.ValueBool() {
+		if stopErr := virtualmachines.StopVirtualMachine(r.client, ctx, virtualMachineID); stopErr != nil {
+			attachErr = fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStoppingVM, virtualMachineID), stopErr)
+			failedSegmentId = segmentIds[0]
+		} else {
+			stopped = true
+		}
+	}
+
+	if attachErr == nil {
+		for _, segmentId := range segmentIds {
+			attachErr = networks.AddL2SegmentInterface(r.client, ctx, virtualMachineID, segmentId)
+			if attachErr != nil {
+				failedSegmentId = segmentId
+				break
+			}
+			attached = append(attached, segmentId)
+		}
+	}
+
+	// The provider stops the machine for the attach, so it starts the machine again.
+	// A start that fails leaves the machine stopped, and the user learns that from the
+	// diagnostic below the state write.
+	var startErr error
+	if stopped {
+		startErr = virtualmachines.StartVirtualMachine(r.client, ctx, virtualMachineID)
+	}
+
+	var mapDiags diag.Diagnostics
+	plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, response, plan)
+	diags.Append(mapDiags...)
+
+	attachedIds, attachedDiags := types.ListValueFrom(ctx, types.StringType, attached)
+	diags.Append(attachedDiags...)
+	if !attachedDiags.HasError() {
+		plan.L2SegmentIds = attachedIds
+	}
+
+	diags.Append(resp.State.Set(ctx, plan)...)
+
+	if startErr != nil {
+		diags.AddError(
+			virtualmachines.ErrSummaryVMLeftStopped,
+			fmt.Sprintf(virtualmachines.ErrDetailVMLeftStoppedCreate, virtualMachineID, startErr.Error()),
+		)
+	}
+	if attachErr != nil {
+		diags.AddError(
+			virtualmachines.ErrSummaryVMCreatedAttachFailed,
+			fmt.Sprintf(virtualmachines.ErrDetailVMCreatedAttachFailed, virtualMachineID, failedSegmentId, attachErr.Error()),
+		)
+	}
+
+	return diags
 }
 
 // Read refreshes the Terraform state with the latest data.
@@ -446,7 +504,6 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	// Add correlation ID for request tracing
 	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, virtualmachines.LogStartingUpdateGPCNVirtualMachine)
-	// Map both the plan and state to see what's changed
 	var plan virtualmachines.ResourceModel
 	diags := req.Plan.Get(ctx, &plan)
 	resp.Diagnostics.Append(diags...)
@@ -461,34 +518,33 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		return
 	}
 
-	// Validate we aren't removing every network
-	err := virtualmachines.ValidateAllNetworksAreNotRemoved(state.NetworkIds, plan.NetworkIds)
-	if err != nil {
+	// The stop decision and the steps after it read the machine once here. State can lag
+	// the platform after a failed read-back. A retry then asks for work the machine
+	// already carries. A stop for finished work costs the user the whole downtime.
+	liveDetail, detailErr := virtualmachines.GetVirtualMachine(r.client, ctx, state.ID.ValueString())
+	if detailErr != nil {
 		resp.Diagnostics.AddError(
-			virtualmachines.ErrSummaryEncounteredValidationError,
-			err.Error(),
+			virtualmachines.ErrSummaryRetrievingVMInfoFailed,
+			detailErr.Error(),
 		)
 		return
 	}
 
-	if plan.AllocatePublicIp != state.AllocatePublicIp {
-		// First validate the primary network type is standard
-		err := virtualmachines.ValidatePublicIpValue(r.client, ctx, plan)
-		if err != nil {
-			resp.Diagnostics.AddError(
-				virtualmachines.ErrSummaryEncounteredValidationError,
-				err.Error(),
-			)
-			return
-		}
+	liveInterfaces, interfacesErr := networks.GetNetworkInterfaces(r.client, ctx, state.ID.ValueString())
+	if interfacesErr != nil {
+		resp.Diagnostics.AddError(
+			virtualmachines.ErrSummaryErrorRetrievingNetworkIfaces,
+			interfacesErr.Error(),
+		)
+		return
 	}
 
 	// Controls stopping the VM. Since this is time-expensive, we only need to do this in a few cases
-	needStopVM := determineIfVMNeedsStopped(state, plan)
+	needStopVM := determineIfVMNeedsStopped(state, plan, liveDetail, liveInterfaces)
 
 	// Before proceeding with update, conditionally stop the virtual machine
 	if needStopVM {
-		err = virtualmachines.StopVirtualMachine(r.client, ctx, state.ID.ValueString())
+		err := virtualmachines.StopVirtualMachine(r.client, ctx, state.ID.ValueString())
 		if err != nil {
 			resp.Diagnostics.AddError(
 				virtualmachines.ErrSummaryUnableToUpdateVM,
@@ -502,15 +558,18 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	// it fails. The steps run in order through one runner, so one early return owns
 	// that repair. The runner keeps the response of the read-back for the mapping.
 	var getVirtualMachineResponse *virtualmachines.ReadVirtualMachinesResponse
+	var acquiredAddress virtualmachines.AcquiredAddress
 	updateSteps := []func() diag.Diagnostics{
 		func() diag.Diagnostics {
-			return virtualmachines.UpdateNetworkInterfacesIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+			return virtualmachines.UpdateL2SegmentsIfChanged(r.client, ctx, state.ID.ValueString(), state, plan, liveInterfaces)
 		},
 		func() diag.Diagnostics {
-			return virtualmachines.UpdatePublicIPIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+			var publicIpDiags diag.Diagnostics
+			acquiredAddress, publicIpDiags = virtualmachines.UpdatePublicIPIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
+			return publicIpDiags
 		},
 		func() diag.Diagnostics {
-			return virtualmachines.UpdateSizeIfChanged(r.client, ctx, plan.ID.ValueString(), state, plan)
+			return virtualmachines.UpdateSizeIfChanged(r.client, ctx, plan.ID.ValueString(), state, plan, liveDetail)
 		},
 		func() diag.Diagnostics {
 			return virtualmachines.UpdateChangeableAttributesIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
@@ -530,10 +589,15 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		},
 	}
 
-	// A start that fails is the only report the user gets. It follows the diagnostics
-	// of the step that fails. This path writes no state, so the next plan shows what is left to do.
+	// A failed step leaves two things to repair, and the machine comes first. The start
+	// runs before the unwind, because a release that hangs would hold the stopped
+	// machine down. One rule then covers every failure after a successful acquire: it
+	// hands back an address the update records nowhere. The change is not in state. An
+	// earlier step can still have succeeded, so the remedy sends the user to the next
+	// plan.
 	for _, updateStep := range updateSteps {
-		resp.Diagnostics.Append(updateStep()...)
+		stepDiags := updateStep()
+		resp.Diagnostics.Append(stepDiags...)
 		if !resp.Diagnostics.HasError() {
 			continue
 		}
@@ -546,13 +610,28 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 				)
 			}
 		}
+		resp.Diagnostics.Append(virtualmachines.UnwindAcquiredAddress(
+			r.client, ctx, state.ID.ValueString(), acquiredAddress, stepDiags)...)
 		return
 	}
 
 	tflog.Info(ctx, virtualmachines.LogRetrievedLatestVMInfoMappingToModel)
+	// The plan modifiers pin the interface list and the address to state when no network
+	// input changed. Terraform refuses a state that differs from that plan. The platform
+	// can fill a late column, such as a MAC address, inside this apply. It can also move
+	// the address. The read-back is therefore kept only where the plan asked for a fresh
+	// value. The next refresh records the rest.
+	plannedNetworkInterfaces := plan.NetworkInterfaces
+	plannedPublicIp := plan.PublicIp
 	var mapDiags diag.Diagnostics
 	plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
 	resp.Diagnostics.Append(mapDiags...)
+	if !plannedNetworkInterfaces.IsUnknown() {
+		plan.NetworkInterfaces = plannedNetworkInterfaces
+	}
+	if !plannedPublicIp.IsUnknown() {
+		plan.PublicIp = plannedPublicIp
+	}
 
 	// Once finished, conditionally start the virtual machine again. The diagnostic below
 	// the state write reports a failed start.
@@ -613,35 +692,49 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	}
 
 	// Before deleting, detach any network interfaces first
-	if !state.NetworkIds.IsNull() {
-		networkInterfaces, err := networks.GetNetworkInterfaces(r.client, ctx, state.ID.ValueString())
+	networkInterfaces, err := networks.GetNetworkInterfaces(r.client, ctx, state.ID.ValueString())
 
-		if client.IsNotFound(err) {
-			tflog.Info(ctx, virtualmachines.LogVirtualMachineAlreadyDeleted)
-			return
-		} else if err != nil {
-			resp.Diagnostics.AddError(
-				virtualmachines.ErrSummaryErrorRetrievingNetworkIfaces,
-				fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailNetworkInterfacesForVM, state.ID.ValueString()), err).Error(),
-			)
-			return
-		}
+	if client.IsNotFound(err) {
+		tflog.Info(ctx, virtualmachines.LogVirtualMachineAlreadyDeleted)
+		return
+	} else if err != nil {
+		resp.Diagnostics.AddError(
+			virtualmachines.ErrSummaryErrorRetrievingNetworkIfaces,
+			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailNetworkInterfacesForVM, state.ID.ValueString()), err).Error(),
+		)
+		return
+	}
 
-		for _, adapter := range networkInterfaces {
-			// Cannot remove the primary interface
-			if !adapter.IsPrimary.ValueBool() {
-				err = networks.RemoveNetworkInterface(r.client, ctx, state.ID.ValueString(), adapter.ID.ValueString())
-				if err != nil {
-					resp.Diagnostics.AddWarning(
-						virtualmachines.WarnSummaryRemovingNetworkInterfaceFailed,
-						fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.WarnDetailRemovingNetworkInterfaceWithIDFailed, adapter.ID.ValueString()), err).Error(),
-					)
-				}
+	for _, adapter := range networkInterfaces {
+		// Cannot remove the primary interface
+		if !adapter.IsPrimary.ValueBool() {
+			err = networks.RemoveNetworkInterface(r.client, ctx, state.ID.ValueString(), adapter.ID.ValueString())
+			if err != nil {
+				resp.Diagnostics.AddWarning(
+					virtualmachines.WarnSummaryRemovingNetworkInterfaceFailed,
+					fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.WarnDetailRemovingNetworkInterfaceWithIDFailed, adapter.ID.ValueString()), err).Error(),
+				)
 			}
 		}
 	}
 
-	request, err := http.NewRequestWithContext(ctx, "DELETE", virtualmachines.BASE_URL_V1+state.ID.ValueString(), nil)
+	// GPCN keeps the addresses a deleted machine carried unless the delete asks for
+	// them back. Terraform destroys the address it acquired and leaves a held
+	// public_ip_id to the operator who holds it.
+	var deleteRequestBody io.Reader
+	if virtualmachines.ReleasesAcquiredAddress(state, networkInterfaces) {
+		jsonDeleteRequestBody, err := json.Marshal(map[string]any{"releasePublicIps": true})
+		if err != nil {
+			resp.Diagnostics.AddError(
+				virtualmachines.ErrSummaryUnableToCreateDeleteRequest,
+				err.Error(),
+			)
+			return
+		}
+		deleteRequestBody = bytes.NewBuffer(jsonDeleteRequestBody)
+	}
+
+	request, err := http.NewRequestWithContext(ctx, "DELETE", virtualmachines.BASE_URL_V1+state.ID.ValueString(), deleteRequestBody)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToCreateDeleteRequest,
@@ -729,6 +822,15 @@ func (r *virtualMachinesResource) ModifyPlan(ctx context.Context, req resource.M
 		return
 	}
 
+	// A read-back that failed after a resize leaves state behind the machine. GPCN keeps
+	// the current SKU out of its own upgrade list, so the list alone would answer with a
+	// replacement. A machine that already carries the planned SKU needs no change. An
+	// unreadable detail falls through to the list, which fails the plan on its own.
+	detail, detailErr := virtualmachines.GetVirtualMachine(r.client, ctx, state.ID.ValueString())
+	if detailErr == nil && detail.Data.Configuration.SkuId == plan.SizeId.ValueString() {
+		return
+	}
+
 	// Fetch only the sizes that are valid in-place upgrade targets for this VM
 	upgradeable, err := virtualmachinesizes.FetchSizes(r.client, ctx, state.DatacenterId.ValueString(), state.ID.ValueString())
 	if err != nil {
@@ -750,19 +852,50 @@ func (r *virtualMachinesResource) ModifyPlan(ctx context.Context, req resource.M
 }
 
 /*
-Some actions can be done without stopping the VM. Since it's a heavy time investment to start and stop, determine that and use it for the rest of the update logic.
-Cases where VM needs to be stopped:
-  - NetworkHotplug is disabled AND one of the below
-  - NetworkIds change
-  - size_id changes
+A stop and a start cost the user real time. The provider takes them only where GPCN
+needs them. The image of the machine must take no network hotplug. State reports that
+capability, because the image of a machine does not drift. The decision then asks two
+questions of each attribute below. Does the configuration ask for a change? Does the
+machine still lack that change?
+  - l2_segment_ids against the live segment set
+  - size_id against the live SKU
 */
-func determineIfVMNeedsStopped(state, plan virtualmachines.ResourceModel) bool {
-	// If network hotplug is enabled, the VM does not need to be stopped
+func determineIfVMNeedsStopped(state, plan virtualmachines.ResourceModel, live *virtualmachines.ReadVirtualMachinesResponse, liveInterfaces []networks.ReadVirtualMachineNetworkDataResponseTF) bool {
 	if state.NetworkHotplug.ValueBool() {
 		return false
 	}
 
-	// If network hotplug is disabled, the VM needs to be stopped for a few scenarios
-	return (!slices.Equal(plan.NetworkIds.Elements(), state.NetworkIds.Elements())) ||
-		!state.SizeId.Equal(plan.SizeId)
+	segmentsOutstanding := !plan.L2SegmentIds.Equal(state.L2SegmentIds) &&
+		!slices.Equal(liveSegmentIds(liveInterfaces), sortedSegmentIds(plan.L2SegmentIds))
+	sizeOutstanding := !state.SizeId.Equal(plan.SizeId) &&
+		live.Data.Configuration.SkuId != plan.SizeId.ValueString()
+
+	return segmentsOutstanding || sizeOutstanding
+}
+
+// liveSegmentIds reads the segments the machine carries now. It renders them the way
+// sortedSegmentIds renders a planned element. An unknown planned element therefore
+// matches no live segment and still asks for a stop.
+func liveSegmentIds(liveInterfaces []networks.ReadVirtualMachineNetworkDataResponseTF) []string {
+	segmentIds := make([]string, 0, len(liveInterfaces))
+	for _, liveInterface := range liveInterfaces {
+		if liveInterface.World.ValueString() != networks.NicWorldL2 || liveInterface.L2SegmentID.IsNull() {
+			continue
+		}
+		segmentIds = append(segmentIds, liveInterface.L2SegmentID.String())
+	}
+	slices.Sort(segmentIds)
+	return segmentIds
+}
+
+// sortedSegmentIds reads a segment list in a stable order. GPCN gives the interfaces of
+// a machine no order. A reordered list carries the same segments and asks for nothing.
+// An unknown element sorts under its own rendering and therefore still asks for a stop.
+func sortedSegmentIds(list types.List) []string {
+	segmentIds := make([]string, 0, len(list.Elements()))
+	for _, element := range list.Elements() {
+		segmentIds = append(segmentIds, element.String())
+	}
+	slices.Sort(segmentIds)
+	return segmentIds
 }

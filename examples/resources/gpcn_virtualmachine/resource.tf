@@ -1,8 +1,8 @@
 
 # Example: Creating GPCN Virtual Machines
 #
-# This example demonstrates creating a virtual machine on an existing network,
-# with a volume attached. GPCN networking is VPC-based: create a gpcn_vpc and a gpcn_vpc_subnet first.
+# This example demonstrates creating a virtual machine on a VPC subnet,
+# with a volume attached.
 
 terraform {
   required_providers {
@@ -15,11 +15,6 @@ terraform {
 
 provider "gpcn" {
   host = "https://api.gpcn.com"
-}
-
-# The network the virtual machine is born on
-variable "network_id" {
-  type = string
 }
 
 # Lookup datacenter in Central US region
@@ -54,6 +49,19 @@ resource "gpcn_resource_group" "group_example" {
   name = "terraform-demo-group"
 }
 
+# The VPC and the subnet the virtual machine is born on
+resource "gpcn_vpc" "example" {
+  name          = "terraform-demo-vpc"
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+  cidr          = "10.112.0.0/16"
+}
+
+resource "gpcn_vpc_subnet" "example" {
+  vpc_id = gpcn_vpc.example.id
+  name   = "terraform-demo-subnet"
+  cidr   = "10.112.1.0/24"
+}
+
 # Create storage volume for the VM
 resource "gpcn_volume" "vm_storage" {
   name          = "vm-storage-primary"
@@ -73,9 +81,13 @@ resource "gpcn_virtualmachine" "example" {
 
   # Networking
   allocate_public_ip = false
-  network_ids = [
-    var.network_id
-  ]
+  subnet_id          = gpcn_vpc_subnet.example.id
+
+  # Needs a gpcn_l2_segment resource in this configuration:
+  # l2_segment_ids = [gpcn_l2_segment.example.id]
+
+  # Needs a held gpcn_vpc_public_ip resource in this configuration:
+  # public_ip_id   = gpcn_vpc_public_ip.example.id
 
   # Resource Group
   resource_group_id = gpcn_resource_group.group_example.id

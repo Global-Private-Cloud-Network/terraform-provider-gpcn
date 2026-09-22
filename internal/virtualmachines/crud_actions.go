@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"terraform-provider-gpcn/internal/client"
-	"terraform-provider-gpcn/internal/networks"
 
 	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
@@ -60,14 +59,6 @@ type ReadVirtualMachinesResponse struct {
 func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, imageId string, skuId string, model ResourceModel) (*ReadVirtualMachinesResponse, error) {
 	tflog.Info(ctx, LogStartingCreateVirtualMachine)
 
-	// Allocate public Ip cannot be true if we are attaching a network of type custom
-	tflog.Info(ctx, LogValidatingPublicIPConfiguration)
-	err := ValidatePublicIpValue(gpcnClient, ctx, model)
-	if err != nil {
-		return nil, err
-	}
-	tflog.Info(ctx, LogValidatedPublicIPConfigurationSuccessfully)
-
 	// Extract auth configuration and set authMethod fields
 	var auth ResourceModelInitialAuth
 	authDiags := model.InitialAuth.As(ctx, &auth, basetypes.ObjectAsOptions{})
@@ -82,15 +73,15 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 		authMethod = "password"
 	}
 
-	// Create a new request from the model
+	// Create a new request from the model. The body is .strict() at GPCN, so it carries
+	// only the keys this create needs. subnetId is the fork that names the VPC world.
 	createVMRequestBody := map[string]any{
-		"acquirePublicIp":   model.AllocatePublicIp.ValueBool(),
-		"authMethod":        authMethod,
-		"skuId":             skuId,
-		"datacenterId":      model.DatacenterId.ValueString(),
-		"imageId":           imageId,
-		"name":              model.Name.ValueString(),
-		"numberOfInstances": 1,
+		"authMethod":   authMethod,
+		"skuId":        skuId,
+		"datacenterId": model.DatacenterId.ValueString(),
+		"imageId":      imageId,
+		"name":         model.Name.ValueString(),
+		"subnetId":     model.SubnetId.ValueString(),
 	}
 
 	if authMethod == "ssh-key" {
@@ -108,19 +99,13 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 		createVMRequestBody["resourceGroupId"] = model.ResourceGroupId.ValueString()
 	}
 
-	// GPCN create takes one birth network. The caller attaches the rest after the
-	// machine exists.
-	if !model.NetworkIds.IsNull() && len(model.NetworkIds.Elements()) > 0 {
-		var networkIds []string
-		diags := model.NetworkIds.ElementsAs(ctx, &networkIds, true)
-		if diags.HasError() {
-			return nil, fmt.Errorf("failed to read network_ids")
-		}
-
-		tflog.Info(ctx, LogNetworkIdsNotNull)
-		createVMRequestBody["networkId"] = networkIds[0]
-	} else {
-		tflog.Info(ctx, LogNetworkIdsNullOrEmpty)
+	// GPCN reads acquirePublicIp as a request for a NEW address, and refuses it beside a
+	// held one. A false flag would compete with publicIpId, so it is never sent.
+	if model.AllocatePublicIp.ValueBool() {
+		createVMRequestBody["acquirePublicIp"] = true
+	}
+	if !model.PublicIpId.IsNull() && model.PublicIpId.ValueString() != "" {
+		createVMRequestBody["publicIpId"] = model.PublicIpId.ValueString()
 	}
 
 	jsonCreateVMRequestBody, err := json.Marshal(createVMRequestBody)
@@ -314,35 +299,4 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 		return nil, pollErr
 	}
 	return getResp, nil
-}
-
-// Verify if public IP is set to true, the first network cannot be of type custom
-func ValidatePublicIpValue(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) error {
-	tflog.Info(ctx, LogStartingValidatePublicIPValue)
-	// If false, no error
-	if !model.AllocatePublicIp.ValueBool() {
-		tflog.Info(ctx, LogPublicIPNotAllocated)
-		return nil
-	}
-
-	// If true, check if we have networks and check the primary (first) network type
-	if model.NetworkIds.IsNull() || len(model.NetworkIds.Elements()) < 1 {
-		tflog.Info(ctx, LogNoNetworksSpecified)
-		return nil
-	}
-	var networkIds []string
-	model.NetworkIds.ElementsAs(ctx, &networkIds, true)
-
-	tflog.Info(ctx, LogValidatingPublicIPSettingByNetworkType)
-	getNetworkResponse, err := networks.GetNetwork(gpcnClient, ctx, networkIds[0])
-	if err != nil {
-		return err
-	}
-
-	if getNetworkResponse.Data.NetworkType == networks.NETWORK_TYPE_CUSTOM {
-		return errors.New(ErrDetailNetworkTypeMustBeStandard)
-	}
-
-	tflog.Info(ctx, LogPublicIPValidationPassed)
-	return nil
 }

@@ -2,20 +2,37 @@
 
 This release targets the GPCN API deployed with the VPC networking rollout. It does not work against the previous API: the virtual machine create body changed and the API refuses the old keys.
 
+UPGRADING FROM 1.3.0:
+
+1.4.0 manages virtual machines on VPC subnets only. A machine created by 1.3.0 sits on a legacy network: it has no subnet, `subnet_id` is required, and GPCN refuses to move a legacy machine onto a subnet. The first plan under 1.4.0 fails validation for such a block (`subnet_id` is required and `network_ids` is gone); once the block is rewritten, the plan proposes to destroy and recreate the machine. Before that plan:
+
+1. Remove each legacy machine from state with `terraform state rm gpcn_virtualmachine.<name>`. The machine keeps running; GPCN manages it outside Terraform from then on.
+2. Delete or rewrite its block. A new block needs `subnet_id` from a `gpcn_vpc_subnet`, and applying it creates a new machine on that subnet. Move data by attaching a `gpcn_volume` to the new machine. A `gpcn_volume_attachment` whose machine block is deleted must be removed from state; one whose machine block is rewritten replaces itself with the machine.
+3. A custom `gpcn_network` that the platform adopted into an L2 segment follows the migration procedure on the `gpcn_network` page.
+4. Volumes, GPUs, SSH keys and resource groups upgrade in place. Check `volume_type` spellings (`SSD`, `NVMe`, or a storage code) and the GPU series codes named below before the first apply.
+
 BREAKING CHANGES:
 
 - **Network**: `gpcn_network` is deprecated. Creating one is refused at plan time: GPCN networking is VPC-based, and this release adds `gpcn_vpc`, `gpcn_vpc_subnet` and `gpcn_l2_segment`. Existing networks can still be read, renamed and destroyed. A custom network the platform adopted into an L2 segment leaves state with a warning that names the import command.
-- **Virtual Machine**: the create request sends `acquirePublicIp` and a single `networkId`; additional `network_ids` entries attach after the machine exists. When the image lacks network hotplug the provider stops the machine for the attach and starts it again. A failed attach leaves the machine in state, tainted, and reports which network did not attach; the next apply replaces the machine unless you untaint it. A change that stops the machine and cannot start it again reports `Virtual machine left stopped` and says what to do next.
+- **Virtual Machine**: a machine is created on a VPC subnet. `network_ids` is removed; `subnet_id` is required and replaces the machine when changed; `l2_segment_ids` (up to four) attaches layer-2 segments after the machine exists; `allocate_public_ip` is optional and defaults to false; `public_ip_id` attaches an address you already hold. The create request sends `subnetId`, `acquirePublicIp` and `publicIpId`. When the image lacks network hotplug the provider stops the machine for an attach and starts it again. A failed attach leaves the machine in state, tainted, and names the segment. A change that stops the machine and cannot start it again reports `Virtual machine left stopped` and says what to do next. `network_interfaces` reports the interface's world (`legacy`, `vpc` or `l2`), its subnet, VPC and segment ids and names, and its MAC address. A 1.3.0 state file loads, but a machine it describes sits on a legacy network and cannot be moved to a subnet; the first plan fails validation for its block, and a rewritten block proposes to replace the machine. See *Upgrading from 1.3.0*. An imported machine records its address as `public_ip_id`, never as one Terraform acquired.
 - **Volume**: `volume_type_id` is deprecated and always null; the API identifies a storage class by code. Use the new computed `volume_type_code`. `volume_type` accepts `SSD`, `NVMe`, or a storage component code the datacenter offers. The built-in classes are written `SSD` and `NVMe`; their codes `vol-add-ssd` and `vol-add-nvme` are refused at plan time with the spelling to use.
 - **GPU**: `series_name` and `series_code` are validated against the datacenter's live inventory instead of a fixed list. The H100 and A100 series codes are `nvidia-h100-series` and `nvidia-a100-series`; the previous codes never matched the catalog. The disabled `NVIDIA L40 Series` is no longer advertised.
 - **SSH Key**: `name` is validated at plan time with GPCN's rule (1 to 30 characters, letters, numbers, spaces, periods, hyphens and `_ ( ) ' #`, beginning and ending with a letter or number). A name with leading or trailing whitespace is refused, because GPCN trims it.
 
 FEATURES:
+- **New Resource `gpcn_vpc`**: a routed private network with a super-CIDR (/16 to /24, RFC 1918), optional DNS resolvers and an `acknowledge_overlap` switch for a CIDR the tenant already uses elsewhere. Read warns when the platform parks the VPC in `failed`.
+- **New Resource `gpcn_vpc_subnet`**: a block carved inside the VPC by `cidr` or by `prefix` length, bound to a security group; rebinding is in place. `prefix` is read from the carved block, so an import never plans a replacement.
+- **New Resource `gpcn_vpc_nsg`**: a network security group with inline `rule` blocks; the rule set is replaced as a whole. Changing the rules of the VPC's default group warns at plan time that the platform posture is replaced.
+- **New Resource `gpcn_vpc_public_ip`** and **`gpcn_vpc_public_ip_attachment`**: an elastic address held by the VPC and its binding to a machine's interface. An address acquired or attached that then cannot be read back stays in state, tainted, so the next apply releases or detaches it instead of orphaning it. Releasing an attached address succeeds and cuts the machine off. The attachment cannot be imported.
+- **New Resource `gpcn_l2_segment`**: a layer-2 network inside one datacenter, the successor of custom `gpcn_network`. Read warns when the platform parks the segment in `failed`.
+- **Data Source `gpcn_datacenters`**: new `vpc_capable` and `l2_capable` fields and filters.
 
 - **Provider**: the provider checks the API key when it configures (`GET /v1/auth/check`). A revoked, expired or unbound key fails once with a clear message; a key expiring within seven days warns.
 - **Data Source `gpcn_datacenters`**: new `code`, `continent_code` and `continent_name` per datacenter; `gpu_enabled` is filtered by the API; the list is paged up to 10,000 rows, with a warning when the cap is hit.
 
 ENHANCEMENTS:
+- **Validation**: `name` and `description` on the new resources refuse leading or trailing whitespace at plan time, because GPCN trims them and the plan would never settle.
+- **Imports**: `gpcn_vpc_subnet`, `gpcn_vpc_nsg` and `gpcn_vpc_public_ip` import as `<vpc_id>/<id>`; `gpcn_vpc` and `gpcn_l2_segment` import by id.
 
 - **Errors**: API refusals render as `HTTP <status> (<code>): <message>` instead of a raw JSON body.
 - **Jobs**: a job the platform cancels fails immediately instead of after the polling timeout; a failed job reports the worker's own error message.

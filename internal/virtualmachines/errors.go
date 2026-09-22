@@ -3,7 +3,6 @@ package virtualmachines
 // Error summary constants
 const (
 	ErrSummaryUnexpectedConfigureType             = "Unexpected Data Source Configure Type"
-	ErrSummaryUnableToCompletePlan                = "Unable to complete plan"
 	ErrSummaryUnableToCreateVM                    = "Unable to create GPCN Virtual Machine"
 	ErrSummaryRetrievingVMInfoFailed              = "Retrieving information about the Virtual Machine failed"
 	ErrSummaryErrorUpdatingVMSize                 = "Error updating Virtual Machine size"
@@ -13,14 +12,13 @@ const (
 	ErrSummaryUnableToCreateDeleteRequest         = "Unable to create a request for deleting a new GPCN Virtual Machine"
 	ErrSummaryUnableToDeleteVM                    = "Unable to delete GPCN Virtual Machine"
 	ErrSummaryUnableToUpdateVM                    = "Unable to update GPCN Virtual Machine"
-	ErrSummaryUnableToStopVM                      = "Unable to stop GPCN Virtual Machine"
 	ErrSummaryErrorReadingDeleteBody              = "Error reading body response GPCN Virtual Machine - Delete"
 	ErrSummaryErrorUnmarshalingDelete             = "Error unmarshaling GPCN Virtual Machine - Delete"
 	ErrSummaryEncounteredErrorGettingJobInfo      = "Encountered an error getting job info"
-	ErrSummaryEncounteredValidationError          = "Encountered a validation error"
 	ErrSummaryUnableToUpdatePublicIPConfiguration = "Unable to update public IP configuration"
 	ErrSummaryUnableToDetermineSizeChange         = "Unable to determine whether size_id change requires replacement"
 	ErrSummaryNoPrimaryNetworkInterface           = "No primary network interface"
+	ErrSummaryPublicIpConflict                    = "Invalid public IP configuration"
 	ErrSummaryVMCreatedAttachFailed               = "Virtual machine created but a network interface attach failed"
 	ErrSummaryVMLeftStopped                       = "Virtual machine left stopped"
 )
@@ -32,23 +30,62 @@ const (
 
 // Error detail message templates
 const (
-	ErrDetailExpectedGpcnClient        = "Expected *client.GpcnClient, got: %T. Please report this issue to the provider developers."
-	ErrDetailNetworkInterfacesForNewVM = "Error retrieving network interfaces for newly created virtual machine with ID %s"
-	ErrDetailNetworkInterfacesForVM    = "Error retrieving network interfaces for virtual machine with ID %s"
-	ErrDetailVMInfoFailedCanImport     = "Retrieving information about the Virtual Machine failed. The job was successful, but Terraform could not read more information about its value. You can import the id to repair the state with terraform import"
-	ErrDetailAddedNetworksExceedsMax   = "this change would exceed the maximum number of networks attached allowed %d"
-	ErrDetailUnableToDeleteVMWithID    = "Unable to delete GPCN Virtual Machine with ID %s"
-	ErrDetailUnmarshalingDeleteWithID  = "Error unmarshaling GPCN Virtual Machine - Delete with ID %s"
-	ErrDetailJobInfoCheckDashboard     = "Encountered an error getting job info. The request may still have succeeded. Check the GPCN dashboard for more information"
-	ErrDetailStoppingVM                = "Error stopping virtual machine with ID %s"
-	ErrDetailCannotRemoveLastNetwork   = "unable to remove the last Network attached to a virtual machine"
-	ErrDetailNetworkTypeMustBeStandard = "the prospective primary network (first in the list) is of type custom. allocate_public_ip can only be true when the primary network's network_type is standard"
-	ErrDetailFetchUpgradeSizesFailed   = "The provider could not fetch the valid upgrade targets for this Virtual Machine, so it cannot tell whether the size_id change is an in-place upgrade. This error is often transient. Re-run the plan. Underlying error: %s"
-	ErrDetailNoPrimaryNetworkInterface = "No network interface on virtual machine with ID %s is marked primary, so the public IP cannot be changed"
-	ErrDetailVMCreatedAttachFailed     = "virtual machine %s was created and is in state, but attaching %s failed: %s. Terraform has marked the machine tainted: run terraform untaint on it and apply again to attach the remaining networks, or let the next apply replace it."
-	ErrDetailVMLeftStoppedUpdate       = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal."
-	ErrDetailVMLeftStoppedCreate       = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform untaint on it; otherwise the next apply replaces the machine."
-	ErrDetailVMLeftStoppedRetry        = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform plan and check the proposed changes before applying."
+	ErrDetailExpectedGpcnClient              = "Expected *client.GpcnClient, got: %T. Please report this issue to the provider developers."
+	ErrDetailNetworkInterfacesForVM          = "Error retrieving network interfaces for virtual machine with ID %s"
+	ErrDetailVMInfoFailedCanImport           = "Retrieving information about the Virtual Machine failed. The job was successful, but Terraform could not read more information about its value. You can import the id to repair the state with terraform import"
+	ErrDetailUnableToDeleteVMWithID          = "Unable to delete GPCN Virtual Machine with ID %s"
+	ErrDetailUnmarshalingDeleteWithID        = "Error unmarshaling GPCN Virtual Machine - Delete with ID %s"
+	ErrDetailJobInfoCheckDashboard           = "Encountered an error getting job info. The request may still have succeeded. Check the GPCN dashboard for more information"
+	ErrDetailStoppingVM                      = "Error stopping virtual machine with ID %s"
+	ErrDetailPublicIpIdConflictsWithAllocate = "public_ip_id and allocate_public_ip are mutually exclusive"
+	ErrDetailFetchUpgradeSizesFailed         = "The provider could not fetch the valid upgrade targets for this Virtual Machine, so it cannot tell whether the size_id change is an in-place upgrade. This error is often transient. Re-run the plan. Underlying error: %s"
+	ErrDetailNoPrimaryNetworkInterface       = "No network interface on virtual machine with ID %s is marked primary, so the public IP cannot be changed"
+	ErrDetailPrimaryInterfaceNotOnAVpc       = "the primary network interface of virtual machine %s is not on a VPC subnet, and a public IP attaches to a VPC interface only"
+	ErrDetailVMCreatedAttachFailed           = "virtual machine %s was created and is in state, but attaching %s failed: %s. Terraform has marked the machine tainted: run terraform untaint on it and apply again to attach the remaining networks, or let the next apply replace it."
+)
+
+// GPCN reports one address row whatever bound the address. A
+// gpcn_vpc_public_ip_attachment binds one, and an unwind whose release also failed
+// leaves another. The provider cannot tell them apart, so the refusal names only what
+// it observes. The remedy puts the release first. A failed release parks the row for
+// a retry, and an import then adopts a row the platform tears down. The last sentence
+// covers the address another resource manages: releasing that one makes both resources
+// leave state, and the next apply acquires a different address without a word.
+const ErrDetailPrimaryInterfaceCarriesAForeignAddress = "the primary network interface of virtual machine %s already carries public IP %s. Release that address, or import it as gpcn_vpc_public_ip and name it in public_ip_id. If another resource already manages it, drop allocate_public_ip from this machine instead."
+
+// A start that fails after the provider stopped the machine leaves it stopped. The
+// remedy differs by path. Create taints the machine, so the next apply replaces it.
+// The tail of Update writes state, so a second apply changes nothing. A failure between
+// the stop and the state write records nothing. Earlier steps of that update can still
+// have succeeded, so the user reads the next plan before applying it.
+const (
+	ErrDetailVMLeftStoppedCreate = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform untaint on it; otherwise the next apply replaces the machine."
+	ErrDetailVMLeftStoppedUpdate = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal."
+	ErrDetailVMLeftStoppedRetry  = "virtual machine %s was stopped for the change and did not start again: %s. Start it in the portal, then run terraform plan and check the proposed changes before applying."
+)
+
+// An address the provider took, or gave up, can outlive the verb that failed. The
+// provider gives that address back, and the report says so. Only a release that fails
+// too leaves one to find. No attribute records that address, so the report is the only
+// place the operator reads its id. One phrase remains below, and it names the release
+// that failed after a successful detach.
+const (
+	ErrDetailPublicIpOrphaned                  = "public IP %s was acquired for virtual machine %s but %s: %s. Release it in the portal or import it as gpcn_vpc_public_ip."
+	ErrDetailPublicIpAttachFailedReleased      = "public IP %s was acquired for virtual machine %s but attaching it failed: %s; the address was released."
+	ErrDetailPublicIpAttachFailedReleaseFailed = "public IP %s was acquired for virtual machine %s but attaching it failed: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip."
+	ErrPhrasePublicIpReleaseFailed             = "releasing it failed"
+
+	ErrDetailPublicIpAcquireJobFailedReleased      = "public IP %s was acquired for virtual machine %s but its acquisition job failed: %s; the address was released."
+	ErrDetailPublicIpAcquireJobFailedReleaseFailed = "public IP %s was acquired for virtual machine %s but its acquisition job failed: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip."
+)
+
+// A step that fails after a successful acquire leaves an address the update records
+// nowhere. The runner gives that address back, so the machine ends where it started and
+// the retry acquires afresh. Only a release that fails too leaves one to find, and that
+// report names it.
+const (
+	ErrDetailAcquiredAddressReleasedAfterStepFailure      = "public IP %s was acquired for virtual machine %s but the update failed afterwards: %s; the address was released."
+	ErrDetailAcquiredAddressReleaseFailedAfterStepFailure = "public IP %s was acquired for virtual machine %s but the update failed afterwards: %s; releasing it failed too: %s. Release it in the portal or import it as gpcn_vpc_public_ip."
 )
 
 // Warning detail message templates

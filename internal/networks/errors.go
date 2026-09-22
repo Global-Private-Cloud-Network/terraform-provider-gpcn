@@ -34,10 +34,6 @@ const (
 	ErrDetailUnableToDeleteNetworkWithID  = "Unable to delete GPCN Network with ID '%s'"
 
 	ErrDetailNetworkCreateRetired = "GPCN has moved to VPC networking. Create a gpcn_vpc and a gpcn_vpc_subnet for routed networking, or a gpcn_l2_segment for a layer-2 network. Existing gpcn_network resources can still be read and destroyed."
-
-	ErrDetailNoCandidateNetworkInterface    = "the virtual machine has no candidate network interface to promote"
-	ErrDetailReplacePrimaryInterfaceFailed  = "error replacing primary interface: %w"
-	ErrDetailRefreshNetworkInterfacesFailed = "error refreshing the network interfaces of virtual machine ID '%s' before promoting a primary: %w"
 )
 
 const (
