@@ -906,7 +906,7 @@ func TestVpcResourcePlanWaitsOutATeardownAlreadyRunning(t *testing.T) {
 		},
 	})
 
-	// The status read plus two polls.
+	// The status read plus two polls that meet the 404.
 	if count := mock.readsWhileTearingDown(); count != 3 {
 		t.Errorf("reads while tearing down = %d, want 3", count)
 	}
