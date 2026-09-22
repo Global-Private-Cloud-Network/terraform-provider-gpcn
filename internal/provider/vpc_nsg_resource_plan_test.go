@@ -593,6 +593,7 @@ func TestVpcNsgResourceSchemaAttachesWhitespaceValidators(t *testing.T) {
 	if !ok {
 		t.Fatalf("rule is %T, want schema.SetNestedBlock", schemaResponse.Schema.Blocks["rule"])
 	}
+	assertWhitespaceValidator(t, ruleBlock.NestedObject.Attributes, "remote_cidr", "Invalid security group rule %s")
 	assertWhitespaceValidator(t, ruleBlock.NestedObject.Attributes, "description", "Invalid security group rule %s")
 }
 
