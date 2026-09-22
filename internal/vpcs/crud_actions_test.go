@@ -249,12 +249,12 @@ func TestVpcDeleteTreatsARowThatVanishedAsDeleted(t *testing.T) {
 }
 
 // The status read decides what the refusal means. A read that fails decides
-// nothing, and the stale refusal reports a teardown the provider never saw.
+// nothing, and the refusal names a state the provider never confirmed.
 func TestVpcDeleteSurfacesAFailedStatusReadAfterTheRefusal(t *testing.T) {
 	t.Parallel()
 
 	// The status read is the first read of the row.
-	mock := &vpcDeleteMock{refusals: 1, status: VPC_STATUS_DELETING, failReadsFrom: 1}
+	mock := &vpcDeleteMock{refusals: 1, failReadsFrom: 1}
 	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{T: t, Handler: mock.handler(t)})
 
 	err := DeleteVpc(gpcnClient, context.Background(), vpcUnitTestID)
