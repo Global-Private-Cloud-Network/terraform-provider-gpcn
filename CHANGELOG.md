@@ -7,7 +7,7 @@ UPGRADING FROM 1.3.0:
 1.4.0 manages virtual machines on VPC subnets only. A machine created by 1.3.0 sits on a legacy network: it has no subnet, `subnet_id` is required, and GPCN refuses to move a legacy machine onto a subnet. The first plan under 1.4.0 fails validation for such a block (`subnet_id` is required and `network_ids` is gone); once the block is rewritten, the plan proposes to destroy and recreate the machine. Before that plan:
 
 1. Remove each legacy machine from state with `terraform state rm gpcn_virtualmachine.<name>`. The machine keeps running; GPCN manages it outside Terraform from then on.
-2. Delete or rewrite its block. A new block needs `subnet_id` from a `gpcn_vpc_subnet`, and applying it creates a new machine on that subnet. Move data by attaching a `gpcn_volume` to the new machine. A `gpcn_volume_attachment` that references a legacy machine must be removed from state or rewritten with it.
+2. Delete or rewrite its block. A new block needs `subnet_id` from a `gpcn_vpc_subnet`, and applying it creates a new machine on that subnet. Move data by attaching a `gpcn_volume` to the new machine. A `gpcn_volume_attachment` whose machine block is deleted must be removed from state; one whose machine block is rewritten replaces itself with the machine.
 3. A custom `gpcn_network` that the platform adopted into an L2 segment follows the migration procedure on the `gpcn_network` page.
 4. Volumes, GPUs, SSH keys and resource groups upgrade in place. Check `volume_type` spellings (`SSD`, `NVMe`, or a storage code) and the GPU series codes named below before the first apply.
 

@@ -57,6 +57,6 @@ Remove the machine from state before that plan. The machine keeps running, and G
 terraform state rm gpcn_virtualmachine.<name>
 ```
 
-Then delete or rewrite the block. A new block needs `subnet_id` from a `gpcn_vpc_subnet`, and applying it creates a new machine on that subnet. Move data by attaching a `gpcn_volume` to the new machine. A `gpcn_volume_attachment` that references the legacy machine must be removed from state or rewritten with it.
+Then delete or rewrite the block. A new block needs `subnet_id` from a `gpcn_vpc_subnet`, and applying it creates a new machine on that subnet. Move data by attaching a `gpcn_volume` to the new machine. A `gpcn_volume_attachment` whose machine block is deleted must be removed from state; one whose machine block is rewritten replaces itself with the machine.
 
 A machine that 1.4.0 created imports back with `subnet_id`, `l2_segment_ids` and `public_ip_id` filled from the platform. An import never infers `allocate_public_ip`: destroying an imported machine leaves its address held.
