@@ -2632,6 +2632,20 @@ var vmPlanTestReadBackUnwindPattern = vmPlanTestSentencePattern(
 	vmPlanTestUnwindSentence(virtualmachines.ErrDetailVMInfoFailedCanImport + ": " +
 		vmPlanTestRetriesExhausted + "HTTP error 500"))
 
+// vmPlanTestUnwindNamedSentence renders the unwind report that names the address. A
+// release that fails too carries the detail of the step and the refusal of the release.
+func vmPlanTestUnwindNamedSentence(stepDetail, releaseDetail string) string {
+	return fmt.Sprintf(virtualmachines.ErrDetailAcquiredAddressReleaseFailedAfterStepFailure,
+		vmPlanTestAcquiredIpID, vmPlanTestID, stepDetail, releaseDetail)
+}
+
+// vmPlanTestReadBackReleaseFailedPattern holds the named report after a refused
+// read-back and a refused release. Neither detail has a wildcard in front of it.
+var vmPlanTestReadBackReleaseFailedPattern = vmPlanTestSentencePattern(
+	vmPlanTestUnwindNamedSentence(
+		virtualmachines.ErrDetailVMInfoFailedCanImport+": "+vmPlanTestRetriesExhausted+"HTTP error 500",
+		vmPlanTestRetriesExhausted+"HTTP 500: release refused"))
+
 // vmPlanTestAcquiredAddressVerbs lists the verbs an unwound acquire leaves behind. The
 // runner issues the release in every arm. Only the platform's answer differs.
 func vmPlanTestAcquiredAddressVerbs() []string {
@@ -2949,7 +2963,7 @@ func TestVirtualMachineResourcePlanNamesTheAcquiredAddressWhenTheReleaseFails(t 
 			},
 			{
 				Config:      vmPublicIpPlanTestConfig(server.URL, "vm-plan-release-fails", true, ""),
-				ExpectError: vmPlanTestAcquiredAddressReleaseFailedPattern,
+				ExpectError: vmPlanTestReadBackReleaseFailedPattern,
 			},
 		},
 	})
