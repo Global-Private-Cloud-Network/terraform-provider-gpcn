@@ -145,7 +145,6 @@ func PollCreateSubnet(gpcnClient *client.GpcnClient, ctx context.Context, jobID 
 // GetSubnet pages the VPC's subnet listing and matches the ID. The API wires no
 // single-read route for a subnet, so the listing is the only read there is.
 func GetSubnet(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, subnetID string) (*ApiSubnet, error) {
-	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetSubnetWithID, subnetID))
 
 	for page := int64(1); ; page++ {

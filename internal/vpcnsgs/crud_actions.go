@@ -140,7 +140,6 @@ func PollCreateNsg(gpcnClient *client.GpcnClient, ctx context.Context, jobID str
 
 // GetNsg reads the group and its complete rule set.
 func GetNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, nsgID string) (*NsgDetail, error) {
-	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetNsgWithID, nsgID))
 
 	request, err := http.NewRequestWithContext(ctx, "GET", nsgPath(vpcID, nsgID), nil)
