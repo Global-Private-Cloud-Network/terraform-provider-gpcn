@@ -3179,12 +3179,11 @@ func startVirtualMachineCarriedAddressMockServer(t *testing.T) (*httptest.Server
 	return server, recorded
 }
 
-// vmPlanTestForeignAddressPattern matches the refusal of a carried address after
-// Terraform wraps it.
-var vmPlanTestForeignAddressPattern = regexp.MustCompile(
-	`(?s)already\s+carries\s+public\s+IP\s+` + vmPlanTestAcquiredIpID +
-		`\s+that\s+this\s+configuration\s+did\s+not\s+attach` +
-		`.*name\s+it\s+in\s+public_ip_id,\s+or\s+release\s+it`)
+// vmPlanTestForeignAddressPattern holds the whole refusal of a carried address, so a
+// remedy that goes missing cannot pass.
+var vmPlanTestForeignAddressPattern = vmPlanTestSentencePattern(
+	fmt.Sprintf(virtualmachines.ErrDetailPrimaryInterfaceCarriesAForeignAddress,
+		vmPlanTestID, vmPlanTestAcquiredIpID))
 
 // A machine can carry an address Terraform did not acquire. A
 // gpcn_vpc_public_ip_attachment binds one, and an unwind whose release also failed
