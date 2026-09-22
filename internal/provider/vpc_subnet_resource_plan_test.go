@@ -22,6 +22,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
+// regexpSubnetCreatedButJobFailed pins the R145 sentence for a carve the
+// platform gave up on after it inserted the row.
+var regexpSubnetCreatedButJobFailed = regexp.MustCompile(`(?s)subnet\s+` + subnetPlanTestID +
+	`\s+was\s+created\s+and\s+is\s+in\s+state,\s+but\s+its\s+creation\s+job\s+failed.*` +
+	`Terraform\s+has\s+marked\s+the\s+subnet\s+tainted,\s+so\s+the\s+next\s+apply\s+deletes\s+it\s+and\s+creates\s+it\s+again\.`)
+
 const (
 	subnetPlanTestVpcID        = "11111111-1111-4111-8111-111111111111"
 	subnetPlanTestID           = "22222222-2222-4222-8222-222222222222"
@@ -56,8 +62,11 @@ type subnetPlanTestServerState struct {
 	// missingOnDelete answers the DELETE with a 404. A subnet another operator
 	// already removed gives that answer.
 	missingOnDelete bool
-	createBody      map[string]any
-	rebindBody      map[string]any
+	// failCreateJob makes the carve job stop badly. The platform inserts the
+	// row before it dispatches that job, so the id exists either way.
+	failCreateJob bool
+	createBody    map[string]any
+	rebindBody    map[string]any
 }
 
 func (s *subnetPlanTestServerState) row() map[string]any {
@@ -173,7 +182,7 @@ func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestS
 			}
 			testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
-			testutil.HandleJobResponse(w, "job-1", subnetPlanTestID, true)
+			subnetPlanTestHandleJob(w, r, state)
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -181,6 +190,44 @@ func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestS
 	t.Cleanup(server.Close)
 
 	return server, state
+}
+
+// failTheCreateJob arms the carve failure under the lock. The mock server
+// reads the flag from another goroutine.
+func (s *subnetPlanTestServerState) failTheCreateJob() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failCreateJob = true
+}
+
+// subnetPlanTestHandleJob answers the poll for the job the request names. Only
+// the carve job can stop badly, so every other job completes.
+func subnetPlanTestHandleJob(w http.ResponseWriter, r *http.Request, state *subnetPlanTestServerState) {
+	jobID := "job-1"
+	if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
+		jobID, _ = ids[0].(string)
+	}
+
+	state.mu.Lock()
+	failCreate := state.failCreateJob
+	state.mu.Unlock()
+
+	if jobID == "job-create" && failCreate {
+		testutil.WriteJSONResponse(w, map[string]any{
+			"success": true,
+			"message": "Job status retrieved",
+			"data": map[string]any{"jobs": []map[string]any{{
+				"jobId":        jobID,
+				"isCompleted":  false,
+				"isTerminal":   true,
+				"hasFailed":    true,
+				"errorMessage": subnetPlanTestFailedReason,
+			}}},
+		})
+		return
+	}
+
+	testutil.HandleJobResponse(w, jobID, subnetPlanTestID, true)
 }
 
 // whitespaceRefusal builds the pattern for a whitespace refusal. Terraform
@@ -905,5 +952,46 @@ func TestVpcSubnetReadWarnsOnFailedSubnetUnit(t *testing.T) {
 	ready := readInState("ready", "")
 	if got := ready.Diagnostics.WarningsCount(); got != 0 {
 		t.Errorf("warnings for a ready subnet = %d, want 0", got)
+	}
+}
+
+// The platform inserts the subnet row before it dispatches the carve job, and
+// the row holds the name and the CIDR until someone deletes it. A failed job
+// must therefore leave the id in state. The destroy then deletes the row
+// instead of leaving the next apply to collide with it.
+func TestVpcSubnetResourcePlanKeepsTheIdWhenTheCreateJobFails(t *testing.T) {
+	t.Parallel()
+	server, state := startSubnetPlanMockServer(t)
+	state.failTheCreateJob()
+
+	config := subnetPlanTestConfig(server.URL, "carve-failed", "")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexpSubnetCreatedButJobFailed,
+			},
+			{
+				Config:  config,
+				Destroy: true,
+				Check:   checkSubnetDestroyDeletedTheRow(state),
+			},
+		},
+	})
+}
+
+// checkSubnetDestroyDeletedTheRow proves the failed create wrote the id to
+// state. The mock routes the delete by that id. A create that keeps the id to
+// itself leaves the destroy nothing to delete.
+func checkSubnetDestroyDeletedTheRow(state *subnetPlanTestServerState) func(*terraform.State) error {
+	return func(*terraform.State) error {
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		if !state.deleted {
+			return fmt.Errorf("expected the destroy to delete the subnet row, but the mock still lists it")
+		}
+		return nil
 	}
 }

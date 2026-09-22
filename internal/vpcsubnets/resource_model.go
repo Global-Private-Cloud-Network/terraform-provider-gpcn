@@ -84,6 +84,23 @@ func SubnetFailedWarning(response *ApiSubnet) diag.Diagnostics {
 	return diags
 }
 
+// MapIssuedSubnetToModel records what the 202 already knows: the ID, the block
+// the allocator reserved and the group the row is bound to. The carve job has
+// not run, so nothing else is read and every other Computed attribute is null.
+func MapIssuedSubnetToModel(response *ApiSubnet, model ResourceModel) ResourceModel {
+	model.ID = types.StringValue(response.ID)
+	model.CIDR = types.StringValue(response.CIDR)
+	model.NsgID = types.StringValue(response.NsgID)
+	model.Prefix = types.Int64Null()
+	model.NsgName = types.StringNull()
+	model.State = types.StringNull()
+	model.AttachedNicCount = types.Int64Null()
+	model.FailureReason = types.StringNull()
+	model.CreatedTime = types.StringNull()
+	model.LastUpdated = types.StringNull()
+	return model
+}
+
 // MapSubnetResponseToModel writes the Computed attributes. It fills the
 // configurable ones only when the caller chose no value. An import and a
 // Create both leave that behind. A configured CIDR must survive.
