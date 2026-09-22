@@ -355,7 +355,7 @@ func (m *vpcMock) setGetNotFound(notFound bool) {
 	m.getNotFound = notFound
 }
 
-// readsWhileTearingDown is how many reads the provider made after the refusal.
+// The count of reads the provider makes after the refusal.
 func (m *vpcMock) readsWhileTearingDown() int {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()

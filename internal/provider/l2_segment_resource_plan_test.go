@@ -604,9 +604,8 @@ func TestL2SegmentResourcePlanReplacesOnDatacenterChange(t *testing.T) {
 	})
 }
 
-// TestL2SegmentResourceSchemaNamesTheResourceGroupDrop pins the sentence byte
-// for byte. An import of a grouped segment plans a no-op, so nothing else tells
-// the reader the group was dropped.
+// The sentence is pinned byte for byte. An import of a grouped segment plans a
+// no-op, so nothing else tells the reader the group was dropped.
 func TestL2SegmentResourceSchemaNamesTheResourceGroupDrop(t *testing.T) {
 	t.Parallel()
 
