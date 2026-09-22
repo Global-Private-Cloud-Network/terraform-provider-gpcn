@@ -5,8 +5,6 @@ import (
 	"os"
 	"testing"
 
-	"terraform-provider-gpcn/internal/vpcpublicips"
-
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
@@ -88,8 +86,9 @@ func TestVPCPublicIpAttachmentResourceRefusesImportUnit(t *testing.T) {
 	if len(errors) != 1 {
 		t.Fatalf("Expected exactly one error diagnostic, got %v", importResponse.Diagnostics)
 	}
-	if got := errors[0].Summary(); got != vpcpublicips.ErrSummaryPublicIpAttachmentImport {
-		t.Errorf("Summary = %q, want %q", got, vpcpublicips.ErrSummaryPublicIpAttachmentImport)
+	const wantSummary = "Import is not supported"
+	if got := errors[0].Summary(); got != wantSummary {
+		t.Errorf("Summary = %q, want %q", got, wantSummary)
 	}
 	const wantDetail = "gpcn_vpc_public_ip_attachment cannot be imported: the API does not report which interface holds an address"
 	if got := errors[0].Detail(); got != wantDetail {

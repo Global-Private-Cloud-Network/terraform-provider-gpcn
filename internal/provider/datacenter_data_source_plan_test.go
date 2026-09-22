@@ -616,3 +616,40 @@ func TestDatacentersDataSourceDoesNotBlameGpuEnabledForCapabilityMiss(t *testing
 
 	datacenterPlanTestAssertOnlyListPath(t, rec)
 }
+
+// An unset capability filter must send no key at all. A key sent as false asks
+// for the datacenters that lack the capability. The answer then hides every
+// datacenter that has it.
+func TestDatacentersDataSourceOmitsUnsetCapabilityFilters(t *testing.T) {
+	t.Parallel()
+
+	server, rec := startDatacenterPlanMockServer(t, func(r *http.Request) map[string]any {
+		for _, key := range []string{"vpcCapable", "l2Capable"} {
+			if _, sent := r.URL.Query()[key]; sent {
+				t.Errorf("the unfiltered read carries %s: %q", key, r.URL.RawQuery)
+			}
+		}
+		return datacenterPlanTestBody([]map[string]any{
+			datacenterPlanTestCapabilityRow("dc-1", "Chicago", datacenterPlanTestRegionAlpha, true, true, true),
+		}, 1, 1)
+	})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: datacenterPlanTestConfig(server.URL, ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.#", "1"),
+				),
+			},
+		},
+	})
+
+	_, queries := rec.snapshot()
+	for _, query := range queries {
+		if strings.Contains(query, "vpcCapable") || strings.Contains(query, "l2Capable") {
+			t.Errorf("query %q carries a capability filter, want none", query)
+		}
+	}
+}

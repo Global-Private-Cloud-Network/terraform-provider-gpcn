@@ -51,6 +51,20 @@ func TestNoOuterWhitespaceValidatorUnit(t *testing.T) {
 			wantSummary: "Invalid security group rule description",
 			wantDetail:  "description must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)",
 		},
+		{
+			// GPCN trims with JavaScript, which removes a byte order mark. Go
+			// does not, so a pasted mark would never settle.
+			name: "leading byte order mark", summary: "Invalid VPC %s", attribute: "name",
+			value:       types.StringValue("\ufeffvpc"),
+			wantSummary: "Invalid VPC name",
+			wantDetail:  "name must not start or end with whitespace (GPCN trims it, which would make the stored value differ from the configuration)",
+		},
+		{
+			// Go trims U+0085 and JavaScript does not. GPCN therefore stores the
+			// value unchanged, and a refusal here refuses what the API accepts.
+			name: "leading next line", summary: "Invalid VPC %s", attribute: "name",
+			value: types.StringValue("\u0085vpc"),
+		},
 		{name: "null", summary: "Invalid VPC %s", attribute: "description", value: types.StringNull()},
 		{name: "unknown", summary: "Invalid VPC %s", attribute: "name", value: types.StringUnknown()},
 	}

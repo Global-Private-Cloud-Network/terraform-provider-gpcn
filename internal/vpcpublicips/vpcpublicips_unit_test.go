@@ -273,7 +273,7 @@ func TestReleasePublicIpTreatsNotFoundAsDoneMockHTTP(t *testing.T) {
 			testutil.WriteJSONResponse(w, map[string]any{
 				"success": false,
 				"message": "Public IP not found",
-				"error":   map[string]any{"code": "RESOURCE_NOT_FOUND", "statusCode": 404, "details": nil},
+				"error":   map[string]any{"code": "Resource Not Found", "statusCode": 404, "details": nil},
 			})
 		},
 	})
@@ -485,7 +485,7 @@ func TestReleasePublicIpReportsNotFoundFromTheJobPollMockHTTP(t *testing.T) {
 			testutil.WriteJSONResponse(w, map[string]any{
 				"success": false,
 				"message": "Not Found",
-				"error":   map[string]any{"code": "RESOURCE_NOT_FOUND", "statusCode": 404, "details": nil},
+				"error":   map[string]any{"code": "Resource Not Found", "statusCode": 404, "details": nil},
 			})
 		},
 	})

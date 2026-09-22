@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 
@@ -297,6 +298,59 @@ func TestL2SegmentResourcePlanRefusesPaddedName(t *testing.T) {
 	})
 }
 
+// GPCN trims a padded description before it stores it, exactly as it trims a
+// name. The configuration never settles, so the plan refuses the value.
+func TestL2SegmentResourcePlanRefusesPaddedDescription(t *testing.T) {
+	t.Parallel()
+	server, _ := startL2SegmentPlanMockServer(t)
+
+	padded := fmt.Sprintf(`
+provider "gpcn" {
+  host    = %q
+  api_key = "test-key"
+}
+
+resource "gpcn_l2_segment" "test" {
+  name          = %q
+  datacenter_id = %q
+  description   = " x"
+}
+`, server.URL, l2PlanTestName, l2PlanTestDatacenterID)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      padded,
+				ExpectError: whitespaceRefusal("Invalid L2 segment description", "description"),
+			},
+		},
+	})
+}
+
+// The platform adopts a legacy custom network under the name it already had.
+// An adopted name carries characters the create regex refuses. The segment must
+// still round-trip, so the provider adds no regex of its own.
+func TestL2SegmentResourcePlanCreatesAnAdoptedName(t *testing.T) {
+	t.Parallel()
+	server, _ := startL2SegmentPlanMockServer(t)
+
+	const adoptedName = "dmz_vlan_100"
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: l2PlanTestConfig(server.URL, adoptedName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnL2SegmentTest, "id", l2PlanTestSegmentID),
+					resource.TestCheckResourceAttr(gpcnL2SegmentTest, "name", adoptedName),
+				),
+			},
+		},
+	})
+}
+
 // A NIC can land between the plan and the apply. The attribute therefore plans
 // unknown, and the apply writes what the API reports.
 func TestL2SegmentResourcePlanAcceptsNicCountMovedDuringApply(t *testing.T) {
@@ -548,4 +602,18 @@ func TestL2SegmentResourcePlanReplacesOnDatacenterChange(t *testing.T) {
 			},
 		},
 	})
+}
+
+// The sentence is pinned byte for byte. An import of a grouped segment plans a
+// no-op, so nothing else tells the reader the group was dropped.
+func TestL2SegmentResourceSchemaNamesTheResourceGroupDrop(t *testing.T) {
+	t.Parallel()
+
+	schemaResponse := &fwresource.SchemaResponse{}
+	NewL2SegmentResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
+
+	const want = "A segment that sits in a resource group imports without the group; the provider does not manage resource groups in this release."
+	if got := schemaResponse.Schema.Description; !strings.Contains(got, want) {
+		t.Errorf("Description = %q, want it to contain %q", got, want)
+	}
 }

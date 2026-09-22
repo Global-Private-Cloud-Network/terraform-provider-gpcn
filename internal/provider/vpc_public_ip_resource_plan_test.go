@@ -23,7 +23,8 @@ import (
 // The provider forwards the platform's own refusal sentence. The test pins
 // those bytes, not a summary the provider writes. Terraform wraps a
 // diagnostic to the terminal width, so the pattern accepts a break at any space.
-var regexpPublicIpReleaseInProgress = regexp.MustCompile(`Public\s+IP\s+release\s+is\s+in\s+progress;\s+wait\s+for\s+it\s+to\s+finish`)
+var regexpPublicIpReleaseInProgress = regexp.MustCompile(`HTTP\s+409\s+\(Duplicate\s+Resource\):\s+` +
+	`Public\s+IP\s+release\s+is\s+in\s+progress;\s+wait\s+for\s+it\s+to\s+finish`)
 
 // The import identifier names the VPC and the address. A bare address id is
 // refused with the form the resource expects.
@@ -38,6 +39,7 @@ var regexpPublicIpAcquiredButJobFailed = regexp.MustCompile(`public\s+IP\s+` + v
 // next apply does. Terraform wraps a diagnostic, so words break on \s+.
 var regexpPublicIpAcquiredButReadBackFailed = regexp.MustCompile(`(?s)public\s+IP\s+` + vpcPublicIpPlanTestID +
 	`\s+was\s+acquired\s+and\s+is\s+in\s+state,\s+but\s+reading\s+it\s+back\s+failed:.*` +
+	`HTTP\s+500\s+\(Internal\s+Error\).*` +
 	`Terraform\s+has\s+marked\s+the\s+address\s+tainted,\s+so\s+the\s+next\s+apply\s+releases\s+it\s+and\s+acquires\s+another\.`)
 
 const (
@@ -311,7 +313,7 @@ func publicIpPlanTestHandleRelease(w http.ResponseWriter, row *publicIpPlanTestR
 		testutil.WriteJSONResponse(w, map[string]any{
 			"success": false,
 			"message": "Public IP release is in progress; wait for it to finish",
-			"error":   map[string]any{"code": "DUPLICATE_RESOURCE", "statusCode": 409, "details": nil},
+			"error":   map[string]any{"code": "Duplicate Resource", "statusCode": 409, "details": nil},
 		})
 		return
 	}
@@ -327,7 +329,7 @@ func publicIpPlanTestServerError(w http.ResponseWriter) {
 	testutil.WriteJSONResponse(w, map[string]any{
 		"success": false,
 		"message": "Public IP listing is temporarily unavailable",
-		"error":   map[string]any{"code": "INTERNAL_ERROR", "statusCode": 500, "details": nil},
+		"error":   map[string]any{"code": "Internal Error", "statusCode": 500, "details": nil},
 	})
 }
 

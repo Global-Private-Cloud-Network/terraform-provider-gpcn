@@ -41,6 +41,9 @@ const (
 	// The API counts children in two populations. The reader deletes the first
 	// and waits for the second.
 	ErrDetailVpcNotEmpty = "%s Blockers: %s. In flight: %s."
+	// A teardown another caller started owns the row. The provider waits for
+	// the row to go, and this sentence reports the wait running out.
+	ErrDetailVpcTeardownTimeout = "a teardown was already running, and the VPC was still present after %s"
 )
 
 // The messages GPCN's own super-CIDR refinement raises, byte for byte
