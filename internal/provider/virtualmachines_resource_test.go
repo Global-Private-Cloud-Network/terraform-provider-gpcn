@@ -56,14 +56,15 @@ const (
 	vmOctetSlots = 8
 )
 
-// octetForCase derives the octet of the named case. The guard below and every call site
-// read this one derivation, so a broken derivation fails the guard.
-func octetForCase(name string) (int, bool) {
+// vpcTestOctetFor returns the octet of the named case. The guard below and every call
+// site read this one function. A wrapper that ignores its slot fails the guard.
+func vpcTestOctetFor(t testing.TB, name string) int {
+	t.Helper()
 	slot, named := vmOctetSlot[name]
 	if !named {
-		return 0, false
+		t.Fatalf("Expected %s to own a slot in vmOctetSlot", name)
 	}
-	return vmOctetBase + slot, true
+	return vmOctetBase + slot
 }
 
 // vpcTestOctet returns the second octet of the case's own /16. The map above names every
@@ -71,11 +72,7 @@ func octetForCase(name string) (int, bool) {
 // belongs to this file, so parallel cases in other files never collide.
 func vpcTestOctet(t *testing.T) int {
 	t.Helper()
-	octet, named := octetForCase(t.Name())
-	if !named {
-		t.Fatalf("Expected %s to own a slot in vmOctetSlot", t.Name())
-	}
-	return octet
+	return vpcTestOctetFor(t, t.Name())
 }
 
 // A shared slot puts two parallel cases in one /16, and GPCN refuses the second VPC.
@@ -86,11 +83,7 @@ func TestVirtualMachineAcceptanceOctetsAreUnique(t *testing.T) {
 		if slot < 0 || slot >= vmOctetSlots {
 			t.Errorf("Expected %s to take a slot below %d, got %d", name, vmOctetSlots, slot)
 		}
-		octet, named := octetForCase(name)
-		if !named {
-			t.Errorf("Expected %s to derive an octet", name)
-			continue
-		}
+		octet := vpcTestOctetFor(t, name)
 		if other, taken := owner[octet]; taken {
 			t.Errorf("Expected %s and %s to take different octets, both take %d", name, other, octet)
 		}
