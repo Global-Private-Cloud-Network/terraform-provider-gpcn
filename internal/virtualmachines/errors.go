@@ -46,8 +46,8 @@ const (
 
 // GPCN reports one address row for an address the operator attached and for the
 // leftover of a failed read-back. The provider cannot tell them apart. It refuses the
-// acquire and names the address, because adopting a held one makes the next destroy
-// release what gpcn_vpc_public_ip owns.
+// acquire and names the address. Adopting a held one makes the next destroy release
+// what gpcn_vpc_public_ip owns.
 const ErrDetailPrimaryInterfaceCarriesAForeignAddress = "the primary network interface of virtual machine %s already carries public IP %s that this configuration did not attach; import it as gpcn_vpc_public_ip and name it in public_ip_id, or release it"
 
 // A start that fails after the provider stopped the machine leaves it stopped. The

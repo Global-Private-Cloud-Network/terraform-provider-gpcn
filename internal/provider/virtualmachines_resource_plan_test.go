@@ -2207,7 +2207,7 @@ type vmPublicIpMockArms struct {
 // address binds it, and the image list answers the import. refuseReadAfterChange makes
 // the first read of the machine after an attach or a rename answer 500. That read is
 // the read-back of the update. The sizes arm reports every size but the one the machine
-// carries, so a planned size change is an in-place resize.
+// carries. A planned size change is therefore an in-place resize.
 func startVirtualMachinePublicIpMockServer(t *testing.T, arms vmPublicIpMockArms) (*httptest.Server, func() []string) {
 	t.Helper()
 
