@@ -743,3 +743,24 @@ func TestVirtualMachineAddressDescriptions(t *testing.T) {
 		}
 	}
 }
+
+// An import fills l2_segment_ids from the interfaces, and the attribute carries a
+// default of the empty list. A configuration that leaves it out therefore detaches
+// every segment on the next apply, so the release pins the sentence that says so.
+func TestVirtualMachineSegmentIdsDescription(t *testing.T) {
+	schemaResponse := &fwresource.SchemaResponse{}
+	NewVirtualMachinesResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
+	if schemaResponse.Diagnostics.HasError() {
+		t.Fatalf("Expected a schema, got %v", schemaResponse.Diagnostics)
+	}
+
+	const want = "IDs of the L2 segments the virtual machine carries. They attach after the machine is created, and the machine is stopped for a change unless its image supports network hotplug. After an import, name the segments the machine carries; otherwise the next apply detaches them. Maximum of 4, because the birth subnet interface holds one of the five interfaces GPCN allows"
+
+	attribute, ok := schemaResponse.Schema.Attributes["l2_segment_ids"]
+	if !ok {
+		t.Fatal("Expected an l2_segment_ids attribute")
+	}
+	if got := attribute.GetDescription(); got != want {
+		t.Errorf("Expected the description %q, got %q", want, got)
+	}
+}
