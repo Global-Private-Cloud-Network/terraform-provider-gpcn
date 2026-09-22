@@ -76,8 +76,9 @@ type IssuedSubnet struct {
 
 // IssueCreateSubnet posts the subnet and returns the 202 without waiting. The
 // caller writes the ID to state before PollCreateSubnet waits for the carve.
+// The two halves inherit the caller's correlation ID, so one create reads as
+// one thread in the support log.
 func IssueCreateSubnet(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*IssuedSubnet, error) {
-	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, LogStartingCreateSubnet)
 
 	vpcID := model.VpcID.ValueString()
@@ -128,8 +129,6 @@ func IssueCreateSubnet(gpcnClient *client.GpcnClient, ctx context.Context, model
 // PollCreateSubnet waits for the carve job. It stands apart from the issue so
 // the caller can put the subnet ID in state before the wait.
 func PollCreateSubnet(gpcnClient *client.GpcnClient, ctx context.Context, jobID string) error {
-	ctx = client.WithCorrelationID(ctx)
-
 	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionCreateSubnet, jobID); err != nil {
 		return fmt.Errorf("create subnet polling failed: %w", err)
 	}

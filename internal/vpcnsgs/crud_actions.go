@@ -81,9 +81,9 @@ type IssuedNsg struct {
 // IssueCreateNsg posts the group with its rules inline and returns the 202
 // without waiting. One call creates both, because the rules route is a replace
 // rather than an append. The caller writes the ID to state before PollCreateNsg
-// waits for the build.
+// waits for the build. The two halves inherit the caller's correlation ID, so
+// one create reads as one thread in the support log.
 func IssueCreateNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, name, description string, rules []RuleModel) (*IssuedNsg, error) {
-	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, LogStartingCreateNsg)
 
 	createNsgRequestBody := map[string]any{
@@ -125,8 +125,6 @@ func IssueCreateNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, n
 // PollCreateNsg waits for the build job. It stands apart from the issue so the
 // caller can put the group ID in state before the wait.
 func PollCreateNsg(gpcnClient *client.GpcnClient, ctx context.Context, jobID string) error {
-	ctx = client.WithCorrelationID(ctx)
-
 	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionCreateNsg, jobID); err != nil {
 		return fmt.Errorf("create security group polling failed: %w", err)
 	}

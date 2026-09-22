@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -399,5 +400,47 @@ func TestRefreshNsgModelFromResponseUpdatesDescriptionUnit(t *testing.T) {
 	}
 	if got := model.Description.ValueString(); got != "" {
 		t.Errorf("expected a cleared description to read as the empty string, got %q", got)
+	}
+}
+
+// One create carries one correlation id. A poll that mints its own leaves the
+// support log with no link between the create call and the job it waits for.
+func TestCreateNsgCarriesOneCorrelationIDUnit(t *testing.T) {
+	t.Parallel()
+
+	var createID, pollID string
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == client.JOBS_BASE_URL_V1 {
+				if pollID == "" {
+					pollID = r.Header.Get("x-Correlation-ID")
+				}
+				testutil.HandleJobResponse(w, "job-create", unitTestNsgID, true)
+				return
+			}
+			createID = r.Header.Get("x-Correlation-ID")
+			testutil.WriteJSONResponse(w, map[string]any{
+				"success": true,
+				"message": "Operation initiated successfully",
+				"data":    map[string]any{"nsgId": unitTestNsgID, "jobId": "job-create"},
+			})
+		},
+	})
+
+	ctx := client.WithCorrelationID(context.Background())
+	issued, err := IssueCreateNsg(gpcnClient, ctx, unitTestVpcID, "nsg-a", "", nil)
+	if err != nil {
+		t.Fatalf("expected the create to be issued, got %v", err)
+	}
+	if err := PollCreateNsg(gpcnClient, ctx, issued.JobID); err != nil {
+		t.Fatalf("expected the build poll to succeed, got %v", err)
+	}
+
+	if createID == "" {
+		t.Fatal("the create carried no correlation id")
+	}
+	if pollID != createID {
+		t.Errorf("poll correlation id = %q, want the create's %q", pollID, createID)
 	}
 }
