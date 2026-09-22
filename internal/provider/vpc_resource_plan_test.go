@@ -243,8 +243,8 @@ func (m *vpcMock) handleDelete(w http.ResponseWriter) {
 		m.tearingDown = true
 		m.deletingGets = 2
 	}
-	// The dispatch dies between the refusal and the read, so the row the next
-	// read answers with carries the parked marker.
+	// The dispatch dies between the refusal and the read. The row the next
+	// read answers with therefore carries the parked marker.
 	parked := !tearingDown && m.parkedTeardownDeletes > 0
 	if parked {
 		m.parkedTeardownDeletes--
@@ -818,8 +818,8 @@ func TestVpcResourcePlanRefusesACidrThatIsNotANetworkAddress(t *testing.T) {
 	})
 }
 
-// A VPC deleted outside Terraform has to leave state, or every later plan
-// fails on the read instead of offering to create the VPC again.
+// A VPC deleted outside Terraform has to leave state. Every later plan
+// otherwise fails on the read instead of offering to create the VPC again.
 func TestVpcResourcePlanRemovesAVanishedVpcFromState(t *testing.T) {
 	t.Parallel()
 	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
@@ -935,7 +935,7 @@ func TestVpcResourcePlanReclaimsAParkedTeardown(t *testing.T) {
 	if count := mock.requestCount("DELETE /v1/resource/vpcs/" + vpcPlanTestID); count != 2 {
 		t.Errorf("DELETE count = %d, want 2", count)
 	}
-	// The status read alone. A provider that waited would poll the row as well.
+	// The status read alone. A provider that waits polls the row as well.
 	if count := mock.readsWhileTearingDown(); count != 1 {
 		t.Errorf("reads while tearing down = %d, want 1", count)
 	}

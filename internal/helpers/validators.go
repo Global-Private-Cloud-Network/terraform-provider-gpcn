@@ -53,8 +53,8 @@ func (v NoOuterWhitespaceValidator) ValidateString(_ context.Context, request va
 }
 
 // TrimGPCNSpace removes the whitespace GPCN itself removes. Every resource that
-// measures outer whitespace measures it with this function, so one set of code
-// points answers for the whole provider.
+// measures outer whitespace measures it with this function. One set of code
+// points therefore answers for the whole provider.
 func TrimGPCNSpace(value string) string {
 	return strings.TrimFunc(value, isJavaScriptWhitespace)
 }
