@@ -170,7 +170,6 @@ func GetNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, nsgID str
 // RenameNsg relabels the group. The route is synchronous, because a name in
 // this family never reaches the provider: objects are named from row IDs.
 func RenameNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, nsgID, name, description string) error {
-	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, fmt.Sprintf(LogStartingRenameNsgWithID, nsgID))
 
 	renameRequestBody, err := json.Marshal(map[string]any{
@@ -203,7 +202,6 @@ func RenameNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, nsgID,
 // ReplaceNsgRules sends the complete desired set. The API diffs it by content
 // key, so a rule left out of the payload is removed from the group.
 func ReplaceNsgRules(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, nsgID string, rules []RuleModel) error {
-	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, fmt.Sprintf(LogStartingReplaceNsgRules, nsgID))
 
 	replaceRequestBody, err := json.Marshal(map[string]any{"rules": RuleRequestBodies(rules)})
@@ -233,7 +231,6 @@ func ReplaceNsgRules(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 // DeleteNsg tears the group down. The VPC's own default group refuses, and so
 // does a group any subnet still names.
 func DeleteNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, nsgID string) error {
-	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteNsgWithID, nsgID))
 
 	request, err := http.NewRequestWithContext(ctx, "DELETE", nsgPath(vpcID, nsgID), nil)
