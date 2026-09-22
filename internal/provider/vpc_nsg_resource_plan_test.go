@@ -31,6 +31,12 @@ const (
 	gpcnVpcNsgTest          = "gpcn_vpc_nsg.test"
 )
 
+// regexpNsgCreatedButReadBackFailed pins the R155 sentence for a group the
+// platform built and then would not serve back.
+var regexpNsgCreatedButReadBackFailed = regexp.MustCompile(`(?s)security\s+group\s+` + nsgPlanTestID +
+	`\s+was\s+created\s+and\s+is\s+in\s+state,\s+but\s+reading\s+it\s+back\s+failed.*` +
+	`Terraform\s+has\s+marked\s+the\s+group\s+tainted,\s+so\s+the\s+next\s+apply\s+deletes\s+it\s+and\s+creates\s+it\s+again\.`)
+
 // regexpNsgCreatedButJobFailed pins the R145 sentence for a group build the
 // platform gave up on after it inserted the row.
 var regexpNsgCreatedButJobFailed = regexp.MustCompile(`(?s)security\s+group\s+` + nsgPlanTestID +
@@ -85,6 +91,9 @@ type nsgPlanTestServerState struct {
 	// failureReason stands for the sentence GPCN files against a parked group.
 	// An empty value reads back as the API's null.
 	failureReason string
+	// failNextRead answers the next group read with a 500. The build still
+	// ran, so the group is there and only the read-back fails.
+	failNextRead bool
 }
 
 func (s *nsgPlanTestServerState) storeRules(body map[string]any) {
@@ -155,9 +164,17 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 			})
 		case r.Method == http.MethodGet && r.URL.Path == groupPath:
 			state.mu.Lock()
+			failRead := state.failNextRead
+			state.failNextRead = false
 			deleted := state.deleted
 			detail := state.detail()
 			state.mu.Unlock()
+			if failRead {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				fmt.Fprint(w, `{"success":false,"message":"Internal server error","error":{"code":"Internal Error","statusCode":500,"details":null}}`)
+				return
+			}
 			if deleted {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusNotFound)
@@ -228,6 +245,14 @@ func (s *nsgPlanTestServerState) failTheCreateJob() {
 	s.failCreateJob = true
 }
 
+// failTheNextRead arms the read failure under the lock. The mock server reads
+// the flag from another goroutine.
+func (s *nsgPlanTestServerState) failTheNextRead() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failNextRead = true
+}
+
 // nsgPlanTestHandleJob answers the poll for the job the request names. Only
 // the build job can stop badly, so every other job completes.
 func nsgPlanTestHandleJob(w http.ResponseWriter, r *http.Request, state *nsgPlanTestServerState) {
@@ -260,6 +285,13 @@ func nsgPlanTestHandleJob(w http.ResponseWriter, r *http.Request, state *nsgPlan
 
 func nsgPlanTestConfig(host, name, rules string) string {
 	return nsgPlanTestConfigWithDescription(host, name, "", rules)
+}
+
+// nsgPlanTestConfigWithoutRetries drops the retry budget. The client retries a
+// 500 answer, which would hide a read-back that fails once.
+func nsgPlanTestConfigWithoutRetries(host, name, rules string) string {
+	config := nsgPlanTestConfig(host, name, rules)
+	return strings.Replace(config, "  api_key = \"test-key\"\n", "  api_key = \"test-key\"\n  max_retries = 0\n", 1)
 }
 
 func nsgPlanTestConfigWithDescription(host, name, description, rules string) string {
@@ -941,4 +973,30 @@ func TestVpcNsgReadWarnsOnFailedGroupUnit(t *testing.T) {
 	if got := ready.Diagnostics.WarningsCount(); got != 0 {
 		t.Errorf("warnings for a ready group = %d, want 0", got)
 	}
+}
+
+// GPCN answers the read-back after a build that worked. A failure there leaves
+// the group and the id in state, so the error carries the tainted remedy
+// rather than a bare HTTP failure.
+func TestVpcNsgResourcePlanKeepsTheIdWhenTheReadBackFails(t *testing.T) {
+	t.Parallel()
+	server, state := startNsgPlanMockServer(t)
+	state.failTheNextRead()
+
+	config := nsgPlanTestConfigWithoutRetries(server.URL, "read-back-failed", nsgPlanTestRuleHTTPS)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexpNsgCreatedButReadBackFailed,
+			},
+			{
+				Config:  config,
+				Destroy: true,
+				Check:   checkNsgDestroyDeletedTheGroup(state),
+			},
+		},
+	})
 }

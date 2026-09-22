@@ -22,6 +22,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 )
 
+// regexpSubnetCreatedButReadBackFailed pins the R155 sentence for a row the
+// platform carved and then would not serve back.
+var regexpSubnetCreatedButReadBackFailed = regexp.MustCompile(`(?s)subnet\s+` + subnetPlanTestID +
+	`\s+was\s+created\s+and\s+is\s+in\s+state,\s+but\s+reading\s+it\s+back\s+failed.*` +
+	`Terraform\s+has\s+marked\s+the\s+subnet\s+tainted,\s+so\s+the\s+next\s+apply\s+deletes\s+it\s+and\s+creates\s+it\s+again\.`)
+
 // regexpSubnetCreatedButJobFailed pins the R145 sentence for a carve the
 // platform gave up on after it inserted the row.
 var regexpSubnetCreatedButJobFailed = regexp.MustCompile(`(?s)subnet\s+` + subnetPlanTestID +
@@ -65,8 +71,11 @@ type subnetPlanTestServerState struct {
 	// failCreateJob makes the carve job stop badly. The platform inserts the
 	// row before it dispatches that job, so the id exists either way.
 	failCreateJob bool
-	createBody    map[string]any
-	rebindBody    map[string]any
+	// failNextRead answers the next listing with a 500. The carve still ran,
+	// so the row is there and only the read-back fails.
+	failNextRead bool
+	createBody   map[string]any
+	rebindBody   map[string]any
 }
 
 func (s *subnetPlanTestServerState) row() map[string]any {
@@ -126,11 +135,19 @@ func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestS
 			})
 		case r.Method == http.MethodGet && r.URL.Path == collection:
 			state.mu.Lock()
+			failRead := state.failNextRead
+			state.failNextRead = false
 			rows := []map[string]any{}
 			if !state.deleted {
 				rows = append(rows, state.row())
 			}
 			state.mu.Unlock()
+			if failRead {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				fmt.Fprint(w, `{"success":false,"message":"Internal server error","error":{"code":"Internal Error","statusCode":500,"details":null}}`)
+				return
+			}
 			testutil.WriteJSONResponse(w, map[string]any{
 				"success": true,
 				"message": "",
@@ -200,6 +217,14 @@ func (s *subnetPlanTestServerState) failTheCreateJob() {
 	s.failCreateJob = true
 }
 
+// failTheNextRead arms the listing failure under the lock. The mock server
+// reads the flag from another goroutine.
+func (s *subnetPlanTestServerState) failTheNextRead() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failNextRead = true
+}
+
 // subnetPlanTestHandleJob answers the poll for the job the request names. Only
 // the carve job can stop badly, so every other job completes.
 func subnetPlanTestHandleJob(w http.ResponseWriter, r *http.Request, state *subnetPlanTestServerState) {
@@ -254,6 +279,13 @@ resource "gpcn_vpc_subnet" "test" {
   %s
 }
 `, host, subnetPlanTestVpcID, name, subnetPlanTestCIDR, extra)
+}
+
+// subnetPlanTestConfigWithoutRetries drops the retry budget. The client retries
+// a 500 answer, which would hide a read-back that fails once.
+func subnetPlanTestConfigWithoutRetries(host, name string) string {
+	config := subnetPlanTestConfig(host, name, "")
+	return strings.Replace(config, "  api_key = \"test-key\"\n", "  api_key = \"test-key\"\n  max_retries = 0\n", 1)
 }
 
 // subnetPlanTestConfigWithoutCidr asks the allocator for a block rather than
@@ -994,4 +1026,30 @@ func checkSubnetDestroyDeletedTheRow(state *subnetPlanTestServerState) func(*ter
 		}
 		return nil
 	}
+}
+
+// The platform answers the read-back after a carve that worked. A failure
+// there leaves the row and the id in state, so the error carries the tainted
+// remedy rather than a bare HTTP failure.
+func TestVpcSubnetResourcePlanKeepsTheIdWhenTheReadBackFails(t *testing.T) {
+	t.Parallel()
+	server, state := startSubnetPlanMockServer(t)
+	state.failTheNextRead()
+
+	config := subnetPlanTestConfigWithoutRetries(server.URL, "read-back-failed")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexpSubnetCreatedButReadBackFailed,
+			},
+			{
+				Config:  config,
+				Destroy: true,
+				Check:   checkSubnetDestroyDeletedTheRow(state),
+			},
+		},
+	})
 }

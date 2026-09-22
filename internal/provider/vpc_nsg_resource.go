@@ -221,7 +221,10 @@ func (r *vpcNsgResource) Create(ctx context.Context, req resource.CreateRequest,
 
 	detail, err := vpcnsgs.GetNsg(r.client, ctx, plan.VpcID.ValueString(), issued.NsgID)
 	if err != nil {
-		resp.Diagnostics.AddError(vpcnsgs.ErrSummaryUnableToCreateNsg, err.Error())
+		resp.Diagnostics.AddError(
+			vpcnsgs.ErrSummaryUnableToCreateNsg,
+			fmt.Sprintf(vpcnsgs.ErrDetailNsgCreatedReadBackFailed, issued.NsgID, err),
+		)
 		return
 	}
 	tflog.Info(ctx, vpcnsgs.LogSuccessfullyRetrievedNsgCreate)

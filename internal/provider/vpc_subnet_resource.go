@@ -198,7 +198,10 @@ func (r *vpcSubnetResource) Create(ctx context.Context, req resource.CreateReque
 
 	subnet, err := vpcsubnets.GetSubnet(r.client, ctx, plan.VpcID.ValueString(), subnetID)
 	if err != nil {
-		resp.Diagnostics.AddError(vpcsubnets.ErrSummaryUnableToCreateSubnet, err.Error())
+		resp.Diagnostics.AddError(
+			vpcsubnets.ErrSummaryUnableToCreateSubnet,
+			fmt.Sprintf(vpcsubnets.ErrDetailSubnetCreatedReadBackFailed, subnetID, err),
+		)
 		return
 	}
 	tflog.Info(ctx, vpcsubnets.LogSuccessfullyRetrievedSubnetCreate)
