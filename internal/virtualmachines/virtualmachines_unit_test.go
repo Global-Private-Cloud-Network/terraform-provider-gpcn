@@ -2010,6 +2010,34 @@ func TestUpdatePublicIPIfChangedKeepsTheHeldAddressOnAnExchangeRetry(t *testing.
 	}
 }
 
+// An operator can name a held address in the same change that gives the acquired one
+// up. Terraform took the acquired address, so it goes back. The machine carries one
+// address at a time, so the release frees the interface for the held one.
+func TestUpdatePublicIPIfChangedReleasesTheAcquiredAddressWhenThePlanNamesAnother(t *testing.T) {
+	const vmID = "vm-acquired-for-held"
+	const heldID = "ip-held-1"
+
+	server, gpcnClient, verbs := publicIpUpdateMockServer(t, testPublicIpAcquiredID)
+	defer server.Close()
+
+	state := createTestVMModel("test-vm", testVMImage, true)
+	plan := createTestVMModel("test-vm", testVMImage, false)
+	plan.PublicIpId = types.StringValue(heldID)
+
+	_, diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if diags.HasError() {
+		t.Fatalf("Expected no error diagnostic, got %v", diags.Errors())
+	}
+	want := []string{
+		"detach " + testPublicIpAcquiredID,
+		"release " + testPublicIpAcquiredID,
+		"attach " + heldID,
+	}
+	if !slices.Equal(*verbs, want) {
+		t.Errorf("Expected %v, got %v", want, *verbs)
+	}
+}
+
 // The API inserts the address row before it dispatches the job, so a failed acquisition
 // leaves a real address. The diagnostic is the only record of it.
 func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheAcquireJobFails(t *testing.T) {
