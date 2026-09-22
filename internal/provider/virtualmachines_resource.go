@@ -589,9 +589,10 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		},
 	}
 
-	// One rule covers every step after the public-IP step. A failure hands back an
-	// address the update records nowhere, so the runner unwinds it first. A start that
-	// fails is the only report the user gets after that. The change is not in state. An
+	// A failed step leaves two things to repair, and the machine comes first. The start
+	// runs before the unwind, because the release is a long-polled job the user does not
+	// wait for. One rule then covers every step after the public-IP step: a failure
+	// hands back an address the update records nowhere. The change is not in state. An
 	// earlier step can still have succeeded, so the remedy sends the user to the next
 	// plan.
 	for _, updateStep := range updateSteps {
@@ -600,8 +601,6 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		if !resp.Diagnostics.HasError() {
 			continue
 		}
-		resp.Diagnostics.Append(virtualmachines.UnwindAcquiredAddress(
-			r.client, ctx, state.ID.ValueString(), acquiredAddress, stepDiags)...)
 		if needStopVM {
 			startErr := virtualmachines.StartVirtualMachine(r.client, ctx, state.ID.ValueString())
 			if startErr != nil {
@@ -611,6 +610,8 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 				)
 			}
 		}
+		resp.Diagnostics.Append(virtualmachines.UnwindAcquiredAddress(
+			r.client, ctx, state.ID.ValueString(), acquiredAddress, stepDiags)...)
 		return
 	}
 
