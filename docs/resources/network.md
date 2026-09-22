@@ -134,7 +134,7 @@ terraform state rm gpcn_network.<name>
 terraform import gpcn_l2_segment.<name> <segment-id>
 ```
 
-A segment that sits in a resource group imports without the group; the provider does not manage resource groups in this release.
+gpcn_l2_segment does not expose resource_group_id in this release; a segment that sits in a resource group imports without it.
 
 Then run `terraform apply`. The plan is empty when the imported segment matches the block. Never destroy the old row: the segment carries live traffic, and a destroy tears the carrier down.
 
