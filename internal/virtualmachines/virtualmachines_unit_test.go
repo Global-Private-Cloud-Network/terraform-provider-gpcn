@@ -15,6 +15,7 @@ import (
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/networks"
 	"terraform-provider-gpcn/internal/testutil"
+	"terraform-provider-gpcn/internal/vpcpublicips"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/types"
@@ -1883,6 +1884,14 @@ func writePublicIpJobStatus(w http.ResponseWriter, r *http.Request, failedJobs [
 // failed job, so a test chooses which verb refuses.
 func publicIpUpdateMockServer(t *testing.T, carriedID string, failedJobs ...string) (*httptest.Server, *client.GpcnClient, *[]string) {
 	t.Helper()
+	return publicIpMockServer(t, carriedID, testPublicIpAcquiredID, failedJobs...)
+}
+
+// publicIpMockServer is publicIpUpdateMockServer with the id the acquire 202 names. An
+// empty acquiredID leaves the sibling field out, as GPCN does for a request it refused
+// before it inserted the row.
+func publicIpMockServer(t *testing.T, carriedID, acquiredID string, failedJobs ...string) (*httptest.Server, *client.GpcnClient, *[]string) {
+	t.Helper()
 
 	addressesPath := "/v1/resource/vpcs/" + testPublicIpVpcID + "/public-ips"
 	verbs := []string{}
@@ -1895,11 +1904,13 @@ func publicIpUpdateMockServer(t *testing.T, carriedID string, failedJobs ...stri
 				testutil.WriteJSONResponse(w, publicIpPrimaryInterfaceBody(carriedID))
 			case r.Method == http.MethodPost && r.URL.Path == addressesPath:
 				verbs = append(verbs, "acquire")
+				acquired := map[string]any{"jobId": testPublicIpJobAcquire}
+				if acquiredID != "" {
+					acquired["publicIpId"] = acquiredID
+				}
 				testutil.WriteJSONResponse(w, map[string]any{
 					"success": true, "message": "Operation initiated successfully",
-					"data": map[string]any{
-						"publicIpId": testPublicIpAcquiredID, "jobId": testPublicIpJobAcquire,
-					},
+					"data": acquired,
 				})
 			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/attach"):
 				verbs = append(verbs, "attach "+publicIpVerbTarget(r.URL.Path, addressesPath, "/attach"))
@@ -1988,6 +1999,35 @@ func TestUpdatePublicIPIfChangedNamesTheAddressWhenTheAcquireJobFails(t *testing
 	}
 	if !strings.HasSuffix(detail, ". Release it in the portal or import it as gpcn_vpc_public_ip.") {
 		t.Errorf("Expected the detail to end with the remedy sentence, got '%s'", detail)
+	}
+	if !slices.Equal(*verbs, []string{"acquire"}) {
+		t.Errorf("Expected the acquire alone, got %v", *verbs)
+	}
+}
+
+// A 202 that names no address proves the request inserted no row. Nothing is left
+// behind, so the report is the plain refusal. The remedy sentence would send the
+// operator looking for an address that does not exist.
+func TestUpdatePublicIPIfChangedReportsABareFailureWhenTheAcquireNamesNoAddress(t *testing.T) {
+	const vmID = "vm-acquire-names-no-address"
+
+	server, gpcnClient, verbs := publicIpMockServer(t, "", "", testPublicIpJobAcquire)
+	defer server.Close()
+
+	state := createTestVMModel("test-vm", testVMImage, false)
+	plan := createTestVMModel("test-vm", testVMImage, true)
+
+	diags := UpdatePublicIPIfChanged(gpcnClient, context.Background(), vmID, state, plan)
+	if !diags.HasError() {
+		t.Fatal("Expected an error diagnostic when the acquisition job fails")
+	}
+	detail := diags.Errors()[0].Detail()
+	wantPrefix := vpcpublicips.ActionAcquirePublicIp + " polling failed: "
+	if !strings.HasPrefix(detail, wantPrefix) {
+		t.Errorf("Expected the detail to start with '%s', got '%s'", wantPrefix, detail)
+	}
+	if strings.Contains(detail, "Release it in the portal") {
+		t.Errorf("Expected no orphan sentence, got '%s'", detail)
 	}
 	if !slices.Equal(*verbs, []string{"acquire"}) {
 		t.Errorf("Expected the acquire alone, got %v", *verbs)
