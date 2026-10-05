@@ -61,7 +61,7 @@ func (r *volumesResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 					stringvalidator.LengthBetween(1, 255),
 				},
 				PlanModifiers: []planmodifier.String{
-					// Changing the name requires us to destroy and create a new volume. There's no update call for volumes
+					// GPCN cannot rename a volume, so a new name replaces it.
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
