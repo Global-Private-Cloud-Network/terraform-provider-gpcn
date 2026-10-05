@@ -87,6 +87,9 @@ type volPlanTestRecorder struct {
 	moveBodies  []map[string]any
 	resizeCount int
 	writeOrder  []string
+
+	refuseMoveOnce  bool
+	defaultOnResize string
 }
 
 func (rec *volPlanTestRecorder) setGroup(groupId string) {
@@ -155,11 +158,21 @@ func startVolumePlanRecordingMockServer(t *testing.T) (*httptest.Server, func(st
 			rec.mu.Lock()
 			rec.resizeCount++
 			rec.writeOrder = append(rec.writeOrder, "resize")
+			if rec.groupId == "" && rec.defaultOnResize != "" {
+				rec.groupId = rec.defaultOnResize
+			}
 			rec.mu.Unlock()
 			testutil.HandleCreateJobResponse(w, "job-1", "resize issued")
 		case r.Method == http.MethodPut && r.URL.Path == volumePath:
 			body := testutil.ReadRequestBody(r)
 			rec.mu.Lock()
+			if rec.refuseMoveOnce {
+				rec.refuseMoveOnce = false
+				rec.mu.Unlock()
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"success":false,"message":"You do not have access to the specified resource group","error":{"code":"Entity Access Denied"}}`))
+				return
+			}
 			rec.moveBodies = append(rec.moveBodies, body)
 			rec.writeOrder = append(rec.writeOrder, "move")
 			if groupId, ok := body["resourceGroupId"].(string); ok {
@@ -911,4 +924,115 @@ func TestVolumeResourcePlanMoveAndGrow(t *testing.T) {
 	if len(moveBodies) != 1 || len(moveBodies[0]) != 1 {
 		t.Errorf("expected one bare move body, saw %v", moveBodies)
 	}
+}
+
+func TestVolumeResourcePlanGrowWithUnsetGroupKeepsItKnown(t *testing.T) {
+	t.Parallel()
+	server, _, _, _ := startVolumePlanRecordingMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithSize(server.URL, 128),
+				Check:  resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestDefaultGroup),
+			},
+			{
+				Config: volPlanTestConfigWithSize(server.URL, volPlanTestSizeGb),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionUpdate),
+						plancheck.ExpectKnownValue(gpcnVolumeTest, tfjsonpath.New("resource_group_id"), knownvalue.StringExact(volPlanTestDefaultGroup)),
+					},
+				},
+			},
+		},
+	})
+}
+
+// The mock reports no group until the resize, which leaves state null as a 1.4.0
+// state with no group is.
+func TestVolumeResourcePlanNullGroupStateSurvivesAnUpdate(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+	rec.mu.Lock()
+	rec.groupId = ""
+	rec.defaultOnResize = volPlanTestDefaultGroup
+	rec.mu.Unlock()
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithSize(server.URL, 128),
+				Check:  resource.TestCheckNoResourceAttr(gpcnVolumeTest, "resource_group_id"),
+			},
+			{
+				Config: volPlanTestConfigWithSize(server.URL, volPlanTestSizeGb),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestDefaultGroup),
+			},
+		},
+	})
+}
+
+func TestVolumeResourcePlanRefusedMoveShowsAPIError(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+	moveConfig := volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupB)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupA),
+				Check:  resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupA),
+			},
+			{
+				PreConfig: func() {
+					rec.mu.Lock()
+					rec.refuseMoveOnce = true
+					rec.mu.Unlock()
+				},
+				Config:      moveConfig,
+				ExpectError: regexp.MustCompile(`You\s+do\s+not\s+have\s+access\s+to\s+the\s+specified\s+resource\s+group`),
+			},
+			{
+				Config: moveConfig,
+				Check:  resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupB),
+			},
+		},
+	})
+}
+
+func TestVolumeResourcePlanAdoptsOutOfBandMoveWhenUnset(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+	config := volPlanTestConfig(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check:  resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestDefaultGroup),
+			},
+			{
+				PreConfig: func() { rec.setGroup(volPlanTestGroupB) },
+				Config:    config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionNoop),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupB),
+			},
+		},
+	})
+
+	volPlanTestExpectNoWrites(t, rec)
 }
