@@ -12,13 +12,14 @@ import (
 
 // Error summary constants
 const (
-	ErrSummaryUnexpectedConfigureType     = "Unexpected Configure Type"
-	ErrSummaryUnableToCreateResourceGroup = "Unable to Create Resource Group"
-	ErrSummaryUnableToReadResourceGroup   = "Unable to Read Resource Group"
-	ErrSummaryUnableToUpdateResourceGroup = "Unable to Update Resource Group"
-	ErrSummaryUnableToDeleteResourceGroup = "Unable to Delete Resource Group"
-	ErrSummaryUnableToFetchResourceGroups = "Unable to Fetch Resource Groups"
-	ErrSummaryNoResourceGroupMatches      = "No Resource Group Matches"
+	ErrSummaryUnexpectedConfigureType           = "Unexpected Configure Type"
+	ErrSummaryUnexpectedDataSourceConfigureType = "Unexpected Data Source Configure Type"
+	ErrSummaryUnableToCreateResourceGroup       = "Unable to Create Resource Group"
+	ErrSummaryUnableToReadResourceGroup         = "Unable to Read Resource Group"
+	ErrSummaryUnableToUpdateResourceGroup       = "Unable to Update Resource Group"
+	ErrSummaryUnableToDeleteResourceGroup       = "Unable to Delete Resource Group"
+	ErrSummaryUnableToFetchResourceGroups       = "Unable to Fetch Resource Groups"
+	ErrSummaryNoResourceGroupMatches            = "No Resource Group Matches"
 )
 
 // Error detail message templates

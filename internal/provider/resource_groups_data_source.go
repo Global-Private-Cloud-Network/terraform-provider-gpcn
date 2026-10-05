@@ -100,8 +100,8 @@ func (d *resourceGroupsDataSource) Configure(_ context.Context, req datasource.C
 	gpcnClient, ok := req.ProviderData.(*client.GpcnClient)
 	if !ok {
 		resp.Diagnostics.AddError(
-			"Unexpected Data Source Configure Type",
-			fmt.Sprintf("Expected *client.GpcnClient, got: %T. Please report this issue to the provider developers.", req.ProviderData),
+			resourcegroups.ErrSummaryUnexpectedDataSourceConfigureType,
+			fmt.Sprintf(resourcegroups.ErrDetailExpectedGpcnClient, req.ProviderData),
 		)
 		return
 	}

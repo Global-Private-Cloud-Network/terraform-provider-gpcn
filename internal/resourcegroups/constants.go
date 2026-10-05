@@ -9,6 +9,6 @@ const (
 
 // The page size keeps each request small. The page cap bounds the whole read.
 const (
-	listPageSize = 100
-	listPageCap  = 100
+	listLimit   = 100
+	listPageCap = 100
 )

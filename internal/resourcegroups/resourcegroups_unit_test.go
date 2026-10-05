@@ -66,6 +66,20 @@ func TestDeleteRefusalDetail_OtherErrors(t *testing.T) {
 	}
 }
 
+func assertListQuery(t *testing.T, r *http.Request) {
+	t.Helper()
+	query := r.URL.Query()
+	if query.Get("limit") != "100" {
+		t.Errorf("limit = %q, want 100 (query %q)", query.Get("limit"), r.URL.RawQuery)
+	}
+	if query.Get("page") == "" {
+		t.Errorf("page missing (query %q)", r.URL.RawQuery)
+	}
+	if _, present := query["pageSize"]; present {
+		t.Errorf("the API has no pageSize parameter (query %q)", r.URL.RawQuery)
+	}
+}
+
 func listPage(rows []map[string]any, page, totalPages int) map[string]any {
 	return map[string]any{
 		"success": true,
@@ -81,6 +95,7 @@ func TestFetchResourceGroups_SinglePage(t *testing.T) {
 			if r.URL.Path != "/v1/resource-groups/" {
 				t.Errorf("unexpected path %q", r.URL.Path)
 			}
+			assertListQuery(t, r)
 			testutil.WriteJSONResponse(w, listPage([]map[string]any{
 				{"id": "rg-1", "name": "Default", "description": "d", "isDefault": true},
 				{"id": "rg-2", "name": "other", "description": "o", "isDefault": false},
@@ -109,9 +124,7 @@ func TestFetchResourceGroups_TwoPages(t *testing.T) {
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			page := r.URL.Query().Get("page")
 			pages = append(pages, page)
-			if r.URL.Query().Get("pageSize") == "" {
-				t.Errorf("pageSize missing: %q", r.URL.RawQuery)
-			}
+			assertListQuery(t, r)
 			if page == "1" {
 				testutil.WriteJSONResponse(w, listPage([]map[string]any{{"id": "rg-1", "name": "a", "isDefault": false}}, 1, 2))
 				return

@@ -209,7 +209,7 @@ func FetchResourceGroups(gpcnClient *client.GpcnClient, ctx context.Context) ([]
 }
 
 func fetchResourceGroupPage(gpcnClient *client.GpcnClient, ctx context.Context, page int) (*listResourceGroupsResponse, error) {
-	listURL := fmt.Sprintf("%s?page=%d&pageSize=%d", BASE_URL_V1, page, listPageSize)
+	listURL := fmt.Sprintf("%s?page=%d&limit=%d", BASE_URL_V1, page, listLimit)
 	request, err := http.NewRequestWithContext(ctx, "GET", listURL, nil)
 	if err != nil {
 		return nil, err
