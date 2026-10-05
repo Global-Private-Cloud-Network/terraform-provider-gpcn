@@ -77,6 +77,7 @@ output "gpcn_vpc_example" {
 - `acknowledge_overlap` (Boolean) Set to true to create a VPC whose CIDR overlaps an existing VPC. Overlapping VPCs can never be connected to each other. The value is sent with the create request and is never read back
 - `description` (String) Additional information about the VPC to provide context for its purpose. The value must not start or end with whitespace
 - `dns_nameservers` (List of String) One or two IPv4 DNS servers the guests in the VPC receive. The platform chooses them when the list is omitted. The provider applies them once, at creation, because a provider discards a later change. Changing this value requires replacing the VPC
+- `resource_group_id` (String) ID of the resource group this VPC belongs to. When omitted, the VPC is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the VPC in place. Removing it from configuration leaves the VPC where it is
 
 ### Read-Only
 

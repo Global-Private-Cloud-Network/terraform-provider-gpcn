@@ -49,6 +49,7 @@ resource "gpcn_resource_group" "example" {
 
 - `created_time` (String) Timestamp when the resource group was created in ISO-8601 format
 - `id` (String) Unique identifier for the resource group in UUID format
+- `is_default` (Boolean) Whether this is the tenant's Default resource group. Every tenant has exactly one, and it cannot be deleted
 - `last_updated` (String) Timestamp when the resource group was last updated in ISO-8601 format
 
 ## Import
