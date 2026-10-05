@@ -58,6 +58,18 @@ func TestDeleteRefusalDetail_IgnoresNonNumericEntry(t *testing.T) {
 	}
 }
 
+func TestDeleteRefusalDetail_NotEmptyRendersKeysInSortedOrder(t *testing.T) {
+	details := map[string]any{
+		"virtualMachines": float64(2), "gpuVirtualMachines": float64(1),
+		"volumes": float64(3), "vpcs": float64(4), "l2Segments": float64(5),
+	}
+	detail, refused := DeleteRefusalDetail("rg-1", refusal("RESOURCE_GROUP_NOT_EMPTY", details))
+	want := "Resource group rg-1 still has resources assigned to it (gpuVirtualMachines: 1, l2Segments: 5, virtualMachines: 2, volumes: 3, vpcs: 4). Move them to another resource group, then destroy it again."
+	if !refused || detail != want {
+		t.Fatalf("got %v %q, want %q", refused, detail, want)
+	}
+}
+
 func TestDeleteRefusalDetail_OtherErrors(t *testing.T) {
 	for _, err := range []error{errors.New("boom"), refusal("SOMETHING_ELSE", nil)} {
 		if detail, refused := DeleteRefusalDetail("rg-1", err); refused || detail != "" {
@@ -171,5 +183,25 @@ func TestMapResourceGroupResponseToModel_IsDefault(t *testing.T) {
 	model := MapResourceGroupResponseToModel(&response, ResourceModel{})
 	if !model.IsDefault.ValueBool() || model.IsDefault.IsNull() {
 		t.Fatalf("is_default = %v", model.IsDefault)
+	}
+}
+
+func TestFetchResourceGroups_TooManyPagesErrors(t *testing.T) {
+	requests := 0
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			requests++
+			testutil.WriteJSONResponse(w, listPage([]map[string]any{{"id": "rg-1", "name": "a", "isDefault": false}}, 1, 101))
+		},
+	})
+	defer server.Close()
+
+	_, err := FetchResourceGroups(gpcnClient, t.Context())
+	if err == nil || !strings.Contains(err.Error(), "101 pages") {
+		t.Fatalf("got %v, want an error naming 101 pages", err)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
 	}
 }

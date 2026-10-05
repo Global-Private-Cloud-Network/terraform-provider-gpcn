@@ -7,7 +7,7 @@ const (
 	ErrorCodeResourceGroupNotEmpty  = "RESOURCE_GROUP_NOT_EMPTY"
 )
 
-// The page size keeps each request small. The page cap bounds the whole read.
+// The limit keeps each request small. The page cap bounds the whole read.
 const (
 	listLimit   = 100
 	listPageCap = 100

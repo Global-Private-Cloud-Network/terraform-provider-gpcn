@@ -55,9 +55,15 @@ func renderLiveCounts(err error) string {
 	if !errors.As(err, &httpErr) {
 		return ""
 	}
-	parts := make([]string, 0, len(httpErr.Details))
-	for key, raw := range httpErr.Details {
-		count, isNumber := numericCount(raw)
+	keys := make([]string, 0, len(httpErr.Details))
+	for key := range httpErr.Details {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		count, isNumber := numericCount(httpErr.Details[key])
 		if !isNumber || count == 0 {
 			continue
 		}
@@ -66,7 +72,6 @@ func renderLiveCounts(err error) string {
 	if len(parts) == 0 {
 		return ""
 	}
-	sort.Strings(parts)
 	return " (" + strings.Join(parts, ", ") + ")"
 }
 
