@@ -1281,11 +1281,12 @@ func TestVpcResourcePlanRefusedMoveShowsAPIError(t *testing.T) {
 			{Config: vpcPlanTestGroupConfig(mock.url, "vpc-refused", vpcPlanTestGroupA)},
 			{
 				Config:      vpcPlanTestGroupConfig(mock.url, "vpc-refused", vpcPlanTestGroupB),
-				ExpectError: regexp.MustCompile(`Resource group not found`),
+				ExpectError: regexp.MustCompile(`Resource\s+group\s+not\s+found`),
 			},
 			{
-				Config: vpcPlanTestGroupConfig(mock.url, "vpc-refused", vpcPlanTestGroupB),
-				Check:  resource.TestCheckResourceAttr(gpcnVpcTest, "resource_group_id", vpcPlanTestGroupB),
+				Config:           vpcPlanTestGroupConfig(mock.url, "vpc-refused", vpcPlanTestGroupB),
+				ConfigPlanChecks: vpcPlanTestExpectAction(plancheck.ResourceActionUpdate),
+				Check:            resource.TestCheckResourceAttr(gpcnVpcTest, "resource_group_id", vpcPlanTestGroupB),
 			},
 		},
 	})
