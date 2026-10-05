@@ -58,7 +58,7 @@ func (d *resourceGroupsDataSource) Schema(_ context.Context, _ datasource.Schema
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Optional:    true,
-				Description: "Return only the resource group with exactly this name. The data source fails when none matches",
+				Description: "Return only the resource group with exactly this name. The data source fails when none matches.",
 			},
 			"resource_groups": schema.ListNestedAttribute{
 				Computed:    true,

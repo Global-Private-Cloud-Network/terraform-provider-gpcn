@@ -81,7 +81,7 @@ func (r *resourceGroupResource) Schema(_ context.Context, _ resource.SchemaReque
 				Description: "Whether this is the tenant's Default resource group. Every tenant has exactly one, and it cannot be deleted",
 				Computed:    true,
 				PlanModifiers: []planmodifier.Bool{
-					boolplanmodifier.UseStateForUnknown(),
+					boolplanmodifier.UseNonNullStateForUnknown(),
 				},
 			},
 		},

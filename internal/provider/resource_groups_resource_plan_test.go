@@ -12,8 +12,10 @@ import (
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 const (
@@ -36,12 +38,26 @@ const (
 type rgPlanTestMock struct {
 	url string
 
-	mutex         sync.Mutex
-	name          string
-	description   string
-	isDefault     bool
-	deleteRefusal string
-	deleted       bool
+	mutex          sync.Mutex
+	name           string
+	description    string
+	isDefault      bool
+	deleteRefusal  string
+	deleted        bool
+	deleteNotFound bool
+	deletePaths    []string
+}
+
+func (m *rgPlanTestMock) deleteRequests(path string) int {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	count := 0
+	for _, recorded := range m.deletePaths {
+		if recorded == path {
+			count++
+		}
+	}
+	return count
 }
 
 func startRgPlanTestMock(t *testing.T, isDefault bool, deleteRefusal string) *rgPlanTestMock {
@@ -86,6 +102,11 @@ func (m *rgPlanTestMock) handle(t *testing.T, w http.ResponseWriter, r *http.Req
 		m.applyBody(r)
 		testutil.WriteJSONResponse(w, map[string]any{"success": true})
 	case r.Method == http.MethodDelete && r.URL.Path == rgPlanTestPath+rgPlanTestID:
+		m.deletePaths = append(m.deletePaths, r.URL.Path)
+		if m.deleteNotFound {
+			rgPlanTestWrite(w, http.StatusNotFound, `{"success":false,"message":"Resource group not found"}`)
+			return
+		}
 		if m.deleteRefusal != "" {
 			body := m.deleteRefusal
 			m.deleteRefusal = ""
@@ -138,6 +159,12 @@ func TestResourceGroupResourcePlanCreateUpdateDestroy(t *testing.T) {
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy: func(*terraform.State) error {
+			if count := mock.deleteRequests(rgPlanTestPath + rgPlanTestID); count != 1 {
+				return fmt.Errorf("DELETE requests for %s = %d, want 1", rgPlanTestID, count)
+			}
+			return nil
+		},
 		Steps: []resource.TestStep{
 			{
 				Config: rgPlanTestConfig(mock.url, "group-a"),
@@ -151,6 +178,7 @@ func TestResourceGroupResourcePlanCreateUpdateDestroy(t *testing.T) {
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnResourceGroupTest, plancheck.ResourceActionUpdate),
+						plancheck.ExpectKnownValue(gpcnResourceGroupTest, tfjsonpath.New("is_default"), knownvalue.Bool(false)),
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -221,6 +249,25 @@ func TestResourceGroupResourcePlanRefusesNonEmptyDelete(t *testing.T) {
 				Destroy:     true,
 				ExpectError: regexp.MustCompile(`(?s)virtualMachines:\s+2,\s+volumes:\s+1`),
 			},
+		},
+	})
+}
+
+func TestResourceGroupResourcePlanDestroyAlreadyGoneSucceeds(t *testing.T) {
+	t.Parallel()
+	mock := startRgPlanTestMock(t, false, "")
+	mock.deleteNotFound = true
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy: func(*terraform.State) error {
+			if count := mock.deleteRequests(rgPlanTestPath + rgPlanTestID); count != 1 {
+				return fmt.Errorf("DELETE requests for %s = %d, want 1", rgPlanTestID, count)
+			}
+			return nil
+		},
+		Steps: []resource.TestStep{
+			{Config: rgPlanTestConfig(mock.url, "gone")},
 		},
 	})
 }

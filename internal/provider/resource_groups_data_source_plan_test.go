@@ -176,3 +176,38 @@ func TestResourceGroupsDataSourcePlanPagesToTotalPages(t *testing.T) {
 		}},
 	})
 }
+
+func TestResourceGroupsDataSourcePlanNoDefaultRowLeavesIdNull(t *testing.T) {
+	t.Parallel()
+	mock := startRgDataSourceTestMock(t, [][]rgDataSourceTestRow{{
+		{id: "rg-one", name: "one"},
+		{id: "rg-two", name: "two"},
+	}})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config: rgDataSourceTestConfig(mock.url, ""),
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr(rgDataSourceTestAddress, "resource_groups.#", "2"),
+				resource.TestCheckNoResourceAttr(rgDataSourceTestAddress, "default_resource_group_id"),
+			),
+		}},
+	})
+}
+
+func TestResourceGroupsDataSourcePlanEmptyListWithoutFilter(t *testing.T) {
+	t.Parallel()
+	mock := startRgDataSourceTestMock(t, [][]rgDataSourceTestRow{{}})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config: rgDataSourceTestConfig(mock.url, ""),
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr(rgDataSourceTestAddress, "resource_groups.#", "0"),
+				resource.TestCheckNoResourceAttr(rgDataSourceTestAddress, "default_resource_group_id"),
+			),
+		}},
+	})
+}
