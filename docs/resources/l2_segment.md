@@ -61,7 +61,7 @@ output "gpcn_l2_segment_example" {
 ### Optional
 
 - `description` (String) Additional information about the L2 segment to provide context for its purpose
-- `resource_group_id` (String) ID of the resource group this L2 segment belongs to. When omitted, the L2 segment is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the L2 segment in place. Removing it from configuration leaves the L2 segment where it is
+- `resource_group_id` (String) ID of the resource group this L2 segment belongs to. When omitted, the L2 segment is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the L2 segment in place. Removing it from configuration leaves the L2 segment where it is, but a replacement created while it is unset joins the Default resource group
 
 ### Read-Only
 

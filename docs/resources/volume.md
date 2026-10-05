@@ -63,7 +63,7 @@ output "example_gpcn_volume_ssd" {
 
 ### Optional
 
-- `resource_group_id` (String) ID of the resource group this volume belongs to. When omitted, the volume is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the volume in place. Removing it from configuration leaves the volume where it is
+- `resource_group_id` (String) ID of the resource group this volume belongs to. When omitted, the volume is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the volume in place. Removing it from configuration leaves the volume where it is, but a replacement created while it is unset joins the Default resource group
 
 ### Read-Only
 
