@@ -11,8 +11,10 @@ import (
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 const (
@@ -109,6 +111,9 @@ type gpuPlanTestMock struct {
 	group      string
 	createBody map[string]any
 	putBodies  []map[string]any
+
+	refuseMoveOnce bool
+	defaultOnPut   string
 }
 
 // setName renames the GPU out of band, which is how a test creates drift.
@@ -118,7 +123,6 @@ func (m *gpuPlanTestMock) setName(newName string) {
 	m.name = newName
 }
 
-// setGroup moves the GPU out of band.
 func (m *gpuPlanTestMock) setGroup(newGroup string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -176,7 +180,17 @@ func startGPUPlanMockServer(t *testing.T) (*httptest.Server, *gpuPlanTestMock) {
 		case r.Method == http.MethodPut && r.URL.Path == gpuPath:
 			body := testutil.ReadRequestBody(r)
 			mock.mu.Lock()
+			if _, moves := body["resourceGroupId"].(string); moves && mock.refuseMoveOnce {
+				mock.refuseMoveOnce = false
+				mock.mu.Unlock()
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"success":false,"message":"You do not have access to the specified resource group","error":{"code":"Entity Access Denied"}}`))
+				return
+			}
 			mock.putBodies = append(mock.putBodies, body)
+			if mock.group == "" && mock.defaultOnPut != "" {
+				mock.group = mock.defaultOnPut
+			}
 			if name, ok := body["name"].(string); ok {
 				mock.name = name
 			}
@@ -649,6 +663,115 @@ func TestGPUResourcePlanRenameSendsNoGroup(t *testing.T) {
 						}
 						if body["name"] != "gpu-plan-b" {
 							return fmt.Errorf("expected name gpu-plan-b, got %v", body["name"])
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+func TestGPUResourcePlanRenameWithUnsetGroupKeepsItKnown(t *testing.T) {
+	t.Parallel()
+	server, _ := startGPUPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a", ""),
+				Check:  resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestDefaultGroup),
+			},
+			{
+				Config: gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-b", ""),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnGPUTest, plancheck.ResourceActionUpdate),
+						plancheck.ExpectKnownValue(gpcnGPUTest, tfjsonpath.New("resource_group_id"), knownvalue.StringExact(gpuPlanTestDefaultGroup)),
+					},
+				},
+			},
+		},
+	})
+}
+
+// The mock reports no group until the first update, which leaves state null as a
+// 1.4.0 state with no group is.
+func TestGPUResourcePlanNullGroupStateSurvivesAnUpdate(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+	mock.setGroup("")
+	mock.mu.Lock()
+	mock.defaultOnPut = gpuPlanTestDefaultGroup
+	mock.mu.Unlock()
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a", ""),
+				Check:  resource.TestCheckNoResourceAttr(gpcnGPUTest, "resource_group_id"),
+			},
+			{
+				Config:           gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-b", ""),
+				ConfigPlanChecks: gpuPlanTestAction(plancheck.ResourceActionUpdate),
+				Check:            resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestDefaultGroup),
+			},
+		},
+	})
+}
+
+func TestGPUResourcePlanRefusedMoveShowsAPIError(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+	moveConfig := gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a", gpuPlanTestGroupField(gpuPlanTestGroupB))
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a", gpuPlanTestGroupField(gpuPlanTestGroupA)),
+				Check:  resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestGroupA),
+			},
+			{
+				PreConfig: func() {
+					mock.mu.Lock()
+					mock.refuseMoveOnce = true
+					mock.mu.Unlock()
+				},
+				Config:      moveConfig,
+				ExpectError: regexp.MustCompile(`You\s+do\s+not\s+have\s+access\s+to\s+the\s+specified\s+resource\s+group`),
+			},
+			{
+				Config: moveConfig,
+				Check:  resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestGroupB),
+			},
+		},
+	})
+}
+
+func TestGPUResourcePlanAdoptsOutOfBandMoveWhenUnset(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+	config := gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a", "")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check:  resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestDefaultGroup),
+			},
+			{
+				PreConfig:        func() { mock.setGroup(gpuPlanTestGroupB) },
+				Config:           config,
+				ConfigPlanChecks: gpuPlanTestNoop(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestGroupB),
+					func(*terraform.State) error {
+						if n := mock.putCount(); n != 0 {
+							return fmt.Errorf("expected no PUT, got %d", n)
 						}
 						return nil
 					},
