@@ -260,9 +260,12 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				},
 			},
 			"resource_group_id": schema.StringAttribute{
-				Description: "ID of the resource group this virtual machine belongs to. When omitted, the machine is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the machine in place. Removing it from configuration leaves the machine where it is",
+				Description: "ID of the resource group this virtual machine belongs to. When omitted, the machine is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the machine in place. Removing it from configuration leaves the machine where it is, but a replacement created while it is unset joins the Default resource group",
 				Optional:    true,
 				Computed:    true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseNonNullStateForUnknown(),
 				},

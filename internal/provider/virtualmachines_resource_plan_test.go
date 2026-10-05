@@ -19,6 +19,7 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -4087,6 +4088,32 @@ func TestVirtualMachineResourcePlanImportReadsGroup(t *testing.T) {
 			},
 		},
 	})
+
+	persisted := startVirtualMachineGroupMockServer(t, vmPlanTestDefaultGroup)
+	persisted.mu.Lock()
+	persisted.name = "vm-group-import-persisted"
+	persisted.birthSubnet = vmPlanTestSubnetID
+	persisted.group = vmPlanTestGroupG
+	persisted.mu.Unlock()
+	persistedConfig := vmGroupPlanTestConfig(persisted.server.URL, "vm-group-import-persisted", vmPlanTestGroupG)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:             persistedConfig,
+				ResourceName:       gpcnVirtualMachineTest,
+				ImportState:        true,
+				ImportStateId:      vmPlanTestID,
+				ImportStatePersist: true,
+			},
+			{
+				Config:           persistedConfig,
+				ConfigPlanChecks: vmGroupPlanTestExpectAction(plancheck.ResourceActionNoop),
+				Check:            resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "resource_group_id", vmPlanTestGroupG),
+			},
+		},
+	})
 }
 
 func TestVirtualMachineResourcePlanNeverSendsNullGroup(t *testing.T) {
@@ -4255,4 +4282,38 @@ func TestVirtualMachineResourcePlanAdoptsOutOfBandMoveWhenUnset(t *testing.T) {
 			},
 		},
 	})
+}
+
+func TestVirtualMachineResourcePlanRefusesEmptyGroup(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineGroupMockServer(t, vmPlanTestDefaultGroup)
+	config := strings.Replace(vmGroupPlanTestConfig(mock.server.URL, "vm-group-empty", vmPlanTestGroupG), fmt.Sprintf("%q", vmPlanTestGroupG), `""`, 1)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config:      config,
+			ExpectError: regexp.MustCompile(`(?s)Invalid Attribute Value Length`),
+		}},
+	})
+
+	if body := mock.recordedCreate(); body != nil {
+		t.Errorf("expected no create request, saw %v", body)
+	}
+}
+
+func TestVirtualMachineResourcePlanGroupDescriptionBytes(t *testing.T) {
+	t.Parallel()
+
+	schemaResponse := &fwresource.SchemaResponse{}
+	NewVirtualMachinesResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
+	if schemaResponse.Diagnostics.HasError() {
+		t.Fatalf("Expected a schema, got %v", schemaResponse.Diagnostics)
+	}
+
+	want := "ID of the resource group this virtual machine belongs to. When omitted, the machine is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the machine in place. Removing it from configuration leaves the machine where it is, but a replacement created while it is unset joins the Default resource group"
+	got := schemaResponse.Schema.Attributes["resource_group_id"].GetDescription()
+	if got != want {
+		t.Errorf("Description = %q, want %q", got, want)
+	}
 }
