@@ -91,9 +91,10 @@ func (r *vpcResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"resource_group_id": schema.StringAttribute{
-				Description: "ID of the resource group this VPC belongs to. When omitted, the VPC is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the VPC in place. Removing it from configuration leaves the VPC where it is",
+				Description: "ID of the resource group this VPC belongs to. When omitted, the VPC is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the VPC in place, together with its subnets, security groups and public IP addresses. Removing it from configuration leaves the VPC where it is, but a replacement created while it is unset joins the Default resource group",
 				Optional:    true,
 				Computed:    true,
+				Validators:  []validator.String{stringvalidator.LengthAtLeast(1)},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseNonNullStateForUnknown(),
 				},

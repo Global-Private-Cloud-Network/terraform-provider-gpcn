@@ -116,6 +116,8 @@ type vpcMockRefusals struct {
 	tearingDownDeletes    int
 	parkedTeardownDeletes int
 	deleteJobFailures     int
+	emptyGroupUntilWrite  bool
+	refusedMoves          int
 }
 
 func startVpcPlanMockServer(t *testing.T, refusals vpcMockRefusals) *vpcMock {
@@ -131,6 +133,8 @@ func startVpcPlanMockServer(t *testing.T, refusals vpcMockRefusals) *vpcMock {
 		tearingDownDeletes:    refusals.tearingDownDeletes,
 		parkedTeardownDeletes: refusals.parkedTeardownDeletes,
 		deleteJobFailures:     refusals.deleteJobFailures,
+		emptyGroupUntilWrite:  refusals.emptyGroupUntilWrite,
+		refusedMoves:          refusals.refusedMoves,
 	}
 	vpcPath := "/v1/resource/vpcs/" + vpcPlanTestID
 
@@ -184,6 +188,7 @@ func (m *vpcMock) handleCreate(w http.ResponseWriter, r *http.Request) {
 			m.cidr = cidr
 		}
 		m.nameservers = requestedNameservers(body)
+		m.groupID = vpcPlanTestDefaultGroup
 		if group, ok := body["resourceGroupId"].(string); ok {
 			m.groupID = group
 		}
@@ -1167,21 +1172,18 @@ func TestVpcResourcePlanDetectsOutOfBandMove(t *testing.T) {
 func TestVpcResourcePlanImportReadsGroup(t *testing.T) {
 	t.Parallel()
 	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+	mock.setName("vpc-group-import")
+	mock.setGroup(vpcPlanTestGroupA)
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			{Config: vpcPlanTestGroupConfig(mock.url, "vpc-group-import", vpcPlanTestGroupA)},
 			{
-				ResourceName:            gpcnVpcTest,
-				ImportState:             true,
-				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"acknowledge_overlap"},
-			},
-			{
-				ResourceName:  gpcnVpcTest,
-				ImportState:   true,
-				ImportStateId: vpcPlanTestID,
+				Config:             vpcPlanTestGroupConfig(mock.url, "vpc-group-import", vpcPlanTestGroupA),
+				ResourceName:       gpcnVpcTest,
+				ImportState:        true,
+				ImportStateId:      vpcPlanTestID,
+				ImportStatePersist: true,
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
 					if len(states) != 1 {
 						return fmt.Errorf("imported %d instances, want 1", len(states))
@@ -1252,8 +1254,7 @@ func TestVpcResourcePlanRenameWithUnsetGroupKeepsItKnown(t *testing.T) {
 
 func TestVpcResourcePlanNullGroupStateSurvivesAnUpdate(t *testing.T) {
 	t.Parallel()
-	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
-	mock.emptyGroupUntilWrite = true
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{emptyGroupUntilWrite: true})
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -1272,8 +1273,7 @@ func TestVpcResourcePlanNullGroupStateSurvivesAnUpdate(t *testing.T) {
 
 func TestVpcResourcePlanRefusedMoveShowsAPIError(t *testing.T) {
 	t.Parallel()
-	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
-	mock.refusedMoves = 1
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{refusedMoves: 1})
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -1305,6 +1305,70 @@ func TestVpcResourcePlanAdoptsOutOfBandMoveWhenUnset(t *testing.T) {
 				Config:           vpcPlanTestConfig(mock.url, "vpc-adopt"),
 				ConfigPlanChecks: vpcPlanTestExpectAction(plancheck.ResourceActionNoop),
 				Check:            resource.TestCheckResourceAttr(gpcnVpcTest, "resource_group_id", vpcPlanTestGroupB),
+			},
+		},
+	})
+}
+
+func TestVpcResourcePlanRefusesEmptyGroup(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      vpcPlanTestGroupConfig(mock.url, "vpc-empty-group", ""),
+				ExpectError: regexp.MustCompile(`(?s)Invalid Attribute Value Length`),
+			},
+		},
+	})
+	if got := mock.requestCount("POST /v1/resource/vpcs/"); got != 0 {
+		t.Errorf("create requests = %d, want 0", got)
+	}
+}
+
+func TestVpcResourcePlanGroupDescriptionBytes(t *testing.T) {
+	t.Parallel()
+
+	want := "ID of the resource group this VPC belongs to. When omitted, the VPC is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the VPC in place, together with its subnets, security groups and public IP addresses. Removing it from configuration leaves the VPC where it is, but a replacement created while it is unset joins the Default resource group"
+	if got := vpcResourceTestSchema(t).Attributes["resource_group_id"].GetDescription(); got != want {
+		t.Errorf("resource_group_id Description = %q, want %q", got, want)
+	}
+}
+
+func TestVpcResourcePlanReplacementWithUnsetGroupJoinsDefault(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: vpcPlanTestGroupConfig(mock.url, "vpc-replace-group", vpcPlanTestGroupA)},
+			{
+				Config:           vpcPlanTestConfig(mock.url, "vpc-replace-group"),
+				ConfigPlanChecks: vpcPlanTestExpectAction(plancheck.ResourceActionNoop),
+			},
+			{
+				Config: vpcPlanTestConfigWith(mock.url, fmt.Sprintf(`
+  name          = "vpc-replace-group"
+  datacenter_id = %q
+  cidr          = "10.51.0.0/16"
+`, vpcPlanTestDatacenterID)),
+				ConfigPlanChecks: vpcPlanTestExpectAction(plancheck.ResourceActionReplace),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcTest, "resource_group_id", vpcPlanTestDefaultGroup),
+					func(*terraform.State) error {
+						bodies := mock.allCreateBodies()
+						if len(bodies) != 2 {
+							return fmt.Errorf("create count = %d, want 2", len(bodies))
+						}
+						if _, sent := bodies[1]["resourceGroupId"]; sent {
+							return fmt.Errorf("replacement create body carries resourceGroupId: %v", bodies[1])
+						}
+						return nil
+					},
+				),
 			},
 		},
 	})
