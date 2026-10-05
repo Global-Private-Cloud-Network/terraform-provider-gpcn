@@ -1,3 +1,29 @@
+## 1.5.0 (Unreleased)
+
+This release follows the GPCN resource-group change: every resource belongs to exactly one resource group, and a resource created without one joins the tenant's Default group.
+
+UPGRADING FROM 1.4.0:
+
+1. Upgrade when GPCN deploys the resource-group change. 1.4.0 does not work against the new API for a `gpcn_virtualmachine` that sets no `resource_group_id`: GPCN reports the Default group, 1.4.0 plans to unassign it, and GPCN refuses that update.
+2. Removing `resource_group_id` from a `gpcn_virtualmachine` block no longer unassigns the machine. It stays in its group. To move it to the Default group, set `resource_group_id` to `default_resource_group_id` from the `gpcn_resource_groups` data source.
+3. State upgrades in place. The first plan after the upgrade is empty for a block that sets no `resource_group_id`; the attribute then reports the group GPCN holds.
+4. An API key whose owner holds only a group-scoped role must set `resource_group_id` on every resource it creates. GPCN answers 403 to a create that names no group.
+
+BREAKING CHANGES:
+
+- **Virtual Machine**: `resource_group_id` is now optional and computed. Removing it from configuration leaves the machine in its group; GPCN no longer accepts an unassign.
+
+FEATURES:
+
+- **New Data Source `gpcn_resource_groups`**: lists the resource groups the API key can see, filters by exact `name`, and reports `default_resource_group_id`.
+- **GPU, Volume, VPC, L2 Segment**: new `resource_group_id`. It is optional and computed: omitted, the resource joins the Default group and the attribute reports it; changed, the resource moves in place.
+- **Resource Group**: new computed `is_default`.
+
+ENHANCEMENTS:
+
+- **Resource Group**: a destroy that GPCN refuses names the cause. The Default group cannot be deleted, and the error says how to stop managing it; a group that still holds resources lists the counts.
+- **Virtual Machine**: an out-of-band move to another resource group shows in the plan.
+
 ## 1.4.0 (September 22, 2026)
 
 This release targets the GPCN API deployed with the VPC networking rollout. It does not work against the previous API: the virtual machine create body changed and the API refuses the old keys.
