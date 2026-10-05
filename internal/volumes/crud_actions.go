@@ -173,7 +173,7 @@ func UpdateVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 		return nil, err
 	}
 
-	// The only possible update is a resizing since everything else triggers a re-create
+	// A resize is the only change this call makes.
 	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/resize", bytes.NewBuffer(jsonUpdateVolumeRequestBody))
 	if err != nil {
 		return nil, err
