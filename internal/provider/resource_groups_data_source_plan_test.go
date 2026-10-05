@@ -50,7 +50,7 @@ func startRgDataSourceTestMock(t *testing.T, pages [][]rgDataSourceTestRow) *rgD
 			return
 		}
 		page, err := strconv.Atoi(r.URL.Query().Get("page"))
-		if r.URL.Query().Get("limit") != "100" || r.URL.Query().Has("pageSize") {
+		if r.URL.Query().Get("limit") != "100" || r.URL.Query().Get("sort") != "name:asc" || r.URL.Query().Has("pageSize") {
 			testutil.LogUnexpectedRequest(t, w, r)
 			return
 		}

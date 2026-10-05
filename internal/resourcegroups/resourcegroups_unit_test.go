@@ -30,14 +30,14 @@ func TestDeleteRefusalDetail_NotEmptyWithDetails(t *testing.T) {
 		"volumes": float64(1), "vpcs": float64(0), "l2Segments": float64(0),
 	}
 	detail, refused := DeleteRefusalDetail("rg-1", refusal("RESOURCE_GROUP_NOT_EMPTY", details))
-	want := "Resource group rg-1 still has resources assigned to it (virtualMachines: 2, volumes: 1). Move them to another resource group, then destroy it again."
+	want := "Resource group rg-1 still has resources assigned to it (virtualMachines: 2, volumes: 1). Move them to another resource group, then destroy it again. When the same apply moves them, Terraform deletes the group first: apply the moves alone, for example with -target, then apply again."
 	if !refused || detail != want {
 		t.Fatalf("got %v %q, want %q", refused, detail, want)
 	}
 }
 
 func TestDeleteRefusalDetail_NotEmptyWithoutDetails(t *testing.T) {
-	want := "Resource group rg-1 still has resources assigned to it. Move them to another resource group, then destroy it again."
+	want := "Resource group rg-1 still has resources assigned to it. Move them to another resource group, then destroy it again. When the same apply moves them, Terraform deletes the group first: apply the moves alone, for example with -target, then apply again."
 	for name, details := range map[string]map[string]any{
 		"absent":           nil,
 		"all zero":         {"volumes": float64(0), "vpcs": float64(0)},
@@ -64,9 +64,17 @@ func TestDeleteRefusalDetail_NotEmptyRendersKeysInSortedOrder(t *testing.T) {
 		"volumes": float64(3), "vpcs": float64(4), "l2Segments": float64(5),
 	}
 	detail, refused := DeleteRefusalDetail("rg-1", refusal("RESOURCE_GROUP_NOT_EMPTY", details))
-	want := "Resource group rg-1 still has resources assigned to it (gpuVirtualMachines: 1, l2Segments: 5, virtualMachines: 2, volumes: 3, vpcs: 4). Move them to another resource group, then destroy it again."
+	want := "Resource group rg-1 still has resources assigned to it (gpuVirtualMachines: 1, l2Segments: 5, virtualMachines: 2, volumes: 3, vpcs: 4). Move them to another resource group, then destroy it again. When the same apply moves them, Terraform deletes the group first: apply the moves alone, for example with -target, then apply again."
 	if !refused || detail != want {
 		t.Fatalf("got %v %q, want %q", refused, detail, want)
+	}
+}
+
+func TestDeleteRefusalDetail_SortsKeysNotRenderedPairs(t *testing.T) {
+	details := map[string]any{"a-b": float64(2), "a": float64(1)}
+	detail, refused := DeleteRefusalDetail("rg-1", refusal("RESOURCE_GROUP_NOT_EMPTY", details))
+	if !refused || !strings.Contains(detail, " (a: 1, a-b: 2).") {
+		t.Fatalf("got %v %q, want counts ordered a, a-b", refused, detail)
 	}
 }
 
@@ -86,6 +94,9 @@ func assertListQuery(t *testing.T, r *http.Request) {
 	}
 	if query.Get("page") == "" {
 		t.Errorf("page missing (query %q)", r.URL.RawQuery)
+	}
+	if query.Get("sort") != "name:asc" {
+		t.Errorf("sort = %q, want name:asc (query %q)", query.Get("sort"), r.URL.RawQuery)
 	}
 	if _, present := query["pageSize"]; present {
 		t.Errorf("the API has no pageSize parameter (query %q)", r.URL.RawQuery)
@@ -203,5 +214,26 @@ func TestFetchResourceGroups_TooManyPagesErrors(t *testing.T) {
 	}
 	if requests != 1 {
 		t.Fatalf("requests = %d, want 1", requests)
+	}
+}
+
+func TestFetchResourceGroups_HundredPagesSucceeds(t *testing.T) {
+	requests := 0
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			requests++
+			assertListQuery(t, r)
+			testutil.WriteJSONResponse(w, listPage([]map[string]any{{"id": "rg-1", "name": "a", "isDefault": false}}, requests, 100))
+		},
+	})
+	defer server.Close()
+
+	groups, err := FetchResourceGroups(gpcnClient, t.Context())
+	if err != nil {
+		t.Fatalf("got %v, want no error at the cap", err)
+	}
+	if requests != 100 || len(groups) != 100 {
+		t.Fatalf("requests = %d, groups = %d, want 100 each", requests, len(groups))
 	}
 }

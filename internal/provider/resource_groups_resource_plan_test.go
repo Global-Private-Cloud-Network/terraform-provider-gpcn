@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -11,6 +12,12 @@ import (
 
 	"terraform-provider-gpcn/internal/testutil"
 
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
+	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-go/tftypes"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
@@ -218,6 +225,41 @@ func TestResourceGroupResourcePlanReportsIsDefault(t *testing.T) {
 	})
 }
 
+// rgPlanTestStillManagedStep proves a refused destroy left the group in state.
+func rgPlanTestStillManagedStep(host, name string) resource.TestStep {
+	return resource.TestStep{
+		Config: rgPlanTestConfig(host, name),
+		ConfigPlanChecks: resource.ConfigPlanChecks{
+			PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+		},
+	}
+}
+
+func TestResourceGroupResourcePlanIsDefaultStaysUnknownFromNullState(t *testing.T) {
+	t.Parallel()
+
+	schemaResponse := &fwresource.SchemaResponse{}
+	NewResourceGroupResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
+	attribute, ok := schemaResponse.Schema.Attributes["is_default"].(schema.BoolAttribute)
+	if !ok {
+		t.Fatalf("is_default is %T, want schema.BoolAttribute", schemaResponse.Schema.Attributes["is_default"])
+	}
+
+	request := planmodifier.BoolRequest{
+		State:      tfsdk.State{Raw: tftypes.NewValue(tftypes.Object{}, map[string]tftypes.Value{})},
+		StateValue: types.BoolNull(),
+		PlanValue:  types.BoolUnknown(),
+	}
+	for _, modifier := range attribute.PlanModifiers {
+		response := &planmodifier.BoolResponse{PlanValue: request.PlanValue}
+		modifier.PlanModifyBool(context.Background(), request, response)
+		request.PlanValue = response.PlanValue
+	}
+	if !request.PlanValue.IsUnknown() {
+		t.Errorf("is_default plan = %v, want unknown: a null prior value must not carry into the plan", request.PlanValue)
+	}
+}
+
 func TestResourceGroupResourcePlanRefusesDefaultDelete(t *testing.T) {
 	t.Parallel()
 	mock := startRgPlanTestMock(t, true, rgPlanTestDefaultRefusalBody)
@@ -232,6 +274,7 @@ func TestResourceGroupResourcePlanRefusesDefaultDelete(t *testing.T) {
 				ExpectError: regexp.MustCompile(
 					`(?s)Unable to Delete Resource Group.*is\s+the\s+tenant's\s+Default\s+resource\s+group,\s+and\s+GPCN\s+does\s+not\s+delete\s+it`),
 			},
+			rgPlanTestStillManagedStep(mock.url, "Default"),
 		},
 	})
 }
@@ -247,8 +290,9 @@ func TestResourceGroupResourcePlanRefusesNonEmptyDelete(t *testing.T) {
 			{
 				Config:      rgPlanTestConfig(mock.url, "busy"),
 				Destroy:     true,
-				ExpectError: regexp.MustCompile(`(?s)virtualMachines:\s+2,\s+volumes:\s+1`),
+				ExpectError: regexp.MustCompile(`(?s)virtualMachines:\s+2,\s+volumes:\s+1\).*apply\s+the\s+moves\s+alone,\s+for\s+example\s+with\s+-target,\s+then\s+apply\s+again`),
 			},
+			rgPlanTestStillManagedStep(mock.url, "busy"),
 		},
 	})
 }
