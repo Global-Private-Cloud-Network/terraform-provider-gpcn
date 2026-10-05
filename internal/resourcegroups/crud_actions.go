@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -26,6 +27,7 @@ type readResourceGroupResponse struct {
 		Description string `json:"description"`
 		CreatedAt   string `json:"createdAt"`
 		UpdatedAt   string `json:"updatedAt"`
+		IsDefault   bool   `json:"isDefault"`
 	} `json:"data"`
 }
 
@@ -156,4 +158,77 @@ func DeleteResourceGroup(gpcnClient *client.GpcnClient, ctx context.Context, id 
 
 	tflog.Info(ctx, LogSuccessfullyFinishedDeleteResourceGroup)
 	return nil
+}
+
+// ResourceGroupSummary is one row of the list endpoint.
+type ResourceGroupSummary struct {
+	ID          string
+	Name        string
+	Description string
+	IsDefault   bool
+}
+
+type listResourceGroupsResponse struct {
+	Data []struct {
+		ID          string  `json:"id"`
+		Name        string  `json:"name"`
+		Description *string `json:"description"`
+		IsDefault   bool    `json:"isDefault"`
+	} `json:"data"`
+	Meta struct {
+		TotalPages int `json:"totalPages"`
+	} `json:"meta"`
+}
+
+// FetchResourceGroups reads every page of the list. The first answer bounds the
+// loop, so a later page cannot extend it.
+func FetchResourceGroups(gpcnClient *client.GpcnClient, ctx context.Context) ([]ResourceGroupSummary, error) {
+	var groups []ResourceGroupSummary
+
+	for page, totalPages := 1, 1; page <= totalPages; page++ {
+		response, err := fetchResourceGroupPage(gpcnClient, ctx, page)
+		if err != nil {
+			return nil, err
+		}
+		if page == 1 {
+			totalPages = response.Meta.TotalPages
+			if totalPages > listPageCap {
+				return nil, fmt.Errorf(ErrDetailResourceGroupListTooLong, totalPages, listPageCap)
+			}
+		}
+		for _, row := range response.Data {
+			group := ResourceGroupSummary{ID: row.ID, Name: row.Name, IsDefault: row.IsDefault}
+			if row.Description != nil {
+				group.Description = *row.Description
+			}
+			groups = append(groups, group)
+		}
+	}
+
+	return groups, nil
+}
+
+func fetchResourceGroupPage(gpcnClient *client.GpcnClient, ctx context.Context, page int) (*listResourceGroupsResponse, error) {
+	listURL := fmt.Sprintf("%s?page=%d&pageSize=%d", BASE_URL_V1, page, listPageSize)
+	request, err := http.NewRequestWithContext(ctx, "GET", listURL, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	response, err := gpcnClient.DoWithRetry(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var parsed listResourceGroupsResponse
+	if err = json.Unmarshal(body, &parsed); err != nil {
+		return nil, err
+	}
+	return &parsed, nil
 }

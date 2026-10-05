@@ -40,6 +40,7 @@ func TestResourceGroupResource(t *testing.T) {
 					resource.TestCheckResourceAttrSet(gpcnResourceGroupTest, "id"),
 					resource.TestCheckResourceAttrSet(gpcnResourceGroupTest, "created_time"),
 					resource.TestCheckResourceAttrSet(gpcnResourceGroupTest, "last_updated"),
+					resource.TestCheckResourceAttr(gpcnResourceGroupTest, "is_default", "false"),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
