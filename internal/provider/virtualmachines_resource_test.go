@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-testing/compare"
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
@@ -114,6 +115,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 	volumeName := fmt.Sprintf("vm-basic-vol-%s", rName)
 	vmName := fmt.Sprintf("vm-basic-%s", rName)
 	vmNameUpdated := fmt.Sprintf("vm-basic-updated-%s", rName)
+	movedGroupName := fmt.Sprintf("terraform-demo-group-moved-%s", rName)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -188,6 +190,14 @@ func TestVirtualMachinesResource(t *testing.T) {
 			// Update and Read testing
 			{
 				Config: providerConfig + dataCenterImagesAndSize() + vpcAndSubnet(rName, vpcOctet) + fmt.Sprintf(`
+			resource "gpcn_resource_group" "vm_group" {
+				name = "terraform-demo-group"
+			}
+
+			resource "gpcn_resource_group" "vm_group_moved" {
+				name = "%s"
+			}
+
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -200,25 +210,26 @@ func TestVirtualMachinesResource(t *testing.T) {
 				image_id = data.gpcn_virtualmachine_images.vm_image.images[0].id
 				allocate_public_ip = false
 				subnet_id          = gpcn_vpc_subnet.vm_subnet.id
+				resource_group_id  = gpcn_resource_group.vm_group_moved.id
 				initial_auth = {
 					ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
 					username   = "testuser"
 				}
 			}
-			`, sshKeyName, vmNameUpdated),
+			`, movedGroupName, sshKeyName, vmNameUpdated),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "name", vmNameUpdated),
 				),
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction("gpcn_resource_group.vm_group", plancheck.ResourceActionDestroy),
+						plancheck.ExpectResourceAction("gpcn_resource_group.vm_group_moved", plancheck.ResourceActionCreate),
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
 					},
 				},
 				ConfigStateChecks: []statecheck.StateCheck{
 					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("l2_segment_ids"), knownvalue.ListSizeExact(0)),
 					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("network_interfaces"), knownvalue.ListSizeExact(1)),
-					statecheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("resource_group_id"), knownvalue.Null()),
+					statecheck.CompareValuePairs(gpcnVirtualMachineTest, tfjsonpath.New("resource_group_id"), "gpcn_resource_group.vm_group_moved", tfjsonpath.New("id"), compare.ValuesSame()),
 				},
 			},
 			// Changing image_id forces a replace
@@ -239,6 +250,14 @@ func TestVirtualMachinesResource(t *testing.T) {
 				min_cpu       = 2
 			}
 			` + vpcAndSubnet(rName, vpcOctet) + fmt.Sprintf(`
+			resource "gpcn_resource_group" "vm_group" {
+				name = "terraform-demo-group"
+			}
+
+			resource "gpcn_resource_group" "vm_group_moved" {
+				name = "%s"
+			}
+
 			resource "gpcn_ssh_key" "vm_uploaded_key" {
 				name       = "%s"
 				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
@@ -256,7 +275,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 					username   = "testuser"
 				}
 			}
-			`, sshKeyName, vmNameUpdated),
+			`, movedGroupName, sshKeyName, vmNameUpdated),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet(gpcnVirtualMachineTest, "image_id"),
 				),

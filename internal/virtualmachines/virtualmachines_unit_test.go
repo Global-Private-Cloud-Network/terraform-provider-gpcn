@@ -47,11 +47,14 @@ func createTestVMModel(name, image string, allocatePublicIP bool) ResourceModel 
 	}
 }
 
+const testDefaultResourceGroupID = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+
 func newVMResponse(id, name string) *ReadVirtualMachinesResponse {
 	resp := &ReadVirtualMachinesResponse{Success: true, Message: "VM retrieved"}
 	resp.Data.Status = "Running"
 	resp.Data.ID = id
 	resp.Data.Name = name
+	resp.Data.ResourceGroupId = testDefaultResourceGroupID
 	resp.Data.CreatedAt = time.Now().Format(time.RFC3339)
 	resp.Data.UpdatedAt = time.Now().Format(time.RFC3339)
 	resp.Data.Configuration = ConfigurationResponse{
@@ -1448,6 +1451,154 @@ func TestCreateVirtualMachineSendsSubnetIdBodyMockHTTP(t *testing.T) {
 	}
 	if createBody["subnetId"] != subnetID {
 		t.Errorf("Expected subnetId '%s', got '%v'", subnetID, createBody["subnetId"])
+	}
+}
+
+func createBodyForResourceGroup(t *testing.T, group types.String) map[string]any {
+	t.Helper()
+	useFastVMStatusPollInterval(t)
+	useNoInitialPollDelay(t)
+	const (
+		jobID = "job-group-1"
+		vmID  = "vm-group-1"
+	)
+
+	var createBody map[string]any
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatalf("reading the create body failed: %v", err)
+				}
+				if err := json.Unmarshal(body, &createBody); err != nil {
+					t.Fatalf("unmarshaling the create body failed: %v", err)
+				}
+				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
+					Success: true,
+					Message: "VM creation job started",
+					Data: client.JobStatusDataResponse{
+						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: vmID}},
+					},
+				})
+			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, vmID, true)
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
+				testutil.WriteJSONResponse(w, newVMResponse(vmID, "test-vm"))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	model := createTestVMModel("test-vm", testVMImage, false)
+	model.ResourceGroupId = group
+
+	if _, err := CreateVirtualMachine(gpcnClient, context.Background(), "550e8400-e29b-41d4-a716-446655440000", "sku-abc-123", model); err != nil {
+		t.Fatalf("CreateVirtualMachine failed: %v", err)
+	}
+	if createBody == nil {
+		t.Fatal("Expected the create endpoint to be called")
+	}
+	return createBody
+}
+
+func TestCreateVirtualMachineSendsResourceGroupIdMockHTTP(t *testing.T) {
+	const groupID = "11111111-1111-1111-1111-111111111111"
+	body := createBodyForResourceGroup(t, types.StringValue(groupID))
+	if body["resourceGroupId"] != groupID {
+		t.Errorf("Expected resourceGroupId '%s', got '%v'", groupID, body["resourceGroupId"])
+	}
+}
+
+func TestCreateVirtualMachineOmitsUnknownResourceGroupIdMockHTTP(t *testing.T) {
+	body := createBodyForResourceGroup(t, types.StringUnknown())
+	if _, present := body["resourceGroupId"]; present {
+		t.Errorf("Expected no resourceGroupId key for an unknown value, got %v", body["resourceGroupId"])
+	}
+}
+
+// runUpdateChangeable returns the PUT bodies the helper sent, one entry per request.
+func runUpdateChangeable(t *testing.T, state, plan ResourceModel) []map[string]any {
+	t.Helper()
+	var bodies []map[string]any
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PUT" && strings.Contains(r.URL.Path, "/virtual-machines/vm-upd-1") {
+				raw, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatalf("reading the update body failed: %v", err)
+				}
+				var body map[string]any
+				if err := json.Unmarshal(raw, &body); err != nil {
+					t.Fatalf("unmarshaling the update body failed: %v", err)
+				}
+				bodies = append(bodies, body)
+				testutil.WriteJSONResponse(w, map[string]any{"success": true})
+				return
+			}
+			testutil.LogUnexpectedRequest(t, w, r)
+		},
+	})
+	defer server.Close()
+
+	diags := UpdateChangeableAttributesIfChanged(gpcnClient, context.Background(), "vm-upd-1", state, plan)
+	if diags.HasError() {
+		t.Fatalf("UpdateChangeableAttributesIfChanged failed: %v", diags)
+	}
+	return bodies
+}
+
+func TestUpdateChangeableAttributesIfChangedSendsChangedGroup(t *testing.T) {
+	state := ResourceModel{Name: types.StringValue("vm"), ResourceGroupId: types.StringValue("group-g")}
+	plan := ResourceModel{Name: types.StringValue("vm"), ResourceGroupId: types.StringValue("group-h")}
+
+	bodies := runUpdateChangeable(t, state, plan)
+	if len(bodies) != 1 {
+		t.Fatalf("Expected one PUT, got %d", len(bodies))
+	}
+	if len(bodies[0]) != 1 || bodies[0]["resourceGroupId"] != "group-h" {
+		t.Errorf("Expected body {resourceGroupId: group-h}, got %v", bodies[0])
+	}
+}
+
+func TestUpdateChangeableAttributesIfChangedNullGroupWithNameChangeSendsNoGroup(t *testing.T) {
+	state := ResourceModel{Name: types.StringValue("old"), ResourceGroupId: types.StringValue("group-g")}
+	plan := ResourceModel{Name: types.StringValue("new"), ResourceGroupId: types.StringNull()}
+
+	bodies := runUpdateChangeable(t, state, plan)
+	if len(bodies) != 1 {
+		t.Fatalf("Expected one PUT, got %d", len(bodies))
+	}
+	if _, present := bodies[0]["resourceGroupId"]; present {
+		t.Errorf("Expected no resourceGroupId key, got %v", bodies[0])
+	}
+	if bodies[0]["name"] != "new" {
+		t.Errorf("Expected name 'new', got %v", bodies[0]["name"])
+	}
+}
+
+func TestUpdateChangeableAttributesIfChangedUnknownGroupSendsNoRequest(t *testing.T) {
+	state := ResourceModel{Name: types.StringValue("vm"), ResourceGroupId: types.StringValue("group-g")}
+	plan := ResourceModel{Name: types.StringValue("vm"), ResourceGroupId: types.StringUnknown()}
+
+	if bodies := runUpdateChangeable(t, state, plan); len(bodies) != 0 {
+		t.Errorf("Expected no PUT for an unknown group, got %v", bodies)
+	}
+}
+
+func TestUpdateChangeableAttributesIfChangedNothingChangedSendsNoRequest(t *testing.T) {
+	state := ResourceModel{Name: types.StringValue("vm"), ResourceGroupId: types.StringValue("group-g")}
+	plan := ResourceModel{Name: types.StringValue("vm"), ResourceGroupId: types.StringValue("group-g")}
+
+	if bodies := runUpdateChangeable(t, state, plan); len(bodies) != 0 {
+		t.Errorf("Expected no PUT, got %v", bodies)
 	}
 }
 

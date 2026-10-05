@@ -94,8 +94,7 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 		createVMRequestBody["password"] = auth.Password.ValueString()
 	}
 
-	// If resourceGroupId is set, add it to the create request
-	if !model.ResourceGroupId.IsNull() {
+	if !model.ResourceGroupId.IsNull() && !model.ResourceGroupId.IsUnknown() {
 		createVMRequestBody["resourceGroupId"] = model.ResourceGroupId.ValueString()
 	}
 

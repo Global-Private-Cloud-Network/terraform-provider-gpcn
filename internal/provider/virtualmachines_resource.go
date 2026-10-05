@@ -260,8 +260,12 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				},
 			},
 			"resource_group_id": schema.StringAttribute{
-				Description: "Optional ID of the resource group to assign this virtual machine to",
+				Description: "ID of the resource group this virtual machine belongs to. When omitted, the machine is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the machine in place. Removing it from configuration leaves the machine where it is",
 				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"initial_auth": schema.SingleNestedAttribute{
 				Description: "Initial authentication configuration for the virtual machine. Either ssh_key_id or password must be specified. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine",
