@@ -10,16 +10,17 @@ import (
 )
 
 type ResourceModel struct {
-	ID             types.String `tfsdk:"id"`
-	Name           types.String `tfsdk:"name"`
-	DatacenterId   types.String `tfsdk:"datacenter_id"`
-	VolumeType     types.String `tfsdk:"volume_type"`
-	VolumeTypeCode types.String `tfsdk:"volume_type_code"`
-	VolumeTypeId   types.Int64  `tfsdk:"volume_type_id"`
-	SizeGb         types.Int64  `tfsdk:"size_gb"`
-	CreatedTime    types.String `tfsdk:"created_time"`
-	LastUpdated    types.String `tfsdk:"last_updated"`
-	Location       types.Map    `tfsdk:"location"`
+	ID              types.String `tfsdk:"id"`
+	Name            types.String `tfsdk:"name"`
+	DatacenterId    types.String `tfsdk:"datacenter_id"`
+	VolumeType      types.String `tfsdk:"volume_type"`
+	VolumeTypeCode  types.String `tfsdk:"volume_type_code"`
+	VolumeTypeId    types.Int64  `tfsdk:"volume_type_id"`
+	SizeGb          types.Int64  `tfsdk:"size_gb"`
+	CreatedTime     types.String `tfsdk:"created_time"`
+	LastUpdated     types.String `tfsdk:"last_updated"`
+	Location        types.Map    `tfsdk:"location"`
+	ResourceGroupId types.String `tfsdk:"resource_group_id"`
 }
 
 // Update the plan or state with new values from the GET response
@@ -32,6 +33,11 @@ func MapVolumeResponseToModel(ctx context.Context, response *readVolumesResponse
 		model.VolumeTypeCode = types.StringNull()
 	} else {
 		model.VolumeTypeCode = types.StringValue(response.Data.VolumeType.Code)
+	}
+
+	model.ResourceGroupId = types.StringNull()
+	if response.Data.ResourceGroupId != "" {
+		model.ResourceGroupId = types.StringValue(response.Data.ResourceGroupId)
 	}
 
 	// Construct time entries

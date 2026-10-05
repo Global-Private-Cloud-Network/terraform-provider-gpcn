@@ -26,6 +26,10 @@ const (
 	LogLongPollingCompletedUpdateVolume  = "Long polling completed for Update GPCN Volume - proceeding to GetVolume"
 	LogSuccessfullyRetrievedVolumeUpdate = "Successfully retrieved GPCN Volume - Update"
 
+	// MoveVolume messages
+	LogStartingMoveVolumeWithID      = "Starting MoveVolume for volume ID %s"
+	LogSuccessfullyMovedVolumeWithID = "Successfully moved volume with ID %s to another resource group"
+
 	// DeleteVolume messages
 	LogStartingDeleteVolumeWithID              = "Starting DeleteVolume for volume ID %s"
 	LogConstructedDeleteVolumeRequest          = "Constructed Delete GPCN Volume request successfully"

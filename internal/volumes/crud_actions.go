@@ -38,12 +38,16 @@ type readVolumesResponse struct {
 			CountryAbbr string `json:"countryAbbr"`
 			Country     string `json:"country"`
 		} `json:"datacenter"`
+		ResourceGroupId    string `json:"resourceGroupId"`
 		VirtualMachineId   string `json:"virtualMachineId"`
 		VirtualMachineName string `json:"virtualMachineName"`
 		CreatedAt          string `json:"createdAt"`
 		UpdatedAt          string `json:"updatedAt"`
 	} `json:"data"`
 }
+
+// ReadVolumesResponse lets the resource hold the read-back from either branch of Update.
+type ReadVolumesResponse = readVolumesResponse
 
 func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*readVolumesResponse, error) {
 	tflog.Info(ctx, LogStartingCreateVolume)
@@ -59,6 +63,9 @@ func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model Reso
 		"datacenterId": model.DatacenterId.ValueString(),
 		"name":         model.Name.ValueString(),
 		"skuId":        skuId,
+	}
+	if !model.ResourceGroupId.IsUnknown() && !model.ResourceGroupId.IsNull() {
+		createVolumeRequestBody["resourceGroupId"] = model.ResourceGroupId.ValueString()
 	}
 
 	jsonCreateVolumeRequestBody, err := json.Marshal(createVolumeRequestBody)
@@ -265,5 +272,28 @@ func DeleteVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 		return err
 	}
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyCompletedDeleteVolumeWithID, volumeId))
+	return nil
+}
+
+func MoveVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId, resourceGroupId string) error {
+	tflog.Info(ctx, fmt.Sprintf(LogStartingMoveVolumeWithID, volumeId))
+
+	jsonMoveVolumeRequestBody, err := json.Marshal(map[string]any{"resourceGroupId": resourceGroupId})
+	if err != nil {
+		return err
+	}
+
+	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId, bytes.NewBuffer(jsonMoveVolumeRequestBody))
+	if err != nil {
+		return err
+	}
+
+	response, err := gpcnClient.DoWithRetry(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyMovedVolumeWithID, volumeId))
 	return nil
 }

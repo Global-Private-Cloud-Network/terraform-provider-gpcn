@@ -41,6 +41,7 @@ func newVolumeResponse(id, name string, sizeGb int64, skuId string) *readVolumes
 	resp.Data.Datacenter.Name = "US-East-1"
 	resp.Data.Datacenter.Region = "East"
 	resp.Data.Datacenter.Country = "US"
+	resp.Data.ResourceGroupId = "rg-default"
 	resp.Data.VirtualMachineId = ""
 	resp.Data.VirtualMachineName = ""
 	resp.Data.CreatedAt = time.Now().Format(time.RFC3339)
@@ -664,5 +665,126 @@ func TestVolumeTypeSpellingValidatorUnit(t *testing.T) {
 		if diagnostic.Detail() != testCase.detail {
 			t.Errorf("%q: expected detail %q, got %q", testCase.value, testCase.detail, diagnostic.Detail())
 		}
+	}
+}
+
+func TestMapVolumeResponseToModelWritesResourceGroupUnit(t *testing.T) {
+	response := newVolumeResponse("volume-123", "test-volume", 256, "sku-uuid-10")
+	response.Data.ResourceGroupId = "rg-moved"
+
+	for name, model := range map[string]ResourceModel{
+		"null": createTestVolumeModel("test-volume", "SSD", 256),
+		"configured": func() ResourceModel {
+			m := createTestVolumeModel("test-volume", "SSD", 256)
+			m.ResourceGroupId = types.StringValue("rg-configured")
+			return m
+		}(),
+	} {
+		result := MapVolumeResponseToModel(context.Background(), response, model)
+		if result.ResourceGroupId.ValueString() != "rg-moved" {
+			t.Errorf("%s: expected ResourceGroupId 'rg-moved', got %v", name, result.ResourceGroupId)
+		}
+	}
+
+	response.Data.ResourceGroupId = ""
+	result := MapVolumeResponseToModel(context.Background(), response, createTestVolumeModel("test-volume", "SSD", 256))
+	if !result.ResourceGroupId.IsNull() {
+		t.Errorf("expected null ResourceGroupId for an empty API value, got %v", result.ResourceGroupId)
+	}
+}
+
+func createVolumeBodyFor(t *testing.T, model ResourceModel) map[string]any {
+	t.Helper()
+	const (
+		jobID    = "job-123"
+		volumeID = "volume-456"
+		skuId    = "sku-uuid-10"
+	)
+	var created map[string]any
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/volume-sizes"):
+				testutil.WriteJSONResponse(w, newVolumeSizesResponse(testDatacenterID, []volumeSizesDataVolumeTypesAvailableSizesResponse{
+					{SkuId: skuId, SizeGb: 256},
+				}))
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/volumes/"):
+				created = testutil.ReadRequestBody(r)
+				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
+					Success: true,
+					Data:    client.JobResponse{JobID: jobID},
+				})
+			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, volumeID, true)
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID):
+				testutil.WriteJSONResponse(w, newVolumeResponse(volumeID, "test-volume", 256, skuId))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	if _, err := CreateVolume(gpcnClient, context.Background(), model); err != nil {
+		t.Fatalf("CreateVolume failed: %v", err)
+	}
+	return created
+}
+
+func TestCreateVolumeSendsResourceGroupIdMockHTTP(t *testing.T) {
+	model := createTestVolumeModel("test-volume", "SSD", 256)
+	model.ResourceGroupId = types.StringValue("rg-1")
+
+	body := createVolumeBodyFor(t, model)
+
+	if body["resourceGroupId"] != "rg-1" {
+		t.Errorf("expected resourceGroupId 'rg-1', got %v", body["resourceGroupId"])
+	}
+}
+
+func TestCreateVolumeOmitsUnknownResourceGroupIdMockHTTP(t *testing.T) {
+	for name, group := range map[string]types.String{
+		"unknown": types.StringUnknown(),
+		"null":    types.StringNull(),
+	} {
+		model := createTestVolumeModel("test-volume", "SSD", 256)
+		model.ResourceGroupId = group
+
+		body := createVolumeBodyFor(t, model)
+
+		if _, present := body["resourceGroupId"]; present {
+			t.Errorf("%s: resourceGroupId must be absent, got %v", name, body["resourceGroupId"])
+		}
+	}
+}
+
+func TestMoveVolumeMockHTTP(t *testing.T) {
+	const volumeID = "volume-move-1"
+	var called bool
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != "PUT" || r.URL.Path != "/v1/resource/volumes/"+volumeID {
+				testutil.LogUnexpectedRequest(t, w, r)
+				return
+			}
+			called = true
+			body := testutil.ReadRequestBody(r)
+			if len(body) != 1 || body["resourceGroupId"] != "rg-2" {
+				t.Errorf("expected exactly {resourceGroupId: rg-2}, got %v", body)
+			}
+			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "ok"})
+		},
+	})
+	defer server.Close()
+
+	if err := MoveVolume(gpcnClient, context.Background(), volumeID, "rg-2"); err != nil {
+		t.Fatalf("MoveVolume failed: %v", err)
+	}
+	if !called {
+		t.Error("expected the move endpoint to be called")
 	}
 }
