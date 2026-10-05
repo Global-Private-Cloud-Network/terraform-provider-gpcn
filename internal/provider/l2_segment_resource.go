@@ -82,9 +82,10 @@ func (r *l2SegmentResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Default: stringdefault.StaticString(""),
 			},
 			"resource_group_id": schema.StringAttribute{
-				Description: "ID of the resource group this L2 segment belongs to. When omitted, the L2 segment is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the L2 segment in place. Removing it from configuration leaves the L2 segment where it is",
+				Description: "ID of the resource group this L2 segment belongs to. When omitted, the L2 segment is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the L2 segment in place. Removing it from configuration leaves the L2 segment where it is, but a replacement created while it is unset joins the Default resource group",
 				Optional:    true,
 				Computed:    true,
+				Validators:  []validator.String{stringvalidator.LengthAtLeast(1)},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseNonNullStateForUnknown(),
 				},

@@ -89,7 +89,7 @@ type l2PlanTestServer struct {
 	// name and description are what the last write left on the segment.
 	name        string
 	description any
-	// updateBody is the body of the last rename or description edit.
+	// updateBody is the body of the last update: a rename, a description edit or a move.
 	updateBody map[string]any
 	// createBody is the body of the last create.
 	createBody map[string]any
@@ -130,6 +130,18 @@ func (s *l2PlanTestServer) moveOutOfBand(groupID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.groupID = groupID
+}
+
+func (s *l2PlanTestServer) setEmptyGroupUntilWrite() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.emptyGroupUntilWrite = true
+}
+
+func (s *l2PlanTestServer) setRefusedMoves(count int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.refusedMoves = count
 }
 
 func (s *l2PlanTestServer) takeMoveRefusal() bool {
@@ -723,7 +735,7 @@ func l2PlanTestExpectAction(action plancheck.ResourceActionType) resource.Config
 	}
 }
 
-// Row 1: an unset group leaves the key off the wire and adopts the Default id.
+// An unset group leaves the key off the wire and adopts the Default id.
 func TestL2SegmentResourcePlanCreateWithoutGroupAdoptsDefault(t *testing.T) {
 	t.Parallel()
 	server, state := startL2SegmentPlanMockServer(t)
@@ -744,7 +756,7 @@ func TestL2SegmentResourcePlanCreateWithoutGroupAdoptsDefault(t *testing.T) {
 	})
 }
 
-// Row 2: a configured group travels in the create body.
+// A configured group travels in the create body.
 func TestL2SegmentResourcePlanCreateWithGroupSendsIt(t *testing.T) {
 	t.Parallel()
 	server, state := startL2SegmentPlanMockServer(t)
@@ -772,7 +784,7 @@ func TestL2SegmentResourcePlanCreateWithGroupSendsIt(t *testing.T) {
 	})
 }
 
-// Row 6: a new group is an in-place update whose body names only the group.
+// A new group is an in-place update whose body names only the group.
 func TestL2SegmentResourcePlanMovesGroupInPlace(t *testing.T) {
 	t.Parallel()
 	server, state := startL2SegmentPlanMockServer(t)
@@ -802,7 +814,7 @@ func TestL2SegmentResourcePlanMovesGroupInPlace(t *testing.T) {
 	})
 }
 
-// Row 7: removing the attribute keeps the group and writes nothing.
+// Removing the attribute keeps the group and writes nothing.
 func TestL2SegmentResourcePlanRemovedGroupPlansEmpty(t *testing.T) {
 	t.Parallel()
 	server, state := startL2SegmentPlanMockServer(t)
@@ -828,7 +840,7 @@ func TestL2SegmentResourcePlanRemovedGroupPlansEmpty(t *testing.T) {
 	})
 }
 
-// Row 5: a move made out of band plans a move back when the group is configured.
+// A move made out of band plans a move back when the group is configured.
 func TestL2SegmentResourcePlanDetectsOutOfBandMove(t *testing.T) {
 	t.Parallel()
 	server, state := startL2SegmentPlanMockServer(t)
@@ -849,7 +861,7 @@ func TestL2SegmentResourcePlanDetectsOutOfBandMove(t *testing.T) {
 	})
 }
 
-// Row 9: an import reads the group, and the plan is empty with the group unset.
+// An import reads the group, and the plan is empty with the group unset.
 func TestL2SegmentResourcePlanImportReadsGroup(t *testing.T) {
 	t.Parallel()
 	server, state := startL2SegmentPlanMockServer(t)
@@ -884,7 +896,7 @@ func TestL2SegmentResourcePlanImportReadsGroup(t *testing.T) {
 	})
 }
 
-// Row 8: a rename with an unchanged group sends no group key.
+// A rename with an unchanged group sends no group key.
 func TestL2SegmentResourcePlanRenameSendsNoGroup(t *testing.T) {
 	t.Parallel()
 	server, state := startL2SegmentPlanMockServer(t)
@@ -928,7 +940,7 @@ func TestL2SegmentResourcePlanRenameWithUnsetGroupKeepsItKnown(t *testing.T) {
 func TestL2SegmentResourcePlanNullGroupStateSurvivesAnUpdate(t *testing.T) {
 	t.Parallel()
 	server, state := startL2SegmentPlanMockServer(t)
-	state.emptyGroupUntilWrite = true
+	state.setEmptyGroupUntilWrite()
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -948,7 +960,7 @@ func TestL2SegmentResourcePlanNullGroupStateSurvivesAnUpdate(t *testing.T) {
 func TestL2SegmentResourcePlanRefusedMoveShowsAPIError(t *testing.T) {
 	t.Parallel()
 	server, state := startL2SegmentPlanMockServer(t)
-	state.refusedMoves = 1
+	state.setRefusedMoves(1)
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -983,4 +995,33 @@ func TestL2SegmentResourcePlanAdoptsOutOfBandMoveWhenUnset(t *testing.T) {
 			},
 		},
 	})
+}
+
+func TestL2SegmentResourcePlanRefusesEmptyGroup(t *testing.T) {
+	t.Parallel()
+	server, state := startL2SegmentPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      l2PlanTestConfigWithGroup(server.URL, l2PlanTestName, ""),
+				ExpectError: regexp.MustCompile(`(?s)Invalid Attribute Value Length`),
+			},
+		},
+	})
+	if body := state.lastCreateBody(); body != nil {
+		t.Errorf("create body = %v, want no create request", body)
+	}
+}
+
+func TestL2SegmentResourcePlanGroupDescriptionBytes(t *testing.T) {
+	t.Parallel()
+
+	want := "ID of the resource group this L2 segment belongs to. When omitted, the L2 segment is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the L2 segment in place. Removing it from configuration leaves the L2 segment where it is, but a replacement created while it is unset joins the Default resource group"
+	schemaResponse := &fwresource.SchemaResponse{}
+	NewL2SegmentResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
+	if got := schemaResponse.Schema.Attributes["resource_group_id"].GetDescription(); got != want {
+		t.Errorf("resource_group_id Description = %q, want %q", got, want)
+	}
 }
