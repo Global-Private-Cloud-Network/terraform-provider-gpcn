@@ -17,8 +17,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 const (
@@ -65,6 +67,8 @@ func l2PlanTestDetailBodyInState(name string, description any, segmentState stri
 	}
 }
 
+const l2PlanTestGroupNotFoundBody = `{"success":false,"message":"Resource group not found"}`
+
 // l2PlanTestInUseBody is the refusal a delete meets while interfaces sit on the
 // segment. It is the only delete refusal that carries a typed code and a count.
 func l2PlanTestInUseBody() map[string]any {
@@ -103,6 +107,11 @@ type l2PlanTestServer struct {
 	// test framework destroys once more after a failed step. That destroy must
 	// succeed, or the run leaves the case red for the wrong reason.
 	refusalsLeft int
+	// emptyGroupUntilWrite makes every read report no group until the first
+	// update arrives, as a backend that predates resource groups does.
+	emptyGroupUntilWrite bool
+	// refusedMoves counts the updates naming a group that answer 404.
+	refusedMoves int
 }
 
 func (s *l2PlanTestServer) lastUpdateBody() map[string]any {
@@ -121,6 +130,16 @@ func (s *l2PlanTestServer) moveOutOfBand(groupID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.groupID = groupID
+}
+
+func (s *l2PlanTestServer) takeMoveRefusal() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.refusedMoves == 0 {
+		return false
+	}
+	s.refusedMoves--
+	return true
 }
 
 func (s *l2PlanTestServer) refuseNextDelete() {
@@ -182,12 +201,22 @@ func startL2SegmentPlanMockServer(t *testing.T) (*httptest.Server, *l2PlanTestSe
 			name, description := state.name, state.description
 			segmentState, failureReason := state.segmentState, state.failureReason
 			nicCount, groupID := state.nicCount, state.groupID
+			if state.emptyGroupUntilWrite {
+				groupID = ""
+			}
 			state.mu.Unlock()
 			testutil.WriteJSONResponse(w, l2PlanTestDetailBodyInState(name, description, segmentState, failureReason, nicCount, groupID))
 		case r.Method == http.MethodPut && r.URL.Path == segmentPath:
 			body := testutil.ReadRequestBody(r)
+			if _, moves := body["resourceGroupId"]; moves && state.takeMoveRefusal() {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(l2PlanTestGroupNotFoundBody))
+				return
+			}
 			state.mu.Lock()
 			state.updateBody = body
+			state.emptyGroupUntilWrite = false
 			if name, present := body["name"].(string); present {
 				state.name = name
 			}
@@ -870,6 +899,87 @@ func TestL2SegmentResourcePlanRenameSendsNoGroup(t *testing.T) {
 				Check: func(*terraform.State) error {
 					return l2PlanTestCheckKeys("update", state.lastUpdateBody(), "name")
 				},
+			},
+		},
+	})
+}
+
+func TestL2SegmentResourcePlanRenameWithUnsetGroupKeepsItKnown(t *testing.T) {
+	t.Parallel()
+	server, _ := startL2SegmentPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: l2PlanTestConfig(server.URL, l2PlanTestName)},
+			{
+				Config: l2PlanTestConfig(server.URL, l2PlanTestRenamedName),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnL2SegmentTest, plancheck.ResourceActionUpdate),
+						plancheck.ExpectKnownValue(gpcnL2SegmentTest, tfjsonpath.New("resource_group_id"), knownvalue.StringExact(l2PlanTestDefaultGroup)),
+					},
+				},
+			},
+		},
+	})
+}
+
+func TestL2SegmentResourcePlanNullGroupStateSurvivesAnUpdate(t *testing.T) {
+	t.Parallel()
+	server, state := startL2SegmentPlanMockServer(t)
+	state.emptyGroupUntilWrite = true
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: l2PlanTestConfig(server.URL, l2PlanTestName),
+				Check:  resource.TestCheckNoResourceAttr(gpcnL2SegmentTest, "resource_group_id"),
+			},
+			{
+				Config: l2PlanTestConfig(server.URL, l2PlanTestRenamedName),
+				Check:  resource.TestCheckResourceAttr(gpcnL2SegmentTest, "resource_group_id", l2PlanTestDefaultGroup),
+			},
+		},
+	})
+}
+
+func TestL2SegmentResourcePlanRefusedMoveShowsAPIError(t *testing.T) {
+	t.Parallel()
+	server, state := startL2SegmentPlanMockServer(t)
+	state.refusedMoves = 1
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: l2PlanTestConfigWithGroup(server.URL, l2PlanTestName, l2PlanTestGroupG)},
+			{
+				Config:      l2PlanTestConfigWithGroup(server.URL, l2PlanTestName, l2PlanTestGroupH),
+				ExpectError: regexp.MustCompile(`Resource\s+group\s+not\s+found`),
+			},
+			{
+				Config:           l2PlanTestConfigWithGroup(server.URL, l2PlanTestName, l2PlanTestGroupH),
+				ConfigPlanChecks: l2PlanTestExpectAction(plancheck.ResourceActionUpdate),
+				Check:            resource.TestCheckResourceAttr(gpcnL2SegmentTest, "resource_group_id", l2PlanTestGroupH),
+			},
+		},
+	})
+}
+
+func TestL2SegmentResourcePlanAdoptsOutOfBandMoveWhenUnset(t *testing.T) {
+	t.Parallel()
+	server, state := startL2SegmentPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: l2PlanTestConfig(server.URL, l2PlanTestName)},
+			{
+				PreConfig:        func() { state.moveOutOfBand(l2PlanTestGroupH) },
+				Config:           l2PlanTestConfig(server.URL, l2PlanTestName),
+				ConfigPlanChecks: l2PlanTestExpectAction(plancheck.ResourceActionNoop),
+				Check:            resource.TestCheckResourceAttr(gpcnL2SegmentTest, "resource_group_id", l2PlanTestGroupH),
 			},
 		},
 	})
