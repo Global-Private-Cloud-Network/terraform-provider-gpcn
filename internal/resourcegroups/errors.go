@@ -75,8 +75,7 @@ func renderLiveCounts(err error) string {
 	return " (" + strings.Join(parts, ", ") + ")"
 }
 
-// A client that pre-decodes numbers can hand over a json.Number instead of a
-// float64.
+// Details may hold a json.Number if the client ever decodes with UseNumber.
 func numericCount(raw any) (int64, bool) {
 	switch value := raw.(type) {
 	case float64:

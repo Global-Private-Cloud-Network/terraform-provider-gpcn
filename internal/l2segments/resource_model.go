@@ -86,9 +86,10 @@ func MapL2SegmentResponseToModel(response *readL2SegmentResponse, model Resource
 }
 
 // RefreshL2SegmentModelFromResponse shows an out-of-band edit. The name and the
-// description reconcile in place through the update verb. The mapper writes the
-// resource group, which does too. The datacenter has no update verb. A refreshed drift there
-// would plan a replacement of a carrier that live traffic uses.
+// description reconcile in place through the update verb. The resource group
+// also moves in place; the mapper writes it. The datacenter has no update verb.
+// A refreshed drift there would plan a replacement of a carrier that live
+// traffic uses.
 func RefreshL2SegmentModelFromResponse(response *readL2SegmentResponse, model ResourceModel) ResourceModel {
 	model.Name = types.StringValue(response.Data.Name)
 	model.Description = descriptionValue(response.Data.Description)
