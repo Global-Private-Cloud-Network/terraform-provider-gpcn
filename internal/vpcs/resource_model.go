@@ -36,8 +36,9 @@ func MapVpcResponseToModel(ctx context.Context, response *readVpcResponse, model
 }
 
 // RefreshVpcModelFromResponse shows a rename, which Terraform reconciles in
-// place. Every other configured attribute requires replacement. An out-of-band
-// change to one must not reach the plan.
+// place. The cidr, the datacenter and the name servers require replacement. An
+// out-of-band change to one must not reach the plan. The mapper writes the
+// resource group, which moves in place.
 func RefreshVpcModelFromResponse(response *readVpcResponse, model ResourceModel) ResourceModel {
 	if response.Data.Name != "" {
 		model.Name = types.StringValue(response.Data.Name)

@@ -59,7 +59,8 @@ func formatTimestamp(raw string) types.String {
 
 // MapL2SegmentResponseToModel writes the computed attributes. It fills the
 // configurable ones only when they are null. An import starts from that state,
-// and Create and Update keep the planned values.
+// and Create and Update keep the planned values. The resource group is the
+// exception: the mapper writes the API's value on every path.
 func MapL2SegmentResponseToModel(response *readL2SegmentResponse, model ResourceModel) ResourceModel {
 	model.ID = types.StringValue(response.Data.ID)
 	model.State = types.StringValue(response.Data.State)
@@ -85,8 +86,8 @@ func MapL2SegmentResponseToModel(response *readL2SegmentResponse, model Resource
 }
 
 // RefreshL2SegmentModelFromResponse shows an out-of-band edit. The name and the
-// description are the only attributes the platform reconciles in place, through
-// the update verb. The datacenter has no update verb. A refreshed drift there
+// description reconcile in place through the update verb. The mapper writes the
+// resource group, which does too. The datacenter has no update verb. A refreshed drift there
 // would plan a replacement of a carrier that live traffic uses.
 func RefreshL2SegmentModelFromResponse(response *readL2SegmentResponse, model ResourceModel) ResourceModel {
 	model.Name = types.StringValue(response.Data.Name)
