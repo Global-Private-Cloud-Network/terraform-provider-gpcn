@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 
 	"terraform-provider-gpcn/internal/testutil"
 
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
@@ -744,6 +746,11 @@ func TestGPUResourcePlanRefusedMoveShowsAPIError(t *testing.T) {
 				ExpectError: regexp.MustCompile(`You\s+do\s+not\s+have\s+access\s+to\s+the\s+specified\s+resource\s+group`),
 			},
 			{
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check:              resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestGroupA),
+			},
+			{
 				Config: moveConfig,
 				Check:  resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestGroupB),
 			},
@@ -779,4 +786,38 @@ func TestGPUResourcePlanAdoptsOutOfBandMoveWhenUnset(t *testing.T) {
 			},
 		},
 	})
+}
+
+func TestGPUResourcePlanRefusesEmptyGroup(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+	config := gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a", `resource_group_id = ""`)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config:      config,
+			ExpectError: regexp.MustCompile(`(?s)Invalid Attribute Value Length`),
+		}},
+	})
+
+	if body := mock.lastCreateBody(); body != nil {
+		t.Errorf("expected no create request, saw %v", body)
+	}
+}
+
+func TestGPUResourcePlanGroupDescriptionBytes(t *testing.T) {
+	t.Parallel()
+
+	schemaResponse := &fwresource.SchemaResponse{}
+	NewGPUResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
+	if schemaResponse.Diagnostics.HasError() {
+		t.Fatalf("Expected a schema, got %v", schemaResponse.Diagnostics)
+	}
+
+	want := "ID of the resource group this GPU instance belongs to. When omitted, the GPU instance is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the GPU instance in place. Removing it from configuration leaves the GPU instance where it is, but a replacement created while it is unset joins the Default resource group"
+	got := schemaResponse.Schema.Attributes["resource_group_id"].GetDescription()
+	if got != want {
+		t.Errorf("Description = %q, want %q", got, want)
+	}
 }
