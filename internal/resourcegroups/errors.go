@@ -28,7 +28,7 @@ const (
 	ErrDetailUpdateResourceGroupFailed = "Failed to update resource group with ID %s"
 	ErrDetailDeleteResourceGroupFailed = "Failed to delete resource group with ID %s"
 	ErrDetailNoResourceGroupMatches    = "No resource group named %q is visible to this API key."
-	ErrDetailResourceGroupListTooLong  = "The resource group list has %d pages, and the provider reads at most %d"
+	ErrDetailResourceGroupListTooLong  = "the resource group list has %d pages, and the provider reads at most %d"
 
 	ErrDetailResourceGroupIsDefault = "Resource group %s is the tenant's Default resource group, and GPCN does not delete it. To stop managing it with Terraform, run: terraform state rm <address>"
 	ErrDetailResourceGroupNotEmpty  = "Resource group %s still has resources assigned to it%s. Move them to another resource group, then destroy it again."
