@@ -150,6 +150,14 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					},
 				},
 			},
+			"resource_group_id": schema.StringAttribute{
+				Description: "ID of the resource group this GPU instance belongs to. When omitted, the GPU instance is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the GPU instance in place. Removing it from configuration leaves the GPU instance where it is",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"created_time": schema.StringAttribute{
 				Description: "Timestamp when the GPU was created in ISO-8601 format",
 				Computed:    true,
@@ -306,7 +314,12 @@ func (r *gpuResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		return
 	}
 
-	err := gpu.UpdateGPU(r.client, ctx, state.ID.ValueString(), plan.Name.ValueString())
+	resourceGroupID := ""
+	if !plan.ResourceGroupId.IsUnknown() && !plan.ResourceGroupId.IsNull() && !plan.ResourceGroupId.Equal(state.ResourceGroupId) {
+		resourceGroupID = plan.ResourceGroupId.ValueString()
+	}
+
+	err := gpu.UpdateGPU(r.client, ctx, state.ID.ValueString(), plan.Name.ValueString(), resourceGroupID)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			gpu.ErrSummaryUnableToUpdateGPU,

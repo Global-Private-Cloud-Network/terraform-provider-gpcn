@@ -39,8 +39,9 @@ type readGPUResponse struct {
 			CountryAbbr string `json:"countryAbbr"`
 			Country     string `json:"country"`
 		} `json:"datacenter"`
-		SshKeyId string `json:"sshKeyId"`
-		Image    string `json:"image"`
+		SshKeyId        string `json:"sshKeyId"`
+		Image           string `json:"image"`
+		ResourceGroupId string `json:"resourceGroupId"`
 	} `json:"data"`
 }
 
@@ -67,6 +68,10 @@ func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId stri
 	// A SKU code pins the exact SKU within the series when available.
 	if !plan.SkuCode.IsNull() && plan.SkuCode.ValueString() != "" {
 		createGPURequestBody["skuCode"] = plan.SkuCode.ValueString()
+	}
+
+	if !plan.ResourceGroupId.IsUnknown() && !plan.ResourceGroupId.IsNull() && plan.ResourceGroupId.ValueString() != "" {
+		createGPURequestBody["resourceGroupId"] = plan.ResourceGroupId.ValueString()
 	}
 
 	jsonCreateGPURequestBody, err := json.Marshal(createGPURequestBody)
@@ -159,12 +164,14 @@ func GetGPU(gpcnClient *client.GpcnClient, ctx context.Context, id string) (*rea
 	return &gpuResp, nil
 }
 
-func UpdateGPU(gpcnClient *client.GpcnClient, ctx context.Context, id, name string) error {
+func UpdateGPU(gpcnClient *client.GpcnClient, ctx context.Context, id, name, resourceGroupID string) error {
 	tflog.Info(ctx, LogStartingUpdateGPU)
 
-	// Create a new request with the name
 	updateGPURequestBody := map[string]any{
 		"name": name,
+	}
+	if resourceGroupID != "" {
+		updateGPURequestBody["resourceGroupId"] = resourceGroupID
 	}
 
 	jsonUpdateGPURequestBody, err := json.Marshal(updateGPURequestBody)

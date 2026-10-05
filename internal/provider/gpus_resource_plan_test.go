@@ -28,6 +28,9 @@ const (
 	gpuPlanTestAPIImageName = "Ubuntu 22.04 LTS (x86_64)"
 	gpuPlanTestSshKeyID     = "key-1"
 	gpuPlanTestTimestamp    = "2026-01-02T15:04:05Z"
+	gpuPlanTestDefaultGroup = "rg-default"
+	gpuPlanTestGroupA       = "rg-a"
+	gpuPlanTestGroupB       = "rg-b"
 )
 
 const (
@@ -74,7 +77,7 @@ func gpuPlanTestSeriesEntry(id, name, code, skuCode, gpuDescription string, vcpu
 
 // Every read the mock serves adds the sentinel configuration, so this envelope
 // omits the block.
-func gpuPlanTestReadBody(name string) map[string]any {
+func gpuPlanTestReadBody(name, group string) map[string]any {
 	return map[string]any{
 		"data": map[string]any{
 			"id":        gpuPlanTestID,
@@ -90,24 +93,66 @@ func gpuPlanTestReadBody(name string) map[string]any {
 				"countryAbbr": "US",
 				"country":     "United States",
 			},
-			"sshKeyId": gpuPlanTestSshKeyID,
-			"image":    gpuPlanTestAPIImageName,
+			"sshKeyId":        gpuPlanTestSshKeyID,
+			"image":           gpuPlanTestAPIImageName,
+			"resourceGroupId": group,
 		},
 	}
 }
 
-// startGPUPlanMockServer serves the GPU endpoints a rename needs. The handler
-// keeps the name from the last create or update. The read after an apply then
-// agrees with the configuration and leaves the refresh plan empty. The first
-// returned function renames the GPU out of band, which is how a test creates
-// drift. The second returns the body of the last create POST.
-func startGPUPlanMockServer(t *testing.T) (*httptest.Server, func(string), func() map[string]any) {
+// gpuPlanTestMock is the state behind the GPU mock. The handler keeps the name
+// and the group from the last create or update independently, so the read after
+// an apply agrees with the configuration and leaves the refresh plan empty.
+type gpuPlanTestMock struct {
+	mu         sync.Mutex
+	name       string
+	group      string
+	createBody map[string]any
+	putBodies  []map[string]any
+}
+
+// setName renames the GPU out of band, which is how a test creates drift.
+func (m *gpuPlanTestMock) setName(newName string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.name = newName
+}
+
+// setGroup moves the GPU out of band.
+func (m *gpuPlanTestMock) setGroup(newGroup string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.group = newGroup
+}
+
+func (m *gpuPlanTestMock) lastCreateBody() map[string]any {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.createBody
+}
+
+func (m *gpuPlanTestMock) lastPutBody() map[string]any {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.putBodies) == 0 {
+		return nil
+	}
+	return m.putBodies[len(m.putBodies)-1]
+}
+
+func (m *gpuPlanTestMock) putCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.putBodies)
+}
+
+// startGPUPlanMockServer serves the GPU endpoints a rename or a move needs.
+// A GPU the mock creates lands in the Default group unless the create body
+// names one.
+func startGPUPlanMockServer(t *testing.T) (*httptest.Server, *gpuPlanTestMock) {
 	t.Helper()
 
-	var mu sync.Mutex
-	name := ""
-	var createBody map[string]any
-
+	mock := &gpuPlanTestMock{group: gpuPlanTestDefaultGroup}
 	gpuPath := "/v1/resource/gpu/" + gpuPlanTestID
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -118,24 +163,33 @@ func startGPUPlanMockServer(t *testing.T) (*httptest.Server, func(string), func(
 			testutil.WriteJSONResponse(w, gpuPlanTestInventoryBody())
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/gpu/":
 			body := testutil.ReadRequestBody(r)
-			mu.Lock()
-			createBody = body
-			name, _ = body["name"].(string)
-			mu.Unlock()
+			mock.mu.Lock()
+			mock.createBody = body
+			mock.name, _ = body["name"].(string)
+			if group, ok := body["resourceGroupId"].(string); ok {
+				mock.group = group
+			}
+			mock.mu.Unlock()
 			testutil.HandleJobResponse(w, "job-1", gpuPlanTestID, true)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", gpuPlanTestID, true)
 		case r.Method == http.MethodPut && r.URL.Path == gpuPath:
 			body := testutil.ReadRequestBody(r)
-			mu.Lock()
-			name, _ = body["name"].(string)
-			mu.Unlock()
+			mock.mu.Lock()
+			mock.putBodies = append(mock.putBodies, body)
+			if name, ok := body["name"].(string); ok {
+				mock.name = name
+			}
+			if group, ok := body["resourceGroupId"].(string); ok {
+				mock.group = group
+			}
+			mock.mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodGet && r.URL.Path == gpuPath:
-			mu.Lock()
-			current := name
-			mu.Unlock()
-			testutil.WriteJSONResponse(w, gpuCatalogTestReadBody(t, current))
+			mock.mu.Lock()
+			name, group := mock.name, mock.group
+			mock.mu.Unlock()
+			testutil.WriteJSONResponse(w, gpuCatalogTestReadBody(t, name, group))
 		case r.Method == http.MethodDelete && r.URL.Path == gpuPath:
 			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
 		default:
@@ -144,22 +198,15 @@ func startGPUPlanMockServer(t *testing.T) (*httptest.Server, func(string), func(
 	}))
 	t.Cleanup(server.Close)
 
-	setName := func(newName string) {
-		mu.Lock()
-		name = newName
-		mu.Unlock()
-	}
-
-	lastCreateBody := func() map[string]any {
-		mu.Lock()
-		defer mu.Unlock()
-		return createBody
-	}
-
-	return server, setName, lastCreateBody
+	return server, mock
 }
 
 func gpuPlanTestConfig(host, seriesField, name string) string {
+	return gpuPlanTestGroupConfig(host, seriesField, name, "")
+}
+
+// groupField is a full attribute line, or empty to leave the group unset.
+func gpuPlanTestGroupConfig(host, seriesField, name, groupField string) string {
 	return fmt.Sprintf(`
 provider "gpcn" {
   host    = %q
@@ -170,18 +217,19 @@ resource "gpcn_gpu" "test" {
   name          = %q
   datacenter_id = %q
   %s
+  %s
   gpu_count  = 1
   image_name = %q
   initial_auth = {
     ssh_key_id = %q
   }
 }
-`, host, name, gpuPlanTestDatacenterID, seriesField, gpuPlanTestImageName, gpuPlanTestSshKeyID)
+`, host, name, gpuPlanTestDatacenterID, seriesField, groupField, gpuPlanTestImageName, gpuPlanTestSshKeyID)
 }
 
 func TestGPUResourcePlanRenameWithSeriesCode(t *testing.T) {
 	t.Parallel()
-	server, _, _ := startGPUPlanMockServer(t)
+	server, _ := startGPUPlanMockServer(t)
 
 	seriesField := fmt.Sprintf("series_code = %q\n  sku_code    = %q", gpuPlanTestSeriesCode, gpuPlanTestSkuCode)
 
@@ -219,7 +267,7 @@ func TestGPUResourcePlanRenameWithSeriesCode(t *testing.T) {
 // The test pins the in-place rename path. It does not guard a fix.
 func TestGPUResourcePlanRenameWithSeriesName(t *testing.T) {
 	t.Parallel()
-	server, _, _ := startGPUPlanMockServer(t)
+	server, _ := startGPUPlanMockServer(t)
 
 	seriesField := fmt.Sprintf("series_name = %q", gpuPlanTestSeriesName)
 
@@ -256,7 +304,7 @@ func TestGPUResourcePlanRenameWithSeriesName(t *testing.T) {
 
 func TestGPUResourcePlanDetectsOutOfBandRename(t *testing.T) {
 	t.Parallel()
-	server, setName, _ := startGPUPlanMockServer(t)
+	server, mock := startGPUPlanMockServer(t)
 
 	seriesField := fmt.Sprintf("series_code = %q\n  sku_code    = %q", gpuPlanTestSeriesCode, gpuPlanTestSkuCode)
 	config := gpuPlanTestConfig(server.URL, seriesField, "gpu-plan-a")
@@ -273,7 +321,7 @@ func TestGPUResourcePlanDetectsOutOfBandRename(t *testing.T) {
 				},
 			},
 			{
-				PreConfig: func() { setName("renamed-out-of-band") },
+				PreConfig: func() { mock.setName("renamed-out-of-band") },
 				Config:    config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
@@ -291,10 +339,10 @@ func TestGPUResourcePlanDetectsOutOfBandRename(t *testing.T) {
 // gpuCatalogTestReadBody answers with the sentinel series the API returns when
 // its own series lookup misses. The state must still carry the code the
 // inventory resolved. The read echo cannot be the source of that code.
-func gpuCatalogTestReadBody(t *testing.T, name string) map[string]any {
+func gpuCatalogTestReadBody(t *testing.T, name, group string) map[string]any {
 	t.Helper()
 
-	body := gpuPlanTestReadBody(name)
+	body := gpuPlanTestReadBody(name, group)
 	data, ok := body["data"].(map[string]any)
 	if !ok {
 		t.Fatalf("Expected a data object in the read body, got %T", body["data"])
@@ -316,12 +364,12 @@ func gpuCatalogTestReadBody(t *testing.T, name string) map[string]any {
 // carries the code, so the test pins both.
 func TestGPUResourcePlanAcceptsCatalogSeriesCode(t *testing.T) {
 	t.Parallel()
-	server, _, lastCreateBody := startGPUPlanMockServer(t)
+	server, mock := startGPUPlanMockServer(t)
 
 	seriesField := fmt.Sprintf("series_name = %q", gpuCatalogTestSeriesName)
 
 	checkCreateBody := func(*terraform.State) error {
-		body := lastCreateBody()
+		body := mock.lastCreateBody()
 		if body == nil {
 			return fmt.Errorf("expected a create POST, got none")
 		}
@@ -356,7 +404,7 @@ func TestGPUResourcePlanAcceptsCatalogSeriesCode(t *testing.T) {
 // lists every series the datacenter offers.
 func TestGPUInventoryDataSourcePlanRefusesEmptySeriesCode(t *testing.T) {
 	t.Parallel()
-	server, _, _ := startGPUPlanMockServer(t)
+	server, _ := startGPUPlanMockServer(t)
 
 	config := fmt.Sprintf(`
 provider "gpcn" {
@@ -384,7 +432,7 @@ data "gpcn_gpu_inventory" "test" {
 // pins the second one.
 func TestGPUInventoryDataSourcePlanRefusesEmptySeriesName(t *testing.T) {
 	t.Parallel()
-	server, _, _ := startGPUPlanMockServer(t)
+	server, _ := startGPUPlanMockServer(t)
 
 	config := fmt.Sprintf(`
 provider "gpcn" {
@@ -404,5 +452,208 @@ data "gpcn_gpu_inventory" "test" {
 			Config:      config,
 			ExpectError: regexp.MustCompile(`(?s)Invalid Attribute Value Length`),
 		}},
+	})
+}
+
+const gpuPlanTestSeriesFieldCode = "series_code = \"" + gpuPlanTestSeriesCode + "\""
+
+func gpuPlanTestGroupField(group string) string {
+	return fmt.Sprintf("resource_group_id = %q", group)
+}
+
+func gpuPlanTestCheckKeys(body map[string]any, wantGroup string) error {
+	if body == nil {
+		return fmt.Errorf("expected a request body, got none")
+	}
+	got, has := body["resourceGroupId"]
+	if wantGroup == "" {
+		if has {
+			return fmt.Errorf("expected no resourceGroupId key, got %v", got)
+		}
+		return nil
+	}
+	if got != wantGroup {
+		return fmt.Errorf("expected resourceGroupId %q, got %v", wantGroup, got)
+	}
+	return nil
+}
+
+func gpuPlanTestNoop() resource.ConfigPlanChecks {
+	return resource.ConfigPlanChecks{
+		PreApply: []plancheck.PlanCheck{
+			plancheck.ExpectResourceAction(gpcnGPUTest, plancheck.ResourceActionNoop),
+		},
+	}
+}
+
+func gpuPlanTestAction(action plancheck.ResourceActionType) resource.ConfigPlanChecks {
+	return resource.ConfigPlanChecks{
+		PreApply: []plancheck.PlanCheck{
+			plancheck.ExpectResourceAction(gpcnGPUTest, action),
+		},
+	}
+}
+
+func TestGPUResourcePlanCreateWithoutGroupAdoptsDefault(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config: gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a", ""),
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestDefaultGroup),
+				func(*terraform.State) error { return gpuPlanTestCheckKeys(mock.lastCreateBody(), "") },
+			),
+		}},
+	})
+}
+
+func TestGPUResourcePlanCreateWithGroupSendsIt(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config: gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a", gpuPlanTestGroupField(gpuPlanTestGroupA)),
+			Check: resource.ComposeAggregateTestCheckFunc(
+				resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestGroupA),
+				func(*terraform.State) error { return gpuPlanTestCheckKeys(mock.lastCreateBody(), gpuPlanTestGroupA) },
+			),
+		}},
+	})
+}
+
+func TestGPUResourcePlanMovesGroupInPlace(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a", gpuPlanTestGroupField(gpuPlanTestGroupA)),
+			},
+			{
+				Config:           gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a", gpuPlanTestGroupField(gpuPlanTestGroupB)),
+				ConfigPlanChecks: gpuPlanTestAction(plancheck.ResourceActionUpdate),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestGroupB),
+					func(*terraform.State) error { return gpuPlanTestCheckKeys(mock.lastPutBody(), gpuPlanTestGroupB) },
+				),
+			},
+		},
+	})
+}
+
+func TestGPUResourcePlanRemovedGroupPlansEmpty(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a", gpuPlanTestGroupField(gpuPlanTestGroupA)),
+			},
+			{
+				Config:           gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a", ""),
+				ConfigPlanChecks: gpuPlanTestNoop(),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestGroupA),
+					func(*terraform.State) error {
+						if n := mock.putCount(); n != 0 {
+							return fmt.Errorf("expected no PUT, got %d", n)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+func TestGPUResourcePlanDetectsOutOfBandMove(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+
+	config := gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a", gpuPlanTestGroupField(gpuPlanTestGroupA))
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig:        func() { mock.setGroup(gpuPlanTestGroupB) },
+				Config:           config,
+				ConfigPlanChecks: gpuPlanTestAction(plancheck.ResourceActionUpdate),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestGroupA),
+					func(*terraform.State) error { return gpuPlanTestCheckKeys(mock.lastPutBody(), gpuPlanTestGroupA) },
+				),
+			},
+		},
+	})
+}
+
+func TestGPUResourcePlanImportReadsGroup(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+
+	mock.setName("gpu-plan-a")
+	mock.setGroup(gpuPlanTestGroupA)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:        gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a", ""),
+				ResourceName:  gpcnGPUTest,
+				ImportState:   true,
+				ImportStateId: gpuPlanTestID,
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported state, got %d", len(states))
+					}
+					if got := states[0].Attributes["resource_group_id"]; got != gpuPlanTestGroupA {
+						return fmt.Errorf("imported resource_group_id = %q, want %q", got, gpuPlanTestGroupA)
+					}
+					return nil
+				},
+			},
+		},
+	})
+}
+
+func TestGPUResourcePlanRenameSendsNoGroup(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a", gpuPlanTestGroupField(gpuPlanTestGroupA)),
+			},
+			{
+				Config:           gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-b", gpuPlanTestGroupField(gpuPlanTestGroupA)),
+				ConfigPlanChecks: gpuPlanTestAction(plancheck.ResourceActionUpdate),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnGPUTest, "name", "gpu-plan-b"),
+					func(*terraform.State) error {
+						body := mock.lastPutBody()
+						if err := gpuPlanTestCheckKeys(body, ""); err != nil {
+							return err
+						}
+						if body["name"] != "gpu-plan-b" {
+							return fmt.Errorf("expected name gpu-plan-b, got %v", body["name"])
+						}
+						return nil
+					},
+				),
+			},
+		},
 	})
 }

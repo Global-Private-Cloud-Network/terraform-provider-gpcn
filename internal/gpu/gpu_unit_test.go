@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -24,12 +26,16 @@ const testImageName = "ubuntu-22.04"
 
 const testSSHKeyID = "ssh-key-abc123"
 
+const testResourceGroupID = "rg-default-1"
+
 func createTestGPUModel(name, seriesName, seriesCode, imageName string, gpuCount int64) ResourceModel {
 	model := ResourceModel{
 		Name:         types.StringValue(name),
 		DatacenterId: types.StringValue(testDatacenterID),
 		GPUCount:     types.Int64Value(gpuCount),
 		ImageName:    types.StringValue(imageName),
+		// A plan leaves an unset resource_group_id unknown.
+		ResourceGroupId: types.StringUnknown(),
 	}
 	if seriesName != "" {
 		model.SeriesName = types.StringValue(seriesName)
@@ -58,6 +64,7 @@ func newGPUResponse(id, name string) *readGPUResponse {
 	resp.Data.UpdatedAt = time.Now().Format(time.RFC3339)
 	resp.Data.Status = "Running"
 	resp.Data.IP = "192.168.1.100"
+	resp.Data.ResourceGroupId = testResourceGroupID
 	resp.Data.Datacenter.ID = testDatacenterID
 	resp.Data.Datacenter.Name = "US-East-1"
 	resp.Data.Datacenter.Region = "East"
@@ -741,7 +748,7 @@ func TestUpdateGPUMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	err := UpdateGPU(gpcnClient, context.Background(), gpuID, newName)
+	err := UpdateGPU(gpcnClient, context.Background(), gpuID, newName, "")
 	if err != nil {
 		t.Fatalf("UpdateGPU failed: %v", err)
 	}
@@ -1306,5 +1313,153 @@ func TestNoInventoryDetailsStayCoupledUnit(t *testing.T) {
 	want := strings.Replace(ErrDetailNoInventoryAvailable, "series code %s", "series %s", 1)
 	if ErrDetailNoInventoryAvailableByName != want {
 		t.Errorf("Expected ErrDetailNoInventoryAvailableByName %q, got %q", want, ErrDetailNoInventoryAvailableByName)
+	}
+}
+
+func gpuUnitCreateKeys(t *testing.T, group types.String) map[string]any {
+	t.Helper()
+
+	const (
+		jobID    = "job-rg-1"
+		gpuID    = "gpu-rg-1"
+		seriesID = "series-rg-1"
+	)
+	var got map[string]any
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/gpu/"):
+				got = testutil.ReadRequestBody(r)
+				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
+					Success: true,
+					Data: client.JobStatusDataResponse{
+						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: gpuID}},
+					},
+				})
+			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, gpuID, true)
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/"+gpuID):
+				testutil.WriteJSONResponse(w, newGPUResponse(gpuID, "test-gpu"))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	model := createTestGPUModel("test-gpu", "", "nvidia-rtx_a6000-series", testImageName, 2)
+	model.ResourceGroupId = group
+	if _, err := CreateGPU(gpcnClient, context.Background(), seriesID, model); err != nil {
+		t.Fatalf("CreateGPU failed: %v", err)
+	}
+	return got
+}
+
+func gpuUnitKeys(body map[string]any) []string {
+	keys := make([]string, 0, len(body))
+	for k := range body {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func TestCreateGPUSendsResourceGroupIdMockHTTP(t *testing.T) {
+	got := gpuUnitCreateKeys(t, types.StringValue("rg-chosen"))
+
+	want := []string{"datacenterId", "gpuCount", "imageName", "name", "resourceGroupId", "seriesId", "sshKeyId"}
+	if !reflect.DeepEqual(gpuUnitKeys(got), want) {
+		t.Errorf("Expected create keys %v, got %v", want, gpuUnitKeys(got))
+	}
+	if got["resourceGroupId"] != "rg-chosen" {
+		t.Errorf("Expected resourceGroupId 'rg-chosen', got %v", got["resourceGroupId"])
+	}
+}
+
+func TestCreateGPUOmitsUnknownResourceGroupIdMockHTTP(t *testing.T) {
+	want := []string{"datacenterId", "gpuCount", "imageName", "name", "seriesId", "sshKeyId"}
+
+	for name, group := range map[string]types.String{
+		"unknown": types.StringUnknown(),
+		"null":    types.StringNull(),
+	} {
+		got := gpuUnitCreateKeys(t, group)
+		if !reflect.DeepEqual(gpuUnitKeys(got), want) {
+			t.Errorf("%s: expected create keys %v, got %v", name, want, gpuUnitKeys(got))
+		}
+	}
+}
+
+func gpuUnitUpdateKeys(t *testing.T, name, group string) map[string]any {
+	t.Helper()
+
+	const gpuID = "gpu-update-rg"
+	var got map[string]any
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "PUT" && strings.Contains(r.URL.Path, "/gpu/"+gpuID) {
+				got = testutil.ReadRequestBody(r)
+				testutil.WriteJSONResponse(w, map[string]bool{"success": true})
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	if err := UpdateGPU(gpcnClient, context.Background(), gpuID, name, group); err != nil {
+		t.Fatalf("UpdateGPU failed: %v", err)
+	}
+	return got
+}
+
+func TestUpdateGPUSendsResourceGroupIdMockHTTP(t *testing.T) {
+	got := gpuUnitUpdateKeys(t, "updated-gpu", "rg-moved")
+
+	want := []string{"name", "resourceGroupId"}
+	if !reflect.DeepEqual(gpuUnitKeys(got), want) {
+		t.Errorf("Expected update keys %v, got %v", want, gpuUnitKeys(got))
+	}
+	if got["resourceGroupId"] != "rg-moved" {
+		t.Errorf("Expected resourceGroupId 'rg-moved', got %v", got["resourceGroupId"])
+	}
+}
+
+func TestUpdateGPUOmitsEmptyResourceGroupIdMockHTTP(t *testing.T) {
+	got := gpuUnitUpdateKeys(t, "updated-gpu", "")
+
+	want := []string{"name"}
+	if !reflect.DeepEqual(gpuUnitKeys(got), want) {
+		t.Errorf("Expected update keys %v, got %v", want, gpuUnitKeys(got))
+	}
+}
+
+func TestMapGPUResponseToModelResourceGroupUnit(t *testing.T) {
+	response := newGPUResponse("gpu-123", "test-gpu")
+	response.Data.ResourceGroupId = "rg-reported"
+
+	for name, prior := range map[string]types.String{
+		"unknown":    types.StringUnknown(),
+		"null":       types.StringNull(),
+		"configured": types.StringValue("rg-configured"),
+	} {
+		model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100-series", testImageName, 2)
+		model.ResourceGroupId = prior
+		result := MapGPUResponseToModel(context.Background(), response, model)
+		if result.ResourceGroupId.ValueString() != "rg-reported" {
+			t.Errorf("%s: expected the read group 'rg-reported', got %v", name, result.ResourceGroupId)
+		}
+	}
+
+	response.Data.ResourceGroupId = ""
+	model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100-series", testImageName, 2)
+	model.ResourceGroupId = types.StringValue("rg-configured")
+	result := MapGPUResponseToModel(context.Background(), response, model)
+	if !result.ResourceGroupId.IsNull() {
+		t.Errorf("Expected an empty group to map to null, got %v", result.ResourceGroupId)
 	}
 }
