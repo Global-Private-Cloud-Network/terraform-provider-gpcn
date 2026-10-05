@@ -53,7 +53,7 @@ output "team_resource_group_id" {
 
 ### Optional
 
-- `name` (String) Return only the resource group with exactly this name. The data source fails when none matches
+- `name` (String) Return only the resource group with exactly this name. The data source fails when none matches.
 
 ### Read-Only
 
