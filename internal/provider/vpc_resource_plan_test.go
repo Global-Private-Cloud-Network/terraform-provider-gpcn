@@ -12,8 +12,10 @@ import (
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 const (
@@ -44,6 +46,8 @@ const vpcEmptyUpdateRefusalBody = `{"success":false,` +
 	`"message":"Invalid Parameters: At least one of name, description or resourceGroupId must be provided",` +
 	`"error":{"code":"Validation Error","statusCode":422,` +
 	`"details":{"issues":[{"path":"","message":"At least one of name, description or resourceGroupId must be provided"}]}}}`
+
+const vpcGroupNotFoundBody = `{"success":false,"message":"Resource group not found"}`
 
 const vpcNotFoundBody = `{"success":false,"message":"VPC not found",` +
 	`"error":{"code":"Resource Not Found","statusCode":404,"details":null}}`
@@ -81,6 +85,11 @@ type vpcMock struct {
 	requests       []string
 	groupID        string
 	updateBodies   []map[string]any
+	// emptyGroupUntilWrite makes every read report no group until the first
+	// update arrives, as a backend that predates resource groups does.
+	emptyGroupUntilWrite bool
+	// refusedMoves counts the updates naming a group that answer 404.
+	refusedMoves int
 	// tearingDownDeletes counts the deletes that answer the refusal a live
 	// teardown raises. The first of them parks the row in deleting.
 	tearingDownDeletes int
@@ -223,6 +232,10 @@ func (m *vpcMock) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	_, hasName := body["name"]
 	_, hasDescription := body["description"]
 	_, hasGroup := body["resourceGroupId"]
+	if hasGroup && m.takeMoveRefusal() {
+		writeVpcRefusal(w, http.StatusNotFound, vpcGroupNotFoundBody)
+		return
+	}
 	if !hasName && !hasDescription && !hasGroup {
 		writeVpcRefusal(w, http.StatusUnprocessableEntity, vpcEmptyUpdateRefusalBody)
 		return
@@ -230,6 +243,7 @@ func (m *vpcMock) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 	m.mutex.Lock()
 	m.updateBodies = append(m.updateBodies, body)
+	m.emptyGroupUntilWrite = false
 	if group, ok := body["resourceGroupId"].(string); ok {
 		m.groupID = group
 	}
@@ -344,11 +358,29 @@ func (m *vpcMock) vpcBody() map[string]any {
 		"failureReason":   m.failureReason,
 		"egressIp":        nil,
 		"activeJobId":     nil,
-		"resourceGroupId": m.groupID,
+		"resourceGroupId": m.reportedGroup(),
 		"createdAt":       vpcPlanTestTimestamp,
 		"updatedAt":       vpcPlanTestTimestamp,
 		"dnsNameservers":  m.answeredNameservers(),
 	}
+}
+
+// reportedGroup is called with the mutex held.
+func (m *vpcMock) reportedGroup() string {
+	if m.emptyGroupUntilWrite {
+		return ""
+	}
+	return m.groupID
+}
+
+func (m *vpcMock) takeMoveRefusal() bool {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	if m.refusedMoves == 0 {
+		return false
+	}
+	m.refusedMoves--
+	return true
 }
 
 // The platform freezes the requested nameservers on the row, and resolves its
@@ -1160,6 +1192,10 @@ func TestVpcResourcePlanImportReadsGroup(t *testing.T) {
 					return nil
 				},
 			},
+			{
+				Config:           vpcPlanTestGroupConfig(mock.url, "vpc-group-import", vpcPlanTestGroupA),
+				ConfigPlanChecks: vpcPlanTestExpectAction(plancheck.ResourceActionNoop),
+			},
 		},
 	})
 }
@@ -1188,6 +1224,86 @@ func TestVpcResourcePlanRenameSendsNoGroup(t *testing.T) {
 					}
 					return nil
 				},
+			},
+		},
+	})
+}
+
+func TestVpcResourcePlanRenameWithUnsetGroupKeepsItKnown(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: vpcPlanTestConfig(mock.url, "vpc-known-a")},
+			{
+				Config: vpcPlanTestConfig(mock.url, "vpc-known-b"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcTest, plancheck.ResourceActionUpdate),
+						plancheck.ExpectKnownValue(gpcnVpcTest, tfjsonpath.New("resource_group_id"), knownvalue.StringExact(vpcPlanTestDefaultGroup)),
+					},
+				},
+			},
+		},
+	})
+}
+
+func TestVpcResourcePlanNullGroupStateSurvivesAnUpdate(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+	mock.emptyGroupUntilWrite = true
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vpcPlanTestConfig(mock.url, "vpc-null-a"),
+				Check:  resource.TestCheckNoResourceAttr(gpcnVpcTest, "resource_group_id"),
+			},
+			{
+				Config: vpcPlanTestConfig(mock.url, "vpc-null-b"),
+				Check:  resource.TestCheckResourceAttr(gpcnVpcTest, "resource_group_id", vpcPlanTestDefaultGroup),
+			},
+		},
+	})
+}
+
+func TestVpcResourcePlanRefusedMoveShowsAPIError(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+	mock.refusedMoves = 1
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: vpcPlanTestGroupConfig(mock.url, "vpc-refused", vpcPlanTestGroupA)},
+			{
+				Config:      vpcPlanTestGroupConfig(mock.url, "vpc-refused", vpcPlanTestGroupB),
+				ExpectError: regexp.MustCompile(`Resource group not found`),
+			},
+			{
+				Config: vpcPlanTestGroupConfig(mock.url, "vpc-refused", vpcPlanTestGroupB),
+				Check:  resource.TestCheckResourceAttr(gpcnVpcTest, "resource_group_id", vpcPlanTestGroupB),
+			},
+		},
+	})
+}
+
+func TestVpcResourcePlanAdoptsOutOfBandMoveWhenUnset(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: vpcPlanTestConfig(mock.url, "vpc-adopt")},
+			{
+				PreConfig:        func() { mock.setGroup(vpcPlanTestGroupB) },
+				Config:           vpcPlanTestConfig(mock.url, "vpc-adopt"),
+				ConfigPlanChecks: vpcPlanTestExpectAction(plancheck.ResourceActionNoop),
+				Check:            resource.TestCheckResourceAttr(gpcnVpcTest, "resource_group_id", vpcPlanTestGroupB),
 			},
 		},
 	})
