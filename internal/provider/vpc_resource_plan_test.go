@@ -24,6 +24,9 @@ const (
 	vpcPlanTestTimestamp    = "2026-01-02T15:04:05Z"
 	vpcPlanTestCreateJobID  = "job-create"
 	vpcPlanTestDeleteJobID  = "job-delete"
+	vpcPlanTestDefaultGroup = "rg-default"
+	vpcPlanTestGroupA       = "rg-a"
+	vpcPlanTestGroupB       = "rg-b"
 )
 
 const vpcOverlapRefusalBody = `{"success":false,` +
@@ -76,6 +79,8 @@ type vpcMock struct {
 	createBody     map[string]any
 	createBodies   []map[string]any
 	requests       []string
+	groupID        string
+	updateBodies   []map[string]any
 	// tearingDownDeletes counts the deletes that answer the refusal a live
 	// teardown raises. The first of them parks the row in deleting.
 	tearingDownDeletes int
@@ -109,6 +114,7 @@ func startVpcPlanMockServer(t *testing.T, refusals vpcMockRefusals) *vpcMock {
 
 	mock := &vpcMock{
 		cidr:                  vpcPlanTestCidr,
+		groupID:               vpcPlanTestDefaultGroup,
 		status:                "active",
 		createRefusal:         refusals.create,
 		deleteRefusals:        refusals.deletes,
@@ -169,6 +175,9 @@ func (m *vpcMock) handleCreate(w http.ResponseWriter, r *http.Request) {
 			m.cidr = cidr
 		}
 		m.nameservers = requestedNameservers(body)
+		if group, ok := body["resourceGroupId"].(string); ok {
+			m.groupID = group
+		}
 	}
 	m.mutex.Unlock()
 
@@ -213,12 +222,17 @@ func (m *vpcMock) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 	_, hasName := body["name"]
 	_, hasDescription := body["description"]
-	if !hasName && !hasDescription {
+	_, hasGroup := body["resourceGroupId"]
+	if !hasName && !hasDescription && !hasGroup {
 		writeVpcRefusal(w, http.StatusUnprocessableEntity, vpcEmptyUpdateRefusalBody)
 		return
 	}
 
 	m.mutex.Lock()
+	m.updateBodies = append(m.updateBodies, body)
+	if group, ok := body["resourceGroupId"].(string); ok {
+		m.groupID = group
+	}
 	if name, ok := body["name"].(string); ok {
 		m.name = name
 	}
@@ -330,7 +344,7 @@ func (m *vpcMock) vpcBody() map[string]any {
 		"failureReason":   m.failureReason,
 		"egressIp":        nil,
 		"activeJobId":     nil,
-		"resourceGroupId": nil,
+		"resourceGroupId": m.groupID,
 		"createdAt":       vpcPlanTestTimestamp,
 		"updatedAt":       vpcPlanTestTimestamp,
 		"dnsNameservers":  m.answeredNameservers(),
@@ -380,6 +394,20 @@ func (m *vpcMock) allCreateBodies() []map[string]any {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	return append([]map[string]any(nil), m.createBodies...)
+}
+
+func (m *vpcMock) allUpdateBodies() []map[string]any {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	return append([]map[string]any(nil), m.updateBodies...)
+}
+
+// setGroup moves the VPC behind the provider's back. The mutex orders the
+// write against the handler goroutine that reads the field.
+func (m *vpcMock) setGroup(groupID string) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.groupID = groupID
 }
 
 // setName renames the VPC behind the provider's back. The mutex orders the
@@ -966,6 +994,200 @@ func TestVpcResourcePlanReportsAParkedReclaimWhoseJobFails(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVpcTest, "id", vpcPlanTestID),
 				),
+			},
+		},
+	})
+}
+
+func vpcPlanTestGroupConfig(host, name, groupID string) string {
+	return vpcPlanTestConfigWith(host, fmt.Sprintf(`
+  name              = %q
+  datacenter_id     = %q
+  cidr              = %q
+  resource_group_id = %q
+`, name, vpcPlanTestDatacenterID, vpcPlanTestCidr, groupID))
+}
+
+func vpcPlanTestExpectAction(action plancheck.ResourceActionType) resource.ConfigPlanChecks {
+	return resource.ConfigPlanChecks{
+		PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(gpcnVpcTest, action)},
+	}
+}
+
+func TestVpcResourcePlanCreateWithoutGroupAdoptsDefault(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vpcPlanTestConfig(mock.url, "vpc-group-default"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcTest, "resource_group_id", vpcPlanTestDefaultGroup),
+					func(*terraform.State) error {
+						if _, sent := mock.lastCreateBody()["resourceGroupId"]; sent {
+							return fmt.Errorf("expected no resourceGroupId in the create body, got %v", mock.lastCreateBody()["resourceGroupId"])
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+func TestVpcResourcePlanCreateWithGroupSendsIt(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vpcPlanTestGroupConfig(mock.url, "vpc-group-sent", vpcPlanTestGroupA),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcTest, "resource_group_id", vpcPlanTestGroupA),
+					func(*terraform.State) error {
+						if got, _ := mock.lastCreateBody()["resourceGroupId"].(string); got != vpcPlanTestGroupA {
+							return fmt.Errorf("create body resourceGroupId = %q, want %q", got, vpcPlanTestGroupA)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+func TestVpcResourcePlanMovesGroupInPlace(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: vpcPlanTestGroupConfig(mock.url, "vpc-group-move", vpcPlanTestGroupA)},
+			{
+				Config:           vpcPlanTestGroupConfig(mock.url, "vpc-group-move", vpcPlanTestGroupB),
+				ConfigPlanChecks: vpcPlanTestExpectAction(plancheck.ResourceActionUpdate),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcTest, "resource_group_id", vpcPlanTestGroupB),
+					func(*terraform.State) error {
+						bodies := mock.allUpdateBodies()
+						if len(bodies) != 1 {
+							return fmt.Errorf("PUT count = %d, want 1", len(bodies))
+						}
+						if len(bodies[0]) != 1 || bodies[0]["resourceGroupId"] != vpcPlanTestGroupB {
+							return fmt.Errorf("PUT body = %v, want exactly resourceGroupId %q", bodies[0], vpcPlanTestGroupB)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+func TestVpcResourcePlanRemovedGroupPlansEmpty(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: vpcPlanTestGroupConfig(mock.url, "vpc-group-removed", vpcPlanTestGroupA)},
+			{
+				Config:           vpcPlanTestConfig(mock.url, "vpc-group-removed"),
+				ConfigPlanChecks: vpcPlanTestExpectAction(plancheck.ResourceActionNoop),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcTest, "resource_group_id", vpcPlanTestGroupA),
+					func(*terraform.State) error {
+						if count := mock.requestCount("PUT /v1/resource/vpcs/" + vpcPlanTestID); count != 0 {
+							return fmt.Errorf("expected no update request, got %d", count)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+func TestVpcResourcePlanDetectsOutOfBandMove(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: vpcPlanTestGroupConfig(mock.url, "vpc-group-drift", vpcPlanTestGroupA)},
+			{
+				PreConfig:        func() { mock.setGroup(vpcPlanTestGroupB) },
+				Config:           vpcPlanTestGroupConfig(mock.url, "vpc-group-drift", vpcPlanTestGroupA),
+				ConfigPlanChecks: vpcPlanTestExpectAction(plancheck.ResourceActionUpdate),
+				Check:            resource.TestCheckResourceAttr(gpcnVpcTest, "resource_group_id", vpcPlanTestGroupA),
+			},
+		},
+	})
+}
+
+func TestVpcResourcePlanImportReadsGroup(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: vpcPlanTestGroupConfig(mock.url, "vpc-group-import", vpcPlanTestGroupA)},
+			{
+				ResourceName:            gpcnVpcTest,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"acknowledge_overlap"},
+			},
+			{
+				ResourceName:  gpcnVpcTest,
+				ImportState:   true,
+				ImportStateId: vpcPlanTestID,
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("imported %d instances, want 1", len(states))
+					}
+					if got := states[0].Attributes["resource_group_id"]; got != vpcPlanTestGroupA {
+						return fmt.Errorf("imported resource_group_id = %q, want %q", got, vpcPlanTestGroupA)
+					}
+					return nil
+				},
+			},
+		},
+	})
+}
+
+func TestVpcResourcePlanRenameSendsNoGroup(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: vpcPlanTestGroupConfig(mock.url, "vpc-group-rename-a", vpcPlanTestGroupA)},
+			{
+				Config:           vpcPlanTestGroupConfig(mock.url, "vpc-group-rename-b", vpcPlanTestGroupA),
+				ConfigPlanChecks: vpcPlanTestExpectAction(plancheck.ResourceActionUpdate),
+				Check: func(*terraform.State) error {
+					bodies := mock.allUpdateBodies()
+					if len(bodies) != 1 {
+						return fmt.Errorf("PUT count = %d, want 1", len(bodies))
+					}
+					if _, sent := bodies[0]["resourceGroupId"]; sent {
+						return fmt.Errorf("PUT body carries resourceGroupId: %v", bodies[0])
+					}
+					if bodies[0]["name"] != "vpc-group-rename-b" {
+						return fmt.Errorf("PUT body = %v, want the new name", bodies[0])
+					}
+					return nil
+				},
 			},
 		},
 	})

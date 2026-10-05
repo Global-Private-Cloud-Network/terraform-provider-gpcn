@@ -15,6 +15,7 @@ type ResourceModel struct {
 	CIDR               types.String `tfsdk:"cidr"`
 	Description        types.String `tfsdk:"description"`
 	DNSNameservers     types.List   `tfsdk:"dns_nameservers"`
+	ResourceGroupId    types.String `tfsdk:"resource_group_id"`
 	AcknowledgeOverlap types.Bool   `tfsdk:"acknowledge_overlap"`
 	Status             types.String `tfsdk:"status"`
 	EgressIp           types.String `tfsdk:"egress_ip"`
@@ -52,6 +53,7 @@ func mapVpcPayloadToModel(_ context.Context, payload vpcPayload, model ResourceM
 	model.ActiveJobId = nullableString(payload.ActiveJobId)
 	model.CreatedTime = rfc850Timestamp(payload.CreatedAt)
 	model.LastUpdated = rfc850Timestamp(payload.UpdatedAt)
+	model.ResourceGroupId = emptyAsNull(payload.ResourceGroupID)
 
 	// The schema defaults the description to the empty string. A null in state
 	// would plan a change on every apply.
@@ -96,6 +98,14 @@ func rfc850Timestamp(timestamp string) types.String {
 		return types.StringValue("unknown")
 	}
 	return types.StringValue(parsed.Format(time.RFC850))
+}
+
+// An older backend answers an empty string where a group id belongs.
+func emptyAsNull(value string) types.String {
+	if value == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(value)
 }
 
 func nullableString(value *string) types.String {

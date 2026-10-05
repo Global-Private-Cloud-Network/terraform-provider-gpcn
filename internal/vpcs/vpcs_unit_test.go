@@ -21,14 +21,15 @@ const (
 func vpcUnitTestPayload() vpcPayload {
 	description := "shared services"
 	payload := vpcPayload{
-		ID:             vpcUnitTestID,
-		Name:           "vpc-from-api",
-		Description:    &description,
-		CIDR:           "10.50.0.0/16",
-		Status:         VPC_STATUS_ACTIVE,
-		CreatedAt:      vpcUnitTestCreated,
-		UpdatedAt:      vpcUnitTestUpdated,
-		DnsNameservers: []string{"8.8.8.8", "1.1.1.1"},
+		ID:              vpcUnitTestID,
+		ResourceGroupID: "rg-api",
+		Name:            "vpc-from-api",
+		Description:     &description,
+		CIDR:            "10.50.0.0/16",
+		Status:          VPC_STATUS_ACTIVE,
+		CreatedAt:       vpcUnitTestCreated,
+		UpdatedAt:       vpcUnitTestUpdated,
+		DnsNameservers:  []string{"8.8.8.8", "1.1.1.1"},
 	}
 	payload.Datacenter.ID = "dc-1"
 	payload.Datacenter.Name = "Kansas"
@@ -315,5 +316,37 @@ func TestFailedVpcWarningWithoutAReason(t *testing.T) {
 	want := "VPC vpc-1 is in the failed state. Destroy the VPC and create it again."
 	if got := FailedVpcWarning(vpcUnitTestID, "").Detail(); got != want {
 		t.Errorf("Detail = %q, want %q", got, want)
+	}
+}
+
+func TestMapVpcResponseToModelWritesTheResourceGroup(t *testing.T) {
+	t.Parallel()
+
+	read := MapVpcResponseToModel(context.Background(), &readVpcResponse{Data: vpcUnitTestPayload()}, ResourceModel{
+		ResourceGroupId: types.StringValue("rg-configured"),
+	})
+	if got := read.ResourceGroupId.ValueString(); got != "rg-api" {
+		t.Errorf("ResourceGroupId after a read = %q, want %q", got, "rg-api")
+	}
+
+	created := &createVpcResponse{}
+	created.Data.Vpc = vpcUnitTestPayload()
+	fromCreate := MapCreatedVpcToModel(context.Background(), created, ResourceModel{ResourceGroupId: types.StringUnknown()})
+	if got := fromCreate.ResourceGroupId.ValueString(); got != "rg-api" {
+		t.Errorf("ResourceGroupId after a create = %q, want %q", got, "rg-api")
+	}
+}
+
+func TestMapVpcResponseToModelMapsAnEmptyResourceGroupToNull(t *testing.T) {
+	t.Parallel()
+
+	payload := vpcUnitTestPayload()
+	payload.ResourceGroupID = ""
+
+	model := MapVpcResponseToModel(context.Background(), &readVpcResponse{Data: payload}, ResourceModel{
+		ResourceGroupId: types.StringValue("rg-configured"),
+	})
+	if !model.ResourceGroupId.IsNull() {
+		t.Errorf("ResourceGroupId = %v, want null", model.ResourceGroupId)
 	}
 }
