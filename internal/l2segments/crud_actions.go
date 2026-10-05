@@ -20,6 +20,7 @@ type l2SegmentData struct {
 	Name             string  `json:"name"`
 	Description      *string `json:"description"`
 	DatacenterId     string  `json:"datacenterId"`
+	ResourceGroupID  string  `json:"resourceGroupId"`
 	DatacenterName   *string `json:"datacenterName"`
 	State            string  `json:"state"`
 	Offering         string  `json:"offering"`
@@ -45,11 +46,14 @@ func createRequestBody(model ResourceModel) map[string]any {
 	if description := model.Description.ValueString(); description != "" {
 		body["description"] = description
 	}
+	if !model.ResourceGroupId.IsUnknown() && !model.ResourceGroupId.IsNull() {
+		body["resourceGroupId"] = model.ResourceGroupId.ValueString()
+	}
 	return body
 }
 
 // updateRequestBody names only what changed. The wire schema refuses a body that
-// names neither the name nor the description.
+// names none of the name, the description and the resource group.
 func updateRequestBody(plan, state ResourceModel) map[string]any {
 	body := map[string]any{}
 	if !plan.Name.Equal(state.Name) {
@@ -57,6 +61,9 @@ func updateRequestBody(plan, state ResourceModel) map[string]any {
 	}
 	if !plan.Description.Equal(state.Description) {
 		body["description"] = plan.Description.ValueString()
+	}
+	if !plan.ResourceGroupId.IsUnknown() && !plan.ResourceGroupId.IsNull() && !plan.ResourceGroupId.Equal(state.ResourceGroupId) {
+		body["resourceGroupId"] = plan.ResourceGroupId.ValueString()
 	}
 	return body
 }

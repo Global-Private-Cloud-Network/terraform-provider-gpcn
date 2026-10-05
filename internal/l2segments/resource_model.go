@@ -11,6 +11,7 @@ type ResourceModel struct {
 	Name             types.String `tfsdk:"name"`
 	DatacenterId     types.String `tfsdk:"datacenter_id"`
 	Description      types.String `tfsdk:"description"`
+	ResourceGroupId  types.String `tfsdk:"resource_group_id"`
 	State            types.String `tfsdk:"state"`
 	Offering         types.String `tfsdk:"offering"`
 	FailureReason    types.String `tfsdk:"failure_reason"`
@@ -39,6 +40,14 @@ func descriptionValue(raw *string) types.String {
 	return types.StringValue(*raw)
 }
 
+// resourceGroupValue maps the empty id an old backend answers to null.
+func resourceGroupValue(raw string) types.String {
+	if raw == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(raw)
+}
+
 // formatTimestamp renders an API timestamp in the house format.
 func formatTimestamp(raw string) types.String {
 	parsed, err := time.Parse(time.RFC3339, raw)
@@ -57,6 +66,7 @@ func MapL2SegmentResponseToModel(response *readL2SegmentResponse, model Resource
 	model.Offering = types.StringValue(response.Data.Offering)
 	model.FailureReason = nullableString(response.Data.FailureReason)
 	model.DatacenterName = nullableString(response.Data.DatacenterName)
+	model.ResourceGroupId = resourceGroupValue(response.Data.ResourceGroupID)
 	model.AttachedNicCount = types.Int64Value(response.Data.AttachedNicCount)
 	model.CreatedTime = formatTimestamp(response.Data.CreatedAt)
 	model.LastUpdated = formatTimestamp(response.Data.UpdatedAt)

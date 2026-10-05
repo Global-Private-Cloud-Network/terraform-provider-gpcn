@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
-	"strings"
 	"sync"
 	"testing"
 
@@ -33,15 +32,18 @@ const (
 	l2PlanTestRenamedName  = "segment-plan-b"
 	l2PlanTestFailedState  = "failed"
 	l2PlanTestFailedReason = "Segment creation failed; delete the segment and try again"
+	l2PlanTestDefaultGroup = "grp-default"
+	l2PlanTestGroupG       = "grp-g"
+	l2PlanTestGroupH       = "grp-h"
 )
 
 // l2PlanTestDetailBody answers with the detail projection. The description is the
 // one nullable field the provider normalizes, so the fixture leaves it null.
-func l2PlanTestDetailBody(name string, description any, nicCount int64) map[string]any {
-	return l2PlanTestDetailBodyInState(name, description, "ready", nil, nicCount)
+func l2PlanTestDetailBody(name string, description any, nicCount int64, groupID string) map[string]any {
+	return l2PlanTestDetailBodyInState(name, description, "ready", nil, nicCount, groupID)
 }
 
-func l2PlanTestDetailBodyInState(name string, description any, segmentState string, failureReason any, nicCount int64) map[string]any {
+func l2PlanTestDetailBodyInState(name string, description any, segmentState string, failureReason any, nicCount int64, groupID string) map[string]any {
 	return map[string]any{
 		"success": true,
 		"message": "",
@@ -51,7 +53,7 @@ func l2PlanTestDetailBodyInState(name string, description any, segmentState stri
 			"description":      description,
 			"datacenterId":     l2PlanTestDatacenterID,
 			"datacenterName":   nil,
-			"resourceGroupId":  nil,
+			"resourceGroupId":  groupID,
 			"state":            segmentState,
 			"offering":         "plain",
 			"failureReason":    failureReason,
@@ -85,6 +87,11 @@ type l2PlanTestServer struct {
 	description any
 	// updateBody is the body of the last rename or description edit.
 	updateBody map[string]any
+	// createBody is the body of the last create.
+	createBody map[string]any
+	// groupID is the resource group the row reports. A create or an update that
+	// names a group stores it.
+	groupID string
 	// segmentState and failureReason are what the platform parked on the row.
 	segmentState  string
 	failureReason any
@@ -102,6 +109,18 @@ func (s *l2PlanTestServer) lastUpdateBody() map[string]any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.updateBody
+}
+
+func (s *l2PlanTestServer) lastCreateBody() map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.createBody
+}
+
+func (s *l2PlanTestServer) moveOutOfBand(groupID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.groupID = groupID
 }
 
 func (s *l2PlanTestServer) refuseNextDelete() {
@@ -136,7 +155,7 @@ func (s *l2PlanTestServer) setName(name string) {
 func startL2SegmentPlanMockServer(t *testing.T) (*httptest.Server, *l2PlanTestServer) {
 	t.Helper()
 
-	state := &l2PlanTestServer{segmentState: "ready"}
+	state := &l2PlanTestServer{segmentState: "ready", groupID: l2PlanTestDefaultGroup}
 	segmentPath := "/v1/resource/l2-segments/" + l2PlanTestSegmentID
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -146,7 +165,11 @@ func startL2SegmentPlanMockServer(t *testing.T) (*httptest.Server, *l2PlanTestSe
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/l2-segments/":
 			body := testutil.ReadRequestBody(r)
 			state.mu.Lock()
+			state.createBody = body
 			state.name, _ = body["name"].(string)
+			if groupID, present := body["resourceGroupId"].(string); present {
+				state.groupID = groupID
+			}
 			if description, present := body["description"]; present {
 				state.description = description
 			}
@@ -158,9 +181,9 @@ func startL2SegmentPlanMockServer(t *testing.T) (*httptest.Server, *l2PlanTestSe
 			state.mu.Lock()
 			name, description := state.name, state.description
 			segmentState, failureReason := state.segmentState, state.failureReason
-			nicCount := state.nicCount
+			nicCount, groupID := state.nicCount, state.groupID
 			state.mu.Unlock()
-			testutil.WriteJSONResponse(w, l2PlanTestDetailBodyInState(name, description, segmentState, failureReason, nicCount))
+			testutil.WriteJSONResponse(w, l2PlanTestDetailBodyInState(name, description, segmentState, failureReason, nicCount, groupID))
 		case r.Method == http.MethodPut && r.URL.Path == segmentPath:
 			body := testutil.ReadRequestBody(r)
 			state.mu.Lock()
@@ -171,13 +194,16 @@ func startL2SegmentPlanMockServer(t *testing.T) (*httptest.Server, *l2PlanTestSe
 			if description, present := body["description"]; present {
 				state.description = description
 			}
+			if groupID, present := body["resourceGroupId"].(string); present {
+				state.groupID = groupID
+			}
 			if state.attachedOnUpdate != nil {
 				state.nicCount = *state.attachedOnUpdate
 				state.attachedOnUpdate = nil
 			}
-			name, description, nicCount := state.name, state.description, state.nicCount
+			name, description, nicCount, groupID := state.name, state.description, state.nicCount, state.groupID
 			state.mu.Unlock()
-			testutil.WriteJSONResponse(w, l2PlanTestDetailBody(name, description, nicCount))
+			testutil.WriteJSONResponse(w, l2PlanTestDetailBody(name, description, nicCount, groupID))
 		case r.Method == http.MethodDelete && r.URL.Path == segmentPath:
 			state.mu.Lock()
 			refuse := state.refusalsLeft > 0
@@ -203,6 +229,21 @@ func startL2SegmentPlanMockServer(t *testing.T) (*httptest.Server, *l2PlanTestSe
 
 func l2PlanTestConfig(host, name string) string {
 	return l2PlanTestConfigInDatacenter(host, name, l2PlanTestDatacenterID)
+}
+
+func l2PlanTestConfigWithGroup(host, name, groupID string) string {
+	return fmt.Sprintf(`
+provider "gpcn" {
+  host    = %q
+  api_key = "test-key"
+}
+
+resource "gpcn_l2_segment" "test" {
+  name              = %q
+  datacenter_id     = %q
+  resource_group_id = %q
+}
+`, host, name, l2PlanTestDatacenterID, groupID)
 }
 
 func l2PlanTestConfigInDatacenter(host, name, datacenterID string) string {
@@ -526,7 +567,7 @@ func TestL2SegmentReadWarnsOnFailedSegmentUnit(t *testing.T) {
 			T: t,
 			Handler: func(w http.ResponseWriter, _ *http.Request) {
 				testutil.WriteJSONResponse(w, l2PlanTestDetailBodyInState(
-					l2PlanTestName, nil, segmentState, failureReason, 0,
+					l2PlanTestName, nil, segmentState, failureReason, 0, l2PlanTestDefaultGroup,
 				))
 			},
 		})
@@ -547,6 +588,7 @@ func TestL2SegmentReadWarnsOnFailedSegmentUnit(t *testing.T) {
 			FailureReason:    types.StringNull(),
 			DatacenterName:   types.StringNull(),
 			AttachedNicCount: types.Int64Value(0),
+			ResourceGroupId:  types.StringValue(l2PlanTestDefaultGroup),
 			CreatedTime:      types.StringValue(l2PlanTestRFC850),
 			LastUpdated:      types.StringValue(l2PlanTestRFC850),
 		})
@@ -631,16 +673,204 @@ func TestL2SegmentResourcePlanReplacesOnDatacenterChange(t *testing.T) {
 	})
 }
 
-// The sentence is pinned byte for byte. An import of a grouped segment plans a
-// no-op, so nothing else tells the reader the group is dropped.
-func TestL2SegmentResourceSchemaNamesTheResourceGroupDrop(t *testing.T) {
-	t.Parallel()
-
-	schemaResponse := &fwresource.SchemaResponse{}
-	NewL2SegmentResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
-
-	const want = "gpcn_l2_segment does not expose resource_group_id in this release; a segment that sits in a resource group imports without it."
-	if got := schemaResponse.Schema.Description; !strings.Contains(got, want) {
-		t.Errorf("Description = %q, want it to contain %q", got, want)
+func l2PlanTestCheckKeys(label string, body map[string]any, want ...string) error {
+	if body == nil {
+		return fmt.Errorf("%s: expected a request, got none", label)
 	}
+	if len(body) != len(want) {
+		return fmt.Errorf("%s: body = %#v, want keys %v", label, body, want)
+	}
+	for _, key := range want {
+		if _, present := body[key]; !present {
+			return fmt.Errorf("%s: body = %#v, want key %q", label, body, key)
+		}
+	}
+	return nil
+}
+
+func l2PlanTestExpectAction(action plancheck.ResourceActionType) resource.ConfigPlanChecks {
+	return resource.ConfigPlanChecks{
+		PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(gpcnL2SegmentTest, action)},
+	}
+}
+
+// Row 1: an unset group leaves the key off the wire and adopts the Default id.
+func TestL2SegmentResourcePlanCreateWithoutGroupAdoptsDefault(t *testing.T) {
+	t.Parallel()
+	server, state := startL2SegmentPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: l2PlanTestConfig(server.URL, l2PlanTestName),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnL2SegmentTest, "resource_group_id", l2PlanTestDefaultGroup),
+					func(*terraform.State) error {
+						return l2PlanTestCheckKeys("create", state.lastCreateBody(), "name", "datacenterId")
+					},
+				),
+			},
+		},
+	})
+}
+
+// Row 2: a configured group travels in the create body.
+func TestL2SegmentResourcePlanCreateWithGroupSendsIt(t *testing.T) {
+	t.Parallel()
+	server, state := startL2SegmentPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: l2PlanTestConfigWithGroup(server.URL, l2PlanTestName, l2PlanTestGroupG),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnL2SegmentTest, "resource_group_id", l2PlanTestGroupG),
+					func(*terraform.State) error {
+						body := state.lastCreateBody()
+						if err := l2PlanTestCheckKeys("create", body, "name", "datacenterId", "resourceGroupId"); err != nil {
+							return err
+						}
+						if got, _ := body["resourceGroupId"].(string); got != l2PlanTestGroupG {
+							return fmt.Errorf("resourceGroupId = %q, want %q", got, l2PlanTestGroupG)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+// Row 6: a new group is an in-place update whose body names only the group.
+func TestL2SegmentResourcePlanMovesGroupInPlace(t *testing.T) {
+	t.Parallel()
+	server, state := startL2SegmentPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: l2PlanTestConfigWithGroup(server.URL, l2PlanTestName, l2PlanTestGroupG)},
+			{
+				Config:           l2PlanTestConfigWithGroup(server.URL, l2PlanTestName, l2PlanTestGroupH),
+				ConfigPlanChecks: l2PlanTestExpectAction(plancheck.ResourceActionUpdate),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnL2SegmentTest, "resource_group_id", l2PlanTestGroupH),
+					func(*terraform.State) error {
+						body := state.lastUpdateBody()
+						if err := l2PlanTestCheckKeys("update", body, "resourceGroupId"); err != nil {
+							return err
+						}
+						if got, _ := body["resourceGroupId"].(string); got != l2PlanTestGroupH {
+							return fmt.Errorf("resourceGroupId = %q, want %q", got, l2PlanTestGroupH)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+// Row 7: removing the attribute keeps the group and writes nothing.
+func TestL2SegmentResourcePlanRemovedGroupPlansEmpty(t *testing.T) {
+	t.Parallel()
+	server, state := startL2SegmentPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: l2PlanTestConfigWithGroup(server.URL, l2PlanTestName, l2PlanTestGroupG)},
+			{
+				Config:           l2PlanTestConfig(server.URL, l2PlanTestName),
+				ConfigPlanChecks: l2PlanTestExpectAction(plancheck.ResourceActionNoop),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnL2SegmentTest, "resource_group_id", l2PlanTestGroupG),
+					func(*terraform.State) error {
+						if body := state.lastUpdateBody(); body != nil {
+							return fmt.Errorf("expected no PUT, got %#v", body)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+// Row 5: a move made out of band plans a move back when the group is configured.
+func TestL2SegmentResourcePlanDetectsOutOfBandMove(t *testing.T) {
+	t.Parallel()
+	server, state := startL2SegmentPlanMockServer(t)
+
+	config := l2PlanTestConfigWithGroup(server.URL, l2PlanTestName, l2PlanTestGroupG)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig:        func() { state.moveOutOfBand(l2PlanTestGroupH) },
+				Config:           config,
+				ConfigPlanChecks: l2PlanTestExpectAction(plancheck.ResourceActionUpdate),
+				Check:            resource.TestCheckResourceAttr(gpcnL2SegmentTest, "resource_group_id", l2PlanTestGroupG),
+			},
+		},
+	})
+}
+
+// Row 9: an import reads the group, and the plan is empty with the group unset.
+func TestL2SegmentResourcePlanImportReadsGroup(t *testing.T) {
+	t.Parallel()
+	server, state := startL2SegmentPlanMockServer(t)
+
+	state.setName(l2PlanTestName)
+	state.moveOutOfBand(l2PlanTestGroupH)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:             l2PlanTestConfig(server.URL, l2PlanTestName),
+				ResourceName:       gpcnL2SegmentTest,
+				ImportState:        true,
+				ImportStateId:      l2PlanTestSegmentID,
+				ImportStatePersist: true,
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported state, got %d", len(states))
+					}
+					if got := states[0].Attributes["resource_group_id"]; got != l2PlanTestGroupH {
+						return fmt.Errorf("imported resource_group_id = %q, want %q", got, l2PlanTestGroupH)
+					}
+					return nil
+				},
+			},
+			{
+				Config:           l2PlanTestConfig(server.URL, l2PlanTestName),
+				ConfigPlanChecks: l2PlanTestExpectAction(plancheck.ResourceActionNoop),
+			},
+		},
+	})
+}
+
+// Row 8: a rename with an unchanged group sends no group key.
+func TestL2SegmentResourcePlanRenameSendsNoGroup(t *testing.T) {
+	t.Parallel()
+	server, state := startL2SegmentPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: l2PlanTestConfigWithGroup(server.URL, l2PlanTestName, l2PlanTestGroupG)},
+			{
+				Config:           l2PlanTestConfigWithGroup(server.URL, l2PlanTestRenamedName, l2PlanTestGroupG),
+				ConfigPlanChecks: l2PlanTestExpectAction(plancheck.ResourceActionUpdate),
+				Check: func(*terraform.State) error {
+					return l2PlanTestCheckKeys("update", state.lastUpdateBody(), "name")
+				},
+			},
+		},
+	})
 }

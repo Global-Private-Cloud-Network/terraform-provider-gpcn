@@ -15,6 +15,7 @@ import (
 const (
 	unitTestSegmentID    = "6c0e4b1a-1d6e-4b6e-9d2b-000000000001"
 	unitTestDatacenterID = "2f1c5f33-9a1e-4f2d-9d2b-000000000002"
+	unitTestGroupID      = "9a3d7c10-0000-4000-8000-00000000000a"
 	unitTestCreatedAt    = "2026-01-02T15:04:05Z"
 	unitTestUpdatedAt    = "2026-03-04T05:06:07Z"
 	unitTestCreatedRFC   = "Friday, 02-Jan-26 15:04:05 UTC"
@@ -28,6 +29,7 @@ func unitTestResponse() *readL2SegmentResponse {
 			ID:               unitTestSegmentID,
 			Name:             "segment-a",
 			Description:      nil,
+			ResourceGroupID:  unitTestGroupID,
 			DatacenterId:     unitTestDatacenterID,
 			DatacenterName:   nil,
 			State:            "ready",
@@ -64,6 +66,24 @@ func TestMapL2SegmentResponseToModelFillsNullAttributesUnit(t *testing.T) {
 	}
 	if got := model.AttachedNicCount.ValueInt64(); got != 3 {
 		t.Errorf("attached_nic_count = %d, want 3", got)
+	}
+}
+
+// The mapper writes the group the API reports on every call, and an empty id
+// from an old backend maps to null.
+func TestMapL2SegmentResponseToModelWritesResourceGroupUnit(t *testing.T) {
+	t.Parallel()
+
+	model := MapL2SegmentResponseToModel(unitTestResponse(), ResourceModel{ResourceGroupId: types.StringValue("stale")})
+	if got := model.ResourceGroupId.ValueString(); got != unitTestGroupID {
+		t.Errorf("resource_group_id = %#v, want %q", model.ResourceGroupId, unitTestGroupID)
+	}
+
+	response := unitTestResponse()
+	response.Data.ResourceGroupID = ""
+	model = MapL2SegmentResponseToModel(response, ResourceModel{ResourceGroupId: types.StringValue("stale")})
+	if !model.ResourceGroupId.IsNull() {
+		t.Errorf("resource_group_id = %#v, want null", model.ResourceGroupId)
 	}
 }
 
@@ -165,24 +185,49 @@ func TestRefreshL2SegmentModelNormalizesNullDescriptionUnit(t *testing.T) {
 func TestCreateL2SegmentRequestBodyUnit(t *testing.T) {
 	t.Parallel()
 
-	body := createRequestBody(ResourceModel{
-		Name:         types.StringValue("segment-a"),
-		DatacenterId: types.StringValue(unitTestDatacenterID),
-		Description:  types.StringValue("first"),
-	})
+	cases := []struct {
+		name  string
+		group types.String
+		want  map[string]any
+	}{
+		{
+			name:  "group known",
+			group: types.StringValue(unitTestGroupID),
+			want: map[string]any{
+				"name": "segment-a", "datacenterId": unitTestDatacenterID,
+				"description": "first", "resourceGroupId": unitTestGroupID,
+			},
+		},
+		{
+			name:  "group null",
+			group: types.StringNull(),
+			want:  map[string]any{"name": "segment-a", "datacenterId": unitTestDatacenterID, "description": "first"},
+		},
+		{
+			name:  "group unknown",
+			group: types.StringUnknown(),
+			want:  map[string]any{"name": "segment-a", "datacenterId": unitTestDatacenterID, "description": "first"},
+		},
+	}
 
-	want := map[string]any{
-		"name":         "segment-a",
-		"datacenterId": unitTestDatacenterID,
-		"description":  "first",
-	}
-	if len(body) != len(want) {
-		t.Fatalf("body = %#v, want %#v", body, want)
-	}
-	for key, value := range want {
-		if body[key] != value {
-			t.Errorf("body[%q] = %#v, want %#v", key, body[key], value)
-		}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			body := createRequestBody(ResourceModel{
+				Name:            types.StringValue("segment-a"),
+				DatacenterId:    types.StringValue(unitTestDatacenterID),
+				Description:     types.StringValue("first"),
+				ResourceGroupId: testCase.group,
+			})
+			if len(body) != len(testCase.want) {
+				t.Fatalf("body = %#v, want %#v", body, testCase.want)
+			}
+			for key, value := range testCase.want {
+				if body[key] != value {
+					t.Errorf("body[%q] = %#v, want %#v", key, body[key], value)
+				}
+			}
+		})
 	}
 }
 
@@ -206,9 +251,11 @@ func TestUpdateL2SegmentRequestBodyUnit(t *testing.T) {
 	t.Parallel()
 
 	state := ResourceModel{
-		Name:        types.StringValue("segment-a"),
-		Description: types.StringValue("first"),
+		Name:            types.StringValue("segment-a"),
+		Description:     types.StringValue("first"),
+		ResourceGroupId: types.StringValue(unitTestGroupID),
 	}
+	const otherGroupID = "9a3d7c10-0000-4000-8000-00000000000b"
 
 	cases := []struct {
 		name string
@@ -217,18 +264,38 @@ func TestUpdateL2SegmentRequestBodyUnit(t *testing.T) {
 	}{
 		{
 			name: "rename only",
-			plan: ResourceModel{Name: types.StringValue("segment-b"), Description: types.StringValue("first")},
+			plan: ResourceModel{Name: types.StringValue("segment-b"), Description: types.StringValue("first"), ResourceGroupId: state.ResourceGroupId},
 			want: map[string]any{"name": "segment-b"},
 		},
 		{
 			name: "description only",
-			plan: ResourceModel{Name: types.StringValue("segment-a"), Description: types.StringValue("second")},
+			plan: ResourceModel{Name: types.StringValue("segment-a"), Description: types.StringValue("second"), ResourceGroupId: state.ResourceGroupId},
 			want: map[string]any{"description": "second"},
 		},
 		{
 			name: "both",
-			plan: ResourceModel{Name: types.StringValue("segment-b"), Description: types.StringValue("second")},
+			plan: ResourceModel{Name: types.StringValue("segment-b"), Description: types.StringValue("second"), ResourceGroupId: state.ResourceGroupId},
 			want: map[string]any{"name": "segment-b", "description": "second"},
+		},
+		{
+			name: "group only",
+			plan: ResourceModel{Name: state.Name, Description: state.Description, ResourceGroupId: types.StringValue(otherGroupID)},
+			want: map[string]any{"resourceGroupId": otherGroupID},
+		},
+		{
+			name: "group unchanged",
+			plan: ResourceModel{Name: state.Name, Description: state.Description, ResourceGroupId: types.StringValue(unitTestGroupID)},
+			want: map[string]any{},
+		},
+		{
+			name: "group null",
+			plan: ResourceModel{Name: state.Name, Description: state.Description, ResourceGroupId: types.StringNull()},
+			want: map[string]any{},
+		},
+		{
+			name: "group unknown",
+			plan: ResourceModel{Name: state.Name, Description: state.Description, ResourceGroupId: types.StringUnknown()},
+			want: map[string]any{},
 		},
 		{
 			name: "nothing changed",

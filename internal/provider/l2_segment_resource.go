@@ -44,7 +44,7 @@ func (r *l2SegmentResource) Metadata(_ context.Context, req resource.MetadataReq
 // Schema defines the schema for the resource.
 func (r *l2SegmentResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages an L2 segment: a layer-2 network that carries virtual machine traffic inside one datacenter. The API key needs l2-segment:read to read a segment, and l2-segment:create, l2-segment:update and l2-segment:delete to manage one. gpcn_l2_segment does not expose resource_group_id in this release; a segment that sits in a resource group imports without it.",
+		Description: "Manages an L2 segment: a layer-2 network that carries virtual machine traffic inside one datacenter. The API key needs l2-segment:read to read a segment, and l2-segment:create, l2-segment:update and l2-segment:delete to manage one.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the L2 segment in UUID format",
@@ -80,6 +80,14 @@ func (r *l2SegmentResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 					helpers.NoOuterWhitespaceValidator{Summary: l2segments.ErrSummaryInvalidL2SegmentAttribute, Attribute: "description"},
 				},
 				Default: stringdefault.StaticString(""),
+			},
+			"resource_group_id": schema.StringAttribute{
+				Description: "ID of the resource group this L2 segment belongs to. When omitted, the L2 segment is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the L2 segment in place. Removing it from configuration leaves the L2 segment where it is",
+				Optional:    true,
+				Computed:    true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"state": schema.StringAttribute{
 				Description: "Lifecycle state of the L2 segment: one of 'creating', 'ready', 'failed' or 'removing'",
