@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -19,7 +20,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
-	"strings"
 )
 
 const (
