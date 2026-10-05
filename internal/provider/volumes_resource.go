@@ -123,9 +123,12 @@ func (r *volumesResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Computed:    true,
 			},
 			"resource_group_id": schema.StringAttribute{
-				Description: "ID of the resource group this volume belongs to. When omitted, the volume is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the volume in place. Removing it from configuration leaves the volume where it is",
+				Description: "ID of the resource group this volume belongs to. When omitted, the volume is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the volume in place. Removing it from configuration leaves the volume where it is, but a replacement created while it is unset joins the Default resource group",
 				Optional:    true,
 				Computed:    true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseNonNullStateForUnknown(),
 				},

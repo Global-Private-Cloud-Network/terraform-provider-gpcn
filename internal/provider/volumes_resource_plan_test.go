@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"net/http"
@@ -12,10 +13,13 @@ import (
 
 	"terraform-provider-gpcn/internal/testutil"
 
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
+	"strings"
 )
 
 const (
@@ -1002,8 +1006,65 @@ func TestVolumeResourcePlanRefusedMoveShowsAPIError(t *testing.T) {
 				ExpectError: regexp.MustCompile(`You\s+do\s+not\s+have\s+access\s+to\s+the\s+specified\s+resource\s+group`),
 			},
 			{
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check:              resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupA),
+			},
+			{
 				Config: moveConfig,
 				Check:  resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupB),
+			},
+		},
+	})
+}
+
+// A refused move must stop the apply before the resize call. Otherwise the volume
+// grows while its group stays behind.
+func TestVolumeResourcePlanRefusedMoveWithGrowSendsNoResize(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+	startConfig := volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, 128, volPlanTestGroupA)
+	moveAndGrow := volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupB)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: startConfig,
+				Check:  resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupA),
+			},
+			{
+				PreConfig: func() {
+					rec.mu.Lock()
+					rec.refuseMoveOnce = true
+					rec.mu.Unlock()
+				},
+				Config:      moveAndGrow,
+				ExpectError: regexp.MustCompile(`You\s+do\s+not\s+have\s+access\s+to\s+the\s+specified\s+resource\s+group`),
+			},
+			{
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check: func(*terraform.State) error {
+					if _, _, resizeCount, _ := rec.snapshot(); resizeCount != 0 {
+						return fmt.Errorf("expected no resize after a refused move, saw %d", resizeCount)
+					}
+					return nil
+				},
+			},
+			{
+				Config: moveAndGrow,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupB),
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "size_gb", fmt.Sprint(volPlanTestSizeGb)),
+					func(*terraform.State) error {
+						_, _, resizeCount, order := rec.snapshot()
+						if resizeCount != 1 || !slices.Equal(order, []string{"move", "resize"}) {
+							return fmt.Errorf("expected move then one resize, saw %v with %d resize(s)", order, resizeCount)
+						}
+						return nil
+					},
+				),
 			},
 		},
 	})
@@ -1035,4 +1096,40 @@ func TestVolumeResourcePlanAdoptsOutOfBandMoveWhenUnset(t *testing.T) {
 	})
 
 	volPlanTestExpectNoWrites(t, rec)
+}
+
+func TestVolumeResourcePlanRefusesEmptyGroup(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+	config := volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, "x")
+	config = strings.Replace(config, `"x"`, `""`, 1)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config:      config,
+			ExpectError: regexp.MustCompile(`(?s)Invalid Attribute Value Length`),
+		}},
+	})
+
+	createBody, _, _, _ := rec.snapshot()
+	if createBody != nil {
+		t.Errorf("expected no create request, saw %v", createBody)
+	}
+}
+
+func TestVolumeResourcePlanGroupDescriptionBytes(t *testing.T) {
+	t.Parallel()
+
+	schemaResponse := &fwresource.SchemaResponse{}
+	NewVolumesResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
+	if schemaResponse.Diagnostics.HasError() {
+		t.Fatalf("Expected a schema, got %v", schemaResponse.Diagnostics)
+	}
+
+	want := "ID of the resource group this volume belongs to. When omitted, the volume is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the volume in place. Removing it from configuration leaves the volume where it is, but a replacement created while it is unset joins the Default resource group"
+	got := schemaResponse.Schema.Attributes["resource_group_id"].GetDescription()
+	if got != want {
+		t.Errorf("Description = %q, want %q", got, want)
+	}
 }
