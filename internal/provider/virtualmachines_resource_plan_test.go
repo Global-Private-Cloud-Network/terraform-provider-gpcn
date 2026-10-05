@@ -22,8 +22,10 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-go/tfprotov6"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
+	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 const (
@@ -3774,6 +3776,9 @@ type vmGroupMock struct {
 	stopped     bool
 	createBody  map[string]any
 	putBodies   []map[string]any
+
+	refuseMoveOnce bool
+	defaultOnPut   string
 }
 
 func (m *vmGroupMock) setGroup(group string) {
@@ -3845,8 +3850,23 @@ func startVirtualMachineGroupMockServer(t *testing.T, defaultGroup string) *vmGr
 			testutil.WriteJSONResponse(w, body)
 		case r.Method == http.MethodPut && r.URL.Path == vmPath:
 			body := testutil.ReadRequestBody(r)
+			if value, present := body["resourceGroupId"]; present && value == nil {
+				w.WriteHeader(http.StatusUnprocessableEntity)
+				_, _ = w.Write([]byte(`{"success":false,"message":"Invalid Parameters","error":{"code":"Validation Error"}}`))
+				return
+			}
 			mock.mu.Lock()
+			if _, moves := body["resourceGroupId"].(string); moves && mock.refuseMoveOnce {
+				mock.refuseMoveOnce = false
+				mock.mu.Unlock()
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"success":false,"message":"You do not have access to the specified resource group","error":{"code":"Entity Access Denied"}}`))
+				return
+			}
 			mock.putBodies = append(mock.putBodies, body)
+			if mock.group == "" && mock.defaultOnPut != "" {
+				mock.group = mock.defaultOnPut
+			}
 			if updated, ok := body["name"].(string); ok {
 				mock.name = updated
 			}
@@ -3866,7 +3886,6 @@ func startVirtualMachineGroupMockServer(t *testing.T, defaultGroup string) *vmGr
 	return mock
 }
 
-// vmGroupPlanTestConfig leaves resource_group_id out when group is empty.
 func vmGroupPlanTestConfig(host, name, group string) string {
 	groupLine := ""
 	if group != "" {
@@ -4082,8 +4101,13 @@ func TestVirtualMachineResourcePlanNeverSendsNullGroup(t *testing.T) {
 				Check:  resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "resource_group_id", vmPlanTestGroupG),
 			},
 			{
-				Config:           vmGroupPlanTestConfig(mock.server.URL, "vm-group-after", ""),
-				ConfigPlanChecks: vmGroupPlanTestExpectAction(plancheck.ResourceActionUpdate),
+				Config: vmGroupPlanTestConfig(mock.server.URL, "vm-group-after", ""),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
+						plancheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("resource_group_id"), knownvalue.StringExact(vmPlanTestGroupG)),
+					},
+				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "resource_group_id", vmPlanTestGroupG),
 					func(*terraform.State) error {
@@ -4125,6 +4149,107 @@ func TestVirtualMachineResourcePlanUpgradesNullGroupState(t *testing.T) {
 				ConfigPlanChecks: vmGroupPlanTestExpectAction(plancheck.ResourceActionNoop),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "resource_group_id", vmPlanTestDefaultGroup),
+					vmGroupPlanTestExpectPuts(mock, 0),
+				),
+			},
+		},
+	})
+}
+
+func TestVirtualMachineResourcePlanRenameWithUnsetGroupKeepsItKnown(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineGroupMockServer(t, vmPlanTestDefaultGroup)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmGroupPlanTestConfig(mock.server.URL, "vm-group-known", ""),
+				Check:  resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "resource_group_id", vmPlanTestDefaultGroup),
+			},
+			{
+				Config: vmGroupPlanTestConfig(mock.server.URL, "vm-group-known-renamed", ""),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
+						plancheck.ExpectKnownValue(gpcnVirtualMachineTest, tfjsonpath.New("resource_group_id"), knownvalue.StringExact(vmPlanTestDefaultGroup)),
+					},
+				},
+			},
+		},
+	})
+}
+
+// Step one runs against a backend that reports no group, so state holds null. The
+// backend reports the Default group from the first update on.
+func TestVirtualMachineResourcePlanNullGroupStateSurvivesAnUpdate(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineGroupMockServer(t, "")
+	mock.defaultOnPut = vmPlanTestDefaultGroup
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmGroupPlanTestConfig(mock.server.URL, "vm-group-null", ""),
+				Check:  resource.TestCheckNoResourceAttr(gpcnVirtualMachineTest, "resource_group_id"),
+			},
+			{
+				Config:           vmGroupPlanTestConfig(mock.server.URL, "vm-group-null-renamed", ""),
+				ConfigPlanChecks: vmGroupPlanTestExpectAction(plancheck.ResourceActionUpdate),
+				Check:            resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "resource_group_id", vmPlanTestDefaultGroup),
+			},
+		},
+	})
+}
+
+func TestVirtualMachineResourcePlanRefusedMoveShowsAPIError(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineGroupMockServer(t, vmPlanTestDefaultGroup)
+	moveConfig := vmGroupPlanTestConfig(mock.server.URL, "vm-group-refused", vmPlanTestGroupH)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmGroupPlanTestConfig(mock.server.URL, "vm-group-refused", vmPlanTestGroupG),
+				Check:  resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "resource_group_id", vmPlanTestGroupG),
+			},
+			{
+				PreConfig: func() {
+					mock.mu.Lock()
+					mock.refuseMoveOnce = true
+					mock.mu.Unlock()
+				},
+				Config:      moveConfig,
+				ExpectError: regexp.MustCompile(`You\s+do\s+not\s+have\s+access\s+to\s+the\s+specified\s+resource\s+group`),
+			},
+			{
+				Config: moveConfig,
+				Check:  resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "resource_group_id", vmPlanTestGroupH),
+			},
+		},
+	})
+}
+
+func TestVirtualMachineResourcePlanAdoptsOutOfBandMoveWhenUnset(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineGroupMockServer(t, vmPlanTestDefaultGroup)
+	config := vmGroupPlanTestConfig(mock.server.URL, "vm-group-adopt", "")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check:  resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "resource_group_id", vmPlanTestDefaultGroup),
+			},
+			{
+				PreConfig:        func() { mock.setGroup(vmPlanTestGroupH) },
+				Config:           config,
+				ConfigPlanChecks: vmGroupPlanTestExpectAction(plancheck.ResourceActionNoop),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "resource_group_id", vmPlanTestGroupH),
 					vmGroupPlanTestExpectPuts(mock, 0),
 				),
 			},
