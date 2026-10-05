@@ -1522,7 +1522,6 @@ func TestCreateVirtualMachineOmitsUnknownResourceGroupIdMockHTTP(t *testing.T) {
 	}
 }
 
-// runUpdateChangeable returns the PUT bodies the helper sent, one entry per request.
 func runUpdateChangeable(t *testing.T, state, plan ResourceModel) []map[string]any {
 	t.Helper()
 	var bodies []map[string]any

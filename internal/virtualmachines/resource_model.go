@@ -115,7 +115,8 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 
 // Read calls this after MapVirtualMachineResponseToModel, so an out-of-band change shows
 // as drift. Create and Update must not call it, because a lagging API then overwrites the
-// planned values. Only the name refreshes, because Terraform reconciles a rename in place.
+// planned values. Only the name refreshes here, because Terraform reconciles a rename in place.
+// The mapper refreshes resource_group_id, because a move reconciles in place.
 // A refresh of any other attribute plans a replacement or discards a configured value.
 // An empty name is an omission, not a rename.
 func RefreshVirtualMachineModelFromResponse(response *ReadVirtualMachinesResponse, model ResourceModel) ResourceModel {
