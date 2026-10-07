@@ -1,4 +1,4 @@
-## 1.5.0 (Unreleased)
+## 1.5.0 (October 7, 2026)
 
 This release follows the GPCN resource-group change: every virtual machine, GPU, volume, VPC and L2 segment belongs to exactly one resource group, and one created without a group joins the tenant's Default group.
 
