@@ -1,5 +1,5 @@
 
-# Example: Managing GPCN SSH Keys
+# Example: Managing GPCN™ SSH Keys
 
 terraform {
   required_providers {

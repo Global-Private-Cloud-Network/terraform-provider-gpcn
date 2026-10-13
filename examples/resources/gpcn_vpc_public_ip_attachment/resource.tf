@@ -1,4 +1,4 @@
-# Example: Attaching a GPCN VPC elastic public IP address to an interface
+# Example: Attaching a GPCN™ VPC elastic IP address to an interface
 
 terraform {
   required_providers {

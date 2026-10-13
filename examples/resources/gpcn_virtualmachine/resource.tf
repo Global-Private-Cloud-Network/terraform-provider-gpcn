@@ -1,5 +1,5 @@
 
-# Example: Creating GPCN Virtual Machines
+# Example: Creating GPCN™ Virtual Machines
 #
 # This example demonstrates creating a virtual machine on a VPC subnet,
 # with a volume attached.
@@ -17,11 +17,11 @@ provider "gpcn" {
   host = "https://api.gpcn.com"
 }
 
-# Lookup datacenter in Central US region
+# Lookup data center in Central US region
 data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "Central"
-  name         = "Chicago"
+  name         = "Chicago 1"
 }
 
 # Look up the image ID for Alma Linux 8

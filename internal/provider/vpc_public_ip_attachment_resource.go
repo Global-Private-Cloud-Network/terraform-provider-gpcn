@@ -39,7 +39,7 @@ func (r *vpcPublicIpAttachmentResource) Metadata(_ context.Context, req resource
 // Schema defines the schema for the resource.
 func (r *vpcPublicIpAttachmentResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Binds an elastic public IP address acquired with gpcn_vpc_public_ip to one VPC network interface. Destroying the attachment detaches the address and leaves it held by the VPC, so the address itself survives. GPCN allows one elastic address per machine. Requires the API-key permissions vpc:read and vpc-public-ip:update.",
+		Description: "Binds an elastic IP address acquired with gpcn_vpc_public_ip to one VPC network interface. Destroying the attachment detaches the address and leaves it held by the VPC, so the address itself survives. GPCN™ allows one elastic address per machine. Requires the API-key permissions vpc:read and vpc-public-ip:update.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the attachment (equal to public_ip_id, because an address carries at most one attachment)",
@@ -63,7 +63,7 @@ func (r *vpcPublicIpAttachmentResource) Schema(_ context.Context, _ resource.Sch
 				},
 			},
 			"nic_id": schema.StringAttribute{
-				Description: "Unique identifier of the VPC network interface the address is bound to. GPCN has no verb that re-points a live address, so changing this value requires replacing the attachment, which detaches the address and attaches it again. The platform reports the machine an address serves but not the interface, so an interface changed outside Terraform is not detected",
+				Description: "Unique identifier of the VPC network interface the address is bound to. GPCN™ has no verb that re-points a live address, so changing this value requires replacing the attachment, which detaches the address and attaches it again. The platform reports the machine an address serves but not the interface, so an interface changed outside Terraform is not detected",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),

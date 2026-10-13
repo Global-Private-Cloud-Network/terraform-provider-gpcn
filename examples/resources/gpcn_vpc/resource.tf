@@ -1,7 +1,7 @@
-# Example: Creating a GPCN VPC
+# Example: Creating a GPCN™ VPC
 #
 # A VPC is the routed private network that holds subnets, security groups and
-# public IP addresses in one datacenter. The API key needs vpc:read, vpc:create,
+# elastic IP addresses in one data center. The API key needs vpc:read, vpc:create,
 # vpc:update and vpc:delete.
 
 terraform {
@@ -17,11 +17,11 @@ provider "gpcn" {
   host = "https://api.gpcn.com"
 }
 
-# Lookup datacenter in Central US region
+# Lookup data center in Central US region
 data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "Central"
-  name         = "Chicago"
+  name         = "Chicago 1"
 }
 
 resource "gpcn_vpc" "example" {

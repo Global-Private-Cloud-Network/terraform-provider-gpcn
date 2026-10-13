@@ -47,7 +47,7 @@ func (r *gpuResource) Metadata(_ context.Context, req resource.MetadataRequest, 
 // Schema defines the schema for the resource.
 func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a GPU resource in GPCN",
+		Description: "Manages a GPU resource in GPCN™",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the GPU in UUID format",
@@ -68,7 +68,7 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"datacenter_id": schema.StringAttribute{
-				Description: "Unique identifier of the datacenter where the GPU will be created. Changing this value requires replacing the GPU",
+				Description: "Unique identifier of the data center where the GPU will be created. Changing this value requires replacing the GPU",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					// Changing the datacenter_id requires us to destroy and create a new GPU
@@ -76,7 +76,7 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"series_name": schema.StringAttribute{
-				Description: "Human-readable name of the GPU series. Exactly one of series_name or series_code must be specified. Use the gpcn_gpu_inventory data source to list the series offered in a datacenter.",
+				Description: "Human-readable name of the GPU series. Exactly one of series_name or series_code must be specified. Use the gpcn_gpu_inventory data source to list the series offered in a data center.",
 				Optional:    true,
 				Computed:    true,
 				Validators: []validator.String{
@@ -93,7 +93,7 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"series_code": schema.StringAttribute{
-				Description: "Short code of the GPU series. Exactly one of series_name or series_code must be specified. Use the gpcn_gpu_inventory data source to list the series offered in a datacenter.",
+				Description: "Short code of the GPU series. Exactly one of series_name or series_code must be specified. Use the gpcn_gpu_inventory data source to list the series offered in a data center.",
 				Optional:    true,
 				Computed:    true,
 				Validators: []validator.String{
@@ -173,7 +173,7 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Computed:    true,
 			},
 			"location": schema.MapAttribute{
-				Description: "Location details including datacenter, region, and country information",
+				Description: "Location details including data center, region, and country information",
 				ElementType: types.StringType,
 				Computed:    true,
 				PlanModifiers: []planmodifier.Map{

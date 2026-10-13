@@ -1,4 +1,4 @@
-# Example: Listing GPCN resource groups
+# Example: Listing GPCN™ resource groups
 #
 # This example lists the resource groups the API key can see and reads the
 # tenant's Default resource group, which new resources join when they name no
@@ -18,8 +18,8 @@ provider "gpcn" {}
 data "gpcn_resource_groups" "all" {}
 
 # Look up one group by its exact name
-data "gpcn_resource_groups" "team" {
-  name = "platform-team"
+data "gpcn_resource_groups" "platform" {
+  name = "platform"
 }
 
 output "default_resource_group_id" {
@@ -27,7 +27,7 @@ output "default_resource_group_id" {
   value       = data.gpcn_resource_groups.all.default_resource_group_id
 }
 
-output "team_resource_group_id" {
-  description = "ID of the platform-team resource group"
-  value       = data.gpcn_resource_groups.team.resource_groups[0].id
+output "platform_resource_group_id" {
+  description = "ID of the platform resource group"
+  value       = data.gpcn_resource_groups.platform.resource_groups[0].id
 }

@@ -439,7 +439,7 @@ func TestVpcResourceConfigureRefusesAnotherProviderData(t *testing.T) {
 func TestVpcResourceSchemaDescriptionBytes(t *testing.T) {
 	t.Parallel()
 
-	want := "Manages a VPC, the routed private network that holds subnets, security groups and public IP addresses in one datacenter. The API key needs vpc:read, vpc:create, vpc:update and vpc:delete."
+	want := "Manages a VPC, the routed private network that holds subnets, security groups and elastic IP addresses in one data center. The API key needs vpc:read, vpc:create, vpc:update and vpc:delete."
 	if got := vpcResourceTestSchema(t).Description; got != want {
 		t.Errorf("Description = %q, want %q", got, want)
 	}

@@ -1,6 +1,6 @@
-# Example: Managing a GPCN L2 segment
+# Example: Managing a GPCN™ L2 segment
 #
-# An L2 segment is a layer-2 network inside one datacenter. It carries no addressing,
+# An L2 segment is a layer-2 network inside one data center. It carries no addressing,
 # so there is no CIDR block, no gateway and no DHCP range to configure.
 
 terraform {
@@ -16,11 +16,11 @@ provider "gpcn" {
   host = "https://api.gpcn.com"
 }
 
-# Lookup datacenter in Central US region
+# Lookup data center in Central US region
 data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "Central"
-  name         = "Chicago"
+  name         = "Chicago 1"
 }
 
 resource "gpcn_l2_segment" "example" {

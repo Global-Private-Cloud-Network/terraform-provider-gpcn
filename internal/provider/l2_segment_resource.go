@@ -44,7 +44,7 @@ func (r *l2SegmentResource) Metadata(_ context.Context, req resource.MetadataReq
 // Schema defines the schema for the resource.
 func (r *l2SegmentResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages an L2 segment: a layer-2 network that carries virtual machine traffic inside one datacenter. The API key needs l2-segment:read to read a segment, and l2-segment:create, l2-segment:update and l2-segment:delete to manage one.",
+		Description: "Manages an L2 segment: a layer-2 network that carries virtual machine traffic inside one data center. The API key needs l2-segment:read to read a segment, and l2-segment:create, l2-segment:update and l2-segment:delete to manage one.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the L2 segment in UUID format",
@@ -65,7 +65,7 @@ func (r *l2SegmentResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"datacenter_id": schema.StringAttribute{
-				Description: "Unique identifier of the datacenter that holds the L2 segment. Changing this value requires replacing the segment",
+				Description: "Unique identifier of the data center that holds the L2 segment. Changing this value requires replacing the segment",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
@@ -103,7 +103,7 @@ func (r *l2SegmentResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Computed:    true,
 			},
 			"datacenter_name": schema.StringAttribute{
-				Description: "Display name of the datacenter that holds the L2 segment",
+				Description: "Display name of the data center that holds the L2 segment",
 				Computed:    true,
 			},
 			"attached_nic_count": schema.Int64Attribute{

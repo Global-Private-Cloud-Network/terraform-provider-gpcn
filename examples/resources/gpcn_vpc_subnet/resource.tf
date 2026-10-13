@@ -1,8 +1,8 @@
-# Example: Carving subnets out of a GPCN VPC
+# Example: Carving subnets out of a GPCN™ VPC
 #
-# A subnet takes its datacenter and its address space from its VPC. Give it a
+# A subnet takes its data center and its address space from its VPC. Give it a
 # CIDR inside the VPC super-CIDR. You can instead give a prefix length and let
-# GPCN carve a free block of that size.
+# GPCN™ carve a free block of that size.
 
 terraform {
   required_providers {
@@ -17,11 +17,11 @@ provider "gpcn" {
   host = "https://api.gpcn.com"
 }
 
-# Lookup datacenter in Central US region
+# Lookup data center in Central US region
 data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "Central"
-  name         = "Chicago"
+  name         = "Chicago 1"
 }
 
 resource "gpcn_vpc" "example" {
@@ -38,7 +38,7 @@ resource "gpcn_vpc_subnet" "example_explicit" {
   cidr        = "10.60.1.0/24"
 }
 
-# A subnet GPCN carves: ask for a size and let the allocator pick the block
+# A subnet GPCN™ carves: ask for a size and let the allocator pick the block
 resource "gpcn_vpc_subnet" "example_carved" {
   vpc_id = gpcn_vpc.example.id
   name   = "terraform-demo-data"

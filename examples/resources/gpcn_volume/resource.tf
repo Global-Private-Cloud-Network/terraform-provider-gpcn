@@ -1,5 +1,5 @@
 
-# Example: Creating GPCN Volumes
+# Example: Creating GPCN™ Volumes
 #
 # This example demonstrates creating storage volumes with different types.
 # Volumes can be attached to virtual machines for additional storage capacity.
@@ -17,11 +17,11 @@ provider "gpcn" {
   host = "https://api.gpcn.com"
 }
 
-# Lookup datacenter in Central US region
+# Lookup data center in Central US region
 data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "Central"
-  name         = "Chicago"
+  name         = "Chicago 1"
 }
 
 # SSD Volume

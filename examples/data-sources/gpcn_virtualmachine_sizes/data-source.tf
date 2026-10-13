@@ -11,11 +11,11 @@ provider "gpcn" {
   host = "https://api.gpcn.com"
 }
 
-# Lookup a datacenter first
+# Lookup a data center first
 data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "Central"
-  name         = "Chicago"
+  name         = "Chicago 1"
 }
 
 # List all general-purpose sizes with at least 4 CPU cores and 8 GB RAM

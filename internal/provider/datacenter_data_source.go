@@ -109,68 +109,68 @@ func (d *datacenterDataSource) Metadata(_ context.Context, req datasource.Metada
 
 func (d *datacenterDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Retrieves information about available GPCN datacenters. Use this data source to filter and find datacenters by name, country, or region.",
+		Description: "Retrieves information about available GPCN™ data centers. Use this data source to filter and find data centers by name, country, or region.",
 		Attributes: map[string]schema.Attribute{
 			"name": schema.StringAttribute{
 				Optional:    true,
-				Description: "Filter datacenters by name",
+				Description: "Filter data centers by name",
 			},
 			"country_name": schema.StringAttribute{
 				Optional:    true,
-				Description: "Filter datacenters by country name (e.g., 'United States', 'Canada').",
+				Description: "Filter data centers by country name (e.g., 'United States', 'Canada').",
 			},
 			"region_name": schema.StringAttribute{
 				Optional:    true,
-				Description: "Filter datacenters by region name within a country. (e.g., 'East', 'West', 'Central')",
+				Description: "Filter data centers by region name within a country. (e.g., 'East', 'West', 'Central')",
 			},
 			"gpu_enabled": schema.BoolAttribute{
 				Optional:    true,
-				Description: "Filter datacenters to only those with GPU support enabled.",
+				Description: "Filter data centers to only those with GPU support enabled.",
 			},
 			"custom_images": schema.BoolAttribute{
 				Optional:    true,
-				Description: "Filter datacenters to only those that support custom images.",
+				Description: "Filter data centers to only those that support custom images.",
 			},
 			"vpc_capable": schema.BoolAttribute{
 				Optional:    true,
-				Description: "Filter datacenters to only those that offer VPC networking.",
+				Description: "Filter data centers to only those that offer VPC networking.",
 			},
 			"l2_capable": schema.BoolAttribute{
 				Optional:    true,
-				Description: "Filter datacenters to only those that offer layer-2 segments.",
+				Description: "Filter data centers to only those that offer layer-2 segments.",
 			},
 			"datacenters": schema.ListNestedAttribute{
 				Computed:    true,
-				Description: "List of datacenters matching the specified filter criteria.",
+				Description: "List of data centers matching the specified filter criteria.",
 				NestedObject: schema.NestedAttributeObject{
 					Attributes: map[string]schema.Attribute{
 						"id": schema.StringAttribute{
 							Computed:    true,
-							Description: "Unique identifier of the datacenter.",
+							Description: "Unique identifier of the data center.",
 						},
 						"name": schema.StringAttribute{
 							Computed:    true,
-							Description: "Name of the datacenter.",
+							Description: "Name of the data center.",
 						},
 						"code": schema.StringAttribute{
 							Computed:    true,
-							Description: "Short code that identifies the datacenter.",
+							Description: "Short code that identifies the data center.",
 						},
 						"region_id": schema.Int64Attribute{
 							Computed:    true,
-							Description: "Numeric identifier of the region where the datacenter is located.",
+							Description: "Numeric identifier of the region where the data center is located.",
 						},
 						"region_name": schema.StringAttribute{
 							Computed:    true,
-							Description: "Name of the region where the datacenter is located.",
+							Description: "Name of the region where the data center is located.",
 						},
 						"country_id": schema.StringAttribute{
 							Computed:    true,
-							Description: "Unique identifier of the country where the datacenter is located.",
+							Description: "Unique identifier of the country where the data center is located.",
 						},
 						"country_name": schema.StringAttribute{
 							Computed:    true,
-							Description: "Name of the country where the datacenter is located.",
+							Description: "Name of the country where the data center is located.",
 						},
 						"country_abbreviation": schema.StringAttribute{
 							Computed:    true,
@@ -178,27 +178,27 @@ func (d *datacenterDataSource) Schema(_ context.Context, _ datasource.SchemaRequ
 						},
 						"continent_code": schema.StringAttribute{
 							Computed:    true,
-							Description: "Code of the continent where the datacenter is located (e.g., 'NA').",
+							Description: "Code of the continent where the data center is located (e.g., 'NA').",
 						},
 						"continent_name": schema.StringAttribute{
 							Computed:    true,
-							Description: "Name of the continent where the datacenter is located.",
+							Description: "Name of the continent where the data center is located.",
 						},
 						"gpu_enabled": schema.BoolAttribute{
 							Computed:    true,
-							Description: "Whether GPU resources are available in this datacenter.",
+							Description: "Whether GPU resources are available in this data center.",
 						},
 						"custom_images": schema.BoolAttribute{
 							Computed:    true,
-							Description: "Whether custom images are supported in this datacenter.",
+							Description: "Whether custom images are supported in this data center.",
 						},
 						"vpc_capable": schema.BoolAttribute{
 							Computed:    true,
-							Description: "Whether VPC networking is available in this datacenter.",
+							Description: "Whether VPC networking is available in this data center.",
 						},
 						"l2_capable": schema.BoolAttribute{
 							Computed:    true,
-							Description: "Whether layer-2 segments are available in this datacenter.",
+							Description: "Whether layer-2 segments are available in this data center.",
 						}},
 				},
 			},

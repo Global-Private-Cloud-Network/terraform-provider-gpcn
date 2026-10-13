@@ -61,11 +61,11 @@ func (d *virtualMachineSizesDataSource) Metadata(_ context.Context, req datasour
 
 func (d *virtualMachineSizesDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Retrieves available virtual machine sizes for a given datacenter. Results can be filtered by category and minimum specifications",
+		Description: "Retrieves available virtual machine sizes for a given data center. Results can be filtered by category and minimum specifications",
 		Attributes: map[string]schema.Attribute{
 			"datacenter_id": schema.StringAttribute{
 				Required:    true,
-				Description: "The ID of the datacenter to retrieve sizes for",
+				Description: "The ID of the data center to retrieve sizes for",
 			},
 			"category": schema.StringAttribute{
 				Optional:    true,

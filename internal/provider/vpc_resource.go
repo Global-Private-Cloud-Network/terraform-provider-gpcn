@@ -47,7 +47,7 @@ func (r *vpcResource) Metadata(_ context.Context, req resource.MetadataRequest, 
 // Schema defines the schema for the resource.
 func (r *vpcResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a VPC, the routed private network that holds subnets, security groups and public IP addresses in one datacenter. The API key needs vpc:read, vpc:create, vpc:update and vpc:delete.",
+		Description: "Manages a VPC, the routed private network that holds subnets, security groups and elastic IP addresses in one data center. The API key needs vpc:read, vpc:create, vpc:update and vpc:delete.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the VPC in UUID format",
@@ -57,7 +57,7 @@ func (r *vpcResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"name": schema.StringAttribute{
-				Description: "Human-readable name for the VPC. Must be 1-64 characters with no leading or trailing whitespace, and unique within the datacenter",
+				Description: "Human-readable name for the VPC. Must be 1-64 characters with no leading or trailing whitespace, and unique within the data center",
 				Required:    true,
 				Validators: []validator.String{
 					stringvalidator.LengthBetween(1, 64),
@@ -65,7 +65,7 @@ func (r *vpcResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"datacenter_id": schema.StringAttribute{
-				Description: "Unique identifier of the datacenter that holds the VPC. Changing this value requires replacing the VPC",
+				Description: "Unique identifier of the data center that holds the VPC. Changing this value requires replacing the VPC",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.RequiresReplace(),
@@ -91,7 +91,7 @@ func (r *vpcResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				},
 			},
 			"resource_group_id": schema.StringAttribute{
-				Description: "ID of the resource group this VPC belongs to. When omitted, the VPC is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the VPC in place, together with its subnets, security groups and public IP addresses. Removing it from configuration leaves the VPC where it is, but a replacement created while it is unset joins the Default resource group",
+				Description: "ID of the resource group this VPC belongs to. When omitted, the VPC is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the VPC in place, together with its subnets, security groups and elastic IP addresses. Removing it from configuration leaves the VPC where it is, but a replacement created while it is unset joins the Default resource group",
 				Optional:    true,
 				Computed:    true,
 				Validators:  []validator.String{stringvalidator.LengthAtLeast(1)},

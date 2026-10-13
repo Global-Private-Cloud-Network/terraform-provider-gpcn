@@ -63,7 +63,7 @@ resource "gpcn_vpc_public_ip" "test" {
 */
 
 // TestVPCPublicIpResourceSchemaWarnsAboutReleasingAnAttachedAddress pins the
-// warning byte for byte. GPCN releases an attached address and asks for no
+// warning byte for byte. GPCN™ releases an attached address and asks for no
 // detach first. A destroy can therefore cut a live machine off.
 func TestVPCPublicIpResourceSchemaWarnsAboutReleasingAnAttachedAddress(t *testing.T) {
 	t.Parallel()
@@ -71,7 +71,7 @@ func TestVPCPublicIpResourceSchemaWarnsAboutReleasingAnAttachedAddress(t *testin
 	schemaResponse := &fwresource.SchemaResponse{}
 	NewVPCPublicIPResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
 
-	const want = "GPCN releases an attached address as readily as a held one, so destroying this resource while the address serves a machine takes that machine's connectivity away."
+	const want = "GPCN™ releases an attached address as readily as a held one, so destroying this resource while the address serves a machine takes that machine's connectivity away."
 	if got := schemaResponse.Schema.Description; !strings.Contains(got, want) {
 		t.Errorf("Description = %q, want it to contain %q", got, want)
 	}

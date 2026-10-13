@@ -1,6 +1,6 @@
-# Example: Querying GPCN GPU inventory
+# Example: Querying GPCN™ GPU inventory
 #
-# This example demonstrates how to list the available GPU SKUs for a datacenter.
+# This example demonstrates how to list the available GPU SKUs for a data center.
 # Each entry exposes a sku_code that can be passed to a gpcn_gpu resource to pin
 # an exact SKU within the series.
 
@@ -17,7 +17,7 @@ provider "gpcn" {
   host = "https://api.gpcn.com"
 }
 
-# Lookup a GPU-enabled datacenter first
+# Lookup a GPU-enabled data center first
 data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "central"

@@ -47,12 +47,12 @@ func (r *networksResource) Metadata(_ context.Context, req resource.MetadataRequ
 
 // The notice names the three replacements. A deprecation with no destination leaves the
 // reader to guess which resource to move to.
-const networkDeprecationMessage = "gpcn_network is deprecated: GPCN networking is VPC-based. Use gpcn_vpc, gpcn_vpc_subnet and gpcn_l2_segment. Existing networks can still be read and destroyed."
+const networkDeprecationMessage = "gpcn_network is deprecated: GPCN™ networking is VPC-based. Use gpcn_vpc, gpcn_vpc_subnet and gpcn_l2_segment. Existing networks can still be read and destroyed."
 
 // Schema defines the schema for the resource.
 func (r *networksResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description:        "Manages a private network to connect virtual machines within the same datacenter",
+		Description:        "Manages a private network to connect virtual machines within the same data center",
 		DeprecationMessage: networkDeprecationMessage,
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
@@ -140,7 +140,7 @@ func (r *networksResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				},
 			},
 			"datacenter_id": schema.StringAttribute{
-				Description: "Unique identifier of the datacenter where the network will be created. Changing this value requires replacing the network",
+				Description: "Unique identifier of the data center where the network will be created. Changing this value requires replacing the network",
 				Required:    true,
 				PlanModifiers: []planmodifier.String{
 					// Changing the datacenter_id requires us to destroy and create a new network
@@ -148,7 +148,7 @@ func (r *networksResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				},
 			},
 			"location": schema.MapAttribute{
-				Description: "Location details including datacenter, region, and country information",
+				Description: "Location details including data center, region, and country information",
 				ElementType: types.StringType,
 				Computed:    true,
 				PlanModifiers: []planmodifier.Map{

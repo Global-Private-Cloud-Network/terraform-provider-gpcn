@@ -1,7 +1,9 @@
-# Example: A network security group for a GPCN VPC
+# Example: A security group for a GPCN™ VPC
 #
-# The rules live inline. GPCN replaces the whole rule set on every change.
-# GPCN identifies a rule by its direction, protocol, port range and remote
+# The rules live inline. GPCN™ replaces the whole rule set on every change.
+# A new group carries only these rules, not the default group's rule that
+# allows traffic from inside the VPC. Add one if your machines need it.
+# GPCN™ identifies a rule by its direction, protocol, port range and remote
 # CIDR. A rule therefore has no identity of its own to manage separately.
 
 terraform {
@@ -17,11 +19,11 @@ provider "gpcn" {
   host = "https://api.gpcn.com"
 }
 
-# Lookup datacenter in Central US region
+# Lookup data center in Central US region
 data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "Central"
-  name         = "Chicago"
+  name         = "Chicago 1"
 }
 
 resource "gpcn_vpc" "example" {
