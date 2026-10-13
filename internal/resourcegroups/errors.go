@@ -35,6 +35,14 @@ const (
 	ErrDetailResourceGroupNotEmpty  = "Resource group %s still has resources assigned to it%s. Move them to another resource group, then destroy it again. When the same apply moves them, Terraform deletes the group first: apply the moves alone, for example with -target, then apply again."
 )
 
+var countLabels = map[string]string{
+	"virtualMachines":    "virtual machines",
+	"gpuVirtualMachines": "GPU instances",
+	"volumes":            "volumes",
+	"vpcs":               "VPCs",
+	"l2Segments":         "L2 segments",
+}
+
 // DeleteRefusalDetail renders the two refusals the user can act on. The second
 // result is false for any other error, which the caller reports unchanged.
 func DeleteRefusalDetail(groupID string, err error) (string, bool) {
@@ -55,24 +63,33 @@ func renderLiveCounts(err error) string {
 	if !errors.As(err, &httpErr) {
 		return ""
 	}
-	keys := make([]string, 0, len(httpErr.Details))
-	for key := range httpErr.Details {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	parts := make([]string, 0, len(keys))
-	for _, key := range keys {
-		count, isNumber := numericCount(httpErr.Details[key])
+	counts := make([]string, 0, len(httpErr.Details))
+	for key, raw := range httpErr.Details {
+		count, isNumber := numericCount(raw)
 		if !isNumber || count == 0 {
 			continue
 		}
-		parts = append(parts, fmt.Sprintf("%s: %d", key, count))
+		counts = append(counts, fmt.Sprintf("%s\x00%d", countLabel(key), count))
+	}
+	sort.Strings(counts)
+
+	parts := make([]string, 0, len(counts))
+	for _, entry := range counts {
+		label, count, _ := strings.Cut(entry, "\x00")
+		parts = append(parts, label+": "+count)
 	}
 	if len(parts) == 0 {
 		return ""
 	}
 	return " (" + strings.Join(parts, ", ") + ")"
+}
+
+// countLabel names a count key the way a user reads it. An unknown key stays raw.
+func countLabel(key string) string {
+	if label, known := countLabels[key]; known {
+		return label
+	}
+	return key
 }
 
 // Details may hold a json.Number if the client ever decodes with UseNumber.

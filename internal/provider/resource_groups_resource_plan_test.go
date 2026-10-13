@@ -290,7 +290,7 @@ func TestResourceGroupResourcePlanRefusesNonEmptyDelete(t *testing.T) {
 			{
 				Config:      rgPlanTestConfig(mock.url, "busy"),
 				Destroy:     true,
-				ExpectError: regexp.MustCompile(`(?s)virtualMachines:\s+2,\s+volumes:\s+1\).*apply\s+the\s+moves\s+alone,\s+for\s+example\s+with\s+-target,\s+then\s+apply\s+again`),
+				ExpectError: regexp.MustCompile(`(?s)virtual\s+machines:\s+2,\s+volumes:\s+1\).*apply\s+the\s+moves\s+alone,\s+for\s+example\s+with\s+-target,\s+then\s+apply\s+again`),
 			},
 			rgPlanTestStillManagedStep(mock.url, "busy"),
 		},

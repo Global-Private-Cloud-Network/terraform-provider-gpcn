@@ -30,7 +30,7 @@ func TestDeleteRefusalDetail_NotEmptyWithDetails(t *testing.T) {
 		"volumes": float64(1), "vpcs": float64(0), "l2Segments": float64(0),
 	}
 	detail, refused := DeleteRefusalDetail("rg-1", refusal("RESOURCE_GROUP_NOT_EMPTY", details))
-	want := "Resource group rg-1 still has resources assigned to it (virtualMachines: 2, volumes: 1). Move them to another resource group, then destroy it again. When the same apply moves them, Terraform deletes the group first: apply the moves alone, for example with -target, then apply again."
+	want := "Resource group rg-1 still has resources assigned to it (virtual machines: 2, volumes: 1). Move them to another resource group, then destroy it again. When the same apply moves them, Terraform deletes the group first: apply the moves alone, for example with -target, then apply again."
 	if !refused || detail != want {
 		t.Fatalf("got %v %q, want %q", refused, detail, want)
 	}
@@ -53,7 +53,7 @@ func TestDeleteRefusalDetail_NotEmptyWithoutDetails(t *testing.T) {
 func TestDeleteRefusalDetail_IgnoresNonNumericEntry(t *testing.T) {
 	details := map[string]any{"volumes": json.Number("3"), "vpcs": "many", "l2Segments": float64(1)}
 	detail, refused := DeleteRefusalDetail("rg-1", refusal("RESOURCE_GROUP_NOT_EMPTY", details))
-	if !refused || !strings.Contains(detail, "(l2Segments: 1, volumes: 3)") {
+	if !refused || !strings.Contains(detail, "(L2 segments: 1, volumes: 3)") {
 		t.Fatalf("got %v %q", refused, detail)
 	}
 }
@@ -64,7 +64,7 @@ func TestDeleteRefusalDetail_NotEmptyRendersKeysInSortedOrder(t *testing.T) {
 		"volumes": float64(3), "vpcs": float64(4), "l2Segments": float64(5),
 	}
 	detail, refused := DeleteRefusalDetail("rg-1", refusal("RESOURCE_GROUP_NOT_EMPTY", details))
-	want := "Resource group rg-1 still has resources assigned to it (gpuVirtualMachines: 1, l2Segments: 5, virtualMachines: 2, volumes: 3, vpcs: 4). Move them to another resource group, then destroy it again. When the same apply moves them, Terraform deletes the group first: apply the moves alone, for example with -target, then apply again."
+	want := "Resource group rg-1 still has resources assigned to it (GPU instances: 1, L2 segments: 5, VPCs: 4, virtual machines: 2, volumes: 3). Move them to another resource group, then destroy it again. When the same apply moves them, Terraform deletes the group first: apply the moves alone, for example with -target, then apply again."
 	if !refused || detail != want {
 		t.Fatalf("got %v %q, want %q", refused, detail, want)
 	}
@@ -235,5 +235,13 @@ func TestFetchResourceGroups_HundredPagesSucceeds(t *testing.T) {
 	}
 	if requests != 100 || len(groups) != 100 {
 		t.Fatalf("requests = %d, groups = %d, want 100 each", requests, len(groups))
+	}
+}
+
+func TestDeleteRefusalDetail_UnknownKeyRendersRaw(t *testing.T) {
+	details := map[string]any{"sshKeys": float64(2), "volumes": float64(1)}
+	detail, refused := DeleteRefusalDetail("rg-1", refusal("RESOURCE_GROUP_NOT_EMPTY", details))
+	if !refused || !strings.Contains(detail, " (sshKeys: 2, volumes: 1).") {
+		t.Fatalf("got %v %q, want the raw key kept", refused, detail)
 	}
 }
