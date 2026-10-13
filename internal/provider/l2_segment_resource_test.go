@@ -5,9 +5,12 @@ import (
 	"os"
 	"testing"
 
+	"github.com/hashicorp/terraform-plugin-testing/compare"
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/statecheck"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 // l2SegmentTestDatacenterEnvVar names an L2-capable datacenter. Only the
@@ -17,12 +20,29 @@ const l2SegmentTestDatacenterEnvVar = "GPCN_TEST_L2_DATACENTER_ID"
 
 func l2SegmentTestConfig(name, description, datacenterID string) string {
 	return providerConfig + fmt.Sprintf(`
+data "gpcn_resource_groups" "all" {}
+
 resource "gpcn_l2_segment" "test" {
   name          = %q
   description   = %q
   datacenter_id = %q
 }
 `, name, description, datacenterID)
+}
+
+func l2SegmentTestMovedConfig(name, description, datacenterID, groupName string) string {
+	return providerConfig + fmt.Sprintf(`
+resource "gpcn_resource_group" "moved" {
+  name = %q
+}
+
+resource "gpcn_l2_segment" "test" {
+  name              = %q
+  description       = %q
+  datacenter_id     = %q
+  resource_group_id = gpcn_resource_group.moved.id
+}
+`, groupName, name, description, datacenterID)
 }
 
 // TestL2SegmentResource creates a segment, renames it in place and destroys it.
@@ -34,6 +54,7 @@ func TestL2SegmentResource(t *testing.T) {
 	suffix := acctest.RandString(8)
 	name := fmt.Sprintf("segment-%s", suffix)
 	renamed := fmt.Sprintf("segment-renamed-%s", suffix)
+	groupName := fmt.Sprintf("segment-group-%s", suffix)
 
 	resource.Test(t, resource.TestCase{
 		PreCheck: func() {
@@ -49,6 +70,9 @@ func TestL2SegmentResource(t *testing.T) {
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnL2SegmentTest, plancheck.ResourceActionCreate),
 					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.CompareValuePairs(gpcnL2SegmentTest, tfjsonpath.New("resource_group_id"), "data.gpcn_resource_groups.all", tfjsonpath.New("default_resource_group_id"), compare.ValuesSame()),
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnL2SegmentTest, "name", name),
@@ -80,6 +104,17 @@ func TestL2SegmentResource(t *testing.T) {
 					resource.TestCheckResourceAttr(gpcnL2SegmentTest, "name", renamed),
 					resource.TestCheckResourceAttr(gpcnL2SegmentTest, "description", "Renamed by acceptance tests"),
 				),
+			},
+			{
+				Config: l2SegmentTestMovedConfig(renamed, "Renamed by acceptance tests", datacenterID, groupName),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnL2SegmentTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.CompareValuePairs(gpcnL2SegmentTest, tfjsonpath.New("resource_group_id"), "gpcn_resource_group.moved", tfjsonpath.New("id"), compare.ValuesSame()),
+				},
 			},
 		},
 	})
