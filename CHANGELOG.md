@@ -1,4 +1,4 @@
-## 1.5.0 (October 7, 2026)
+## 1.5.0 (October 13, 2026)
 
 This release follows the GPCN resource-group change: every virtual machine, GPU, volume, VPC and L2 segment belongs to exactly one resource group, and one created without a group joins the tenant's Default group.
 
@@ -24,7 +24,6 @@ ENHANCEMENTS:
 
 - **Resource Group**: a destroy that GPCN refuses names the cause. The Default group cannot be deleted, and the error says how to stop managing it; a group that still holds resources lists the counts.
 - **Virtual Machine**: with `resource_group_id` unset, an out-of-band move to another resource group is adopted instead of planning an unassign.
-- **Resource Group**: listing groups no longer depends on creation order, so a tenant with more than 100 groups pages reliably.
 
 ## 1.4.0 (September 22, 2026)
 
