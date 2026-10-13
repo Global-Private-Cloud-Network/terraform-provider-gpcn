@@ -12,12 +12,14 @@ type ResourceModel struct {
 	Description types.String `tfsdk:"description"`
 	CreatedTime types.String `tfsdk:"created_time"`
 	LastUpdated types.String `tfsdk:"last_updated"`
+	IsDefault   types.Bool   `tfsdk:"is_default"`
 }
 
 // MapResourceGroupResponseToModel updates the model with values from a GET response.
 func MapResourceGroupResponseToModel(response *readResourceGroupResponse, model ResourceModel) ResourceModel {
 	model.ID = types.StringValue(response.Data.ID)
 	model.Name = types.StringValue(response.Data.Name)
+	model.IsDefault = types.BoolValue(response.Data.IsDefault)
 
 	if response.Data.Description != "" {
 		model.Description = types.StringValue(response.Data.Description)

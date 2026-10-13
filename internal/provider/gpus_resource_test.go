@@ -10,9 +10,12 @@ import (
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 
+	"github.com/hashicorp/terraform-plugin-testing/compare"
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/statecheck"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 var gpcnGPUTest = "gpcn_gpu.test"
@@ -72,6 +75,7 @@ func TestGPUResource(t *testing.T) {
 	gpuName := fmt.Sprintf("gpu-basic-%s", rName)
 	gpuNameUpdated := fmt.Sprintf("gpu-basic-updated-%s", rName)
 	sshKeyName := fmt.Sprintf("gpu-basic-key-%s", rName)
+	groupName := fmt.Sprintf("gpu-basic-group-%s", rName)
 
 	resource.Test(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -85,6 +89,8 @@ func TestGPUResource(t *testing.T) {
 				name         = "Kansas"
 				gpu_enabled  = true
 			}
+
+			data "gpcn_resource_groups" "all" {}
 
 			resource "gpcn_ssh_key" "test" {
 				name       = "%s"
@@ -106,6 +112,9 @@ func TestGPUResource(t *testing.T) {
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnGPUTest, plancheck.ResourceActionCreate),
 					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.CompareValuePairs(gpcnGPUTest, tfjsonpath.New("resource_group_id"), "data.gpcn_resource_groups.all", tfjsonpath.New("default_resource_group_id"), compare.ValuesSame()),
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet(gpcnGPUTest, "id"),
@@ -163,6 +172,46 @@ func TestGPUResource(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnGPUTest, "name", gpuNameUpdated),
 				),
+			},
+			// A move to a group the test creates is an in-place update
+			{
+				Config: providerConfig + fmt.Sprintf(`
+			data "gpcn_datacenters" "central_us" {
+				country_name = "United States"
+				region_name  = "central"
+				name         = "Kansas"
+				gpu_enabled  = true
+			}
+
+			resource "gpcn_ssh_key" "test" {
+				name       = "%s"
+				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
+			}
+
+			resource "gpcn_resource_group" "moved" {
+				name = "%s"
+			}
+
+			resource "gpcn_gpu" "test" {
+				name              = "%s"
+				datacenter_id     = data.gpcn_datacenters.central_us.datacenters[0].id
+				series_name       = "NVIDIA RTX A6000 Series"
+				gpu_count         = 1
+				image_name        = "ubuntu-22.04"
+				resource_group_id = gpcn_resource_group.moved.id
+				initial_auth = {
+					ssh_key_id = gpcn_ssh_key.test.id
+				}
+			}
+			`, sshKeyName, groupName, gpuNameUpdated),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnGPUTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.CompareValuePairs(gpcnGPUTest, tfjsonpath.New("resource_group_id"), "gpcn_resource_group.moved", tfjsonpath.New("id"), compare.ValuesSame()),
+				},
 			},
 		},
 	})

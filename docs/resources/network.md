@@ -27,7 +27,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>1.4.0"
+      version = "~>1.5.0"
     }
   }
 }
@@ -133,8 +133,6 @@ Then move the state row, which leaves the data plane untouched:
 terraform state rm gpcn_network.<name>
 terraform import gpcn_l2_segment.<name> <segment-id>
 ```
-
-gpcn_l2_segment does not expose resource_group_id in this release; a segment that sits in a resource group imports without it.
 
 Then run `terraform apply`. The plan is empty when the imported segment matches the block. Never destroy the old row: the segment carries live traffic, and a destroy tears the carrier down.
 

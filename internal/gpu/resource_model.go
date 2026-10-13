@@ -22,6 +22,8 @@ type ResourceModel struct {
 	CreatedTime  types.String `tfsdk:"created_time"`
 	LastUpdated  types.String `tfsdk:"last_updated"`
 	Location     types.Map    `tfsdk:"location"`
+
+	ResourceGroupId types.String `tfsdk:"resource_group_id"`
 }
 
 type ResourceModelInitialAuth struct {
@@ -50,6 +52,12 @@ func MapGPUResponseToModel(ctx context.Context, response *readGPUResponse, model
 		model.LastUpdated = types.StringValue("unknown")
 	} else {
 		model.LastUpdated = types.StringValue(updatedTime.Format(time.RFC850))
+	}
+
+	// An empty id comes from a backend that predates resource groups.
+	model.ResourceGroupId = types.StringNull()
+	if response.Data.ResourceGroupId != "" {
+		model.ResourceGroupId = types.StringValue(response.Data.ResourceGroupId)
 	}
 
 	// Construct the location object

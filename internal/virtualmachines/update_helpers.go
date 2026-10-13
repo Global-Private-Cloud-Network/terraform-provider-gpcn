@@ -357,25 +357,18 @@ func UpdateSizeIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmI
 func UpdateChangeableAttributesIfChanged(gpcnClient *client.GpcnClient, ctx context.Context, vmID string, state, plan ResourceModel) diag.Diagnostics {
 	var diags diag.Diagnostics
 
-	if plan.Name == state.Name && plan.ResourceGroupId == state.ResourceGroupId {
-		return diags
-	}
-
 	body := map[string]any{}
 
-	// Check for Name change
-	if plan.Name != state.Name {
+	if !plan.Name.Equal(state.Name) {
 		body["name"] = plan.Name.ValueString()
 	}
 
-	// Check for ResourceGroupId change
-	if plan.ResourceGroupId != state.ResourceGroupId {
-		if plan.ResourceGroupId.IsNull() {
-			// Explicitly set to nil to force a disconnect of the resource group from the VM
-			body["resourceGroupId"] = nil
-		} else {
-			body["resourceGroupId"] = plan.ResourceGroupId.ValueString()
-		}
+	if !plan.ResourceGroupId.IsNull() && !plan.ResourceGroupId.IsUnknown() && !plan.ResourceGroupId.Equal(state.ResourceGroupId) {
+		body["resourceGroupId"] = plan.ResourceGroupId.ValueString()
+	}
+
+	if len(body) == 0 {
+		return diags
 	}
 
 	tflog.Info(ctx, LogAttributesChangedUpdatingVirtualMachine)

@@ -38,6 +38,7 @@ type readVolumesResponse struct {
 			CountryAbbr string `json:"countryAbbr"`
 			Country     string `json:"country"`
 		} `json:"datacenter"`
+		ResourceGroupId    string `json:"resourceGroupId"`
 		VirtualMachineId   string `json:"virtualMachineId"`
 		VirtualMachineName string `json:"virtualMachineName"`
 		CreatedAt          string `json:"createdAt"`
@@ -45,9 +46,12 @@ type readVolumesResponse struct {
 	} `json:"data"`
 }
 
+// ReadVolumesResponse lets the resource hold the read-back from either branch of Update.
+type ReadVolumesResponse = readVolumesResponse
+
 func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*readVolumesResponse, error) {
 	tflog.Info(ctx, LogStartingCreateVolume)
-	componentCode := componentCodeForVolumeType(model.VolumeType.ValueString())
+	componentCode := ComponentCodeForVolumeType(model.VolumeType.ValueString())
 
 	tflog.Info(ctx, LogLookingUpVolumeSkuId)
 	skuId, err := GetVolumeSkuId(gpcnClient, ctx, model.DatacenterId.ValueString(), componentCode, model.SizeGb.ValueInt64())
@@ -59,6 +63,9 @@ func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model Reso
 		"datacenterId": model.DatacenterId.ValueString(),
 		"name":         model.Name.ValueString(),
 		"skuId":        skuId,
+	}
+	if !model.ResourceGroupId.IsUnknown() && !model.ResourceGroupId.IsNull() {
+		createVolumeRequestBody["resourceGroupId"] = model.ResourceGroupId.ValueString()
 	}
 
 	jsonCreateVolumeRequestBody, err := json.Marshal(createVolumeRequestBody)
@@ -147,7 +154,7 @@ func GetVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId stri
 
 func UpdateVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId string, model ResourceModel) (*readVolumesResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateVolumeWithID, volumeId))
-	componentCode := componentCodeForVolumeType(model.VolumeType.ValueString())
+	componentCode := ComponentCodeForVolumeType(model.VolumeType.ValueString())
 
 	tflog.Info(ctx, LogValidatingVolumeSkuIdForUpdate)
 
@@ -166,7 +173,7 @@ func UpdateVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 		return nil, err
 	}
 
-	// The only possible update is a resizing since everything else triggers a re-create
+	// A resize is the only change this call makes.
 	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/resize", bytes.NewBuffer(jsonUpdateVolumeRequestBody))
 	if err != nil {
 		return nil, err
@@ -265,5 +272,28 @@ func DeleteVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 		return err
 	}
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyCompletedDeleteVolumeWithID, volumeId))
+	return nil
+}
+
+func MoveVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId, resourceGroupId string) error {
+	tflog.Info(ctx, fmt.Sprintf(LogStartingMoveVolumeWithID, volumeId))
+
+	jsonMoveVolumeRequestBody, err := json.Marshal(map[string]any{"resourceGroupId": resourceGroupId})
+	if err != nil {
+		return err
+	}
+
+	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId, bytes.NewBuffer(jsonMoveVolumeRequestBody))
+	if err != nil {
+		return err
+	}
+
+	response, err := gpcnClient.DoWithRetry(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+
+	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyMovedVolumeWithID, volumeId))
 	return nil
 }

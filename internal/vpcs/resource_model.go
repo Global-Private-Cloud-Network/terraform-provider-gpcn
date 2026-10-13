@@ -15,6 +15,7 @@ type ResourceModel struct {
 	CIDR               types.String `tfsdk:"cidr"`
 	Description        types.String `tfsdk:"description"`
 	DNSNameservers     types.List   `tfsdk:"dns_nameservers"`
+	ResourceGroupId    types.String `tfsdk:"resource_group_id"`
 	AcknowledgeOverlap types.Bool   `tfsdk:"acknowledge_overlap"`
 	Status             types.String `tfsdk:"status"`
 	EgressIp           types.String `tfsdk:"egress_ip"`
@@ -35,8 +36,9 @@ func MapVpcResponseToModel(ctx context.Context, response *readVpcResponse, model
 }
 
 // RefreshVpcModelFromResponse shows a rename, which Terraform reconciles in
-// place. Every other configured attribute requires replacement. An out-of-band
-// change to one must not reach the plan.
+// place. The cidr, the datacenter and the name servers require replacement. An
+// out-of-band change to one must not reach the plan. The mapper writes the
+// resource group, which moves in place.
 func RefreshVpcModelFromResponse(response *readVpcResponse, model ResourceModel) ResourceModel {
 	if response.Data.Name != "" {
 		model.Name = types.StringValue(response.Data.Name)
@@ -52,6 +54,7 @@ func mapVpcPayloadToModel(_ context.Context, payload vpcPayload, model ResourceM
 	model.ActiveJobId = nullableString(payload.ActiveJobId)
 	model.CreatedTime = rfc850Timestamp(payload.CreatedAt)
 	model.LastUpdated = rfc850Timestamp(payload.UpdatedAt)
+	model.ResourceGroupId = emptyAsNull(payload.ResourceGroupID)
 
 	// The schema defaults the description to the empty string. A null in state
 	// would plan a change on every apply.
@@ -96,6 +99,14 @@ func rfc850Timestamp(timestamp string) types.String {
 		return types.StringValue("unknown")
 	}
 	return types.StringValue(parsed.Format(time.RFC850))
+}
+
+// An older backend answers an empty string where a group id belongs.
+func emptyAsNull(value string) types.String {
+	if value == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(value)
 }
 
 func nullableString(value *string) types.String {

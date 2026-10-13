@@ -22,7 +22,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>1.4.0"
+      version = "~>1.5.0"
     }
   }
 }
@@ -60,6 +60,10 @@ output "example_gpcn_volume_ssd" {
 - `name` (String) Human-readable name for the volume. Must be 1-255 characters. Changing this value requires replacing the volume
 - `size_gb` (Number) Size of the volume in GB. Can be increased without replacement, but shrinking requires replacing the volume
 - `volume_type` (String) Type of storage: 'SSD', 'NVMe', or a storage component code such as 'vol-add-ultra'. Use "SSD" or "NVMe" for the built-in storage classes and the component code for any other class. The datacenter decides which codes it offers, and a code it does not offer is refused with the list of codes it does offer. Changing this value requires replacing the volume. A volume whose SKU the platform cannot resolve reads "Unknown"; after the platform repairs it, remove the volume from state and import it again so the code is recorded. The built-in codes vol-add-ssd and vol-add-nvme are refused at plan time; write SSD or NVMe instead.
+
+### Optional
+
+- `resource_group_id` (String) ID of the resource group this volume belongs to. When omitted, the volume is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the volume in place. Removing it from configuration leaves the volume where it is, but a replacement created while it is unset joins the Default resource group
 
 ### Read-Only
 

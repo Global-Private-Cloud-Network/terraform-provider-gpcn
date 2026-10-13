@@ -3,12 +3,12 @@
 page_title: "gpcn_l2_segment Resource - gpcn"
 subcategory: ""
 description: |-
-  Manages an L2 segment: a layer-2 network that carries virtual machine traffic inside one datacenter. The API key needs l2-segment:read to read a segment, and l2-segment:create, l2-segment:update and l2-segment:delete to manage one. gpcn_l2_segment does not expose resource_group_id in this release; a segment that sits in a resource group imports without it.
+  Manages an L2 segment: a layer-2 network that carries virtual machine traffic inside one datacenter. The API key needs l2-segment:read to read a segment, and l2-segment:create, l2-segment:update and l2-segment:delete to manage one.
 ---
 
 # gpcn_l2_segment (Resource)
 
-Manages an L2 segment: a layer-2 network that carries virtual machine traffic inside one datacenter. The API key needs l2-segment:read to read a segment, and l2-segment:create, l2-segment:update and l2-segment:delete to manage one. gpcn_l2_segment does not expose resource_group_id in this release; a segment that sits in a resource group imports without it.
+Manages an L2 segment: a layer-2 network that carries virtual machine traffic inside one datacenter. The API key needs l2-segment:read to read a segment, and l2-segment:create, l2-segment:update and l2-segment:delete to manage one.
 
 ## Example Usage
 
@@ -22,7 +22,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~>1.4.0"
+      version = "~>1.5.0"
     }
   }
 }
@@ -61,6 +61,7 @@ output "gpcn_l2_segment_example" {
 ### Optional
 
 - `description` (String) Additional information about the L2 segment to provide context for its purpose
+- `resource_group_id` (String) ID of the resource group this L2 segment belongs to. When omitted, the L2 segment is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the L2 segment in place. Removing it from configuration leaves the L2 segment where it is, but a replacement created while it is unset joins the Default resource group
 
 ### Read-Only
 

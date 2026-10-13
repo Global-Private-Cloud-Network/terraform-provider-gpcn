@@ -27,13 +27,14 @@ type vpcPayload struct {
 		Code *string `json:"code"`
 		Name string  `json:"name"`
 	} `json:"datacenter"`
-	Status         string   `json:"status"`
-	FailureReason  *string  `json:"failureReason"`
-	EgressIp       *string  `json:"egressIp"`
-	ActiveJobId    *string  `json:"activeJobId"`
-	CreatedAt      string   `json:"createdAt"`
-	UpdatedAt      string   `json:"updatedAt"`
-	DnsNameservers []string `json:"dnsNameservers"`
+	Status          string   `json:"status"`
+	FailureReason   *string  `json:"failureReason"`
+	EgressIp        *string  `json:"egressIp"`
+	ActiveJobId     *string  `json:"activeJobId"`
+	CreatedAt       string   `json:"createdAt"`
+	UpdatedAt       string   `json:"updatedAt"`
+	DnsNameservers  []string `json:"dnsNameservers"`
+	ResourceGroupID string   `json:"resourceGroupId"`
 }
 
 type readVpcResponse struct {
@@ -74,6 +75,9 @@ func CreateVpc(gpcnClient *client.GpcnClient, ctx context.Context, model Resourc
 	}
 	if !model.DNSNameservers.IsNull() && !model.DNSNameservers.IsUnknown() {
 		createVpcRequestBody["dnsNameservers"] = stringsFromList(model.DNSNameservers)
+	}
+	if isKnown(model.ResourceGroupId) {
+		createVpcRequestBody["resourceGroupId"] = model.ResourceGroupId.ValueString()
 	}
 	// The 409 this key answers is a confirm gate. A request that always carries
 	// the key defeats the gate.
@@ -129,6 +133,9 @@ func UpdateVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string,
 	}
 	if isKnown(plan.Description) && plan.Description.ValueString() != state.Description.ValueString() {
 		updateVpcRequestBody["description"] = plan.Description.ValueString()
+	}
+	if isKnown(plan.ResourceGroupId) && !plan.ResourceGroupId.Equal(state.ResourceGroupId) {
+		updateVpcRequestBody["resourceGroupId"] = plan.ResourceGroupId.ValueString()
 	}
 
 	if len(updateVpcRequestBody) == 0 {

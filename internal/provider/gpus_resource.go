@@ -150,6 +150,17 @@ func (r *gpuResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					},
 				},
 			},
+			"resource_group_id": schema.StringAttribute{
+				Description: "ID of the resource group this GPU instance belongs to. When omitted, the GPU instance is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the GPU instance in place. Removing it from configuration leaves the GPU instance where it is, but a replacement created while it is unset joins the Default resource group",
+				Optional:    true,
+				Computed:    true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseNonNullStateForUnknown(),
+				},
+			},
 			"created_time": schema.StringAttribute{
 				Description: "Timestamp when the GPU was created in ISO-8601 format",
 				Computed:    true,
@@ -231,7 +242,13 @@ func (r *gpuResource) Create(ctx context.Context, req resource.CreateRequest, re
 		return
 	}
 
+	plannedGroup := plan.ResourceGroupId
 	plan = gpu.MapGPUResponseToModel(ctx, getGPUResponse, plan)
+	// A move made elsewhere during the apply must not contradict the plan. The
+	// next refresh reports it as drift.
+	if !plannedGroup.IsUnknown() {
+		plan.ResourceGroupId = plannedGroup
+	}
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
@@ -306,7 +323,12 @@ func (r *gpuResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		return
 	}
 
-	err := gpu.UpdateGPU(r.client, ctx, state.ID.ValueString(), plan.Name.ValueString())
+	resourceGroupID := ""
+	if !plan.ResourceGroupId.IsUnknown() && !plan.ResourceGroupId.IsNull() && !plan.ResourceGroupId.Equal(state.ResourceGroupId) {
+		resourceGroupID = plan.ResourceGroupId.ValueString()
+	}
+
+	err := gpu.UpdateGPU(r.client, ctx, state.ID.ValueString(), plan.Name.ValueString(), resourceGroupID)
 	if err != nil {
 		resp.Diagnostics.AddError(
 			gpu.ErrSummaryUnableToUpdateGPU,
@@ -325,7 +347,13 @@ func (r *gpuResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		return
 	}
 
+	plannedGroup := plan.ResourceGroupId
 	plan = gpu.MapGPUResponseToModel(ctx, getGPUResponse, plan)
+	// A move made elsewhere during the apply must not contradict the plan. The
+	// next refresh reports it as drift.
+	if !plannedGroup.IsUnknown() {
+		plan.ResourceGroupId = plannedGroup
+	}
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)

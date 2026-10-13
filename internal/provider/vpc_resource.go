@@ -90,6 +90,15 @@ func (r *vpcResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 					helpers.NoOuterWhitespaceValidator{Summary: vpcs.ErrSummaryInvalidVpcAttribute, Attribute: "description"},
 				},
 			},
+			"resource_group_id": schema.StringAttribute{
+				Description: "ID of the resource group this VPC belongs to. When omitted, the VPC is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the VPC in place, together with its subnets, security groups and public IP addresses. Removing it from configuration leaves the VPC where it is, but a replacement created while it is unset joins the Default resource group",
+				Optional:    true,
+				Computed:    true,
+				Validators:  []validator.String{stringvalidator.LengthAtLeast(1)},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseNonNullStateForUnknown(),
+				},
+			},
 			"dns_nameservers": schema.ListAttribute{
 				Description: "One or two IPv4 DNS servers the guests in the VPC receive. The platform chooses them when the list is omitted. The provider applies them once, at creation, because a provider discards a later change. Changing this value requires replacing the VPC",
 				Optional:    true,
@@ -181,7 +190,13 @@ func (r *vpcResource) Create(ctx context.Context, req resource.CreateRequest, re
 
 	// The API inserts the row inside the request, so the VPC exists before the
 	// job runs. State takes it now, or a poll timeout orphans a live VPC.
+	plannedGroup := plan.ResourceGroupId
 	plan = vpcs.MapCreatedVpcToModel(ctx, createVpcResponse, plan)
+	// A move made elsewhere during the apply must not contradict the plan. The
+	// next refresh reports it as drift.
+	if !plannedGroup.IsUnknown() {
+		plan.ResourceGroupId = plannedGroup
+	}
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -205,6 +220,11 @@ func (r *vpcResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 
 	plan = vpcs.MapVpcResponseToModel(ctx, getVpcResponse, plan)
+	// A move made elsewhere during the apply must not contradict the plan. The
+	// next refresh reports it as drift.
+	if !plannedGroup.IsUnknown() {
+		plan.ResourceGroupId = plannedGroup
+	}
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -286,7 +306,13 @@ func (r *vpcResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		return
 	}
 
+	plannedGroup := plan.ResourceGroupId
 	plan = vpcs.MapVpcResponseToModel(ctx, getVpcResponse, plan)
+	// A move made elsewhere during the apply must not contradict the plan. The
+	// next refresh reports it as drift.
+	if !plannedGroup.IsUnknown() {
+		plan.ResourceGroupId = plannedGroup
+	}
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)

@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -12,6 +14,8 @@ import (
 
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
+
+	"github.com/hashicorp/terraform-plugin-framework/types"
 )
 
 const vpcNotActiveBody = `{"success":false,` +
@@ -98,13 +102,14 @@ func (m *vpcDeleteMock) handler(t *testing.T) func(http.ResponseWriter, *http.Re
 				"success": true,
 				"message": "",
 				"data": map[string]any{
-					"id":          vpcUnitTestID,
-					"name":        "vpc-creating",
-					"cidr":        "10.50.0.0/16",
-					"status":      status,
-					"activeJobId": activeJobID,
-					"createdAt":   vpcUnitTestCreated,
-					"updatedAt":   vpcUnitTestUpdated,
+					"id":              vpcUnitTestID,
+					"resourceGroupId": "rg-api",
+					"name":            "vpc-creating",
+					"cidr":            "10.50.0.0/16",
+					"status":          status,
+					"activeJobId":     activeJobID,
+					"createdAt":       vpcUnitTestCreated,
+					"updatedAt":       vpcUnitTestUpdated,
 				},
 			})
 		case r.Method == http.MethodPost && r.URL.Path == client.JOBS_BASE_URL_V1:
@@ -293,5 +298,132 @@ func TestVpcDeleteSurfacesAFailedReadDuringTheTeardownWait(t *testing.T) {
 	}
 	if count := mock.deleteCount(); count != 1 {
 		t.Errorf("DELETE count = %d, want 1", count)
+	}
+}
+
+// vpcBodyMock records the last request body of each write and answers every
+// call with a VPC row, so Create and Update run to the end.
+type vpcBodyMock struct {
+	mutex sync.Mutex
+	posts []map[string]any
+	puts  []map[string]any
+}
+
+func (m *vpcBodyMock) handler(t *testing.T) http.HandlerFunc {
+	t.Helper()
+	row := map[string]any{
+		"id": vpcUnitTestID, "name": "vpc-a", "cidr": "10.50.0.0/16", "status": VPC_STATUS_ACTIVE,
+		"resourceGroupId": "rg-api", "createdAt": vpcUnitTestCreated, "updatedAt": vpcUnitTestUpdated,
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			m.mutex.Lock()
+			m.posts = append(m.posts, testutil.ReadRequestBody(r))
+			m.mutex.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{"jobId": "job-create", "vpc": row}})
+		case http.MethodPut:
+			m.mutex.Lock()
+			m.puts = append(m.puts, testutil.ReadRequestBody(r))
+			m.mutex.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": row})
+		case http.MethodGet:
+			testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": row})
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}
+}
+
+func vpcBodyKeys(body map[string]any) []string {
+	keys := make([]string, 0, len(body))
+	for key := range body {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func TestCreateVpcSendsTheResourceGroupOnlyWhenKnownAndSet(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]struct {
+		group types.String
+		want  []string
+	}{
+		"set":     {types.StringValue("rg-1"), []string{"cidr", "datacenterId", "name", "resourceGroupId"}},
+		"null":    {types.StringNull(), []string{"cidr", "datacenterId", "name"}},
+		"unknown": {types.StringUnknown(), []string{"cidr", "datacenterId", "name"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			mock := &vpcBodyMock{}
+			_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{T: t, Handler: mock.handler(t)})
+
+			_, err := CreateVpc(gpcnClient, context.Background(), ResourceModel{
+				Name:            types.StringValue("vpc-a"),
+				CIDR:            types.StringValue("10.50.0.0/16"),
+				DatacenterId:    types.StringValue("dc-1"),
+				Description:     types.StringNull(),
+				DNSNameservers:  types.ListNull(types.StringType),
+				ResourceGroupId: tc.group,
+			})
+			if err != nil {
+				t.Fatalf("CreateVpc: %v", err)
+			}
+			if len(mock.posts) != 1 {
+				t.Fatalf("POST count = %d, want 1", len(mock.posts))
+			}
+			if got := vpcBodyKeys(mock.posts[0]); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("create body keys = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUpdateVpcSendsTheGroupAloneWhenOnlyTheGroupChanged(t *testing.T) {
+	t.Parallel()
+
+	state := ResourceModel{
+		Name:            types.StringValue("vpc-a"),
+		Description:     types.StringValue(""),
+		ResourceGroupId: types.StringValue("rg-1"),
+	}
+	cases := map[string]struct {
+		group types.String
+		want  []string
+	}{
+		"moved":     {types.StringValue("rg-2"), []string{"resourceGroupId"}},
+		"unchanged": {types.StringValue("rg-1"), nil},
+		"unknown":   {types.StringUnknown(), nil},
+		"null":      {types.StringNull(), nil},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			mock := &vpcBodyMock{}
+			_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{T: t, Handler: mock.handler(t)})
+
+			plan := state
+			plan.ResourceGroupId = tc.group
+			if _, err := UpdateVpc(gpcnClient, context.Background(), vpcUnitTestID, plan, state); err != nil {
+				t.Fatalf("UpdateVpc: %v", err)
+			}
+			if tc.want == nil {
+				if len(mock.puts) != 0 {
+					t.Errorf("PUT bodies = %v, want none", mock.puts)
+				}
+				return
+			}
+			if len(mock.puts) != 1 {
+				t.Fatalf("PUT count = %d, want 1", len(mock.puts))
+			}
+			if got := vpcBodyKeys(mock.puts[0]); !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("update body keys = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

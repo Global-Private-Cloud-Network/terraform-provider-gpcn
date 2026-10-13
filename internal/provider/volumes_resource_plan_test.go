@@ -1,20 +1,24 @@
 package provider
 
 import (
+	"context"
 	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
 	"terraform-provider-gpcn/internal/testutil"
 
+	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/terraform"
 	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
@@ -26,7 +30,29 @@ const (
 	volPlanTestSizeGb       = 256
 	volPlanTestName         = "vol-plan-a"
 	volPlanTestTimestamp    = "2026-01-02T15:04:05Z"
+	volPlanTestDefaultGroup = "00000000-0000-4000-8000-0000000000d0"
+	volPlanTestGroupA       = "00000000-0000-4000-8000-0000000000a1"
+	volPlanTestGroupB       = "00000000-0000-4000-8000-0000000000b2"
+
+	volPlanTestInvalidParametersBody = `{"success":false,"message":"Invalid Parameters","error":{"code":"Validation Error","statusCode":422,"details":null}}`
 )
+
+var volPlanTestUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// volPlanTestRefuseNonUUIDGroup answers like the API does to a group id that is
+// not a UUID, and reports whether it did.
+func volPlanTestRefuseNonUUIDGroup(w http.ResponseWriter, body map[string]any) bool {
+	groupId, present := body["resourceGroupId"]
+	if !present {
+		return false
+	}
+	if text, ok := groupId.(string); ok && volPlanTestUUIDPattern.MatchString(text) {
+		return false
+	}
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	_, _ = w.Write([]byte(volPlanTestInvalidParametersBody))
+	return true
+}
 
 var volPlanTestSkuSizes = map[string]int64{"sku-128": 128, "sku-256": volPlanTestSizeGb}
 
@@ -48,7 +74,7 @@ func volPlanTestSizesBody() map[string]any {
 	}
 }
 
-func volPlanTestReadBody(name string, sizeGb int64) map[string]any {
+func volPlanTestReadBody(name string, sizeGb int64, groupId string) map[string]any {
 	return map[string]any{
 		"success": true,
 		"message": "ok",
@@ -68,11 +94,45 @@ func volPlanTestReadBody(name string, sizeGb int64) map[string]any {
 				"countryAbbr": "US",
 				"country":     "United States",
 			},
+			"resourceGroupId":  groupId,
 			"virtualMachineId": "",
 			"createdAt":        volPlanTestTimestamp,
 			"updatedAt":        volPlanTestTimestamp,
 		},
 	}
+}
+
+// volPlanTestRecorder holds what the volume mock saw and the group it reports.
+type volPlanTestRecorder struct {
+	mu          sync.Mutex
+	groupId     string
+	createBody  map[string]any
+	moveBodies  []map[string]any
+	resizeCount int
+	writeOrder  []string
+
+	refuseMoveOnce  bool
+	defaultOnResize string
+	moveOnResize    string
+	rejectedMoves   int
+}
+
+func (rec *volPlanTestRecorder) setGroup(groupId string) {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	rec.groupId = groupId
+}
+
+func (rec *volPlanTestRecorder) rejectedMoveCount() int {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	return rec.rejectedMoves
+}
+
+func (rec *volPlanTestRecorder) snapshot() (createBody map[string]any, moveBodies []map[string]any, resizeCount int, writeOrder []string) {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	return rec.createBody, slices.Clone(rec.moveBodies), rec.resizeCount, slices.Clone(rec.writeOrder)
 }
 
 // startVolumePlanMockServer serves the volume endpoints a drift test needs.
@@ -81,10 +141,20 @@ func volPlanTestReadBody(name string, sizeGb int64) map[string]any {
 // The returned functions change the stored values out of band to create drift.
 func startVolumePlanMockServer(t *testing.T) (*httptest.Server, func(string), func(int64)) {
 	t.Helper()
+	server, setName, setSize, _ := startVolumePlanRecordingMockServer(t)
+	return server, setName, setSize
+}
+
+// startVolumePlanRecordingMockServer also stores the resource group that a
+// create or a move sent, reports the Default group otherwise, and records
+// every write so a test can assert the wire.
+func startVolumePlanRecordingMockServer(t *testing.T) (*httptest.Server, func(string), func(int64), *volPlanTestRecorder) {
+	t.Helper()
 
 	var mu sync.Mutex
 	name := ""
 	sizeGb := int64(volPlanTestSizeGb)
+	rec := &volPlanTestRecorder{groupId: volPlanTestDefaultGroup}
 
 	volumePath := "/v1/resource/volumes/" + volPlanTestID
 
@@ -96,11 +166,20 @@ func startVolumePlanMockServer(t *testing.T) (*httptest.Server, func(string), fu
 			testutil.WriteJSONResponse(w, volPlanTestSizesBody())
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/volumes/":
 			body := testutil.ReadRequestBody(r)
+			if volPlanTestRefuseNonUUIDGroup(w, body) {
+				return
+			}
 			skuId, _ := body["skuId"].(string)
 			mu.Lock()
 			name, _ = body["name"].(string)
 			sizeGb = volPlanTestSkuSizes[skuId]
 			mu.Unlock()
+			rec.mu.Lock()
+			rec.createBody = body
+			if groupId, ok := body["resourceGroupId"].(string); ok {
+				rec.groupId = groupId
+			}
+			rec.mu.Unlock()
 			testutil.HandleCreateJobResponse(w, "job-1", "create issued")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", volPlanTestID, true)
@@ -110,12 +189,51 @@ func startVolumePlanMockServer(t *testing.T) (*httptest.Server, func(string), fu
 			mu.Lock()
 			sizeGb = int64(newSize)
 			mu.Unlock()
+			rec.mu.Lock()
+			rec.resizeCount++
+			rec.writeOrder = append(rec.writeOrder, "resize")
+			if rec.groupId == "" && rec.defaultOnResize != "" {
+				rec.groupId = rec.defaultOnResize
+			}
+			if rec.moveOnResize != "" {
+				rec.groupId = rec.moveOnResize
+			}
+			rec.mu.Unlock()
 			testutil.HandleCreateJobResponse(w, "job-1", "resize issued")
+		case r.Method == http.MethodPut && r.URL.Path == volumePath:
+			body := testutil.ReadRequestBody(r)
+			if _, present := body["resourceGroupId"]; !present {
+				body["resourceGroupId"] = nil
+			}
+			if volPlanTestRefuseNonUUIDGroup(w, body) {
+				rec.mu.Lock()
+				rec.rejectedMoves++
+				rec.mu.Unlock()
+				return
+			}
+			rec.mu.Lock()
+			if rec.refuseMoveOnce {
+				rec.refuseMoveOnce = false
+				rec.mu.Unlock()
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"success":false,"message":"You do not have access to the specified resource group","error":{"code":"Entity Access Denied"}}`))
+				return
+			}
+			rec.moveBodies = append(rec.moveBodies, body)
+			rec.writeOrder = append(rec.writeOrder, "move")
+			if groupId, ok := body["resourceGroupId"].(string); ok {
+				rec.groupId = groupId
+			}
+			rec.mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "moved"})
 		case r.Method == http.MethodGet && r.URL.Path == volumePath:
 			mu.Lock()
 			currentName, currentSize := name, sizeGb
 			mu.Unlock()
-			testutil.WriteJSONResponse(w, volPlanTestReadBody(currentName, currentSize))
+			rec.mu.Lock()
+			currentGroup := rec.groupId
+			rec.mu.Unlock()
+			testutil.WriteJSONResponse(w, volPlanTestReadBody(currentName, currentSize, currentGroup))
 		case r.Method == http.MethodDelete && r.URL.Path == volumePath:
 			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
 		default:
@@ -136,7 +254,7 @@ func startVolumePlanMockServer(t *testing.T) (*httptest.Server, func(string), fu
 		mu.Unlock()
 	}
 
-	return server, setName, setSize
+	return server, setName, setSize, rec
 }
 
 func volPlanTestConfig(host string) string {
@@ -152,6 +270,15 @@ func volPlanTestConfigWithType(host, volumeType string) string {
 }
 
 func volPlanTestConfigFor(host, volumeType string, sizeGb int64) string {
+	return volPlanTestConfigWithGroup(host, volumeType, sizeGb, "")
+}
+
+// An empty groupId leaves resource_group_id out of the configuration.
+func volPlanTestConfigWithGroup(host, volumeType string, sizeGb int64, groupId string) string {
+	groupLine := ""
+	if groupId != "" {
+		groupLine = fmt.Sprintf("resource_group_id = %q", groupId)
+	}
 	return fmt.Sprintf(`
 provider "gpcn" {
   host    = %q
@@ -163,8 +290,9 @@ resource "gpcn_volume" "test" {
   datacenter_id = %q
   volume_type   = %q
   size_gb       = %d
+  %s
 }
-`, host, volPlanTestName, volPlanTestDatacenterID, volumeType, sizeGb)
+`, host, volPlanTestName, volPlanTestDatacenterID, volumeType, sizeGb, groupLine)
 }
 
 // The schema rules only on the spelling of a built-in class. The datacenter
@@ -359,6 +487,7 @@ func startUnknownVolumeTypePlanMockServer(t *testing.T) *httptest.Server {
 				"countryAbbr": "US",
 				"country":     "United States",
 			},
+			"resourceGroupId":  volPlanTestDefaultGroup,
 			"virtualMachineId": "",
 			"createdAt":        volPlanTestTimestamp,
 			"updatedAt":        volPlanTestTimestamp,
@@ -522,6 +651,7 @@ func startThirdClassVolumePlanMockServer(t *testing.T) *httptest.Server {
 				"countryAbbr": "US",
 				"country":     "United States",
 			},
+			"resourceGroupId":  volPlanTestDefaultGroup,
 			"virtualMachineId": "",
 			"createdAt":        volPlanTestTimestamp,
 			"updatedAt":        volPlanTestTimestamp,
@@ -601,4 +731,520 @@ func TestVolumeResourcePlanImportKeepsAThirdClassCode(t *testing.T) {
 			},
 		},
 	})
+}
+
+func volPlanTestExpectNoWrites(t *testing.T, rec *volPlanTestRecorder) {
+	t.Helper()
+	_, moveBodies, resizeCount, _ := rec.snapshot()
+	if len(moveBodies) != 0 || resizeCount != 0 || rec.rejectedMoveCount() != 0 {
+		t.Errorf("expected no write request, saw %d move(s), %d refused move(s) and %d resize(s)", len(moveBodies), rec.rejectedMoveCount(), resizeCount)
+	}
+}
+
+func TestVolumeResourcePlanCreateWithoutGroupAdoptsDefault(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfig(server.URL),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectUnknownValue(gpcnVolumeTest, tfjsonpath.New("resource_group_id")),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestDefaultGroup),
+			},
+		},
+	})
+
+	createBody, _, _, _ := rec.snapshot()
+	if _, present := createBody["resourceGroupId"]; present {
+		t.Errorf("create body must not carry resourceGroupId, got %v", createBody["resourceGroupId"])
+	}
+}
+
+func TestVolumeResourcePlanCreateWithGroupSendsIt(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupA),
+				Check:  resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupA),
+			},
+		},
+	})
+
+	createBody, _, _, _ := rec.snapshot()
+	if createBody["resourceGroupId"] != volPlanTestGroupA {
+		t.Errorf("expected create body resourceGroupId %q, got %v", volPlanTestGroupA, createBody["resourceGroupId"])
+	}
+}
+
+func TestVolumeResourcePlanMovesGroupInPlace(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupA),
+				Check:  resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupA),
+			},
+			{
+				Config: volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupB),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupB),
+			},
+		},
+	})
+
+	_, moveBodies, resizeCount, _ := rec.snapshot()
+	if len(moveBodies) != 1 {
+		t.Fatalf("expected one move request, saw %d", len(moveBodies))
+	}
+	if keys := slices.Sorted(maps.Keys(moveBodies[0])); !slices.Equal(keys, []string{"resourceGroupId"}) {
+		t.Errorf("expected the move body key set {resourceGroupId}, got %v", keys)
+	}
+	if moveBodies[0]["resourceGroupId"] != volPlanTestGroupB {
+		t.Errorf("expected move to %q, got %v", volPlanTestGroupB, moveBodies[0]["resourceGroupId"])
+	}
+	if resizeCount != 0 {
+		t.Errorf("expected no /resize call, saw %d", resizeCount)
+	}
+}
+
+func TestVolumeResourcePlanRemovedGroupPlansEmpty(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupA),
+			},
+			{
+				Config: volPlanTestConfig(server.URL),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionNoop),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupA),
+			},
+		},
+	})
+
+	volPlanTestExpectNoWrites(t, rec)
+}
+
+func TestVolumeResourcePlanDetectsOutOfBandMove(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+
+	config := volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupA)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+			},
+			{
+				PreConfig: func() { rec.setGroup(volPlanTestGroupB) },
+				Config:    config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupA),
+			},
+		},
+	})
+
+	_, moveBodies, _, _ := rec.snapshot()
+	if len(moveBodies) != 1 || moveBodies[0]["resourceGroupId"] != volPlanTestGroupA {
+		t.Errorf("expected one move back to %q, saw %v", volPlanTestGroupA, moveBodies)
+	}
+}
+
+func TestVolumeResourcePlanImportReadsGroup(t *testing.T) {
+	t.Parallel()
+	server, _, _, _ := startVolumePlanRecordingMockServer(t)
+
+	config := volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupA)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+			},
+			{
+				Config:            config,
+				ResourceName:      gpcnVolumeTest,
+				ImportState:       true,
+				ImportStateVerify: true,
+			},
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionNoop),
+					},
+				},
+			},
+		},
+	})
+}
+
+func TestVolumeResourcePlanGrowDoesNotMove(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, 128, volPlanTestGroupA),
+			},
+			{
+				Config: volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupA),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(gpcnVolumeTest, "size_gb", fmt.Sprint(volPlanTestSizeGb)),
+			},
+		},
+	})
+
+	_, moveBodies, resizeCount, _ := rec.snapshot()
+	if resizeCount != 1 || len(moveBodies) != 0 {
+		t.Errorf("expected one resize and no move, saw %d resize(s) and %d move(s)", resizeCount, len(moveBodies))
+	}
+}
+
+func TestVolumeResourcePlanMoveAndGrow(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, 128, volPlanTestGroupA),
+			},
+			{
+				Config: volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupB),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "size_gb", fmt.Sprint(volPlanTestSizeGb)),
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupB),
+				),
+			},
+		},
+	})
+
+	_, moveBodies, _, writeOrder := rec.snapshot()
+	if !slices.Equal(writeOrder, []string{"move", "resize"}) {
+		t.Errorf("expected the move before the resize, saw %v", writeOrder)
+	}
+	if len(moveBodies) != 1 || len(moveBodies[0]) != 1 {
+		t.Errorf("expected one bare move body, saw %v", moveBodies)
+	}
+}
+
+func TestVolumeResourcePlanGrowWithUnsetGroupKeepsItKnown(t *testing.T) {
+	t.Parallel()
+	server, _, _, _ := startVolumePlanRecordingMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithSize(server.URL, 128),
+				Check:  resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestDefaultGroup),
+			},
+			{
+				Config: volPlanTestConfigWithSize(server.URL, volPlanTestSizeGb),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionUpdate),
+						plancheck.ExpectKnownValue(gpcnVolumeTest, tfjsonpath.New("resource_group_id"), knownvalue.StringExact(volPlanTestDefaultGroup)),
+					},
+				},
+			},
+		},
+	})
+}
+
+// The mock reports no group until the resize, which leaves state null as a 1.4.0
+// state with no group is.
+func TestVolumeResourcePlanNullGroupStateSurvivesAnUpdate(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+	rec.mu.Lock()
+	rec.groupId = ""
+	rec.defaultOnResize = volPlanTestDefaultGroup
+	rec.mu.Unlock()
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithSize(server.URL, 128),
+				Check:  resource.TestCheckNoResourceAttr(gpcnVolumeTest, "resource_group_id"),
+			},
+			{
+				Config: volPlanTestConfigWithSize(server.URL, volPlanTestSizeGb),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestDefaultGroup),
+			},
+		},
+	})
+
+	_, moveBodies, resizeCount, _ := rec.snapshot()
+	if len(moveBodies) != 0 || rec.rejectedMoveCount() != 0 {
+		t.Errorf("expected no move, saw %d move(s) and %d refused move(s)", len(moveBodies), rec.rejectedMoveCount())
+	}
+	if resizeCount != 1 {
+		t.Errorf("expected one resize, saw %d", resizeCount)
+	}
+}
+
+func TestVolumeResourcePlanRefusedMoveShowsAPIError(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+	moveConfig := volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupB)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupA),
+				Check:  resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupA),
+			},
+			{
+				PreConfig: func() {
+					rec.mu.Lock()
+					rec.refuseMoveOnce = true
+					rec.mu.Unlock()
+				},
+				Config:      moveConfig,
+				ExpectError: regexp.MustCompile(`You\s+do\s+not\s+have\s+access\s+to\s+the\s+specified\s+resource\s+group`),
+			},
+			{
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check:              resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupA),
+			},
+			{
+				Config: moveConfig,
+				Check:  resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupB),
+			},
+		},
+	})
+}
+
+// A refused move must stop the apply before the resize call. Otherwise the volume
+// grows while its group stays behind.
+func TestVolumeResourcePlanRefusedMoveWithGrowSendsNoResize(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+	startConfig := volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, 128, volPlanTestGroupA)
+	moveAndGrow := volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupB)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: startConfig,
+				Check:  resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupA),
+			},
+			{
+				PreConfig: func() {
+					rec.mu.Lock()
+					rec.refuseMoveOnce = true
+					rec.mu.Unlock()
+				},
+				Config:      moveAndGrow,
+				ExpectError: regexp.MustCompile(`You\s+do\s+not\s+have\s+access\s+to\s+the\s+specified\s+resource\s+group`),
+			},
+			{
+				RefreshState:       true,
+				ExpectNonEmptyPlan: true,
+				Check: func(*terraform.State) error {
+					if _, _, resizeCount, _ := rec.snapshot(); resizeCount != 0 {
+						return fmt.Errorf("expected no resize after a refused move, saw %d", resizeCount)
+					}
+					return nil
+				},
+			},
+			{
+				Config: moveAndGrow,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupB),
+					resource.TestCheckResourceAttr(gpcnVolumeTest, "size_gb", fmt.Sprint(volPlanTestSizeGb)),
+					func(*terraform.State) error {
+						_, _, resizeCount, order := rec.snapshot()
+						if resizeCount != 1 || !slices.Equal(order, []string{"move", "resize"}) {
+							return fmt.Errorf("expected move then one resize, saw %v with %d resize(s)", order, resizeCount)
+						}
+						return nil
+					},
+				),
+			},
+		},
+	})
+}
+
+func TestVolumeResourcePlanAdoptsOutOfBandMoveWhenUnset(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+	config := volPlanTestConfig(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check:  resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestDefaultGroup),
+			},
+			{
+				PreConfig: func() { rec.setGroup(volPlanTestGroupB) },
+				Config:    config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionNoop),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupB),
+			},
+		},
+	})
+
+	volPlanTestExpectNoWrites(t, rec)
+}
+
+func TestVolumeResourcePlanRefusesEmptyGroup(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+	config := volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, "x")
+	config = strings.Replace(config, `"x"`, `""`, 1)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config:      config,
+			ExpectError: regexp.MustCompile(`(?s)Invalid Attribute Value Length`),
+		}},
+	})
+
+	createBody, _, _, _ := rec.snapshot()
+	if createBody != nil {
+		t.Errorf("expected no create request, saw %v", createBody)
+	}
+}
+
+func TestVolumeResourcePlanGroupDescriptionBytes(t *testing.T) {
+	t.Parallel()
+
+	schemaResponse := &fwresource.SchemaResponse{}
+	NewVolumesResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
+	if schemaResponse.Diagnostics.HasError() {
+		t.Fatalf("Expected a schema, got %v", schemaResponse.Diagnostics)
+	}
+
+	want := "ID of the resource group this volume belongs to. When omitted, the volume is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the volume in place. Removing it from configuration leaves the volume where it is, but a replacement created while it is unset joins the Default resource group"
+	got := schemaResponse.Schema.Attributes["resource_group_id"].GetDescription()
+	if got != want {
+		t.Errorf("Description = %q, want %q", got, want)
+	}
+}
+
+// The group moves while the resize request is in flight. State keeps the
+// configured group, so the next plan moves the volume back in place.
+func TestVolumeResourcePlanMoveDuringApplyKeepsPlannedGroup(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, 128, volPlanTestGroupA),
+			},
+			{
+				PreConfig: func() {
+					rec.mu.Lock()
+					rec.moveOnResize = volPlanTestGroupB
+					rec.mu.Unlock()
+				},
+				Config:             volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupA),
+				ExpectNonEmptyPlan: true,
+				Check:              resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupA),
+			},
+			{
+				PreConfig: func() {
+					rec.mu.Lock()
+					rec.moveOnResize = ""
+					rec.mu.Unlock()
+				},
+				Config: volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupA),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupA),
+			},
+		},
+	})
+}
+
+// A grow to a size the datacenter does not offer must fail before the move.
+// Otherwise the volume changes group and the grow never happens.
+func TestVolumeResourcePlanUnsupportedGrowDoesNotMove(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, 128, volPlanTestGroupA),
+			},
+			{
+				Config:      volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, 555, volPlanTestGroupB),
+				ExpectError: regexp.MustCompile(`not\s+available\s+for\s+this\s+datacenter`),
+			},
+		},
+	})
+
+	_, moveBodies, resizeCount, _ := rec.snapshot()
+	if len(moveBodies) != 0 || resizeCount != 0 {
+		t.Errorf("expected no move and no resize, saw %d move(s) and %d resize(s)", len(moveBodies), resizeCount)
+	}
 }

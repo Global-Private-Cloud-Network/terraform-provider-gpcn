@@ -61,7 +61,7 @@ func (r *volumesResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 					stringvalidator.LengthBetween(1, 255),
 				},
 				PlanModifiers: []planmodifier.String{
-					// Changing the name requires us to destroy and create a new volume. There's no update call for volumes
+					// GPCN cannot rename a volume, so a new name replaces it.
 					stringplanmodifier.RequiresReplace(),
 				},
 			},
@@ -122,6 +122,17 @@ func (r *volumesResource) Schema(_ context.Context, _ resource.SchemaRequest, re
 				Description: "Timestamp when the volume was last updated in ISO-8601 format",
 				Computed:    true,
 			},
+			"resource_group_id": schema.StringAttribute{
+				Description: "ID of the resource group this volume belongs to. When omitted, the volume is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the volume in place. Removing it from configuration leaves the volume where it is, but a replacement created while it is unset joins the Default resource group",
+				Optional:    true,
+				Computed:    true,
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+				},
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseNonNullStateForUnknown(),
+				},
+			},
 			"location": schema.MapAttribute{
 				Description: "Location details including datacenter, region, and country information",
 				ElementType: types.StringType,
@@ -176,7 +187,9 @@ func (r *volumesResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
+	plannedGroup := plan.ResourceGroupId
 	plan = volumes.MapVolumeResponseToModel(ctx, getVolumeResponse, plan)
+	plan.ResourceGroupId = keepPlannedVolumeGroup(plannedGroup, plan.ResourceGroupId)
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
@@ -240,16 +253,57 @@ func (r *volumesResource) Update(ctx context.Context, req resource.UpdateRequest
 		return
 	}
 
-	getVolumeResponse, err := volumes.UpdateVolume(r.client, ctx, plan.ID.ValueString(), plan)
+	var state volumes.ResourceModel
+	diags = req.State.Get(ctx, &state)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	volumeId := plan.ID.ValueString()
+
+	sizeChanged := !plan.SizeGb.Equal(state.SizeGb)
+	if sizeChanged {
+		componentCode := volumes.ComponentCodeForVolumeType(plan.VolumeType.ValueString())
+		if _, err := volumes.GetVolumeSkuId(r.client, ctx, plan.DatacenterId.ValueString(), componentCode, plan.SizeGb.ValueInt64()); err != nil {
+			resp.Diagnostics.AddError(
+				volumes.ErrSummaryUnableToUpdateVolume,
+				fmt.Sprintf(volumes.ErrDetailUnableToUpdateVolumeWithID, volumeId)+": "+err.Error(),
+			)
+			return
+		}
+	}
+
+	groupChanged := !plan.ResourceGroupId.IsUnknown() && !plan.ResourceGroupId.IsNull() &&
+		!plan.ResourceGroupId.Equal(state.ResourceGroupId)
+	if groupChanged {
+		if err := volumes.MoveVolume(r.client, ctx, volumeId, plan.ResourceGroupId.ValueString()); err != nil {
+			resp.Diagnostics.AddError(
+				volumes.ErrSummaryUnableToUpdateVolume,
+				fmt.Sprintf(volumes.ErrDetailUnableToUpdateVolumeWithID, volumeId)+": "+err.Error(),
+			)
+			return
+		}
+	}
+
+	var getVolumeResponse *volumes.ReadVolumesResponse
+	var err error
+	if sizeChanged {
+		getVolumeResponse, err = volumes.UpdateVolume(r.client, ctx, volumeId, plan)
+	} else {
+		getVolumeResponse, err = volumes.GetVolume(r.client, ctx, volumeId)
+	}
 	if err != nil {
 		resp.Diagnostics.AddError(
 			volumes.ErrSummaryUnableToUpdateVolume,
-			fmt.Sprintf(volumes.ErrDetailUnableToUpdateVolumeWithID, plan.ID.ValueString())+": "+err.Error(),
+			fmt.Sprintf(volumes.ErrDetailUnableToUpdateVolumeWithID, volumeId)+": "+err.Error(),
 		)
 		return
 	}
 
+	plannedGroup := plan.ResourceGroupId
 	plan = volumes.MapVolumeResponseToModel(ctx, getVolumeResponse, plan)
+	plan.ResourceGroupId = keepPlannedVolumeGroup(plannedGroup, plan.ResourceGroupId)
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
@@ -290,4 +344,14 @@ func (r *volumesResource) Delete(ctx context.Context, req resource.DeleteRequest
 
 func (r *volumesResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	resource.ImportStatePassthroughID(ctx, path.Root("id"), req, resp)
+}
+
+// A known planned group must reach state unchanged, or Terraform fails the
+// apply as inconsistent. A group moved out of band during the apply then shows
+// as drift on the next plan.
+func keepPlannedVolumeGroup(planned, reported types.String) types.String {
+	if planned.IsUnknown() {
+		return reported
+	}
+	return planned
 }

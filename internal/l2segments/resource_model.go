@@ -11,6 +11,7 @@ type ResourceModel struct {
 	Name             types.String `tfsdk:"name"`
 	DatacenterId     types.String `tfsdk:"datacenter_id"`
 	Description      types.String `tfsdk:"description"`
+	ResourceGroupId  types.String `tfsdk:"resource_group_id"`
 	State            types.String `tfsdk:"state"`
 	Offering         types.String `tfsdk:"offering"`
 	FailureReason    types.String `tfsdk:"failure_reason"`
@@ -39,6 +40,14 @@ func descriptionValue(raw *string) types.String {
 	return types.StringValue(*raw)
 }
 
+// resourceGroupValue maps the empty id an old backend answers to null.
+func resourceGroupValue(raw string) types.String {
+	if raw == "" {
+		return types.StringNull()
+	}
+	return types.StringValue(raw)
+}
+
 // formatTimestamp renders an API timestamp in the house format.
 func formatTimestamp(raw string) types.String {
 	parsed, err := time.Parse(time.RFC3339, raw)
@@ -50,13 +59,15 @@ func formatTimestamp(raw string) types.String {
 
 // MapL2SegmentResponseToModel writes the computed attributes. It fills the
 // configurable ones only when they are null. An import starts from that state,
-// and Create and Update keep the planned values.
+// and Create and Update keep the planned values. The resource group is the
+// exception: the mapper writes the API's value on every path.
 func MapL2SegmentResponseToModel(response *readL2SegmentResponse, model ResourceModel) ResourceModel {
 	model.ID = types.StringValue(response.Data.ID)
 	model.State = types.StringValue(response.Data.State)
 	model.Offering = types.StringValue(response.Data.Offering)
 	model.FailureReason = nullableString(response.Data.FailureReason)
 	model.DatacenterName = nullableString(response.Data.DatacenterName)
+	model.ResourceGroupId = resourceGroupValue(response.Data.ResourceGroupID)
 	model.AttachedNicCount = types.Int64Value(response.Data.AttachedNicCount)
 	model.CreatedTime = formatTimestamp(response.Data.CreatedAt)
 	model.LastUpdated = formatTimestamp(response.Data.UpdatedAt)
@@ -75,9 +86,10 @@ func MapL2SegmentResponseToModel(response *readL2SegmentResponse, model Resource
 }
 
 // RefreshL2SegmentModelFromResponse shows an out-of-band edit. The name and the
-// description are the only attributes the platform reconciles in place, through
-// the update verb. The datacenter has no update verb. A refreshed drift there
-// would plan a replacement of a carrier that live traffic uses.
+// description reconcile in place through the update verb. The resource group
+// also moves in place; the mapper writes it. The datacenter has no update verb.
+// A refreshed drift there would plan a replacement of a carrier that live
+// traffic uses.
 func RefreshL2SegmentModelFromResponse(response *readL2SegmentResponse, model ResourceModel) ResourceModel {
 	model.Name = types.StringValue(response.Data.Name)
 	model.Description = descriptionValue(response.Data.Description)

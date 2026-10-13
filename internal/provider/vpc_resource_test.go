@@ -16,9 +16,12 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/tfsdk"
 	"github.com/hashicorp/terraform-plugin-framework/types"
+	"github.com/hashicorp/terraform-plugin-testing/compare"
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
+	"github.com/hashicorp/terraform-plugin-testing/statecheck"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 // vpcAccOctetSlot names the block each acceptance case in this file owns. A
@@ -69,6 +72,7 @@ func TestVpcResource(t *testing.T) {
 	rName := acctest.RandString(8)
 	vpcName := fmt.Sprintf("vpc-basic-%s", rName)
 	vpcNameUpdated := fmt.Sprintf("vpc-basic-updated-%s", rName)
+	groupName := fmt.Sprintf("vpc-basic-group-%s", rName)
 	// The overlap check covers the whole entity. A fixed block meets only what
 	// an earlier run of this case left behind, which the configuration
 	// acknowledges.
@@ -85,6 +89,8 @@ func TestVpcResource(t *testing.T) {
 				vpc_capable = true
 			}
 
+			data "gpcn_resource_groups" "all" {}
+
 			resource "gpcn_vpc" "test" {
 				name                = "%s"
 				datacenter_id       = data.gpcn_datacenters.central_us.datacenters[0].id
@@ -97,6 +103,9 @@ func TestVpcResource(t *testing.T) {
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVpcTest, plancheck.ResourceActionCreate),
 					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.CompareValuePairs(gpcnVpcTest, tfjsonpath.New("resource_group_id"), "data.gpcn_resource_groups.all", tfjsonpath.New("default_resource_group_id"), compare.ValuesSame()),
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrSet(gpcnVpcTest, "id"),
@@ -143,6 +152,36 @@ func TestVpcResource(t *testing.T) {
 					resource.TestCheckResourceAttr(gpcnVpcTest, "name", vpcNameUpdated),
 					resource.TestCheckResourceAttr(gpcnVpcTest, "description", "terraform acceptance, renamed"),
 				),
+			},
+			// A move to a group the test creates is an in-place update
+			{
+				Config: providerConfig + fmt.Sprintf(`
+			data "gpcn_datacenters" "central_us" {
+				name        = "Chicago"
+				vpc_capable = true
+			}
+
+			resource "gpcn_resource_group" "moved" {
+				name = "%s"
+			}
+
+			resource "gpcn_vpc" "test" {
+				name                = "%s"
+				datacenter_id       = data.gpcn_datacenters.central_us.datacenters[0].id
+				cidr                = "%s"
+				description         = "terraform acceptance, renamed"
+				acknowledge_overlap = true
+				resource_group_id   = gpcn_resource_group.moved.id
+			}
+			`, groupName, vpcNameUpdated, vpcCidr),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.CompareValuePairs(gpcnVpcTest, tfjsonpath.New("resource_group_id"), "gpcn_resource_group.moved", tfjsonpath.New("id"), compare.ValuesSame()),
+				},
 			},
 		},
 	})
@@ -210,18 +249,19 @@ func TestVpcResourceCreateWritesIdBeforePolling(t *testing.T) {
 					"data": map[string]any{
 						"jobId": vpcPlanTestCreateJobID,
 						"vpc": map[string]any{
-							"id":             vpcPlanTestID,
-							"name":           "vpc-orphan",
-							"description":    "",
-							"cidr":           vpcPlanTestCidr,
-							"datacenter":     map[string]any{"id": vpcPlanTestDatacenterID, "code": "kansas", "name": "Kansas"},
-							"status":         "creating",
-							"failureReason":  nil,
-							"egressIp":       nil,
-							"activeJobId":    vpcPlanTestCreateJobID,
-							"createdAt":      vpcPlanTestTimestamp,
-							"updatedAt":      vpcPlanTestTimestamp,
-							"dnsNameservers": []string{"8.8.8.8"},
+							"id":              vpcPlanTestID,
+							"resourceGroupId": vpcPlanTestDefaultGroup,
+							"name":            "vpc-orphan",
+							"description":     "",
+							"cidr":            vpcPlanTestCidr,
+							"datacenter":      map[string]any{"id": vpcPlanTestDatacenterID, "code": "kansas", "name": "Kansas"},
+							"status":          "creating",
+							"failureReason":   nil,
+							"egressIp":        nil,
+							"activeJobId":     vpcPlanTestCreateJobID,
+							"createdAt":       vpcPlanTestTimestamp,
+							"updatedAt":       vpcPlanTestTimestamp,
+							"dnsNameservers":  []string{"8.8.8.8"},
 						},
 					},
 				})
@@ -289,18 +329,19 @@ func TestVpcResourceReadWarnsWhenVpcFailed(t *testing.T) {
 					"success": true,
 					"message": "",
 					"data": map[string]any{
-						"id":             vpcPlanTestID,
-						"name":           "vpc-failed",
-						"description":    "",
-						"cidr":           vpcPlanTestCidr,
-						"datacenter":     map[string]any{"id": vpcPlanTestDatacenterID, "code": "kansas", "name": "Kansas"},
-						"status":         status,
-						"failureReason":  failureReason,
-						"egressIp":       nil,
-						"activeJobId":    nil,
-						"createdAt":      vpcPlanTestTimestamp,
-						"updatedAt":      vpcPlanTestTimestamp,
-						"dnsNameservers": []string{"8.8.8.8"},
+						"id":              vpcPlanTestID,
+						"resourceGroupId": vpcPlanTestDefaultGroup,
+						"name":            "vpc-failed",
+						"description":     "",
+						"cidr":            vpcPlanTestCidr,
+						"datacenter":      map[string]any{"id": vpcPlanTestDatacenterID, "code": "kansas", "name": "Kansas"},
+						"status":          status,
+						"failureReason":   failureReason,
+						"egressIp":        nil,
+						"activeJobId":     nil,
+						"createdAt":       vpcPlanTestTimestamp,
+						"updatedAt":       vpcPlanTestTimestamp,
+						"dnsNameservers":  []string{"8.8.8.8"},
 					},
 				})
 			},

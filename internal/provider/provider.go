@@ -303,6 +303,7 @@ func (p *gpcnProvider) DataSources(_ context.Context) []func() datasource.DataSo
 	return []func() datasource.DataSource{
 		NewDatacenterDataSource,
 		NewGPUInventoryDataSource,
+		NewResourceGroupsDataSource,
 		NewVirtualMachineImagesDataSource,
 		NewVirtualMachineSizesDataSource,
 	}
