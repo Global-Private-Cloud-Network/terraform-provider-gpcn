@@ -30,10 +30,29 @@ const (
 	volPlanTestSizeGb       = 256
 	volPlanTestName         = "vol-plan-a"
 	volPlanTestTimestamp    = "2026-01-02T15:04:05Z"
-	volPlanTestDefaultGroup = "rg-default"
-	volPlanTestGroupA       = "rg-a"
-	volPlanTestGroupB       = "rg-b"
+	volPlanTestDefaultGroup = "00000000-0000-4000-8000-0000000000d0"
+	volPlanTestGroupA       = "00000000-0000-4000-8000-0000000000a1"
+	volPlanTestGroupB       = "00000000-0000-4000-8000-0000000000b2"
+
+	volPlanTestInvalidParametersBody = `{"success":false,"message":"Invalid Parameters","error":{"code":"Validation Error","statusCode":422,"details":null}}`
 )
+
+var volPlanTestUUIDPattern = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// volPlanTestRefuseNonUUIDGroup answers like the API does to a group id that is
+// not a UUID, and reports whether it did.
+func volPlanTestRefuseNonUUIDGroup(w http.ResponseWriter, body map[string]any) bool {
+	groupId, present := body["resourceGroupId"]
+	if !present {
+		return false
+	}
+	if text, ok := groupId.(string); ok && volPlanTestUUIDPattern.MatchString(text) {
+		return false
+	}
+	w.WriteHeader(http.StatusUnprocessableEntity)
+	_, _ = w.Write([]byte(volPlanTestInvalidParametersBody))
+	return true
+}
 
 var volPlanTestSkuSizes = map[string]int64{"sku-128": 128, "sku-256": volPlanTestSizeGb}
 
@@ -94,12 +113,20 @@ type volPlanTestRecorder struct {
 
 	refuseMoveOnce  bool
 	defaultOnResize string
+	moveOnResize    string
+	rejectedMoves   int
 }
 
 func (rec *volPlanTestRecorder) setGroup(groupId string) {
 	rec.mu.Lock()
 	defer rec.mu.Unlock()
 	rec.groupId = groupId
+}
+
+func (rec *volPlanTestRecorder) rejectedMoveCount() int {
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	return rec.rejectedMoves
 }
 
 func (rec *volPlanTestRecorder) snapshot() (createBody map[string]any, moveBodies []map[string]any, resizeCount int, writeOrder []string) {
@@ -139,6 +166,9 @@ func startVolumePlanRecordingMockServer(t *testing.T) (*httptest.Server, func(st
 			testutil.WriteJSONResponse(w, volPlanTestSizesBody())
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/volumes/":
 			body := testutil.ReadRequestBody(r)
+			if volPlanTestRefuseNonUUIDGroup(w, body) {
+				return
+			}
 			skuId, _ := body["skuId"].(string)
 			mu.Lock()
 			name, _ = body["name"].(string)
@@ -165,10 +195,22 @@ func startVolumePlanRecordingMockServer(t *testing.T) (*httptest.Server, func(st
 			if rec.groupId == "" && rec.defaultOnResize != "" {
 				rec.groupId = rec.defaultOnResize
 			}
+			if rec.moveOnResize != "" {
+				rec.groupId = rec.moveOnResize
+			}
 			rec.mu.Unlock()
 			testutil.HandleCreateJobResponse(w, "job-1", "resize issued")
 		case r.Method == http.MethodPut && r.URL.Path == volumePath:
 			body := testutil.ReadRequestBody(r)
+			if _, present := body["resourceGroupId"]; !present {
+				body["resourceGroupId"] = nil
+			}
+			if volPlanTestRefuseNonUUIDGroup(w, body) {
+				rec.mu.Lock()
+				rec.rejectedMoves++
+				rec.mu.Unlock()
+				return
+			}
 			rec.mu.Lock()
 			if rec.refuseMoveOnce {
 				rec.refuseMoveOnce = false
@@ -694,8 +736,8 @@ func TestVolumeResourcePlanImportKeepsAThirdClassCode(t *testing.T) {
 func volPlanTestExpectNoWrites(t *testing.T, rec *volPlanTestRecorder) {
 	t.Helper()
 	_, moveBodies, resizeCount, _ := rec.snapshot()
-	if len(moveBodies) != 0 || resizeCount != 0 {
-		t.Errorf("expected no write request, saw %d move(s) and %d resize(s)", len(moveBodies), resizeCount)
+	if len(moveBodies) != 0 || resizeCount != 0 || rec.rejectedMoveCount() != 0 {
+		t.Errorf("expected no write request, saw %d move(s), %d refused move(s) and %d resize(s)", len(moveBodies), rec.rejectedMoveCount(), resizeCount)
 	}
 }
 
@@ -982,6 +1024,14 @@ func TestVolumeResourcePlanNullGroupStateSurvivesAnUpdate(t *testing.T) {
 			},
 		},
 	})
+
+	_, moveBodies, resizeCount, _ := rec.snapshot()
+	if len(moveBodies) != 0 || rec.rejectedMoveCount() != 0 {
+		t.Errorf("expected no move, saw %d move(s) and %d refused move(s)", len(moveBodies), rec.rejectedMoveCount())
+	}
+	if resizeCount != 1 {
+		t.Errorf("expected one resize, saw %d", resizeCount)
+	}
 }
 
 func TestVolumeResourcePlanRefusedMoveShowsAPIError(t *testing.T) {
@@ -1131,5 +1181,70 @@ func TestVolumeResourcePlanGroupDescriptionBytes(t *testing.T) {
 	got := schemaResponse.Schema.Attributes["resource_group_id"].GetDescription()
 	if got != want {
 		t.Errorf("Description = %q, want %q", got, want)
+	}
+}
+
+// The group moves while the resize request is in flight. State keeps the
+// configured group, so the next plan moves the volume back in place.
+func TestVolumeResourcePlanMoveDuringApplyKeepsPlannedGroup(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, 128, volPlanTestGroupA),
+			},
+			{
+				PreConfig: func() {
+					rec.mu.Lock()
+					rec.moveOnResize = volPlanTestGroupB
+					rec.mu.Unlock()
+				},
+				Config:             volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupA),
+				ExpectNonEmptyPlan: true,
+				Check:              resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupA),
+			},
+			{
+				PreConfig: func() {
+					rec.mu.Lock()
+					rec.moveOnResize = ""
+					rec.mu.Unlock()
+				},
+				Config: volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, volPlanTestSizeGb, volPlanTestGroupA),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(gpcnVolumeTest, "resource_group_id", volPlanTestGroupA),
+			},
+		},
+	})
+}
+
+// A grow to a size the datacenter does not offer must fail before the move.
+// Otherwise the volume changes group and the grow never happens.
+func TestVolumeResourcePlanUnsupportedGrowDoesNotMove(t *testing.T) {
+	t.Parallel()
+	server, _, _, rec := startVolumePlanRecordingMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, 128, volPlanTestGroupA),
+			},
+			{
+				Config:      volPlanTestConfigWithGroup(server.URL, volPlanTestVolumeType, 555, volPlanTestGroupB),
+				ExpectError: regexp.MustCompile(`not\s+available\s+for\s+this\s+datacenter`),
+			},
+		},
+	})
+
+	_, moveBodies, resizeCount, _ := rec.snapshot()
+	if len(moveBodies) != 0 || resizeCount != 0 {
+		t.Errorf("expected no move and no resize, saw %d move(s) and %d resize(s)", len(moveBodies), resizeCount)
 	}
 }

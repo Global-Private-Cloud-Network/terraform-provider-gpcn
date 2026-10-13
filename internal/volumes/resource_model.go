@@ -121,7 +121,7 @@ func canonicalVolumeType(name string) string {
 	return name
 }
 
-func componentCodeForVolumeType(volumeType string) string {
+func ComponentCodeForVolumeType(volumeType string) string {
 	if code, known := volumeTypeMapping[canonicalVolumeType(volumeType)]; known {
 		return code
 	}

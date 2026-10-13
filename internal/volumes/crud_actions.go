@@ -51,7 +51,7 @@ type ReadVolumesResponse = readVolumesResponse
 
 func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*readVolumesResponse, error) {
 	tflog.Info(ctx, LogStartingCreateVolume)
-	componentCode := componentCodeForVolumeType(model.VolumeType.ValueString())
+	componentCode := ComponentCodeForVolumeType(model.VolumeType.ValueString())
 
 	tflog.Info(ctx, LogLookingUpVolumeSkuId)
 	skuId, err := GetVolumeSkuId(gpcnClient, ctx, model.DatacenterId.ValueString(), componentCode, model.SizeGb.ValueInt64())
@@ -154,7 +154,7 @@ func GetVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId stri
 
 func UpdateVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId string, model ResourceModel) (*readVolumesResponse, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateVolumeWithID, volumeId))
-	componentCode := componentCodeForVolumeType(model.VolumeType.ValueString())
+	componentCode := ComponentCodeForVolumeType(model.VolumeType.ValueString())
 
 	tflog.Info(ctx, LogValidatingVolumeSkuIdForUpdate)
 

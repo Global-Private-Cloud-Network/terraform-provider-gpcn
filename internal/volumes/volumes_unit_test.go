@@ -534,8 +534,8 @@ func TestCanonicalVolumeTypeAcceptsCodesAndNamesUnit(t *testing.T) {
 			if got := canonicalVolumeType(testCase.value); got != testCase.canonical {
 				t.Errorf("canonicalVolumeType(%q) = %q, want %q", testCase.value, got, testCase.canonical)
 			}
-			if got := componentCodeForVolumeType(testCase.value); got != testCase.code {
-				t.Errorf("componentCodeForVolumeType(%q) = %q, want %q", testCase.value, got, testCase.code)
+			if got := ComponentCodeForVolumeType(testCase.value); got != testCase.code {
+				t.Errorf("ComponentCodeForVolumeType(%q) = %q, want %q", testCase.value, got, testCase.code)
 			}
 		}
 	})
