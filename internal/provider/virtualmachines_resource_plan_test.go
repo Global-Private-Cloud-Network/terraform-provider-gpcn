@@ -3780,6 +3780,7 @@ type vmGroupMock struct {
 
 	refuseMoveOnce bool
 	defaultOnPut   string
+	moveOnPutTo    string
 }
 
 func (m *vmGroupMock) setGroup(group string) {
@@ -3873,6 +3874,10 @@ func startVirtualMachineGroupMockServer(t *testing.T, defaultGroup string) *vmGr
 			}
 			if group, ok := body["resourceGroupId"].(string); ok {
 				mock.group = group
+			}
+			if mock.moveOnPutTo != "" {
+				mock.group = mock.moveOnPutTo
+				mock.moveOnPutTo = ""
 			}
 			mock.mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
@@ -4316,4 +4321,34 @@ func TestVirtualMachineResourcePlanGroupDescriptionBytes(t *testing.T) {
 	if got != want {
 		t.Errorf("Description = %q, want %q", got, want)
 	}
+}
+
+func TestVirtualMachineResourcePlanMoveDuringApplyKeepsPlannedGroup(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineGroupMockServer(t, vmPlanTestDefaultGroup)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmGroupPlanTestConfig(mock.server.URL, "vm-group-race", vmPlanTestGroupG),
+				Check:  resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "resource_group_id", vmPlanTestGroupG),
+			},
+			{
+				PreConfig: func() {
+					mock.mu.Lock()
+					mock.moveOnPutTo = vmPlanTestGroupH
+					mock.mu.Unlock()
+				},
+				Config:             vmGroupPlanTestConfig(mock.server.URL, "vm-group-race-renamed", vmPlanTestGroupG),
+				ExpectNonEmptyPlan: true,
+				Check:              resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "resource_group_id", vmPlanTestGroupG),
+			},
+			{
+				Config:           vmGroupPlanTestConfig(mock.server.URL, "vm-group-race-renamed", vmPlanTestGroupG),
+				ConfigPlanChecks: vmGroupPlanTestExpectAction(plancheck.ResourceActionUpdate),
+				Check:            resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "resource_group_id", vmPlanTestGroupG),
+			},
+		},
+	})
 }

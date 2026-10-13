@@ -630,6 +630,7 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	// value. The next refresh records the rest.
 	plannedNetworkInterfaces := plan.NetworkInterfaces
 	plannedPublicIp := plan.PublicIp
+	plannedResourceGroupId := plan.ResourceGroupId
 	var mapDiags diag.Diagnostics
 	plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
 	resp.Diagnostics.Append(mapDiags...)
@@ -638,6 +639,9 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	}
 	if !plannedPublicIp.IsUnknown() {
 		plan.PublicIp = plannedPublicIp
+	}
+	if !plannedResourceGroupId.IsUnknown() {
+		plan.ResourceGroupId = plannedResourceGroupId
 	}
 
 	// Once finished, conditionally start the virtual machine again. The diagnostic below
