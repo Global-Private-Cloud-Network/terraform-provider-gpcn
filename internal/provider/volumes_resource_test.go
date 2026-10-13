@@ -8,6 +8,7 @@ import (
 
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 
+	"github.com/hashicorp/terraform-plugin-testing/compare"
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/knownvalue"
@@ -17,6 +18,8 @@ import (
 )
 
 var gpcnVolumeTest = "gpcn_volume.test"
+
+const gpcnResourceGroupsAll = "data.gpcn_resource_groups.all"
 
 func TestVolumesResource(t *testing.T) {
 	t.Parallel()
@@ -34,6 +37,8 @@ func TestVolumesResource(t *testing.T) {
 				region_name  = "Central"
 				name = "Chicago"
 			}
+
+			data "gpcn_resource_groups" "all" {}
 
 			resource "gpcn_volume" "test" {
 				name = "%s"
@@ -65,6 +70,13 @@ func TestVolumesResource(t *testing.T) {
 						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionCreate),
 					},
 				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.CompareValuePairs(
+						gpcnVolumeTest, tfjsonpath.New("resource_group_id"),
+						gpcnResourceGroupsAll, tfjsonpath.New("default_resource_group_id"),
+						compare.ValuesSame(),
+					),
+				},
 			},
 			// ImportState testing
 			{
@@ -82,6 +94,8 @@ func TestVolumesResource(t *testing.T) {
 				region_name  = "Central"
 				name = "Chicago"
 			}
+
+			data "gpcn_resource_groups" "all" {}
 
 			resource "gpcn_volume" "test" {
 				name = "%s"
@@ -110,6 +124,42 @@ func TestVolumesResource(t *testing.T) {
 					statecheck.ExpectKnownValue(gpcnVolumeTest, tfjsonpath.New("size_gb"), knownvalue.Int64Exact(512)),
 				},
 			},
+			// Move to a resource group the test creates
+			{
+				Config: providerConfig + fmt.Sprintf(`
+			data "gpcn_datacenters" "central_us" {
+				country_name = "United States"
+				region_name  = "Central"
+				name = "Chicago"
+			}
+
+			data "gpcn_resource_groups" "all" {}
+
+			resource "gpcn_resource_group" "target" {
+				name = "volume-group-%s"
+			}
+
+			resource "gpcn_volume" "test" {
+				name = "%s"
+				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+				volume_type = "SSD"
+				size_gb = 512
+				resource_group_id = gpcn_resource_group.target.id
+			}
+			`, rName, volumeName),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.CompareValuePairs(
+						gpcnVolumeTest, tfjsonpath.New("resource_group_id"),
+						"gpcn_resource_group.target", tfjsonpath.New("id"),
+						compare.ValuesSame(),
+					),
+				},
+			},
 			// Update and Read testing with a replace
 			// Decreasing the size forces a replace
 			{
@@ -120,13 +170,19 @@ func TestVolumesResource(t *testing.T) {
 				name = "Chicago"
 			}
 
+			data "gpcn_resource_groups" "all" {}
+
+			resource "gpcn_resource_group" "target" {
+				name = "volume-group-%s"
+			}
+
 			resource "gpcn_volume" "test" {
 				name = "%s"
 				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
 				volume_type = "SSD"
 				size_gb = 256
 			}
-			`, volumeName),
+			`, rName, volumeName),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					// Verify attributes are set to the values from the config
 					resource.TestCheckResourceAttr(gpcnVolumeTest, "name", volumeName),
