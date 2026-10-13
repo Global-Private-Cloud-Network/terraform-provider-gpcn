@@ -190,7 +190,13 @@ func (r *vpcResource) Create(ctx context.Context, req resource.CreateRequest, re
 
 	// The API inserts the row inside the request, so the VPC exists before the
 	// job runs. State takes it now, or a poll timeout orphans a live VPC.
+	plannedGroup := plan.ResourceGroupId
 	plan = vpcs.MapCreatedVpcToModel(ctx, createVpcResponse, plan)
+	// A move made elsewhere during the apply must not contradict the plan. The
+	// next refresh reports it as drift.
+	if !plannedGroup.IsUnknown() {
+		plan.ResourceGroupId = plannedGroup
+	}
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
@@ -214,6 +220,11 @@ func (r *vpcResource) Create(ctx context.Context, req resource.CreateRequest, re
 	}
 
 	plan = vpcs.MapVpcResponseToModel(ctx, getVpcResponse, plan)
+	// A move made elsewhere during the apply must not contradict the plan. The
+	// next refresh reports it as drift.
+	if !plannedGroup.IsUnknown() {
+		plan.ResourceGroupId = plannedGroup
+	}
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -295,7 +306,13 @@ func (r *vpcResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		return
 	}
 
+	plannedGroup := plan.ResourceGroupId
 	plan = vpcs.MapVpcResponseToModel(ctx, getVpcResponse, plan)
+	// A move made elsewhere during the apply must not contradict the plan. The
+	// next refresh reports it as drift.
+	if !plannedGroup.IsUnknown() {
+		plan.ResourceGroupId = plannedGroup
+	}
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)

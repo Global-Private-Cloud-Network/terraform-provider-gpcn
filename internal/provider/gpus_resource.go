@@ -242,7 +242,13 @@ func (r *gpuResource) Create(ctx context.Context, req resource.CreateRequest, re
 		return
 	}
 
+	plannedGroup := plan.ResourceGroupId
 	plan = gpu.MapGPUResponseToModel(ctx, getGPUResponse, plan)
+	// A move made elsewhere during the apply must not contradict the plan. The
+	// next refresh reports it as drift.
+	if !plannedGroup.IsUnknown() {
+		plan.ResourceGroupId = plannedGroup
+	}
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
@@ -341,7 +347,13 @@ func (r *gpuResource) Update(ctx context.Context, req resource.UpdateRequest, re
 		return
 	}
 
+	plannedGroup := plan.ResourceGroupId
 	plan = gpu.MapGPUResponseToModel(ctx, getGPUResponse, plan)
+	// A move made elsewhere during the apply must not contradict the plan. The
+	// next refresh reports it as drift.
+	if !plannedGroup.IsUnknown() {
+		plan.ResourceGroupId = plannedGroup
+	}
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)

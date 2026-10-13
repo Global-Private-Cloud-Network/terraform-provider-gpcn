@@ -67,7 +67,8 @@ func l2PlanTestDetailBodyInState(name string, description any, segmentState stri
 	}
 }
 
-const l2PlanTestGroupNotFoundBody = `{"success":false,"message":"Resource group not found"}`
+const l2PlanTestGroupNotFoundBody = `{"success":false,"message":"Resource group not found",` +
+	`"error":{"code":"Resource Not Found","statusCode":404,"details":null}}`
 
 // l2PlanTestInUseBody is the refusal a delete meets while interfaces sit on the
 // segment. It is the only delete refusal that carries a typed code and a count.
@@ -112,6 +113,23 @@ type l2PlanTestServer struct {
 	emptyGroupUntilWrite bool
 	// refusedMoves counts the updates naming a group that answer 404.
 	refusedMoves int
+	// movedOnUpdate moves the segment to this group while the next update is
+	// served, the way a move in the console can land during an apply.
+	movedOnUpdate string
+	// movedOnJob does the same while the next job poll is served.
+	movedOnJob string
+}
+
+func (s *l2PlanTestServer) setMovedOnJob(groupID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.movedOnJob = groupID
+}
+
+func (s *l2PlanTestServer) setMovedOnUpdate(groupID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.movedOnUpdate = groupID
 }
 
 func (s *l2PlanTestServer) lastUpdateBody() map[string]any {
@@ -207,6 +225,12 @@ func startL2SegmentPlanMockServer(t *testing.T) (*httptest.Server, *l2PlanTestSe
 			state.mu.Unlock()
 			testutil.HandleCreateJobResponse(w, "job-create", "Operation initiated successfully")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			state.mu.Lock()
+			if state.movedOnJob != "" {
+				state.groupID = state.movedOnJob
+				state.movedOnJob = ""
+			}
+			state.mu.Unlock()
 			testutil.HandleJobResponse(w, "job-create", l2PlanTestSegmentID, true)
 		case r.Method == http.MethodGet && r.URL.Path == segmentPath:
 			state.mu.Lock()
@@ -237,6 +261,10 @@ func startL2SegmentPlanMockServer(t *testing.T) (*httptest.Server, *l2PlanTestSe
 			}
 			if groupID, present := body["resourceGroupId"].(string); present {
 				state.groupID = groupID
+			}
+			if state.movedOnUpdate != "" {
+				state.groupID = state.movedOnUpdate
+				state.movedOnUpdate = ""
 			}
 			if state.attachedOnUpdate != nil {
 				state.nicCount = *state.attachedOnUpdate
@@ -952,6 +980,53 @@ func TestL2SegmentResourcePlanNullGroupStateSurvivesAnUpdate(t *testing.T) {
 			{
 				Config: l2PlanTestConfig(server.URL, l2PlanTestRenamedName),
 				Check:  resource.TestCheckResourceAttr(gpcnL2SegmentTest, "resource_group_id", l2PlanTestDefaultGroup),
+			},
+		},
+	})
+}
+
+func TestL2SegmentResourcePlanMoveDuringApplyKeepsPlannedGroup(t *testing.T) {
+	t.Parallel()
+	server, state := startL2SegmentPlanMockServer(t)
+	renamed := l2PlanTestConfigWithGroup(server.URL, l2PlanTestRenamedName, l2PlanTestGroupG)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: l2PlanTestConfigWithGroup(server.URL, l2PlanTestName, l2PlanTestGroupG)},
+			{
+				PreConfig:          func() { state.setMovedOnUpdate(l2PlanTestGroupH) },
+				Config:             renamed,
+				ExpectNonEmptyPlan: true,
+				Check:              resource.TestCheckResourceAttr(gpcnL2SegmentTest, "resource_group_id", l2PlanTestGroupG),
+			},
+			{
+				Config:           renamed,
+				ConfigPlanChecks: l2PlanTestExpectAction(plancheck.ResourceActionUpdate),
+				Check:            resource.TestCheckResourceAttr(gpcnL2SegmentTest, "resource_group_id", l2PlanTestGroupG),
+			},
+		},
+	})
+}
+
+func TestL2SegmentResourcePlanMoveDuringCreateKeepsPlannedGroup(t *testing.T) {
+	t.Parallel()
+	server, state := startL2SegmentPlanMockServer(t)
+	state.setMovedOnJob(l2PlanTestGroupH)
+	config := l2PlanTestConfigWithGroup(server.URL, l2PlanTestName, l2PlanTestGroupG)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:             config,
+				ExpectNonEmptyPlan: true,
+				Check:              resource.TestCheckResourceAttr(gpcnL2SegmentTest, "resource_group_id", l2PlanTestGroupG),
+			},
+			{
+				Config:           config,
+				ConfigPlanChecks: l2PlanTestExpectAction(plancheck.ResourceActionUpdate),
+				Check:            resource.TestCheckResourceAttr(gpcnL2SegmentTest, "resource_group_id", l2PlanTestGroupG),
 			},
 		},
 	})

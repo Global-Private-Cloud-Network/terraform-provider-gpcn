@@ -170,7 +170,13 @@ func (r *l2SegmentResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 
+	plannedGroup := plan.ResourceGroupId
 	plan = l2segments.MapL2SegmentResponseToModel(getResponse, plan)
+	// A move made elsewhere during the apply must not contradict the plan. The
+	// next refresh reports it as drift.
+	if !plannedGroup.IsUnknown() {
+		plan.ResourceGroupId = plannedGroup
+	}
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)
@@ -256,7 +262,13 @@ func (r *l2SegmentResource) Update(ctx context.Context, req resource.UpdateReque
 		return
 	}
 
+	plannedGroup := plan.ResourceGroupId
 	plan = l2segments.MapL2SegmentResponseToModel(getResponse, plan)
+	// A move made elsewhere during the apply must not contradict the plan. The
+	// next refresh reports it as drift.
+	if !plannedGroup.IsUnknown() {
+		plan.ResourceGroupId = plannedGroup
+	}
 
 	diags = resp.State.Set(ctx, plan)
 	resp.Diagnostics.Append(diags...)

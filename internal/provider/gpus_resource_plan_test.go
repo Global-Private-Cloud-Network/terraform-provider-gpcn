@@ -116,6 +116,11 @@ type gpuPlanTestMock struct {
 
 	refuseMoveOnce bool
 	defaultOnPut   string
+	// movedOnPut moves the GPU to this group while the next update request is
+	// served, the way a move in the console can land during an apply.
+	movedOnPut string
+	// movedOnJob does the same while the next job poll is served.
+	movedOnJob string
 }
 
 // setName renames the GPU out of band, which is how a test creates drift.
@@ -178,6 +183,12 @@ func startGPUPlanMockServer(t *testing.T) (*httptest.Server, *gpuPlanTestMock) {
 			mock.mu.Unlock()
 			testutil.HandleJobResponse(w, "job-1", gpuPlanTestID, true)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			mock.mu.Lock()
+			if mock.movedOnJob != "" {
+				mock.group = mock.movedOnJob
+				mock.movedOnJob = ""
+			}
+			mock.mu.Unlock()
 			testutil.HandleJobResponse(w, "job-1", gpuPlanTestID, true)
 		case r.Method == http.MethodPut && r.URL.Path == gpuPath:
 			body := testutil.ReadRequestBody(r)
@@ -198,6 +209,10 @@ func startGPUPlanMockServer(t *testing.T) (*httptest.Server, *gpuPlanTestMock) {
 			}
 			if group, ok := body["resourceGroupId"].(string); ok {
 				mock.group = group
+			}
+			if mock.movedOnPut != "" {
+				mock.group = mock.movedOnPut
+				mock.movedOnPut = ""
 			}
 			mock.mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
@@ -718,7 +733,65 @@ func TestGPUResourcePlanNullGroupStateSurvivesAnUpdate(t *testing.T) {
 			{
 				Config:           gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-b", ""),
 				ConfigPlanChecks: gpuPlanTestAction(plancheck.ResourceActionUpdate),
-				Check:            resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestDefaultGroup),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestDefaultGroup),
+					func(*terraform.State) error { return gpuPlanTestCheckKeys(mock.lastPutBody(), "") },
+				),
+			},
+		},
+	})
+}
+
+func TestGPUResourcePlanMoveDuringApplyKeepsPlannedGroup(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+	renamed := gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-b", gpuPlanTestGroupField(gpuPlanTestGroupA))
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a", gpuPlanTestGroupField(gpuPlanTestGroupA)),
+			},
+			{
+				PreConfig: func() {
+					mock.mu.Lock()
+					mock.movedOnPut = gpuPlanTestGroupB
+					mock.mu.Unlock()
+				},
+				Config:             renamed,
+				ExpectNonEmptyPlan: true,
+				Check:              resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestGroupA),
+			},
+			{
+				Config:           renamed,
+				ConfigPlanChecks: gpuPlanTestAction(plancheck.ResourceActionUpdate),
+				Check:            resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestGroupA),
+			},
+		},
+	})
+}
+
+func TestGPUResourcePlanMoveDuringCreateKeepsPlannedGroup(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+	mock.mu.Lock()
+	mock.movedOnJob = gpuPlanTestGroupB
+	mock.mu.Unlock()
+	config := gpuPlanTestGroupConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a", gpuPlanTestGroupField(gpuPlanTestGroupA))
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:             config,
+				ExpectNonEmptyPlan: true,
+				Check:              resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestGroupA),
+			},
+			{
+				Config:           config,
+				ConfigPlanChecks: gpuPlanTestAction(plancheck.ResourceActionUpdate),
+				Check:            resource.TestCheckResourceAttr(gpcnGPUTest, "resource_group_id", gpuPlanTestGroupA),
 			},
 		},
 	})

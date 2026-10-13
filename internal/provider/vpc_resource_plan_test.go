@@ -47,7 +47,8 @@ const vpcEmptyUpdateRefusalBody = `{"success":false,` +
 	`"error":{"code":"Validation Error","statusCode":422,` +
 	`"details":{"issues":[{"path":"","message":"At least one of name, description or resourceGroupId must be provided"}]}}}`
 
-const vpcGroupNotFoundBody = `{"success":false,"message":"Resource group not found"}`
+const vpcGroupNotFoundBody = `{"success":false,"message":"Resource group not found",` +
+	`"error":{"code":"Resource Not Found","statusCode":404,"details":null}}`
 
 const vpcNotFoundBody = `{"success":false,"message":"VPC not found",` +
 	`"error":{"code":"Resource Not Found","statusCode":404,"details":null}}`
@@ -90,6 +91,11 @@ type vpcMock struct {
 	emptyGroupUntilWrite bool
 	// refusedMoves counts the updates naming a group that answer 404.
 	refusedMoves int
+	// movedOnUpdate and movedOnJob move the VPC to this group while the next
+	// update request or job poll is served, the way a move in the console can
+	// land during an apply.
+	movedOnUpdate string
+	movedOnJob    string
 	// tearingDownDeletes counts the deletes that answer the refusal a live
 	// teardown raises. The first of them parks the row in deleting.
 	tearingDownDeletes int
@@ -258,6 +264,10 @@ func (m *vpcMock) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	if description, ok := body["description"].(string); ok {
 		m.description = description
 	}
+	if m.movedOnUpdate != "" {
+		m.groupID = m.movedOnUpdate
+		m.movedOnUpdate = ""
+	}
 	m.mutex.Unlock()
 
 	testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "", "data": m.vpcBody()})
@@ -320,6 +330,10 @@ func (m *vpcMock) handleJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	m.mutex.Lock()
+	if m.movedOnJob != "" {
+		m.groupID = m.movedOnJob
+		m.movedOnJob = ""
+	}
 	failing := jobID == vpcPlanTestDeleteJobID && m.deleteJobFailures > 0
 	if failing {
 		m.deleteJobFailures--
@@ -1266,6 +1280,59 @@ func TestVpcResourcePlanNullGroupStateSurvivesAnUpdate(t *testing.T) {
 			{
 				Config: vpcPlanTestConfig(mock.url, "vpc-null-b"),
 				Check:  resource.TestCheckResourceAttr(gpcnVpcTest, "resource_group_id", vpcPlanTestDefaultGroup),
+			},
+		},
+	})
+}
+
+func TestVpcResourcePlanMoveDuringApplyKeepsPlannedGroup(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+	renamed := vpcPlanTestGroupConfig(mock.url, "vpc-move-b", vpcPlanTestGroupA)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: vpcPlanTestGroupConfig(mock.url, "vpc-move-a", vpcPlanTestGroupA)},
+			{
+				PreConfig: func() {
+					mock.mutex.Lock()
+					mock.movedOnUpdate = vpcPlanTestGroupB
+					mock.mutex.Unlock()
+				},
+				Config:             renamed,
+				ExpectNonEmptyPlan: true,
+				Check:              resource.TestCheckResourceAttr(gpcnVpcTest, "resource_group_id", vpcPlanTestGroupA),
+			},
+			{
+				Config:           renamed,
+				ConfigPlanChecks: vpcPlanTestExpectAction(plancheck.ResourceActionUpdate),
+				Check:            resource.TestCheckResourceAttr(gpcnVpcTest, "resource_group_id", vpcPlanTestGroupA),
+			},
+		},
+	})
+}
+
+func TestVpcResourcePlanMoveDuringCreateKeepsPlannedGroup(t *testing.T) {
+	t.Parallel()
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{})
+	mock.mutex.Lock()
+	mock.movedOnJob = vpcPlanTestGroupB
+	mock.mutex.Unlock()
+	config := vpcPlanTestGroupConfig(mock.url, "vpc-move-create", vpcPlanTestGroupA)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:             config,
+				ExpectNonEmptyPlan: true,
+				Check:              resource.TestCheckResourceAttr(gpcnVpcTest, "resource_group_id", vpcPlanTestGroupA),
+			},
+			{
+				Config:           config,
+				ConfigPlanChecks: vpcPlanTestExpectAction(plancheck.ResourceActionUpdate),
+				Check:            resource.TestCheckResourceAttr(gpcnVpcTest, "resource_group_id", vpcPlanTestGroupA),
 			},
 		},
 	})
