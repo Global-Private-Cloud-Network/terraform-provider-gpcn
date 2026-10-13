@@ -249,6 +249,7 @@ func TestVirtualMachinesResource(t *testing.T) {
 				category      = "general-purpose"
 				min_cpu       = 2
 			}
+			data "gpcn_resource_groups" "all" {}
 			` + vpcAndSubnet(rName, vpcOctet) + fmt.Sprintf(`
 			resource "gpcn_resource_group" "vm_group" {
 				name = "terraform-demo-group"
@@ -283,6 +284,9 @@ func TestVirtualMachinesResource(t *testing.T) {
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionReplace),
 					},
+				},
+				ConfigStateChecks: []statecheck.StateCheck{
+					statecheck.CompareValuePairs(gpcnVirtualMachineTest, tfjsonpath.New("resource_group_id"), "data.gpcn_resource_groups.all", tfjsonpath.New("default_resource_group_id"), compare.ValuesSame()),
 				},
 			},
 		},
