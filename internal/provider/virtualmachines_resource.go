@@ -361,9 +361,13 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
+	plannedResourceGroupId := plan.ResourceGroupId
 	var mapDiags diag.Diagnostics
 	plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, getVirtualMachineResponse, plan)
 	resp.Diagnostics.Append(mapDiags...)
+	if !plannedResourceGroupId.IsUnknown() {
+		plan.ResourceGroupId = plannedResourceGroupId
+	}
 
 	// Set state to fully populated data
 	diags = resp.State.Set(ctx, plan)
@@ -434,9 +438,11 @@ func (r *virtualMachinesResource) attachSegmentsAfterCreate(ctx context.Context,
 		startErr = virtualmachines.StartVirtualMachine(r.client, ctx, virtualMachineID)
 	}
 
+	keptResourceGroupId := plan.ResourceGroupId
 	var mapDiags diag.Diagnostics
 	plan, mapDiags = virtualmachines.MapVirtualMachineResponseToModel(ctx, r.client, response, plan)
 	diags.Append(mapDiags...)
+	plan.ResourceGroupId = keptResourceGroupId
 
 	attachedIds, attachedDiags := types.ListValueFrom(ctx, types.StringType, attached)
 	diags.Append(attachedDiags...)
@@ -549,6 +555,13 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 	// Controls stopping the VM. Since this is time-expensive, we only need to do this in a few cases
 	needStopVM := determineIfVMNeedsStopped(state, plan, liveDetail, liveInterfaces)
 
+	// The rename and the move run before the stop. A refused move then leaves the machine
+	// running and unchanged.
+	resp.Diagnostics.Append(virtualmachines.UpdateChangeableAttributesIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
 	// Before proceeding with update, conditionally stop the virtual machine
 	if needStopVM {
 		err := virtualmachines.StopVirtualMachine(r.client, ctx, state.ID.ValueString())
@@ -577,9 +590,6 @@ func (r *virtualMachinesResource) Update(ctx context.Context, req resource.Updat
 		},
 		func() diag.Diagnostics {
 			return virtualmachines.UpdateSizeIfChanged(r.client, ctx, plan.ID.ValueString(), state, plan, liveDetail)
-		},
-		func() diag.Diagnostics {
-			return virtualmachines.UpdateChangeableAttributesIfChanged(r.client, ctx, state.ID.ValueString(), state, plan)
 		},
 		func() diag.Diagnostics {
 			var readBackDiags diag.Diagnostics

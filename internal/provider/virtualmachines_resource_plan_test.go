@@ -2719,10 +2719,9 @@ func TestVirtualMachineResourcePlanReleasesTheAcquiredAddressWhenTheResizeFails(
 	}
 }
 
-// The rename follows the acquire, so a refused rename leaves an address the update never
-// records. One rule covers every step after the acquire, so this arm reports the release
-// too.
-func TestVirtualMachineResourcePlanReleasesTheAcquiredAddressWhenTheRenameFails(t *testing.T) {
+// The rename runs before the acquire, so a refused rename fails the update with the
+// attributes error and acquires no address.
+func TestVirtualMachineResourcePlanRefusedRenameAcquiresNoAddress(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server, recorded := startVirtualMachinePublicIpMockServer(t, vmPublicIpMockArms{refuseAttributesOnce: true})
 
@@ -2734,7 +2733,7 @@ func TestVirtualMachineResourcePlanReleasesTheAcquiredAddressWhenTheRenameFails(
 			},
 			{
 				Config:      vmPublicIpPlanTestConfig(server.URL, "vm-plan-rename-fails-again", true, ""),
-				ExpectError: vmPlanTestAcquiredAddressReleasedPattern,
+				ExpectError: regexp.MustCompile(`Error\s+updating\s+Virtual\s+Machine\s+attributes`),
 			},
 			{
 				Config: vmPublicIpPlanTestConfig(server.URL, "vm-plan-rename-fails", false, ""),
@@ -2746,8 +2745,8 @@ func TestVirtualMachineResourcePlanReleasesTheAcquiredAddressWhenTheRenameFails(
 		},
 	})
 
-	if verbs := recorded(); !slices.Equal(verbs, vmPlanTestAcquiredAddressVerbs()) {
-		t.Errorf("Expected %v, got %v", vmPlanTestAcquiredAddressVerbs(), verbs)
+	if verbs := recorded(); len(verbs) != 0 {
+		t.Errorf("Expected no address request after a refused rename, got %v", verbs)
 	}
 }
 
@@ -3781,6 +3780,16 @@ type vmGroupMock struct {
 	refuseMoveOnce bool
 	defaultOnPut   string
 	moveOnPutTo    string
+	hotplug        int
+	sku            string
+	events         []string
+	createReadsAs  string
+}
+
+func (m *vmGroupMock) recordedEvents() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.events)
 }
 
 func (m *vmGroupMock) setGroup(group string) {
@@ -3806,7 +3815,7 @@ func (m *vmGroupMock) recordedPuts() []map[string]any {
 func startVirtualMachineGroupMockServer(t *testing.T, defaultGroup string) *vmGroupMock {
 	t.Helper()
 
-	mock := &vmGroupMock{group: defaultGroup}
+	mock := &vmGroupMock{group: defaultGroup, hotplug: 1, sku: vmPlanTestSizeID}
 	vmPath := "/v1/resource/virtual-machines/" + vmPlanTestID
 
 	mock.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -3832,22 +3841,45 @@ func startVirtualMachineGroupMockServer(t *testing.T, defaultGroup string) *vmGr
 			mock.mu.Unlock()
 			testutil.WriteJSONResponse(w, vmPlanTestNetworkInterfacesBody(subnet))
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-sizes":
-			testutil.WriteJSONResponse(w, vmPlanTestSizesBody())
+			mock.mu.Lock()
+			sku := mock.sku
+			mock.mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestUpgradeSizesBody(sku))
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-images":
 			testutil.WriteJSONResponse(w, vmPlanTestImagesBody())
 		case r.Method == http.MethodPost && r.URL.Path == vmPath+"/stop":
 			mock.mu.Lock()
 			mock.stopped = true
+			mock.events = append(mock.events, "stop")
 			mock.mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodPost && r.URL.Path == vmPath+"/start":
+			mock.mu.Lock()
+			mock.stopped = false
+			mock.events = append(mock.events, "start")
+			mock.mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodPut && r.URL.Path == vmPath+"/size":
+			body := testutil.ReadRequestBody(r)
+			mock.mu.Lock()
+			mock.events = append(mock.events, "resize")
+			if requested, ok := body["skuId"].(string); ok {
+				mock.sku = requested
+			}
+			mock.mu.Unlock()
+			testutil.HandleCreateJobResponse(w, "job-5", "resize issued")
 		case r.Method == http.MethodGet && r.URL.Path == vmPath:
 			mock.mu.Lock()
-			name, group, status := mock.name, mock.group, virtualmachines.VMStatusRunning.String()
+			name, group, status, sku, hotplug := mock.name, mock.group, virtualmachines.VMStatusRunning.String(), mock.sku, mock.hotplug
 			if mock.stopped {
 				status = virtualmachines.VMStatusShutoff.String()
 			}
+			if mock.createReadsAs != "" {
+				group = mock.createReadsAs
+				mock.createReadsAs = ""
+			}
 			mock.mu.Unlock()
-			body := vmPlanTestReadBody(name, status, vmPlanTestSizeID)
+			body := vmPlanTestReadBodyWithHotplug(name, status, sku, hotplug)
 			body["data"].(map[string]any)["resourceGroupId"] = group
 			testutil.WriteJSONResponse(w, body)
 		case r.Method == http.MethodPut && r.URL.Path == vmPath:
@@ -3893,6 +3925,10 @@ func startVirtualMachineGroupMockServer(t *testing.T, defaultGroup string) *vmGr
 }
 
 func vmGroupPlanTestConfig(host, name, group string) string {
+	return vmGroupPlanTestSizedConfig(host, name, group, vmPlanTestSizeID)
+}
+
+func vmGroupPlanTestSizedConfig(host, name, group, sizeID string) string {
 	groupLine := ""
 	if group != "" {
 		groupLine = fmt.Sprintf("resource_group_id   = %q\n  ", group)
@@ -3915,7 +3951,7 @@ resource "gpcn_virtualmachine" "test" {
     username   = %q
   }
 }
-`, host, name, vmPlanTestDatacenterID, vmPlanTestSizeID, vmPlanTestImageID, vmPlanTestSubnetID, groupLine, vmPlanTestSshKeyID, vmPlanTestUsername)
+`, host, name, vmPlanTestDatacenterID, sizeID, vmPlanTestImageID, vmPlanTestSubnetID, groupLine, vmPlanTestSshKeyID, vmPlanTestUsername)
 }
 
 func vmGroupPlanTestExpectAction(action plancheck.ResourceActionType) resource.ConfigPlanChecks {
@@ -4348,6 +4384,60 @@ func TestVirtualMachineResourcePlanMoveDuringApplyKeepsPlannedGroup(t *testing.T
 				Config:           vmGroupPlanTestConfig(mock.server.URL, "vm-group-race-renamed", vmPlanTestGroupG),
 				ConfigPlanChecks: vmGroupPlanTestExpectAction(plancheck.ResourceActionUpdate),
 				Check:            resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "resource_group_id", vmPlanTestGroupG),
+			},
+		},
+	})
+}
+
+// A refused move fails the update before the stop. The machine stays running and keeps
+// its size.
+func TestVirtualMachineResourcePlanRefusedMoveStopsNothing(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineGroupMockServer(t, vmPlanTestDefaultGroup)
+	mock.hotplug = 0
+	var eventsAfterRefusal []string
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmGroupPlanTestSizedConfig(mock.server.URL, "vm-group-nostop", vmPlanTestGroupG, vmPlanTestSizeID),
+			},
+			{
+				PreConfig: func() {
+					mock.mu.Lock()
+					mock.refuseMoveOnce = true
+					mock.mu.Unlock()
+				},
+				Config:      vmGroupPlanTestSizedConfig(mock.server.URL, "vm-group-nostop", vmPlanTestGroupH, vmPlanTestSizeID2),
+				ExpectError: regexp.MustCompile(`You\s+do\s+not\s+have\s+access\s+to\s+the\s+specified\s+resource\s+group`),
+			},
+			{
+				PreConfig: func() { eventsAfterRefusal = mock.recordedEvents() },
+				Config:    vmGroupPlanTestSizedConfig(mock.server.URL, "vm-group-nostop", vmPlanTestGroupH, vmPlanTestSizeID2),
+			},
+		},
+	})
+
+	if len(eventsAfterRefusal) != 0 {
+		t.Errorf("Expected no stop and no resize after the refused move, got %v", eventsAfterRefusal)
+	}
+}
+
+// The create read-back reports a group other than the planned one. The apply keeps the
+// planned group.
+func TestVirtualMachineResourcePlanCreateKeepsPlannedGroup(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineGroupMockServer(t, vmPlanTestDefaultGroup)
+	mock.createReadsAs = vmPlanTestGroupH
+	config := vmGroupPlanTestConfig(mock.server.URL, "vm-group-create-race", vmPlanTestGroupG)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check:  resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "resource_group_id", vmPlanTestGroupG),
 			},
 		},
 	})
