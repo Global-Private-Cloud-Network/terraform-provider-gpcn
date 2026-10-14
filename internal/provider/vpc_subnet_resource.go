@@ -48,7 +48,7 @@ func (r *vpcSubnetResource) Metadata(_ context.Context, req resource.MetadataReq
 // Schema defines the schema for the resource.
 func (r *vpcSubnetResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a subnet inside a GPCN VPC. A subnet carves a block out of the VPC super-CIDR and binds it to a network security group. The API key needs vpc:read to read a subnet, and vpc-subnet:create, vpc-subnet:update and vpc-subnet:delete to manage one.",
+		Description: "Manages a subnet inside a GPCN™ VPC. A subnet carves a block out of the VPC super-CIDR and binds it to a security group. The API key needs vpc:read to read a subnet, and vpc-subnet:create, vpc-subnet:update and vpc-subnet:delete to manage one.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the subnet in UUID format",
@@ -81,7 +81,7 @@ func (r *vpcSubnetResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"cidr": schema.StringAttribute{
-				Description: "CIDR block for the subnet, which must lie inside the VPC super-CIDR (e.g., 10.50.1.0/24). If omitted, GPCN carves a free block of the requested prefix length. Changing this value requires replacing the subnet",
+				Description: "CIDR block for the subnet, which must lie inside the VPC super-CIDR (e.g., 10.50.1.0/24). If omitted, GPCN™ carves a free block of the requested prefix length. Changing this value requires replacing the subnet",
 				Optional:    true,
 				Computed:    true,
 				Validators: []validator.String{
@@ -93,7 +93,7 @@ func (r *vpcSubnetResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"prefix": schema.Int64Attribute{
-				Description: "Prefix length of the block to carve when cidr is omitted, between 22 and 28. GPCN defaults to 24. The API never reports it, so the provider reads it from the CIDR's mask length. Changing this value requires replacing the subnet",
+				Description: "Prefix length of the block to carve when cidr is omitted, between 22 and 28. GPCN™ defaults to 24. The API never reports it, so the provider reads it from the CIDR's mask length. Changing this value requires replacing the subnet",
 				Optional:    true,
 				Computed:    true,
 				Validators: []validator.Int64{
@@ -105,7 +105,7 @@ func (r *vpcSubnetResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"nsg_id": schema.StringAttribute{
-				Description: "Unique identifier of the network security group the subnet is bound to. If omitted, GPCN binds the VPC's default group. Changing this value rebinds the subnet in place",
+				Description: "Unique identifier of the security group the subnet is bound to. If omitted, GPCN™ binds the VPC's default group. Changing this value rebinds the subnet in place",
 				Optional:    true,
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
@@ -113,7 +113,7 @@ func (r *vpcSubnetResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				},
 			},
 			"nsg_name": schema.StringAttribute{
-				Description: "Name of the network security group the subnet is bound to",
+				Description: "Name of the security group the subnet is bound to",
 				Computed:    true,
 			},
 			"state": schema.StringAttribute{
@@ -121,7 +121,7 @@ func (r *vpcSubnetResource) Schema(_ context.Context, _ resource.SchemaRequest, 
 				Computed:    true,
 			},
 			"attached_nic_count": schema.Int64Attribute{
-				Description: "The number of live network interfaces attached to this subnet. GPCN refuses to delete a subnet while this count is above zero",
+				Description: "The number of live network interfaces attached to this subnet. GPCN™ refuses to delete a subnet while this count is above zero",
 				Computed:    true,
 			},
 			"failure_reason": schema.StringAttribute{

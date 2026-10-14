@@ -1,5 +1,5 @@
 
-# Example: Creating GPCN GPUs
+# Example: Creating GPCN™ GPUs
 #
 # This example demonstrates creating GPU resources by specifying either
 # a series name or series code. GPU count must be 1, 2, 4, or 8. A GPU with
@@ -18,7 +18,7 @@ provider "gpcn" {
   host = "https://api.gpcn.com"
 }
 
-# Lookup GPU-enabled datacenters in Central US region
+# Lookup GPU-enabled data centers in Central US region
 data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "central"
@@ -70,7 +70,7 @@ resource "gpcn_gpu" "example" {
   lifecycle {
     precondition {
       condition     = length(data.gpcn_datacenters.central_us.datacenters) > 0
-      error_message = "No GPU-enabled datacenters found matching the specified filters."
+      error_message = "No GPU-enabled data centers found matching the specified filters."
     }
   }
 }

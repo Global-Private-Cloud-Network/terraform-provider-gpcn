@@ -14,7 +14,7 @@ provider "gpcn" {
 data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "Central"
-  name         = "Chicago"
+  name         = "Chicago 1"
 }
 
 # Look up the image ID for Alma Linux 8
@@ -64,7 +64,7 @@ resource "gpcn_volume_attachment" "primary_storage" {
   volume_id          = gpcn_volume.vm_storage_primary.id
 }
 
-# GPCN attaches to a virtual machine that is Running, Stopped or Shutoff, and it
+# GPCN™ attaches to a virtual machine that is Running, Stopped or Shutoff, and it
 # serializes volume changes per machine with a lock it waits up to ten minutes
 # for. depends_on keeps a second attachment to the same machine out of that wait.
 resource "gpcn_volume_attachment" "secondary_storage" {

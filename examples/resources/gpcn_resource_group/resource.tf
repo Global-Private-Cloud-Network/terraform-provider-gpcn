@@ -1,5 +1,5 @@
 
-# Example: Creating GPCN Resource Groups
+# Example: Creating GPCN™ Resource Groups
 
 terraform {
   required_providers {

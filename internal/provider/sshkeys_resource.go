@@ -42,7 +42,7 @@ func (r *sshKeyResource) Metadata(_ context.Context, req resource.MetadataReques
 // Schema defines the schema for the resource.
 func (r *sshKeyResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages an SSH key resource in GPCN by uploading a public key.",
+		Description: "Manages an SSH key resource in GPCN™ by uploading a public key.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the SSH key in UUID format",

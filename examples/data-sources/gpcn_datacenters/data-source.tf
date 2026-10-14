@@ -1,7 +1,7 @@
-# Example: Querying GPCN Datacenters
+# Example: Querying GPCN™ data centers
 #
-# This example demonstrates how to query available datacenters by location.
-# Datacenters are used when creating resources like networks, volumes, and
+# This example demonstrates how to query available data centers by location.
+# Data centers are used when creating resources like networks, volumes, and
 # virtual machines to specify where they should be deployed.
 
 terraform {
@@ -15,88 +15,88 @@ terraform {
 
 provider "gpcn" {}
 
-# Example 1: Query datacenters in East US region
+# Example 1: Query data centers in East US region
 data "gpcn_datacenters" "east_us" {
   country_name = "United States"
   region_name  = "east"
 }
 
-# Example 2: Query datacenters in West US region
+# Example 2: Query data centers in West US region
 data "gpcn_datacenters" "west_us" {
   country_name = "United States"
   region_name  = "west"
 }
 
-# Example 3: Query all datacenters in a country
+# Example 3: Query all data centers in a country
 data "gpcn_datacenters" "all_us" {
   country_name = "United States"
 }
 
-# Example 4: Query datacenters that support GPUs
+# Example 4: Query data centers that support GPUs
 data "gpcn_datacenters" "gpu_capable" {
   gpu_enabled = true
 }
 
-# Example 5: Query GPU-capable datacenters in a specific region
+# Example 5: Query GPU-capable data centers in a specific region
 data "gpcn_datacenters" "gpu_capable_east_us" {
   country_name = "United States"
   region_name  = "east"
   gpu_enabled  = true
 }
 
-# Example 6: Query datacenters that support custom images
+# Example 6: Query data centers that support custom images
 data "gpcn_datacenters" "custom_image_capable" {
   custom_images = true
 }
 
-# Example 7: Query datacenters that offer VPC networking
+# Example 7: Query data centers that offer VPC networking
 data "gpcn_datacenters" "vpc_capable" {
   vpc_capable = true
 }
 
-# Example 8: Query datacenters that offer layer-2 segments
+# Example 8: Query data centers that offer layer-2 segments
 data "gpcn_datacenters" "l2_capable" {
   l2_capable = true
 }
 
-# Output the first datacenter ID from East US
+# Output the first data center ID from East US
 output "east_us_datacenter_id" {
-  description = "ID of the first datacenter in East US"
+  description = "ID of the first data center in East US"
   value       = data.gpcn_datacenters.east_us.datacenters[0].id
 }
 
-# Output all East US datacenter details
+# Output all East US data center details
 output "east_us_datacenters" {
-  description = "All datacenters in East US region"
+  description = "All data centers in East US region"
   value       = data.gpcn_datacenters.east_us.datacenters
 }
 
-# Output count of datacenters in West US
+# Output count of data centers in West US
 output "west_us_datacenter_count" {
-  description = "Number of datacenters in West US region"
+  description = "Number of data centers in West US region"
   value       = length(data.gpcn_datacenters.west_us.datacenters)
 }
 
-# Output all GPU-capable datacenter IDs
+# Output all GPU-capable data center IDs
 output "gpu_capable_datacenter_ids" {
-  description = "IDs of all datacenters with GPU support"
+  description = "IDs of all data centers with GPU support"
   value       = [for dc in data.gpcn_datacenters.gpu_capable.datacenters : dc.id]
 }
 
-# Output all datacenters supporting custom images
+# Output all data centers supporting custom images
 output "custom_image_datacenter_ids" {
-  description = "IDs of all datacenters that support custom images"
+  description = "IDs of all data centers that support custom images"
   value       = [for dc in data.gpcn_datacenters.custom_image_capable.datacenters : dc.id]
 }
 
-# Output all datacenters that offer VPC networking
+# Output all data centers that offer VPC networking
 output "vpc_capable_datacenter_ids" {
-  description = "IDs of all datacenters that offer VPC networking"
+  description = "IDs of all data centers that offer VPC networking"
   value       = [for dc in data.gpcn_datacenters.vpc_capable.datacenters : dc.id]
 }
 
-# Output all datacenters that offer layer-2 segments
+# Output all data centers that offer layer-2 segments
 output "l2_capable_datacenter_ids" {
-  description = "IDs of all datacenters that offer layer-2 segments"
+  description = "IDs of all data centers that offer layer-2 segments"
   value       = [for dc in data.gpcn_datacenters.l2_capable.datacenters : dc.id]
 }

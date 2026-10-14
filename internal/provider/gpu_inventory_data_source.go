@@ -62,11 +62,11 @@ func (d *gpuInventoryDataSource) Metadata(_ context.Context, req datasource.Meta
 
 func (d *gpuInventoryDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Retrieves the available GPU SKUs for a datacenter. Results can be filtered by GPU series and GPU count",
+		Description: "Retrieves the available GPU SKUs for a data center. Results can be filtered by GPU series and GPU count",
 		Attributes: map[string]schema.Attribute{
 			"datacenter_id": schema.StringAttribute{
 				Required:    true,
-				Description: "The ID of the datacenter to retrieve GPU inventory for",
+				Description: "The ID of the data center to retrieve GPU inventory for",
 			},
 			"series_name": schema.StringAttribute{
 				Optional:    true,

@@ -1,19 +1,20 @@
-# Terraform Provider for GPCN
+# Terraform Provider for GPCN™
 
 [![Terraform Registry](https://img.shields.io/badge/registry-Global--Private--Cloud--Network%2Fgpcn-blue)](https://registry.terraform.io/providers/Global-Private-Cloud-Network/gpcn/latest)
 [![Tests](https://github.com/Global-Private-Cloud-Network/terraform-provider-gpcn/actions/workflows/test.yml/badge.svg)](https://github.com/Global-Private-Cloud-Network/terraform-provider-gpcn/actions/workflows/test.yml)
 [![License: MPL-2.0](https://img.shields.io/badge/license-MPL--2.0-brightgreen)](LICENSE)
 
-Manage [Global Private Cloud Network](https://gpcn.com) infrastructure with Terraform: VPCs, subnets, security groups, public IP addresses, L2 segments, virtual machines, GPU instances, volumes, SSH keys and resource groups.
+Manage [GPCN™ (Global Private Cloud Network™)](https://gpcn.com) infrastructure with Terraform: VPCs, subnets, security groups, elastic IPs, L2 segments, virtual machines, GPU instances, volumes, SSH keys and resource groups.
 
-- **Documentation:** every resource and data source, with examples, on the [Terraform Registry](https://registry.terraform.io/providers/Global-Private-Cloud-Network/gpcn/latest/docs).
+- **Documentation:** every resource and data source, with examples, on the [Terraform Registry](https://registry.terraform.io/providers/Global-Private-Cloud-Network/gpcn/latest/docs). Start with the [Getting started](https://registry.terraform.io/providers/Global-Private-Cloud-Network/gpcn/latest/docs/guides/getting-started) guide.
+- **Platform guides:** the portal, the API and end-to-end how-tos on the [GPCN™ Hub](https://hub.gpcn.com).
 - **Examples:** runnable configurations under [`examples/`](examples/).
 - **Changes:** [CHANGELOG.md](CHANGELOG.md), including upgrade notes between versions.
 
 ## Requirements
 
 - Terraform 1.5 or later
-- A GPCN account and an API key with the permissions for the resources you manage (each resource's documentation names them)
+- A GPCN™ account and an [API key](https://hub.gpcn.com/docs/identity-and-access/credentials/api-keys) whose role covers the resources you manage (see [Roles and permissions](https://hub.gpcn.com/docs/identity-and-access/roles-and-permissions))
 
 ## Usage
 
@@ -22,7 +23,7 @@ terraform {
   required_providers {
     gpcn = {
       source  = "Global-Private-Cloud-Network/gpcn"
-      version = "~> 1.4"
+      version = "~> 1.5"
     }
   }
 }
@@ -30,7 +31,7 @@ terraform {
 provider "gpcn" {}
 
 data "gpcn_datacenters" "chicago" {
-  name        = "Chicago"
+  name        = "Chicago 1"
   vpc_capable = true
 }
 
@@ -64,7 +65,7 @@ Long-running operations (creating machines, volumes and networks) are polled unt
 
 ## Upgrading
 
-Read the entry for the new version in [CHANGELOG.md](CHANGELOG.md) before you upgrade. Minor releases can require configuration changes; the changelog says which, and how to migrate existing state.
+Read the entry for the new version in [CHANGELOG.md](CHANGELOG.md) before you upgrade. Minor releases can require configuration changes; the changelog says which, and how to migrate existing state. The registry has step-by-step guides for [upgrading to 1.5](https://registry.terraform.io/providers/Global-Private-Cloud-Network/gpcn/latest/docs/guides/upgrading-to-1-5) and [migrating from `gpcn_network` to VPCs](https://registry.terraform.io/providers/Global-Private-Cloud-Network/gpcn/latest/docs/guides/migrating-from-gpcn-network).
 
 ## Getting help
 

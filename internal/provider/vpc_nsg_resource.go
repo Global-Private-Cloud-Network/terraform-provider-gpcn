@@ -46,7 +46,7 @@ func (r *vpcNsgResource) Metadata(_ context.Context, req resource.MetadataReques
 // Schema defines the schema for the resource.
 func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a network security group inside a GPCN VPC, with its rules inline. GPCN replaces the whole rule set on every change and identifies a rule by its content, so the rules belong to this resource rather than to one of their own. The API key needs vpc:read to read a group, and vpc-nsg:create, vpc-nsg:update and vpc-nsg:delete to manage one.",
+		Description: "Manages a security group inside a GPCN™ VPC, with its rules inline. GPCN™ replaces the whole rule set on every change and identifies a rule by its content, so the rules belong to this resource rather than to one of their own. The API key needs vpc:read to read a group, and vpc-nsg:create, vpc-nsg:update and vpc-nsg:delete to manage one.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the security group in UUID format",
@@ -79,7 +79,7 @@ func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				},
 			},
 			"is_default": schema.BoolAttribute{
-				Description: "Whether this is the VPC's own default security group. GPCN creates that group with the VPC and refuses to delete it",
+				Description: "Whether this is the VPC's own default security group. GPCN™ creates that group with the VPC and refuses to delete it",
 				Computed:    true,
 			},
 			"state": schema.StringAttribute{
@@ -95,7 +95,7 @@ func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Computed:    true,
 			},
 			"subnet_count": schema.Int64Attribute{
-				Description: "The number of subnets bound to this security group. GPCN refuses to delete a group while this count is above zero",
+				Description: "The number of subnets bound to this security group. GPCN™ refuses to delete a group while this count is above zero",
 				Computed:    true,
 			},
 			"created_time": schema.StringAttribute{
@@ -112,7 +112,7 @@ func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 		},
 		Blocks: map[string]schema.Block{
 			"rule": schema.SetNestedBlock{
-				Description: "One traffic rule of the security group. GPCN identifies a rule by its direction, protocol, port range and remote CIDR, so two rules that agree on all four are the same rule",
+				Description: "One traffic rule of the security group. GPCN™ identifies a rule by its direction, protocol, port range and remote CIDR, so two rules that agree on all four are the same rule",
 				NestedObject: schema.NestedBlockObject{
 					Attributes: map[string]schema.Attribute{
 						"direction": schema.StringAttribute{
@@ -145,7 +145,7 @@ func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 							},
 						},
 						"description": schema.StringAttribute{
-							Description: "Additional information about the rule. GPCN edits it in place, because it is not part of the rule's identity",
+							Description: "Additional information about the rule. GPCN™ edits it in place, because it is not part of the rule's identity",
 							Optional:    true,
 							Validators: []validator.String{
 								helpers.NoOuterWhitespaceValidator{Summary: vpcnsgs.ErrSummaryInvalidNsgRuleAttribute, Attribute: "description"},

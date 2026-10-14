@@ -1398,7 +1398,7 @@ func TestVpcResourcePlanRefusesEmptyGroup(t *testing.T) {
 func TestVpcResourcePlanGroupDescriptionBytes(t *testing.T) {
 	t.Parallel()
 
-	want := "ID of the resource group this VPC belongs to. When omitted, the VPC is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the VPC in place, together with its subnets, security groups and public IP addresses. Removing it from configuration leaves the VPC where it is, but a replacement created while it is unset joins the Default resource group"
+	want := "ID of the resource group this VPC belongs to. When omitted, the VPC is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the VPC in place, together with its subnets, security groups and elastic IP addresses. Removing it from configuration leaves the VPC where it is, but a replacement created while it is unset joins the Default resource group"
 	if got := vpcResourceTestSchema(t).Attributes["resource_group_id"].GetDescription(); got != want {
 		t.Errorf("resource_group_id Description = %q, want %q", got, want)
 	}

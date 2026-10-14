@@ -1,4 +1,4 @@
-# Example: Acquiring a GPCN VPC elastic public IP address
+# Example: Acquiring a GPCN™ VPC elastic IP address
 
 terraform {
   required_providers {

@@ -43,7 +43,7 @@ func (r *resourceGroupResource) Metadata(_ context.Context, req resource.Metadat
 // Schema defines the schema for the resource.
 func (r *resourceGroupResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a resource group in GPCN. Resource groups bind related resources together as a team.",
+		Description: "Manages a resource group in GPCN™. Resource groups bind related resources together.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the resource group in UUID format",

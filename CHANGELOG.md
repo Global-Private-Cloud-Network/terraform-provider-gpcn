@@ -1,3 +1,11 @@
+## 1.5.1 (Unreleased)
+
+DOCUMENTATION:
+
+- **Registry**: a new landing page with a working example, authentication, permissions and timeouts. Resources and data sources are grouped into Compute, Storage, Networking, Identity & Access and Data Centers.
+- **Guides**: new *Getting started*, *Organizing with resource groups*, *Migrating from `gpcn_network` to VPCs* and *Upgrading to version 1.5* guides. The migration steps that lived on the `gpcn_network` and `gpcn_virtualmachine` pages moved into the migration guide.
+- **Terminology**: descriptions and examples follow GPCN™ product terms: "data center", "security group" and "elastic IP" for addresses a VPC holds. Attribute and resource names are unchanged.
+
 ## 1.5.0 (October 13, 2026)
 
 This release follows the GPCN resource-group change: every virtual machine, GPU, volume, VPC and L2 segment belongs to exactly one resource group, and one created without a group joins the tenant's Default group.

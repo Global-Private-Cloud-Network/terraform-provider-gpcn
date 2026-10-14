@@ -11,14 +11,14 @@ provider "gpcn" {
   host = "https://api.gpcn.com"
 }
 
-# Lookup a datacenter first
+# Lookup a data center first
 data "gpcn_datacenters" "central_us" {
   country_name = "United States"
   region_name  = "Central"
-  name         = "Chicago"
+  name         = "Chicago 1"
 }
 
-# List all Linux images for a datacenter
+# List all Linux images for a data center
 data "gpcn_virtualmachine_images" "linux_images" {
   datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
   image_type    = "Linux"

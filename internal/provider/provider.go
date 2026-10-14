@@ -80,19 +80,19 @@ func (p *gpcnProvider) Metadata(_ context.Context, _ provider.MetadataRequest, r
 // Schema defines the provider-level schema for configuration data.
 func (p *gpcnProvider) Schema(_ context.Context, _ provider.SchemaRequest, resp *provider.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "The GPCN provider allows you to manage GPCN cloud infrastructure resources.",
+		Description: "The GPCN™ provider allows you to manage GPCN™ cloud infrastructure resources.",
 		Attributes: map[string]schema.Attribute{
 			"host": schema.StringAttribute{
-				Description: "The hostname of the GPCN API. For most users, this is https://api.gpcn.com. This must be set either in the provider configuration block, or as an environment variable exposed via GPCN_HOST",
+				Description: "The hostname of the GPCN™ API. For most users, this is https://api.gpcn.com. This must be set either in the provider configuration block, or as an environment variable exposed via GPCN_HOST",
 				Optional:    true,
 			},
 			"api_key": schema.StringAttribute{
-				Description: "API key used for programmatic authentication with the GPCN API. This can be created through the portal, under User Management -> API Keys. This must be set either in the provider configuration block (NOT RECOMMENDED), or as an environment variable exposed via GPCN_API_KEY",
+				Description: "API key used for programmatic authentication with the GPCN™ API. This can be created through the portal, under Identity & Access, Credentials, API Keys. This must be set either in the provider configuration block (NOT RECOMMENDED), or as an environment variable exposed via GPCN_API_KEY",
 				Optional:    true,
 				Sensitive:   true,
 			},
 			"request_timeout": schema.Int64Attribute{
-				Description: "Timeout in seconds for individual HTTP requests to the GPCN API. Defaults to 60 seconds.",
+				Description: "Timeout in seconds for individual HTTP requests to the GPCN™ API. Defaults to 60 seconds.",
 				Optional:    true,
 				Validators: []validator.Int64{
 					int64validator.AtLeast(1),

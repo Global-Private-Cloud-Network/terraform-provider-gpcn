@@ -52,11 +52,11 @@ func (d *virtualMachineImagesDataSource) Metadata(_ context.Context, req datasou
 
 func (d *virtualMachineImagesDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Retrieves available virtual machine images for a given datacenter. Results can be filtered by image type and/or name",
+		Description: "Retrieves available virtual machine images for a given data center. Results can be filtered by image type and/or name",
 		Attributes: map[string]schema.Attribute{
 			"datacenter_id": schema.StringAttribute{
 				Required:    true,
-				Description: "The ID of the datacenter to retrieve images for",
+				Description: "The ID of the data center to retrieve images for",
 			},
 			"image_type": schema.StringAttribute{
 				Optional:    true,
