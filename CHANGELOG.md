@@ -1,4 +1,4 @@
-## 1.5.1 (Unreleased)
+## 1.5.1 (October 14, 2026)
 
 DOCUMENTATION:
 
