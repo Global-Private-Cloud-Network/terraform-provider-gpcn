@@ -202,16 +202,42 @@ func (c *GpcnClient) Config() *Config {
 	return c.config
 }
 
-// DoOnce sends the request one time, through the same transport as DoWithRetry.
-// Use it for a POST that creates a row: a retry after a lost answer creates the
-// row twice.
+// DoOnce sends the request through the same transport as DoWithRetry, and
+// sends it again only after a 429. A 429 means the API did not process the
+// request. Use it for a POST that creates a row: a retry after a 5xx answer or
+// a lost answer creates the row twice.
 func (c *GpcnClient) DoOnce(req *http.Request) (*http.Response, error) {
-	//nolint:gosec // G704: URL is constructed from validated config, not user input
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, unwrapURLError(err)
+	delay := c.config.InitialRetryDelay
+
+	for attempt := 0; ; attempt++ {
+		reqClone := req.Clone(req.Context())
+		if req.GetBody != nil {
+			body, err := req.GetBody()
+			if err != nil {
+				return nil, fmt.Errorf("failed to get request body for attempt %d: %w", attempt, err)
+			}
+			reqClone.Body = body
+		}
+
+		//nolint:gosec // G704: URL is constructed from validated config, not user input
+		resp, err := c.httpClient.Do(reqClone)
+		if err == nil {
+			return resp, nil
+		}
+		err = unwrapURLError(err)
+
+		var httpErr *HTTPError
+		if !isHTTPError(err, &httpErr) || httpErr.StatusCode != http.StatusTooManyRequests || attempt >= c.config.MaxRetries {
+			return nil, err
+		}
+
+		select {
+		case <-req.Context().Done():
+			return nil, req.Context().Err()
+		case <-time.After(c.retryWait(delay, httpErr)):
+		}
+		delay = min(delay*2, c.config.MaxRetryDelay)
 	}
-	return resp, nil
 }
 
 // DoWithRetry performs an HTTP request with exponential backoff retry
