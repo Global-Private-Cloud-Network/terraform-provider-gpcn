@@ -17,11 +17,11 @@ Manages a private network to connect virtual machines within the same data cente
 ```terraform
 # gpcn_network is deprecated in favour of gpcn_vpc, gpcn_vpc_subnet and gpcn_l2_segment.
 #
-# Example: Adopting an existing GPCN™ Network into Terraform
+# Example: The block of a retired GPCN™ Network
 #
-# New networks can no longer be created, so this example never declares one. It brings a
-# network that already exists under Terraform with an import block, and then reads,
-# renames and destroys it.
+# GPCN™ has retired legacy networks, and the API no longer serves them. Terraform
+# removes a gpcn_network from state on the next refresh, so delete this block from
+# your configuration. New networks can no longer be created.
 
 terraform {
   required_providers {
@@ -43,14 +43,7 @@ data "gpcn_datacenters" "central_us" {
   name         = "Chicago 1"
 }
 
-# The id of the network that GPCN™ already serves.
-import {
-  to = gpcn_network.existing
-  id = "<network-id>"
-}
-
-# The block the import fills. Every value must match what GPCN™ reports for the network,
-# or the first plan proposes a change.
+# The block an existing configuration holds.
 resource "gpcn_network" "existing" {
   name          = "terraform-demo-standard"
   network_type  = "standard"

@@ -3,14 +3,14 @@
 page_title: "gpcn_vpc_vpn_connection Resource - gpcn"
 subcategory: "Networking"
 description: |-
-  Manages a site-to-site VPN connection between a GPCN™ VPC and a peer gateway. The VPN connection runs on the VPN gateway of the VPC, so create the VPN gateway first. Your organization needs the VPN feature, and the data center of the VPC must offer site-to-site VPN. The API key needs vpc:read to read a VPN connection, vpc-vpn-connection:create, vpc-vpn-connection:update and vpc-vpn-connection:delete to manage one, and vpc-nsg:update to create or change one, because the VPN connection adds rules to the security groups of the VPC. GPCN™ never returns the pre-shared key, so Terraform cannot detect a change made outside Terraform. Set the key with psk, or with psk_wo and psk_wo_version (Terraform 1.11 or later). Every attribute changes in place except vpc_id and vpn_gateway_id.
+  Manages a site-to-site VPN connection between a GPCN™ VPC and a peer gateway. The VPN connection runs on the VPN gateway of the VPC, so create the VPN gateway first. Your organization needs the Site-to-Site VPN feature, and the data center of the VPC must offer site-to-site VPN. The API key needs vpc:read to read a VPN connection, vpc-vpn-connection:create, vpc-vpn-connection:update and vpc-vpn-connection:delete to manage one, and vpc-nsg:update to create or change one, because the VPN connection adds rules to the security groups of the VPC. GPCN™ never returns the pre-shared key, so Terraform can't detect a change made outside Terraform. Set the key with psk, or with psk_wo and psk_wo_version (Terraform 1.11 or later). Every attribute changes in place except vpc_id and vpn_gateway_id.
 ---
 
 # gpcn_vpc_vpn_connection (Resource)
 
 A VPN connection is an encrypted IPsec tunnel between a VPC in GPCN™ (Global Private Cloud Network™) and a peer gateway at your site. Once it's up, the VPC and the peer networks behind your gateway reach each other as if they shared one private network.
 
-Manages a site-to-site VPN connection between a GPCN™ VPC and a peer gateway. The VPN connection runs on the VPN gateway of the VPC, so create the VPN gateway first. Your organization needs the VPN feature, and the data center of the VPC must offer site-to-site VPN. The API key needs vpc:read to read a VPN connection, vpc-vpn-connection:create, vpc-vpn-connection:update and vpc-vpn-connection:delete to manage one, and vpc-nsg:update to create or change one, because the VPN connection adds rules to the security groups of the VPC. GPCN™ never returns the pre-shared key, so Terraform cannot detect a change made outside Terraform. Set the key with psk, or with psk_wo and psk_wo_version (Terraform 1.11 or later). Every attribute changes in place except vpc_id and vpn_gateway_id.
+Manages a site-to-site VPN connection between a GPCN™ VPC and a peer gateway. The VPN connection runs on the VPN gateway of the VPC, so create the VPN gateway first. Your organization needs the Site-to-Site VPN feature, and the data center of the VPC must offer site-to-site VPN. The API key needs vpc:read to read a VPN connection, vpc-vpn-connection:create, vpc-vpn-connection:update and vpc-vpn-connection:delete to manage one, and vpc-nsg:update to create or change one, because the VPN connection adds rules to the security groups of the VPC. GPCN™ never returns the pre-shared key, so Terraform can't detect a change made outside Terraform. Set the key with psk, or with psk_wo and psk_wo_version (Terraform 1.11 or later). Every attribute changes in place except vpc_id and vpn_gateway_id.
 
 ## Example Usage
 
@@ -18,8 +18,8 @@ Manages a site-to-site VPN connection between a GPCN™ VPC and a peer gateway. 
 # Example: A site-to-site VPN connection for a GPCN™ VPC
 #
 # A VPN connection joins the VPN gateway of a VPC to a peer gateway at your
-# site. Create the VPN gateway first. Your organization needs the VPN feature,
-# and the data center must offer site-to-site VPN.
+# site. Create the VPN gateway first. Your organization needs the Site-to-Site
+# VPN feature, and the data center must offer site-to-site VPN.
 
 terraform {
   required_providers {
@@ -122,9 +122,11 @@ GPCN™ never returns the key, and the provider doesn't write it to its logs. Th
 
 ## Security group rules
 
-A VPN connection opens the tunnel's traffic for you. For each peer network, it adds an ingress rule for all protocols to every security group that's bound to a subnet in the VPC. The rules are named after the connection, and GPCN™ removes them when you delete it.
+A VPN connection opens the tunnel's traffic for you. For each peer network, it adds an ingress rule for all protocols to every security group that's bound to a subnet in the VPC. Each rule's description names the connection, and GPCN™ removes them when you delete it.
 
-`gpcn_vpc_nsg` leaves those rules out of its `rule` set, so they never show up as a difference, and it sends them back unchanged whenever it replaces a group's rules. If you write a rule with the same content yourself, it becomes yours and the connection no longer manages it.
+`gpcn_vpc_nsg` leaves those rules out of its `rule` set, so they never show up as a difference, and it sends them back unchanged whenever it replaces a group's rules. If you write a rule with the same direction, protocol, ports and remote CIDR yourself, give it a description of your own. It then becomes yours, and the connection no longer manages it or removes it. A rule you copy exactly, description included, stays the connection's.
+
+If you create a connection while an update of a `gpcn_vpc_nsg` is replacing that group's rules, the connection's rule can be missing from that group until the connection's next full update.
 
 A security group you bind to a subnet after the connection exists doesn't get the rules right away. It gets them on the connection's next full update, which is any change other than `name` or `description` alone. Raising `psk_wo_version` or editing a peer network counts, for example.
 
@@ -142,7 +144,9 @@ The blocks can't overlap each other, the VPC, or the peer networks of another VP
 - Terraform doesn't wait for `connected`. The apply finishes when GPCN™ has built the VPN connection, because a tunnel only comes up when the peer gateway answers.
 - `failed` means the last job failed. `failure_reason` says why, and a create that ends there leaves the resource tainted, so the next apply creates it again.
 
-If `desired_applied` is false, the settings GPCN™ saved aren't the ones the data center is running yet. Terraform shows a warning when it refreshes the VPN connection.
+If `desired_applied` is false, the settings GPCN™ saved aren't the ones the data center is running yet. Terraform shows a warning when it refreshes a VPN connection whose saved settings the data center isn't running and that has no job running. If the data center couldn't apply saved settings, the next plan shows an update that sends them again.
+
+A connection that failed and can't be updated is replaced: Terraform deletes it and creates it again.
 
 ## Limits
 
@@ -157,7 +161,7 @@ If `desired_applied` is false, the settings GPCN™ saved aren't the ones the da
 ### Required
 
 - `name` (String) Name of the VPN connection, 1 to 63 characters: letters, digits, spaces, dots and hyphens, starting and ending with a letter or digit. It must be unique within the VPC
-- `peer_address` (String) Public IPv4 address of the peer gateway, the device at your site that the VPN gateway connects to. Private, shared, loopback, link-local and multicast addresses are refused
+- `peer_address` (String) Public IPv4 address of the peer gateway, the device at your site at the other end of the tunnel. Private, shared, loopback, link-local and multicast addresses are refused
 - `peer_cidrs` (Set of String) The peer networks: 1 to 10 IPv4 CIDR blocks reachable through the peer gateway, each with a prefix length from /8 to /32. Write each block as its network address, such as 192.168.10.0/24, because GPCN™ rewrites a block with host bits set. The blocks must not overlap each other, the VPC, or the peer networks of another VPN connection
 - `vpc_id` (String) Unique identifier of the VPC the VPN connection belongs to. Changing this value requires replacing the VPN connection
 - `vpn_gateway_id` (String) Unique identifier of the VPN gateway of the VPC. It must be the VPN gateway of vpc_id. Referencing the VPN gateway resource makes Terraform create the VPN gateway first and delete it last. Changing this value requires replacing the VPN connection
@@ -177,7 +181,7 @@ If `desired_applied` is false, the settings GPCN™ saved aren't the ones the da
 - `pfs_group` (Number) Diffie-Hellman group for perfect forward secrecy, which is always on: 2, 5 or 14. GPCN™ uses 14 when omitted
 - `psk` (String, Sensitive) Pre-shared key, 16 to 64 printable ASCII characters with no spaces, double quotes or backslashes. Terraform stores it in state, marked sensitive. Set exactly one of psk and psk_wo. Changing psk sends the new key to GPCN™
 - `psk_wo` (String, Sensitive, [Write-only](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments)) Pre-shared key, write-only: Terraform never stores it in the plan or the state. It needs Terraform 1.11 or later and psk_wo_version. Same format as psk. Set exactly one of psk and psk_wo. Terraform sends the key on create, and again when psk_wo_version changes
-- `psk_wo_version` (Number) Version of psk_wo. Terraform cannot see a change in a write-only value, so raise this number to send the current psk_wo to GPCN™ and rotate the key. It is null after an import, so the first apply sends the key again
+- `psk_wo_version` (Number) Version of psk_wo. Terraform can't see a change in a write-only value, so raise this number to send the current psk_wo to GPCN™ and rotate the key. It's null after an import, so the first apply sends the key again
 
 ### Read-Only
 
@@ -185,7 +189,7 @@ If `desired_applied` is false, the settings GPCN™ saved aren't the ones the da
 - `failure_reason` (String) Why the last operation on the VPN connection failed, or null when none has. It changes when an operation fails or succeeds
 - `gateway_kind` (String) How the data center provides the VPN gateway: 'router' or 'appliance'
 - `id` (String) Unique identifier for the VPN connection in UUID format
-- `local_endpoint_address` (String) Public IPv4 address of the VPN gateway, the address your peer gateway connects to
+- `local_endpoint_address` (String) The VPN gateway address: the public IPv4 address your peer gateway connects to
 - `local_networks` (List of String) The networks on the GPCN™ side of the VPN connection, as CIDR blocks. Configure them at your peer gateway. The list changes when the subnets of the VPC change
 - `state` (String) Lifecycle state of the VPN connection: one of 'creating', 'connecting', 'connected', 'disconnected', 'error', 'failed' or 'removing'. It changes when GPCN™ reads the peer gateway. A VPN connection with no traffic rests in 'disconnected', which is not a fault
 

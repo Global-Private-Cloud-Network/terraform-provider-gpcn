@@ -3,23 +3,24 @@
 page_title: "gpcn_vpc_vpn_gateway Resource - gpcn"
 subcategory: "Networking"
 description: |-
-  Manages the VPN gateway of a GPCN™ VPC. A VPC has at most one VPN gateway. It is the public endpoint your peer gateway connects to for site-to-site VPN. Your organization needs the VPN feature, and the data center of the VPC must offer site-to-site VPN. The API key needs vpc:read to read the VPN gateway, and vpc-vpn-connection:create and vpc-vpn-connection:delete to manage it. A VPN gateway has no attribute that changes in place. A gateway that fails to build is replaced on the next apply.
+  Manages the VPN gateway of a GPCN™ VPC. A VPC has at most one VPN gateway. It holds the VPN gateway address, the public IPv4 address your peer gateway connects to for site-to-site VPN. Your organization needs the Site-to-Site VPN feature, and the data center of the VPC must offer site-to-site VPN. The API key needs vpc:read to read the VPN gateway, and vpc-vpn-connection:create and vpc-vpn-connection:delete to manage it. A VPN gateway has no attribute that changes in place. A gateway that fails to build is replaced on the next apply.
 ---
 
 # gpcn_vpc_vpn_gateway (Resource)
 
 A VPN gateway gives a VPC in GPCN™ (Global Private Cloud Network™) a public address for your VPN devices to connect to. Create it first, then add VPN connections. In some data centers it also takes a public address of its own and reserves a /28 from the VPC's range.
 
-Manages the VPN gateway of a GPCN™ VPC. A VPC has at most one VPN gateway. It is the public endpoint your peer gateway connects to for site-to-site VPN. Your organization needs the VPN feature, and the data center of the VPC must offer site-to-site VPN. The API key needs vpc:read to read the VPN gateway, and vpc-vpn-connection:create and vpc-vpn-connection:delete to manage it. A VPN gateway has no attribute that changes in place. A gateway that fails to build is replaced on the next apply.
+Manages the VPN gateway of a GPCN™ VPC. A VPC has at most one VPN gateway. It holds the VPN gateway address, the public IPv4 address your peer gateway connects to for site-to-site VPN. Your organization needs the Site-to-Site VPN feature, and the data center of the VPC must offer site-to-site VPN. The API key needs vpc:read to read the VPN gateway, and vpc-vpn-connection:create and vpc-vpn-connection:delete to manage it. A VPN gateway has no attribute that changes in place. A gateway that fails to build is replaced on the next apply.
 
 ## Example Usage
 
 ```terraform
 # Example: A VPN gateway for a GPCN™ VPC
 #
-# A VPN gateway is the public endpoint your peer gateway connects to for
-# site-to-site VPN. A VPC has one. Your organization needs the VPN feature, and
-# the data center must offer site-to-site VPN.
+# A VPN gateway holds the VPN gateway address, the public address your peer
+# gateway connects to for site-to-site VPN. A VPC has one. Your organization
+# needs the Site-to-Site VPN feature, and the data center must offer
+# site-to-site VPN.
 
 terraform {
   required_providers {
@@ -81,7 +82,7 @@ The data center decides how it provides the VPN gateway, and you can't choose. T
 - **`router`**: the data center's router carries the VPN. `reserved_block` is null, and nothing comes out of your VPC's range.
 - **`appliance`**: the VPN gateway is its own appliance. It takes a public address of its own, and it reserves a /28 from the VPC's range, which `reserved_block` reports. The VPC needs a free /28, or the create fails.
 
-For both kinds, `address` is the public address your peer gateway connects to. Give it to whoever runs the device at your site. The example waits for the subnet before it creates the VPN gateway, because an appliance picks a free /28 and a subnet you create later can't overlap it.
+For both kinds, `address` is the VPN gateway address, the public address your peer gateway connects to. Give it to whoever runs the device at your site. The example waits for the subnet before it creates the VPN gateway, because an appliance picks a free /28 and a subnet you create later can't overlap it.
 
 ## Failed gateways
 
@@ -105,8 +106,8 @@ Destroying a VPC also removes a VPN gateway that's left over, but GPCN™ refuse
 - `address` (String) Public IPv4 address of the VPN gateway. Give it to the administrator of your peer gateway, which connects to it
 - `failure_reason` (String) Why the VPN gateway failed to build or to be removed, or null when neither happened
 - `id` (String) Unique identifier for the VPN gateway in UUID format
-- `kind` (String) How the data center provides the VPN gateway: 'router' or 'appliance'. The data center decides, and you cannot choose
-- `reserved_block` (String) The /28 block GPCN™ reserves inside the VPC CIDR for an appliance VPN gateway. It is null when the kind is 'router'
+- `kind` (String) How the data center provides the VPN gateway: 'router' or 'appliance'. The data center decides, and you can't choose
+- `reserved_block` (String) The /28 block GPCN™ reserves inside the VPC CIDR for an appliance VPN gateway. It's null when the kind is 'router'
 - `state` (String) Lifecycle state of the VPN gateway: one of 'creating', 'ready', 'failed' or 'removing'
 
 ## Import
