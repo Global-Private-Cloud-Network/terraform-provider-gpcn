@@ -36,7 +36,7 @@ The data center decides how it provides the VPN gateway, and you can't choose. T
 - **`router`**: the data center's router carries the VPN. `reserved_block` is null, and nothing comes out of your VPC's range.
 - **`appliance`**: the VPN gateway is its own appliance. It takes a public address of its own, and it reserves a /28 from the VPC's range, which `reserved_block` reports. The VPC needs a free /28, or the create fails.
 
-For both kinds, `address` is the public address your peer gateway connects to. Give it to whoever runs the device at your site. The example waits for the subnet before it creates the VPN gateway, because an appliance picks a free /28 and a subnet you create later can't overlap it.
+For both kinds, `address` is the VPN gateway address, the public address your peer gateway connects to. Give it to whoever runs the device at your site. The example waits for the subnet before it creates the VPN gateway, because an appliance picks a free /28 and a subnet you create later can't overlap it.
 
 ## Failed gateways
 

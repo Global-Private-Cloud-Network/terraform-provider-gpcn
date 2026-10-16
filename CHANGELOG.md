@@ -2,8 +2,8 @@
 
 FEATURES:
 
-- **New Resource `gpcn_vpc_vpn_gateway`**: the VPN gateway of a VPC, the public endpoint your peer gateway connects to for site-to-site VPN. A VPC has one. `kind` reports whether the data center provides it as a `router` or an `appliance`, and `address` is the address your peer gateway connects to. A gateway that fails to build is replaced on the next apply. Import takes the ID of the VPC.
-- **New Resource `gpcn_vpc_vpn_connection`**: an encrypted IPsec tunnel between a VPC and a peer gateway at your site. Set the pre-shared key with `psk`, or with the write-only `psk_wo` and `psk_wo_version` (Terraform 1.11 or later). GPCN never returns the key. `peer_cidrs` must be written as network addresses, and every attribute except `vpc_id` and `vpn_gateway_id` changes in place. Import takes `<vpc_id>/<connection_id>`.
+- **New Resource `gpcn_vpc_vpn_gateway`**: the VPN gateway of a VPC, which holds the address your peer gateway connects to for site-to-site VPN. A VPC has one. `kind` reports whether the data center provides it as a `router` or an `appliance`, and `address` is the VPN gateway address. A gateway that fails to build is replaced on the next apply. Import takes the ID of the VPC.
+- **New Resource `gpcn_vpc_vpn_connection`**: an encrypted IPsec tunnel between a VPC and a peer gateway at your site. Set the pre-shared key with `psk`, or with the write-only `psk_wo` and `psk_wo_version` (Terraform 1.11 or later). GPCN™ never returns the key. write each `peer_cidrs` block as its network address, and every attribute except `vpc_id` and `vpn_gateway_id` changes in place. Import takes `<vpc_id>/<connection_id>`.
 
 ENHANCEMENTS:
 
@@ -12,8 +12,8 @@ ENHANCEMENTS:
 
 DEPRECATIONS:
 
-- **Virtual Machine**: `network_name`, `network_id`, `gateway_ip` and `network_type` in `network_interfaces` are deprecated and always null.
-- **Network**: GPCN has retired legacy networks. The API no longer serves them, so a `gpcn_network` leaves state on the next refresh. The resource stays, deprecated, until 2.0.
+- **Virtual Machine**: `network_name`, `network_id`, `gateway_ip` and `network_type` in `network_interfaces` are deprecated. GPCN™ has retired legacy networks, so they are null for every VPC and L2 interface.
+- **Network**: GPCN™ has retired legacy networks. The API no longer serves them, so a `gpcn_network` leaves state on the next refresh. The resource stays, deprecated, until 2.0.
 
 ## 1.5.1 (October 14, 2026)
 
