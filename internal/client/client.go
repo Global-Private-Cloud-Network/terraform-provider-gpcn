@@ -202,6 +202,18 @@ func (c *GpcnClient) Config() *Config {
 	return c.config
 }
 
+// DoOnce sends the request one time, through the same transport as DoWithRetry.
+// Use it for a POST that creates a row: a retry after a lost answer creates the
+// row twice.
+func (c *GpcnClient) DoOnce(req *http.Request) (*http.Response, error) {
+	//nolint:gosec // G704: URL is constructed from validated config, not user input
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, unwrapURLError(err)
+	}
+	return resp, nil
+}
+
 // DoWithRetry performs an HTTP request with exponential backoff retry
 func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 	var lastErr error
