@@ -106,6 +106,30 @@ func ReadAfterFailure(gpcnClient *client.GpcnClient, ctx context.Context, vpcID 
 	return GetVpnGateway(gpcnClient, ctx, vpcID)
 }
 
+// CreatedSince reports whether a row with this creation time can come from a
+// request sent at requestStart. A time that does not parse never qualifies.
+func CreatedSince(createdAt string, requestStart time.Time) bool {
+	created, err := time.Parse(time.RFC3339Nano, createdAt)
+	return err == nil && !created.Before(requestStart.Add(-AdoptWindow))
+}
+
+// PollAdoptedJob waits for the job that an adopted row still runs. It shares
+// one deadline with the request: the polling timeout, counted from
+// requestStart. A failure is only logged, because the caller reads the row next.
+func PollAdoptedJob(gpcnClient *client.GpcnClient, ctx context.Context, action string, activeJobID *string, requestStart time.Time) {
+	if activeJobID == nil || *activeJobID == "" {
+		return
+	}
+	pollConfig := client.DefaultPollingConfig()
+	if config := gpcnClient.Config(); config != nil && config.PollingTimeout > 0 {
+		pollConfig.Timeout = config.PollingTimeout
+	}
+	pollConfig.Timeout = max(pollConfig.Timeout-time.Since(requestStart), 0)
+	if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, action, *activeJobID, pollConfig); err != nil {
+		tflog.Info(ctx, LogAdoptedJobPollFailed)
+	}
+}
+
 // GetVpnGateway reads the VPC's gateway. A 404 reads as ErrVpnGatewayNotFound.
 func GetVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string) (*ApiVpnGateway, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingGetVpnGateway, vpcID))

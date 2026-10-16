@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/helpers"
@@ -49,7 +50,7 @@ func (r *vpcVpnConnectionResource) Metadata(_ context.Context, req resource.Meta
 
 func (r *vpcVpnConnectionResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a site-to-site VPN connection between a GPCN™ VPC and a peer gateway. The VPN connection runs on the VPN gateway of the VPC, so create the VPN gateway first. Your organization needs the VPN feature, and the data center of the VPC must offer site-to-site VPN. The API key needs vpc:read to read a VPN connection, vpc-vpn-connection:create, vpc-vpn-connection:update and vpc-vpn-connection:delete to manage one, and vpc-nsg:update to create or change one, because the VPN connection adds rules to the security groups of the VPC. GPCN™ never returns the pre-shared key, so Terraform cannot detect a change made outside Terraform. Set the key with psk, or with psk_wo and psk_wo_version (Terraform 1.11 or later). Every attribute changes in place except vpc_id and vpn_gateway_id.",
+		Description: "Manages a site-to-site VPN connection between a GPCN™ VPC and a peer gateway. The VPN connection runs on the VPN gateway of the VPC, so create the VPN gateway first. Your organization needs the Site-to-Site VPN feature, and the data center of the VPC must offer site-to-site VPN. The API key needs vpc:read to read a VPN connection, vpc-vpn-connection:create, vpc-vpn-connection:update and vpc-vpn-connection:delete to manage one, and vpc-nsg:update to create or change one, because the VPN connection adds rules to the security groups of the VPC. GPCN™ never returns the pre-shared key, so Terraform can't detect a change made outside Terraform. Set the key with psk, or with psk_wo and psk_wo_version (Terraform 1.11 or later). Every attribute changes in place except vpc_id and vpn_gateway_id.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the VPN connection in UUID format",
@@ -92,7 +93,7 @@ func (r *vpcVpnConnectionResource) Schema(_ context.Context, _ resource.SchemaRe
 				},
 			},
 			"peer_address": schema.StringAttribute{
-				Description: "Public IPv4 address of the peer gateway, the device at your site that the VPN gateway connects to. Private, shared, loopback, link-local and multicast addresses are refused",
+				Description: "Public IPv4 address of the peer gateway, the device at your site at the other end of the tunnel. Private, shared, loopback, link-local and multicast addresses are refused",
 				Required:    true,
 				Validators: []validator.String{
 					helpers.IPv4AddressValidator{Attribute: "peer_address", PublicOnly: true},
@@ -127,7 +128,7 @@ func (r *vpcVpnConnectionResource) Schema(_ context.Context, _ resource.SchemaRe
 				},
 			},
 			"psk_wo_version": schema.Int64Attribute{
-				Description: "Version of psk_wo. Terraform cannot see a change in a write-only value, so raise this number to send the current psk_wo to GPCN™ and rotate the key. It is null after an import, so the first apply sends the key again",
+				Description: "Version of psk_wo. Terraform can't see a change in a write-only value, so raise this number to send the current psk_wo to GPCN™ and rotate the key. It's null after an import, so the first apply sends the key again",
 				Optional:    true,
 				Validators: []validator.Int64{
 					int64validator.AlsoRequires(path.MatchRoot("psk_wo")),
@@ -224,7 +225,7 @@ func (r *vpcVpnConnectionResource) Schema(_ context.Context, _ resource.SchemaRe
 				},
 			},
 			"local_endpoint_address": schema.StringAttribute{
-				Description: "Public IPv4 address of the VPN gateway, the address your peer gateway connects to",
+				Description: "The VPN gateway address: the public IPv4 address your peer gateway connects to",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -285,9 +286,13 @@ func (r *vpcVpnConnectionResource) ModifyPlan(ctx context.Context, req resource.
 		return
 	}
 
-	notRunning := !state.DesiredApplied.IsNull() && !state.DesiredApplied.IsUnknown() && !state.DesiredApplied.ValueBool()
-	busy := state.State.ValueString() == vpcvpnconnections.StateCreating || state.State.ValueString() == vpcvpnconnections.StateRemoving
-	if notRunning && !busy {
+	jobActive, diags := req.Private.GetKey(ctx, vpcvpnconnections.PrivateKeyJobActive)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	known := !state.DesiredApplied.IsNull() && !state.DesiredApplied.IsUnknown()
+	if known && vpcvpnconnections.RetryUnappliedDue(state.DesiredApplied.ValueBool(), state.State.ValueString(), string(jobActive) == "true") {
 		tflog.Info(ctx, vpcvpnconnections.LogUnappliedPlansUpdate)
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("desired_applied"), types.BoolUnknown())...)
 	}
@@ -323,24 +328,45 @@ func (r *vpcVpnConnectionResource) Create(ctx context.Context, req resource.Crea
 		return
 	}
 
+	requestStart := time.Now()
 	connectionID, rowMayExist, createErr := vpcvpnconnections.CreateVpnConnection(r.client, ctx, vpcID, body)
+	var lookupErr error
 	if connectionID == "" && rowMayExist {
 		// A 5xx answer or a lost answer hides the outcome of the POST. The row
-		// can exist, and its name is unique within the VPC.
-		adopted, findErr := vpcvpnconnections.FindVpnConnectionByName(r.client, ctx, vpcID, plan.Name.ValueString())
-		if findErr == nil && adopted != nil {
+		// can exist, and its name is unique within the VPC. The row counts only
+		// when this request can have made it.
+		var adopted *vpcvpnconnections.ApiVpnConnection
+		adopted, lookupErr = vpcvpnconnections.FindAfterFailure(r.client, ctx, vpcID, plan.Name.ValueString())
+		if lookupErr == nil && adopted != nil {
+			if !vpcvpnconnections.MadeByRequest(adopted, plan.Name.ValueString(), plan.PeerAddress.ValueString(), requestStart) {
+				tflog.Info(ctx, vpcvpnconnections.LogRowNotCreatedByThisRequest)
+				resp.Diagnostics.AddError(vpcvpnconnections.ErrSummaryUnableToCreateVpnConn,
+					fmt.Sprintf(vpcvpnconnections.ErrFmtNotOwnRow, adopted.Name, vpcID, adopted.ID))
+				return
+			}
 			tflog.Info(ctx, vpcvpnconnections.LogAdoptedVpnConnectionByName)
 			connectionID = adopted.ID
+			vpcvpngateways.PollAdoptedJob(r.client, ctx, vpcvpnconnections.ActionCreateVpnConnection, adopted.ActiveJobID, requestStart)
 		}
 	}
 	if connectionID == "" {
-		resp.Diagnostics.AddError(vpcvpnconnections.ErrSummaryUnableToCreateVpnConn, vpcvpngateways.ErrorDetail(createErr))
+		failure := vpcvpngateways.ErrorDetail(createErr)
+		if lookupErr != nil {
+			failure += "\n\n" + vpcvpnconnections.ErrDetailLookupFailed + "\n\n" + vpcvpngateways.ErrorDetail(lookupErr)
+		}
+		resp.Diagnostics.AddError(vpcvpnconnections.ErrSummaryUnableToCreateVpnConn, failure)
 		return
 	}
 
 	// The API holds a row, even when its job failed. Terraform taints the
 	// resource when state is saved with an error.
-	detail, getErr := vpcvpnconnections.GetVpnConnection(r.client, ctx, vpcID, connectionID)
+	var detail *vpcvpnconnections.ApiVpnConnectionDetail
+	var getErr error
+	if createErr != nil {
+		detail, getErr = vpcvpnconnections.ReadAfterFailure(r.client, ctx, vpcID, connectionID)
+	} else {
+		detail, getErr = vpcvpnconnections.GetVpnConnection(r.client, ctx, vpcID, connectionID)
+	}
 	if getErr != nil {
 		resp.Diagnostics.Append(resp.State.Set(ctx, vpcvpnconnections.ModelFromPlanWithID(plan, connectionID))...)
 		failure := createErr
@@ -431,15 +457,13 @@ func (r *vpcVpnConnectionResource) Read(ctx context.Context, req resource.ReadRe
 	}
 
 	updateRefused := detail.State == vpcvpnconnections.StateFailed && !slices.Contains(detail.AcceptedVerbs, vpcvpnconnections.VerbUpdate)
-	privateValue := []byte(nil)
-	if updateRefused {
-		privateValue = []byte("true")
-	}
+	jobActive := detail.ActiveJobID != nil
 	if resp.Private != nil {
-		resp.Diagnostics.Append(resp.Private.SetKey(ctx, vpcvpnconnections.PrivateKeyUpdateRefused, privateValue)...)
+		resp.Diagnostics.Append(resp.Private.SetKey(ctx, vpcvpnconnections.PrivateKeyUpdateRefused, privateFlag(updateRefused))...)
+		resp.Diagnostics.Append(resp.Private.SetKey(ctx, vpcvpnconnections.PrivateKeyJobActive, privateFlag(jobActive))...)
 	}
 
-	if !detail.DesiredApplied && detail.ActiveJobID == nil {
+	if vpcvpnconnections.RetryUnappliedDue(detail.DesiredApplied, detail.State, jobActive) {
 		resp.Diagnostics.AddWarning(vpcvpnconnections.WarnSummaryDesiredNotApplied, vpcvpnconnections.WarnDetailDesiredNotApplied)
 	}
 
@@ -449,6 +473,15 @@ func (r *vpcVpnConnectionResource) Read(ctx context.Context, req resource.ReadRe
 	}
 
 	tflog.Info(ctx, vpcvpnconnections.LogSuccessfullyFinishedReadGPCNVpnConnection)
+}
+
+// privateFlag is the private state value of a flag: "true" when set, and none
+// when not, which removes the key.
+func privateFlag(set bool) []byte {
+	if set {
+		return []byte("true")
+	}
+	return nil
 }
 
 func (r *vpcVpnConnectionResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {

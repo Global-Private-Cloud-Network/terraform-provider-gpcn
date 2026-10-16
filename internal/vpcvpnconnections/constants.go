@@ -1,5 +1,7 @@
 package vpcvpnconnections
 
+import "time"
+
 // BaseURLV1 is the VPC collection. A VPN connection lives under its VPC.
 const BaseURLV1 = "/v1/resource/vpcs/"
 
@@ -83,3 +85,14 @@ const (
 	PrivateKeyUpdateRefused = "update_refused"
 	VerbUpdate              = "update"
 )
+
+// PrivateKeyJobActive is the private state key that Read sets to "true" when the
+// connection runs a job.
+const PrivateKeyJobActive = "job_active"
+
+// CodeStateConflict is the code of the 409 for a connection whose state refuses
+// the call.
+const CodeStateConflict = "VPN_STATE_CONFLICT"
+
+// RemovalPollInterval is a variable so that tests can shorten the wait.
+var RemovalPollInterval = 5 * time.Second

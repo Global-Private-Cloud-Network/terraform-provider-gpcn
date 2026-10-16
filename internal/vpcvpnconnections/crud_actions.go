@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/vpcvpngateways"
@@ -165,6 +166,44 @@ func FindVpnConnectionByName(gpcnClient *client.GpcnClient, ctx context.Context,
 	return nil, nil
 }
 
+// afterFailureContext returns a context that a canceled apply does not stop.
+// A lookup after a failed create must still run, and the request timeout bounds
+// it.
+func afterFailureContext(gpcnClient *client.GpcnClient, ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx.Err() == nil {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), gpcnClient.Config().RequestTimeout)
+}
+
+// FindAfterFailure looks for the connection by name after a create failed.
+func FindAfterFailure(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, name string) (*ApiVpnConnection, error) {
+	ctx, cancel := afterFailureContext(gpcnClient, ctx)
+	defer cancel()
+	return FindVpnConnectionByName(gpcnClient, ctx, vpcID, name)
+}
+
+// ReadAfterFailure reads the connection after a create failed.
+func ReadAfterFailure(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string) (*ApiVpnConnectionDetail, error) {
+	ctx, cancel := afterFailureContext(gpcnClient, ctx)
+	defer cancel()
+	return GetVpnConnection(gpcnClient, ctx, vpcID, connectionID)
+}
+
+// MadeByRequest reports whether a listed row can come from a create request
+// that was sent at requestStart with the given name and peer address.
+func MadeByRequest(row *ApiVpnConnection, name, peerAddress string, requestStart time.Time) bool {
+	return row.Name == name && row.PeerAddress == peerAddress && vpcvpngateways.CreatedSince(row.CreatedAt, requestStart)
+}
+
+// RetryUnappliedDue reports whether the plan sends the saved settings again.
+// That holds when the data center does not run them, the connection is neither
+// being created nor removed, and no job runs.
+func RetryUnappliedDue(desiredApplied bool, state string, jobActive bool) bool {
+	busy := state == StateCreating || state == StateRemoving
+	return !desiredApplied && !busy && !jobActive
+}
+
 // GetVpnConnection reads the detail of a VPN connection. A 404 reads as
 // ErrVpnConnectionNotFound, and the API error stays in the chain.
 func GetVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string) (*ApiVpnConnectionDetail, error) {
@@ -223,10 +262,21 @@ func UpdateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 	return nil
 }
 
-// DeleteVpnConnection issues the removal and polls its job. A 409 reaches the
-// caller as the API error, and a 404 as an error that client.IsNotFound reads.
+// DeleteVpnConnection issues the removal and polls its job. A 409 that says the
+// removal already runs goes on to the wait for the 404. Any other 409 reaches
+// the caller as the API error, and a 404 as an error that client.IsNotFound
+// reads.
 func DeleteVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string) error {
+	timeout := client.DefaultPollingConfig().Timeout
+	if config := gpcnClient.Config(); config != nil && config.PollingTimeout > 0 {
+		timeout = config.PollingTimeout
+	}
+	return deleteVpnConnection(gpcnClient, ctx, vpcID, connectionID, RemovalPollInterval, timeout)
+}
+
+func deleteVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, interval, timeout time.Duration) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteVpnConnection, connectionID))
+	startTime := time.Now()
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, connectionPath(vpcID, connectionID), nil)
 	if err != nil {
@@ -234,6 +284,10 @@ func DeleteVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 	}
 
 	jobID, err := issueJob(gpcnClient, request)
+	if removalAlreadyRunning(err) {
+		tflog.Info(ctx, LogRemovalAlreadyRunning)
+		return waitForVpnConnectionGone(gpcnClient, ctx, vpcID, connectionID, interval, max(timeout-time.Since(startTime), 0))
+	}
 	if err != nil {
 		return err
 	}
@@ -243,6 +297,44 @@ func DeleteVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 		return fmt.Errorf(ErrFmtDeletePollingFailed, err)
 	}
 	return nil
+}
+
+// removalAlreadyRunning reports a 409 for a connection that is being removed
+// and has no failure to show. A removal that failed is not under way.
+func removalAlreadyRunning(err error) bool {
+	var httpErr *client.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict || httpErr.Code != CodeStateConflict {
+		return false
+	}
+	return httpErr.Details["state"] == StateRemoving && httpErr.Details["failureReason"] == nil
+}
+
+// waitForVpnConnectionGone reads the connection every interval until the API
+// answers 404, or until the timeout.
+func waitForVpnConnectionGone(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, interval, timeout time.Duration) error {
+	tflog.Info(ctx, fmt.Sprintf(LogWaitingForVpnConnectionGone, connectionID))
+
+	startTime := time.Now()
+	for {
+		detail, err := GetVpnConnection(gpcnClient, ctx, vpcID, connectionID)
+		if errors.Is(err, ErrVpnConnectionNotFound) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf(ErrFmtWaitForRemovalFailed, err)
+		}
+		tflog.Info(ctx, fmt.Sprintf(LogVpnConnectionStillRemoving, connectionID, detail.State))
+
+		if time.Since(startTime) >= timeout {
+			return fmt.Errorf("%w: "+ErrFmtRemovalTimeout, ErrRemovalTimeout, connectionID, detail.State, timeout)
+		}
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(interval):
+		}
+	}
 }
 
 // sendAccepted sends a request and returns the body of the 2xx answer.

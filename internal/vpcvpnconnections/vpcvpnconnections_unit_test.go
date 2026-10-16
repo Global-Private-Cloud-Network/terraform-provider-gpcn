@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
@@ -542,5 +543,120 @@ func TestVpcVpnConnectionUnitFindVpnConnectionByNameReadsEveryPage(t *testing.T)
 	missing, err := FindVpnConnectionByName(gpcnClient, context.Background(), testVpcID, "absent")
 	if err != nil || missing != nil {
 		t.Errorf("Expected no connection, got %+v, %v", missing, err)
+	}
+}
+
+// A canceled apply must not stop the lookups that follow a failed create.
+func TestVpcVpnConnectionUnitLookupsAfterFailureSurviveCanceledContext(t *testing.T) {
+	t.Parallel()
+	gpcnClient := apiServer(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/resource/vpcs/" + testVpcID + "/vpn-connections":
+			testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": []map[string]any{{"id": testConnID, "name": "wanted"}},
+				"meta": map[string]any{"hasNextPage": false}})
+		case "/v1/resource/vpcs/" + testVpcID + "/vpn-connections/" + testConnID:
+			testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{"id": testConnID, "name": "wanted"}})
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	found, err := FindAfterFailure(gpcnClient, ctx, testVpcID, "wanted")
+	if err != nil || found == nil || found.ID != testConnID {
+		t.Errorf("Expected the lookup to find the row with a canceled context, got %+v, %v", found, err)
+	}
+	detail, err := ReadAfterFailure(gpcnClient, ctx, testVpcID, testConnID)
+	if err != nil || detail == nil || detail.ID != testConnID {
+		t.Errorf("Expected the read to succeed with a canceled context, got %+v, %v", detail, err)
+	}
+	if _, err := FindVpnConnectionByName(gpcnClient, ctx, testVpcID, "wanted"); err == nil {
+		t.Error("Expected a plain lookup on the canceled context to fail")
+	}
+}
+
+func TestVpcVpnConnectionUnitRetryUnappliedDue(t *testing.T) {
+	t.Parallel()
+	for name, test := range map[string]struct {
+		applied   bool
+		state     string
+		jobActive bool
+		want      bool
+	}{
+		"idle and unapplied": {false, StateConnected, false, true},
+		"applied":            {true, StateConnected, false, false},
+		"creating":           {false, StateCreating, false, false},
+		"removing":           {false, StateRemoving, false, false},
+		"job active":         {false, StateConnected, true, false},
+	} {
+		if got := RetryUnappliedDue(test.applied, test.state, test.jobActive); got != test.want {
+			t.Errorf("%s: got %v, want %v", name, got, test.want)
+		}
+	}
+}
+
+func removingConflictServer(t *testing.T, details string, rows []string) (*client.GpcnClient, *atomic.Int32) {
+	t.Helper()
+	var reads atomic.Int32
+	gpcnClient := apiServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusConflict)
+			fmt.Fprintf(w, `{"success":false,"message":"busy","error":{"code":"VPN_STATE_CONFLICT","statusCode":409,"details":%s}}`, details)
+			return
+		}
+		index := int(reads.Add(1)) - 1
+		if index >= len(rows) {
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"success":false,"message":"VPN connection not found","error":{"code":"Resource Not Found","statusCode":404,"details":null}}`)
+			return
+		}
+		fmt.Fprint(w, rows[index])
+	})
+	return gpcnClient, &reads
+}
+
+const removingConnRow = `{"success":true,"data":{"id":"` + testConnID + `","name":"x","state":"removing"}}`
+
+func TestVpcVpnConnectionUnitDeleteRemoving409WaitsForTheRow(t *testing.T) {
+	t.Parallel()
+	gpcnClient, reads := removingConflictServer(t, `{"state":"removing","verb":"delete","failureReason":null}`, []string{removingConnRow, removingConnRow})
+
+	if err := deleteVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID, time.Millisecond, time.Minute); err != nil {
+		t.Fatalf("Expected the delete to wait for the 404, got %v", err)
+	}
+	if got := reads.Load(); got != 3 {
+		t.Errorf("Expected 3 reads (two removing, one 404), got %d", got)
+	}
+}
+
+func TestVpcVpnConnectionUnitDeleteRemoving409TimesOut(t *testing.T) {
+	t.Parallel()
+	gpcnClient, _ := removingConflictServer(t, `{"state":"removing","verb":"delete","failureReason":null}`,
+		slices.Repeat([]string{removingConnRow}, 1000))
+
+	err := deleteVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID, time.Millisecond, 20*time.Millisecond)
+	if !errors.Is(err, ErrRemovalTimeout) {
+		t.Errorf("Expected a removal timeout, got %v", err)
+	}
+}
+
+// A removal that failed, or a connection in another state, is a refusal.
+func TestVpcVpnConnectionUnitDeleteOtherConflictsAreRefusals(t *testing.T) {
+	t.Parallel()
+	for name, details := range map[string]string{
+		"removing with a failure": `{"state":"removing","verb":"delete","failureReason":"The tunnel is stuck."}`,
+		"creating":                `{"state":"creating","verb":"delete","failureReason":null}`,
+		"no details":              `null`,
+	} {
+		gpcnClient, reads := removingConflictServer(t, details, nil)
+		err := deleteVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID, time.Millisecond, time.Minute)
+		if code, _ := vpcvpngateways.ParseAPIError(err); code != "VPN_STATE_CONFLICT" {
+			t.Errorf("%s: expected the 409 to reach the caller, got %v", name, err)
+		}
+		if reads.Load() != 0 {
+			t.Errorf("%s: expected no wait", name)
+		}
 	}
 }

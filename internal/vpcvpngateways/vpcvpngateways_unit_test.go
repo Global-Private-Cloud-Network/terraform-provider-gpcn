@@ -343,3 +343,41 @@ func TestVpcVpnGatewayUnitDeleteRemoving409FallsThroughToWait(t *testing.T) {
 		t.Errorf("Expected 2 reads, got %d", got)
 	}
 }
+
+// A canceled context fails the read of a row, so ReadAfterFailure reads on a
+// fresh context.
+func TestVpcVpnGatewayUnitReadAfterFailureSurvivesCanceledContext(t *testing.T) {
+	t.Parallel()
+	gpcnClient, _ := removalServer(t, []string{removingRow("")})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	gateway, err := ReadAfterFailure(gpcnClient, ctx, testVpcID)
+	if err != nil || gateway == nil || gateway.ID != testGatewayID {
+		t.Fatalf("Expected the row with a canceled context, got %+v, %v", gateway, err)
+	}
+	if _, err := GetVpnGateway(gpcnClient, ctx, testVpcID); err == nil {
+		t.Error("Expected a plain read on the canceled context to fail")
+	}
+}
+
+func TestVpcVpnGatewayUnitCreatedSince(t *testing.T) {
+	t.Parallel()
+	start := time.Date(2026, 10, 16, 12, 0, 0, 0, time.UTC)
+	for name, test := range map[string]struct {
+		createdAt string
+		want      bool
+	}{
+		"after the request":         {"2026-10-16T12:00:03.250Z", true},
+		"inside the window":         {"2026-10-16T11:58:30Z", true},
+		"the edge of the window":    {"2026-10-16T11:58:00Z", true},
+		"before the window":         {"2026-10-16T11:57:59Z", false},
+		"a row from an earlier day": {"2026-01-02T15:04:05Z", false},
+		"empty":                     {"", false},
+		"not a time":                {"yesterday", false},
+	} {
+		if got := CreatedSince(test.createdAt, start); got != test.want {
+			t.Errorf("%s: CreatedSince(%q) = %v, want %v", name, test.createdAt, got, test.want)
+		}
+	}
+}

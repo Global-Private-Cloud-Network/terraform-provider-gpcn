@@ -64,7 +64,13 @@ type vpnGatewayPlanTestServerState struct {
 	failDeleteJob bool
 	// deleteHold is the number of reads after the DELETE that still show the row
 	// as removing. The read after that answers 404.
-	deleteHold   int
+	deleteHold int
+	// createdAt is the creation time of the row. The POST sets it when no row
+	// exists. A test sets it by hand to plant a row that predates the request.
+	createdAt string
+	// activeJobID is the job the row still runs. The job poll for it settles the
+	// row to ready.
+	activeJobID  string
 	deleting     bool
 	getCount     int
 	getsAfterDel int
@@ -73,7 +79,14 @@ type vpnGatewayPlanTestServerState struct {
 }
 
 func (s *vpnGatewayPlanTestServerState) row() map[string]any {
-	var failureReason, reservedBlock, address any
+	var failureReason, reservedBlock, address, activeJobID any
+	createdAt := vpnGatewayPlanTestTimestamp
+	if s.createdAt != "" {
+		createdAt = s.createdAt
+	}
+	if s.activeJobID != "" {
+		activeJobID = s.activeJobID
+	}
 	if s.failureReason != "" {
 		failureReason = s.failureReason
 	}
@@ -91,8 +104,8 @@ func (s *vpnGatewayPlanTestServerState) row() map[string]any {
 		"address":       address,
 		"reservedBlock": reservedBlock,
 		"failureReason": failureReason,
-		"activeJobId":   nil,
-		"createdAt":     vpnGatewayPlanTestTimestamp,
+		"activeJobId":   activeJobID,
+		"createdAt":     createdAt,
 		"updatedAt":     vpnGatewayPlanTestTimestamp,
 	}
 }
@@ -140,6 +153,9 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 			createStatus := state.createStatus
 			if refusal == "" {
 				state.createBodies = append(state.createBodies, body)
+				if !state.exists {
+					state.createdAt = time.Now().UTC().Format(time.RFC3339Nano)
+				}
 				state.exists = true
 				state.rowState = state.createdState
 				if state.createdState == "failed" {
@@ -212,6 +228,10 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 			}
 			state.mu.Lock()
 			failJob := state.failJob || (state.failDeleteJob && jobID == "job-delete")
+			if state.activeJobID != "" && jobID == state.activeJobID {
+				state.activeJobID = ""
+				state.rowState = "ready"
+			}
 			cancelJob := state.cancelJob
 			state.mu.Unlock()
 			if cancelJob {
@@ -616,6 +636,80 @@ func TestVpcVpnGatewayResourceCreate5xxKeepsRow(t *testing.T) {
 						t.Errorf("Expected the POST to be sent once, got %d", len(state.createBodies))
 					}
 					state.createStatus = 0
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcVpnGatewayTest, plancheck.ResourceActionReplace),
+					},
+				},
+			},
+		},
+	})
+}
+
+// A 5xx answer can also come from a request that made no row, while a gateway
+// from an earlier apply stands on the VPC. The create does not adopt that row.
+// It saves no state and names the import command.
+func TestVpcVpnGatewayResourceCreate5xxDoesNotAdoptOldRow(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnGatewayPlanMockServer(t)
+	state.set(func(s *vpnGatewayPlanTestServerState) {
+		s.exists = true
+		s.rowState = "ready"
+		s.createdAt = time.Now().Add(-time.Hour).UTC().Format(time.RFC3339Nano)
+		s.createStatus = http.StatusBadGateway
+	})
+	config := vpnGatewayPlanTestConfig(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				ExpectError: vpnGatewayRefusal("A VPN gateway already exists on this VPC that this apply didn't create. " +
+					"Import it with: terraform import gpcn_vpc_vpn_gateway.<name> " + vpnGatewayPlanTestVpcID),
+			},
+			{
+				PreConfig: func() {
+					state.set(func(s *vpnGatewayPlanTestServerState) { s.exists = false; s.createdAt = ""; s.createStatus = 0 })
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcVpnGatewayTest, plancheck.ResourceActionCreate),
+					},
+				},
+			},
+		},
+	})
+}
+
+// An adopted row that still runs a job is read again once the job ends, so the
+// state holds the settled row.
+func TestVpcVpnGatewayResourceCreate5xxPollsAdoptedJob(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnGatewayPlanMockServer(t)
+	state.set(func(s *vpnGatewayPlanTestServerState) {
+		s.createStatus = http.StatusBadGateway
+		s.createdState = "creating"
+		s.activeJobID = "job-live"
+	})
+	config := vpnGatewayPlanTestConfig(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config, ExpectError: vpnGatewayRefusal(vpnGatewayPlanTestBadGateway)},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					if state.activeJobID != "" {
+						t.Errorf("Expected the create to poll the job of the adopted row, which still runs %q", state.activeJobID)
+					}
+					state.createStatus = 0
+					state.createdState = "ready"
 				},
 				Config: config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{

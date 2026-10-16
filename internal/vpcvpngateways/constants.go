@@ -22,6 +22,10 @@ const (
 // RemovalPollInterval is a variable so that tests can shorten the wait.
 var RemovalPollInterval = 5 * time.Second
 
+// AdoptWindow is how far before the POST a row may start and still count as
+// the row of this request. It absorbs the difference between the two clocks.
+const AdoptWindow = 2 * time.Minute
+
 // CodeGatewayRemoving is the code of the 409 for a gateway whose removal runs.
 const CodeGatewayRemoving = "VPN_GATEWAY_REMOVING"
 

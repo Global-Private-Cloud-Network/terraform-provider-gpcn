@@ -26,5 +26,7 @@ const (
 	LogSuccessfullyFinishedUpdateGPCNVpnGateway = "Successfully finished Update GPCN VPN Gateway"
 	LogStartingDeleteGPCNVpnGateway             = "Starting Delete GPCN VPN Gateway"
 	LogSuccessfullyFinishedDeleteGPCNVpnGateway = "Successfully finished Delete GPCN VPN Gateway"
+	LogRowNotCreatedByThisRequest               = "The VPN gateway of the VPC predates this request, so the create does not adopt it"
+	LogAdoptedJobPollFailed                     = "The job of the adopted row did not finish cleanly. Reading the row as it is"
 	LogFailedGatewayPlansReplacement            = "The VPN gateway is in the failed state, so the plan replaces it"
 )

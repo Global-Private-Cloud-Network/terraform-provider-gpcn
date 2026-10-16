@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
@@ -63,11 +64,25 @@ type vpnConnPlanTestServerState struct {
 	// postStatus makes the POST insert the row and then answer with this status.
 	postStatus int
 	// itemStatus makes the detail GET answer with this status.
-	itemStatus  int
-	postBodies  []map[string]any
-	postRaw     []string
-	putBodies   []map[string]any
-	deleteCount int
+	itemStatus int
+	// keepRow makes the POST leave the stored row as the test planted it.
+	keepRow bool
+	// postActiveJob is the job the row made by the POST still runs.
+	postActiveJob string
+	// listStatus makes the list GET answer with this status.
+	listStatus int
+	// deleteRemoving answers the next DELETE with a 409 for a connection that
+	// is already being removed.
+	deleteRemoving bool
+	// removingHold is the number of detail reads after that 409 that still show
+	// the row as removing. The read after that answers 404.
+	removingHold int
+	removing     bool
+	getsAfterDel int
+	postBodies   []map[string]any
+	postRaw      []string
+	putBodies    []map[string]any
+	deleteCount  int
 }
 
 func (s *vpnConnPlanTestServerState) set(update func(*vpnConnPlanTestServerState)) {
@@ -108,7 +123,7 @@ func vpnConnPlanTestRowFromBody(body map[string]any, state string) map[string]an
 		"ikeVersion": "v2", "encryption": "aes256", "integrity": "sha256", "dhGroup": 14, "pfsGroup": 14,
 		"ikeLifetimeSeconds": 28800, "ipsecLifetimeSeconds": 3600, "dpd": true,
 		"desiredApplied": true, "activeJobId": nil, "acceptedVerbs": []string{"update", "reset", "delete"},
-		"createdAt": vpnConnPlanTestTimestamp, "updatedAt": vpnConnPlanTestTimestamp,
+		"createdAt": time.Now().UTC().Format(time.RFC3339Nano), "updatedAt": vpnConnPlanTestTimestamp,
 	}
 	for _, key := range []string{"description", "ikeVersion", "encryption", "integrity", "dhGroup", "pfsGroup", "ikeLifetimeSeconds", "ipsecLifetimeSeconds", "dpd"} {
 		if value, ok := body[key]; ok {
@@ -125,6 +140,17 @@ func writeVpnConnPlanTestError(w http.ResponseWriter, status int, code, message 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	fmt.Fprintf(w, `{"success":false,"message":%q,"error":{"code":%q,"statusCode":%d,"details":null}}`, message, code, status)
+}
+
+func writeVpnConnPlanTestRemoving(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	fmt.Fprint(w, `{"success":false,"message":"The VPN connection is being removed.","error":{"code":"VPN_STATE_CONFLICT","statusCode":409,`+
+		`"details":{"state":"removing","verb":"delete","failureReason":null}}}`)
+}
+
+func init() {
+	vpcvpnconnections.RemovalPollInterval = 5 * time.Millisecond
 }
 
 func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTestServerState) {
@@ -160,9 +186,14 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			state.mu.Lock()
 			state.postBodies = append(state.postBodies, body)
 			state.postRaw = append(state.postRaw, raw.String())
-			state.exists = true
-			state.row = vpnConnPlanTestRowFromBody(body, state.createdState)
-			state.desiredApplied = true
+			if !state.keepRow {
+				state.exists = true
+				state.row = vpnConnPlanTestRowFromBody(body, state.createdState)
+				if state.postActiveJob != "" {
+					state.row["activeJobId"] = state.postActiveJob
+				}
+				state.desiredApplied = true
+			}
 			postStatus := state.postStatus
 			state.mu.Unlock()
 			if postStatus != 0 {
@@ -179,10 +210,24 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			if state.exists {
 				rows = append(rows, state.detail())
 			}
+			listStatus := state.listStatus
 			state.mu.Unlock()
+			if listStatus != 0 {
+				writeVpnConnPlanTestError(w, listStatus, "Insufficient Permissions", vpnConnPlanTestGetRefused)
+				return
+			}
 			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "", "data": rows, "meta": map[string]any{"hasNextPage": false}})
 		case r.Method == http.MethodGet && r.URL.Path == item:
 			state.mu.Lock()
+			if state.removing {
+				state.getsAfterDel++
+				if state.removingHold > 0 {
+					state.removingHold--
+					state.row["state"] = "removing"
+				} else {
+					state.exists = false
+				}
+			}
 			exists := state.exists
 			itemStatus := state.itemStatus
 			detail := state.detail()
@@ -216,11 +261,19 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			state.mu.Lock()
 			conflict := state.deleteConflict
 			state.deleteConflict = ""
-			if conflict == "" {
+			alreadyRemoving := state.deleteRemoving
+			state.deleteRemoving = false
+			if alreadyRemoving {
+				state.removing = true
+			} else if conflict == "" {
 				state.exists = false
 				state.deleteCount++
 			}
 			state.mu.Unlock()
+			if alreadyRemoving {
+				writeVpnConnPlanTestRemoving(w)
+				return
+			}
 			if conflict != "" {
 				writeVpnConnPlanTestError(w, http.StatusConflict, "VPN_STATE_CONFLICT", conflict)
 				return
@@ -236,6 +289,10 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			}
 			state.mu.Lock()
 			failJob := state.failJob
+			if active, _ := state.row["activeJobId"].(string); active != "" && jobID == active {
+				state.row["activeJobId"] = nil
+				state.row["state"] = "connecting"
+			}
 			state.mu.Unlock()
 			if failJob && jobID != "job-delete" {
 				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
@@ -478,6 +535,155 @@ func TestVpcVpnConnectionResourceCreate5xxAdoptsByName(t *testing.T) {
 	})
 }
 
+// plantOtherRow stands a connection with the planned name on the VPC. The POST
+// then leaves it alone and answers 502.
+func plantOtherRow(state *vpnConnPlanTestServerState, peer string, age time.Duration) {
+	state.set(func(s *vpnConnPlanTestServerState) {
+		s.exists = true
+		s.keepRow = true
+		s.postStatus = http.StatusBadGateway
+		s.row = vpnConnPlanTestRowFromBody(map[string]any{
+			"name": "branch-office", "peerAddress": peer, "peerCidrs": []string{"192.168.10.0/24"},
+		}, "connected")
+		s.row["createdAt"] = time.Now().Add(-age).UTC().Format(time.RFC3339Nano)
+	})
+}
+
+func clearPlantedRow(state *vpnConnPlanTestServerState) {
+	state.set(func(s *vpnConnPlanTestServerState) {
+		s.exists = false
+		s.keepRow = false
+		s.postStatus = 0
+	})
+}
+
+// A 5xx answer can come from a request that made no row, while a connection of
+// the same name from an earlier apply stands on the VPC. The create does not
+// adopt it, saves no state, and names the import command.
+func TestVpcVpnConnectionResourceCreate5xxDoesNotAdoptOldRow(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	plantOtherRow(state, "203.0.113.10", time.Hour)
+	config := newVpnConnPlanTestConfig().render(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				ExpectError: vpnConnRefusal("A VPN connection named branch-office already exists on this VPC that this apply didn't create. " +
+					"Import it with: terraform import gpcn_vpc_vpn_connection.<name> " + vpnConnPlanTestVpcID + "/" + vpnConnPlanTestConnID),
+			},
+			{
+				PreConfig: func() { clearPlantedRow(state) },
+				Config:    config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcVpnConnectionTest, plancheck.ResourceActionCreate),
+					},
+				},
+			},
+		},
+	})
+}
+
+// A fresh row of the same name that points at another peer is not the row of
+// this request either.
+func TestVpcVpnConnectionResourceCreate5xxDoesNotAdoptOtherPeer(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	plantOtherRow(state, "203.0.113.99", 0)
+	config := newVpnConnPlanTestConfig().render(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config, ExpectError: vpnConnRefusal("that this apply didn't create")},
+			{
+				PreConfig: func() { clearPlantedRow(state) },
+				Config:    config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcVpnConnectionTest, plancheck.ResourceActionCreate),
+					},
+				},
+			},
+		},
+	})
+}
+
+// A lookup that fails after a 5xx answer cannot tell whether a row exists. The
+// error says so and keeps the lookup error.
+func TestVpcVpnConnectionResourceCreate5xxLookupFailsNamesTheRisk(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	state.set(func(s *vpnConnPlanTestServerState) {
+		s.keepRow = true
+		s.postStatus = http.StatusBadGateway
+		s.listStatus = http.StatusForbidden
+	})
+	config := newVpnConnPlanTestConfig().render(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				ExpectError: vpnConnDetailOrder(vpnConnPlanTestBadGateway,
+					"A VPN connection may have been created; check the VPC and import it if so."),
+			},
+			{
+				PreConfig: func() {
+					state.set(func(s *vpnConnPlanTestServerState) { s.keepRow = false; s.postStatus = 0; s.listStatus = 0 })
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcVpnConnectionTest, plancheck.ResourceActionCreate),
+					},
+				},
+			},
+		},
+	})
+}
+
+// An adopted row that still runs a job is read again once the job ends.
+func TestVpcVpnConnectionResourceCreate5xxPollsAdoptedJob(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	state.set(func(s *vpnConnPlanTestServerState) {
+		s.postStatus = http.StatusBadGateway
+		s.createdState = "creating"
+		s.postActiveJob = "job-live"
+	})
+	config := newVpnConnPlanTestConfig().render(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config, ExpectError: vpnConnRefusal(vpnConnPlanTestBadGateway)},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					if state.row["activeJobId"] != nil {
+						t.Errorf("Expected the create to poll the job of the adopted row, which still runs %v", state.row["activeJobId"])
+					}
+					state.postStatus = 0
+					state.postActiveJob = ""
+					state.createdState = "connecting"
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcVpnConnectionTest, plancheck.ResourceActionReplace),
+					},
+				},
+			},
+		},
+	})
+}
+
 // A job that ended, followed by a detail read that fails, still leaves a row.
 // The create saves the planned values and the ID with the error, so Terraform
 // taints the resource.
@@ -546,6 +752,41 @@ func TestVpcVpnConnectionResourceUnappliedPlansUpdate(t *testing.T) {
 			},
 		},
 	})
+}
+
+// Saved settings that do not run call for an update only when the connection
+// is idle. While it is being created or removed, or while a job runs, the plan
+// stays empty.
+func TestVpcVpnConnectionResourceUnappliedWhileBusyPlansNoUpdate(t *testing.T) {
+	t.Parallel()
+	for name, busy := range map[string]func(*vpnConnPlanTestServerState){
+		"creating":       func(s *vpnConnPlanTestServerState) { s.row["state"] = "creating" },
+		"removing":       func(s *vpnConnPlanTestServerState) { s.row["state"] = "removing" },
+		"job is running": func(s *vpnConnPlanTestServerState) { s.row["state"] = "connected"; s.row["activeJobId"] = "job-live" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			server, state := startVpnConnPlanMockServer(t)
+			config := newVpnConnPlanTestConfig().render(server.URL)
+
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{Config: config},
+					{
+						PreConfig: func() {
+							state.set(func(s *vpnConnPlanTestServerState) {
+								s.desiredApplied = false
+								busy(s)
+							})
+						},
+						Config:   config,
+						PlanOnly: true,
+					},
+				},
+			})
+		})
+	}
 }
 
 // A failed connection that no longer accepts an update can only be deleted. The
@@ -907,6 +1148,35 @@ func TestVpcVpnConnectionResourceDeleteStateConflict(t *testing.T) {
 	})
 }
 
+// A delete that meets a removal already under way waits until the API answers
+// 404, instead of failing on the 409.
+func TestVpcVpnConnectionResourceDeleteAlreadyRemovingWaits(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	config := newVpnConnPlanTestConfig().render(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy: func(*terraform.State) error {
+			state.mu.Lock()
+			defer state.mu.Unlock()
+			if state.getsAfterDel != 3 {
+				return fmt.Errorf("expected 3 reads after the 409 (two removing, one 404), got %d", state.getsAfterDel)
+			}
+			return nil
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: func(*terraform.State) error {
+					state.set(func(s *vpnConnPlanTestServerState) { s.deleteRemoving = true; s.removingHold = 2 })
+					return nil
+				},
+			},
+		},
+	})
+}
+
 // A failed update job keeps the prior state. The values the API saved show up
 // on the next refresh, and the W1 warning tells the operator to apply again.
 func TestVpcVpnConnectionResourceUpdateJobFailedKeepsState(t *testing.T) {
@@ -1006,7 +1276,14 @@ func TestVpcVpnConnectionResourceDesiredAppliedWarning(t *testing.T) {
 		t.Errorf("Expected no warning while a job is active, got %v", warnings)
 	}
 
-	state.set(func(s *vpnConnPlanTestServerState) { s.row["activeJobId"] = nil; s.desiredApplied = true })
+	for _, busy := range []string{"creating", "removing"} {
+		state.set(func(s *vpnConnPlanTestServerState) { s.row["activeJobId"] = nil; s.row["state"] = busy })
+		if warnings := read().Diagnostics.Warnings(); len(warnings) != 0 {
+			t.Errorf("Expected no warning while the state is %s, got %v", busy, warnings)
+		}
+	}
+
+	state.set(func(s *vpnConnPlanTestServerState) { s.row["state"] = "connected"; s.desiredApplied = true })
 	if warnings := read().Diagnostics.Warnings(); len(warnings) != 0 {
 		t.Errorf("Expected no warning when the settings run, got %v", warnings)
 	}

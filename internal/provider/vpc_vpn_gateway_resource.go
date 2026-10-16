@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/vpcvpngateways"
@@ -38,7 +39,7 @@ func (r *vpcVpnGatewayResource) Metadata(_ context.Context, req resource.Metadat
 
 func (r *vpcVpnGatewayResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages the VPN gateway of a GPCN™ VPC. A VPC has at most one VPN gateway. It is the public endpoint your peer gateway connects to for site-to-site VPN. Your organization needs the VPN feature, and the data center of the VPC must offer site-to-site VPN. The API key needs vpc:read to read the VPN gateway, and vpc-vpn-connection:create and vpc-vpn-connection:delete to manage it. A VPN gateway has no attribute that changes in place. A gateway that fails to build is replaced on the next apply.",
+		Description: "Manages the VPN gateway of a GPCN™ VPC. A VPC has at most one VPN gateway. It holds the VPN gateway address, the public IPv4 address your peer gateway connects to for site-to-site VPN. Your organization needs the Site-to-Site VPN feature, and the data center of the VPC must offer site-to-site VPN. The API key needs vpc:read to read the VPN gateway, and vpc-vpn-connection:create and vpc-vpn-connection:delete to manage it. A VPN gateway has no attribute that changes in place. A gateway that fails to build is replaced on the next apply.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the VPN gateway in UUID format",
@@ -55,7 +56,7 @@ func (r *vpcVpnGatewayResource) Schema(_ context.Context, _ resource.SchemaReque
 				},
 			},
 			"kind": schema.StringAttribute{
-				Description: "How the data center provides the VPN gateway: 'router' or 'appliance'. The data center decides, and you cannot choose",
+				Description: "How the data center provides the VPN gateway: 'router' or 'appliance'. The data center decides, and you can't choose",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -69,7 +70,7 @@ func (r *vpcVpnGatewayResource) Schema(_ context.Context, _ resource.SchemaReque
 				},
 			},
 			"reserved_block": schema.StringAttribute{
-				Description: "The /28 block GPCN™ reserves inside the VPC CIDR for an appliance VPN gateway. It is null when the kind is 'router'",
+				Description: "The /28 block GPCN™ reserves inside the VPC CIDR for an appliance VPN gateway. It's null when the kind is 'router'",
 				Computed:    true,
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
@@ -138,6 +139,7 @@ func (r *vpcVpnGatewayResource) Create(ctx context.Context, req resource.CreateR
 	}
 
 	vpcID := plan.VpcID.ValueString()
+	requestStart := time.Now()
 	rowMayExist, createErr := vpcvpngateways.CreateVpnGateway(r.client, ctx, vpcID)
 	if createErr != nil && !rowMayExist {
 		resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToCreateVpnGW, vpcvpngateways.ErrorDetail(createErr))
@@ -150,6 +152,17 @@ func (r *vpcVpnGatewayResource) Create(ctx context.Context, req resource.CreateR
 	var getErr error
 	if createErr != nil {
 		gateway, getErr = vpcvpngateways.ReadAfterFailure(r.client, ctx, vpcID)
+		if getErr == nil && !vpcvpngateways.CreatedSince(gateway.CreatedAt, requestStart) {
+			tflog.Info(ctx, vpcvpngateways.LogRowNotCreatedByThisRequest)
+			resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToCreateVpnGW, fmt.Sprintf(vpcvpngateways.ErrFmtNotOwnRow, vpcID))
+			return
+		}
+		if getErr == nil && gateway.ActiveJobID != nil {
+			vpcvpngateways.PollAdoptedJob(r.client, ctx, vpcvpngateways.ActionCreateVpnGateway, gateway.ActiveJobID, requestStart)
+			if settled, settledErr := vpcvpngateways.ReadAfterFailure(r.client, ctx, vpcID); settledErr == nil {
+				gateway = settled
+			}
+		}
 	} else {
 		gateway, getErr = vpcvpngateways.GetVpnGateway(r.client, ctx, vpcID)
 	}
