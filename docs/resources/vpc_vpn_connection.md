@@ -8,6 +8,8 @@ description: |-
 
 # gpcn_vpc_vpn_connection (Resource)
 
+A VPN connection is an encrypted IPsec tunnel between a VPC in GPCN™ (Global Private Cloud Network™) and a peer gateway at your site. Once it's up, the VPC and the peer networks behind your gateway reach each other as if they shared one private network.
+
 Manages a site-to-site VPN connection between a GPCN™ VPC and a peer gateway. The VPN connection runs on the VPN gateway of the VPC, so create the VPN gateway first. Your organization needs the VPN feature, and the data center of the VPC must offer site-to-site VPN. The API key needs vpc:read to read a VPN connection, vpc-vpn-connection:create, vpc-vpn-connection:update and vpc-vpn-connection:delete to manage one, and vpc-nsg:update to create or change one, because the VPN connection adds rules to the security groups of the VPC. GPCN™ never returns the pre-shared key, so Terraform cannot detect a change made outside Terraform. Set the key with psk, or with psk_wo and psk_wo_version (Terraform 1.11 or later). Every attribute changes in place except vpc_id and vpn_gateway_id.
 
 ## Example Usage
@@ -98,6 +100,57 @@ output "gpcn_vpc_vpn_connection_local_networks" {
 }
 ```
 
+## Before you start
+
+A VPN connection needs these in place:
+
+- A VPN gateway that's `ready`. Reference its `id` from `vpn_gateway_id`, as the example does, and Terraform builds the VPN gateway first and deletes it last.
+- At least one subnet in the VPC.
+- The Site-to-Site VPN feature on your organization, and a data center that offers site-to-site VPN. Check `vpn_capable` on `gpcn_vpc` or on the `gpcn_datacenters` data source.
+- An API key with `vpc:read`, `vpc-vpn-connection:create`, `vpc-vpn-connection:update`, `vpc-vpn-connection:delete` and `vpc-nsg:update`. The last one is there because a VPN connection edits your security groups (see below).
+
+When the apply finishes, give `local_endpoint_address` to the administrator of your peer gateway, and have them configure `local_networks` at their end.
+
+## Pre-shared key
+
+Both ends of the tunnel need the same pre-shared key. It's 16 to 64 printable ASCII characters, with no spaces, double quotes or backslashes. Set it one of two ways, and exactly one:
+
+- **`psk`** stores the key in your state file, marked sensitive. Change `psk` to rotate the key.
+- **`psk_wo`** is write-only: Terraform sends it to GPCN™ and never stores it in the plan or the state. It needs Terraform 1.11 or later, and it comes with `psk_wo_version`. Terraform can't see a change in a write-only value, so raise `psk_wo_version` to send the current `psk_wo` again and rotate the key.
+
+GPCN™ never returns the key, and the provider doesn't write it to its logs. That means Terraform can't tell if someone changed the key outside Terraform.
+
+## Security group rules
+
+A VPN connection opens the tunnel's traffic for you. For each peer network, it adds an ingress rule for all protocols to every security group that's bound to a subnet in the VPC. The rules are named after the connection, and GPCN™ removes them when you delete it.
+
+`gpcn_vpc_nsg` leaves those rules out of its `rule` set, so they never show up as a difference, and it sends them back unchanged whenever it replaces a group's rules. If you write a rule with the same content yourself, it becomes yours and the connection no longer manages it.
+
+A security group you bind to a subnet after the connection exists doesn't get the rules right away. It gets them on the connection's next full update, which is any change other than `name` or `description` alone. Raising `psk_wo_version` or editing a peer network counts, for example.
+
+## Peer networks
+
+`peer_cidrs` lists the networks behind your peer gateway, one to ten blocks with a prefix length from /8 to /32. Write each one as its network address, such as `192.168.10.0/24`. GPCN™ rewrites a block that has host bits set, which would make every plan show a change, so Terraform refuses `192.168.10.7/24` at plan time and tells you the right form.
+
+The blocks can't overlap each other, the VPC, or the peer networks of another VPN connection. `peer_address` must be a public IPv4 address.
+
+## Connection state
+
+`state` is one of `creating`, `connecting`, `connected`, `disconnected`, `error`, `failed` or `removing`. GPCN™ updates it when it reads the peer gateway, so it can change without a change in your configuration.
+
+- `disconnected` is normal for a tunnel with no traffic. It isn't a fault.
+- Terraform doesn't wait for `connected`. The apply finishes when GPCN™ has built the VPN connection, because a tunnel only comes up when the peer gateway answers.
+- `failed` means the last job failed. `failure_reason` says why, and a create that ends there leaves the resource tainted, so the next apply creates it again.
+
+If `desired_applied` is false, the settings GPCN™ saved aren't the ones the data center is running yet. Terraform shows a warning when it refreshes the VPN connection.
+
+## Limits
+
+- GPCN™ allows 4 VPN connections per VPC by default. Connections in the `failed` and `removing` states count.
+- Each VPN connection takes one peer gateway address, and a VPC can't have two connections to the same address.
+- An `appliance` VPN gateway allows 10 peer networks across all the VPC's connections.
+- The name must be unique within the VPC.
+
 <!-- schema generated by tfplugindocs -->
 ## Schema
 
@@ -147,3 +200,11 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 # a slash. The key is not imported, so the first apply sends it again.
 terraform import gpcn_vpc_vpn_connection.example "c13808d9-3b7d-42c5-a21d-f0961308a38a/8f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
 ```
+
+GPCN™ never returns the key, so `psk` and `psk_wo_version` are null after an import. Whichever your configuration sets, the first apply sends the key again.
+
+## Next Steps
+
+- [`gpcn_vpc_vpn_gateway`](vpc_vpn_gateway) — the VPN gateway this connection runs on
+- [`gpcn_vpc_nsg`](vpc_nsg) — manage the rest of your security group rules
+- [VPN connections on the GPCN™ Hub](https://hub.gpcn.com/docs/resources/networking/vpcs/vpn-connections) — how VPN connections work, and how to reset one in the portal

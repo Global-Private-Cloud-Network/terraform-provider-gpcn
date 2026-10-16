@@ -8,7 +8,7 @@ description: |-
 
 # gpcn_network (Resource)
 
-~> **Deprecated** `gpcn_network` is deprecated in favour of `gpcn_vpc`, `gpcn_vpc_subnet` and `gpcn_l2_segment`. New networks can no longer be created. An existing network is still read, renamed and destroyed by this resource.
+~> **Deprecated** `gpcn_network` is deprecated in favour of `gpcn_vpc`, `gpcn_vpc_subnet` and `gpcn_l2_segment`. GPCN™ has retired legacy networks: the API no longer serves them, so Terraform removes a `gpcn_network` from state on the next refresh. The resource stays, deprecated, until version 2.0.
 
 Manages a private network to connect virtual machines within the same data center
 

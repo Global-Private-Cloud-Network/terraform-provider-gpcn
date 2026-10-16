@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-Terraform provider for GPCN (cloud infrastructure platform) built with Terraform Plugin Framework (v1.19.0).
+Terraform provider for GPCN (cloud infrastructure platform) built with Terraform Plugin Framework (v1.19.0), Go 1.26.9 (`go.mod`), terraform-plugin-testing v1.16.0 and terraform-plugin-docs v0.25.0 (`tools/go.mod`).
 
-Resources: `gpcn_gpu`, `gpcn_l2_segment`, `gpcn_network` (deprecated; create refused), `gpcn_resource_group`, `gpcn_ssh_key`, `gpcn_virtualmachine`, `gpcn_volume`, `gpcn_volume_attachment`, `gpcn_vpc`, `gpcn_vpc_nsg`, `gpcn_vpc_public_ip`, `gpcn_vpc_public_ip_attachment`, `gpcn_vpc_subnet`.
+Resources: `gpcn_gpu`, `gpcn_l2_segment`, `gpcn_network` (deprecated; create refused), `gpcn_resource_group`, `gpcn_ssh_key`, `gpcn_virtualmachine`, `gpcn_volume`, `gpcn_volume_attachment`, `gpcn_vpc`, `gpcn_vpc_nsg`, `gpcn_vpc_public_ip`, `gpcn_vpc_public_ip_attachment`, `gpcn_vpc_subnet`, `gpcn_vpc_vpn_connection`, `gpcn_vpc_vpn_gateway`.
 
 Data sources: `gpcn_datacenters`, `gpcn_gpu_inventory`, `gpcn_resource_groups`, `gpcn_virtualmachine_images`, `gpcn_virtualmachine_sizes`.
 
@@ -76,13 +76,13 @@ Resource schema definitions live in `internal/provider/{resource}_resource.go`.
 ### Key Design Patterns
 
 1. **Separation of Concerns**: `internal/provider/` handles Terraform framework integration; `internal/{resource}/` handles API communication
-2. **Async Operations**: Only endpoints that return a job are polled — networks, volumes, virtual machines, GPUs, volume attachments, and the whole VPC family (VPC create and delete, subnet create, rebind and delete, security-group create, rule replace and delete, public IP acquire, attach, detach and release, L2 segment create and delete). Renames, description changes and resource-group moves on the new resources are synchronous, as are the volume move (`PUT /v1/resource/volumes/{id}`), resource groups and SSH keys. `internal/client/polling.go` long-polls until completion. Two envelope shapes exist: `client.JobStatusSingularResponse` (`data.jobId`) and `client.JobStatusMultiResponse` (`data.jobs[]`, read via `client.GetJobID`). The jobs endpoint constant lives in `internal/client/constants.go`
-3. **Read refresh**: `gpcn_gpu`, `gpcn_network` and `gpcn_virtualmachine` have a `Refresh<X>ModelFromResponse` that Read calls after the mapper. Each one refreshes `name`, because Terraform reconciles a rename in place. Apart from `resource_group_id` (below), every other configured attribute keeps the configured value, because reconciling an out-of-band change to it can destroy the resource. On `gpcn_virtualmachine` that covers `size_id`: a refreshed value plans a downgrade, and the API refuses one. On `gpcn_volume` it covers `name` and `size_gb`, so neither refreshes and the resource has no such function. A drifted volume name requires replacement, and a drifted grow plans a shrink that requires one. `gpcn_ssh_key` and `gpcn_resource_group` refresh `name` inside their shared mapper, which Create and Update call too. `gpcn_volume_attachment` refreshes nothing; its Read compares the attached VM id. Create and Update keep the planned values. The Release B resources with a name (`gpcn_vpc`, `gpcn_vpc_subnet`, `gpcn_vpc_nsg`, `gpcn_l2_segment`) refresh `name` and `description` (the subnet also `nsg_id`, the security group also its rule set), because each reconciles in place; live counters such as `attached_nic_count` carry no plan modifier and plan Unknown. Every resource with a `resource_group_id` (`gpcn_virtualmachine`, `gpcn_gpu`, `gpcn_volume`, `gpcn_vpc`, `gpcn_l2_segment`) writes the API's value on Read, because a move reconciles in place, and on Create and Update only when the plan left it unknown (a known planned value is kept, so a move that lands mid-apply shows as drift on the next plan instead of failing the apply); the attribute is Optional+Computed with `UseNonNullStateForUnknown` (state written by 1.4.0 holds null, and `UseStateForUnknown` plans that null), the provider sends it on create when set and on update only when changed, and it never sends null or `""`
+2. **Async Operations**: Only endpoints that return a job are polled — networks, volumes, virtual machines, GPUs, volume attachments, and the whole VPC family (VPC create and delete, subnet create, rebind and delete, security-group create, rule replace and delete, public IP acquire, attach, detach and release, L2 segment create and delete, VPN gateway create and delete, VPN connection create, update and delete). Renames, description changes and resource-group moves on the new resources are synchronous, as are the volume move (`PUT /v1/resource/volumes/{id}`), resource groups and SSH keys. `internal/client/polling.go` long-polls until completion. Two envelope shapes exist: `client.JobStatusSingularResponse` (`data.jobId`) and `client.JobStatusMultiResponse` (`data.jobs[]`, read via `client.GetJobID`). The jobs endpoint constant lives in `internal/client/constants.go`
+3. **Read refresh**: `gpcn_gpu`, `gpcn_network`, `gpcn_virtualmachine`, `gpcn_vpc`, `gpcn_vpc_subnet`, `gpcn_vpc_nsg` and `gpcn_l2_segment` have a `Refresh<X>ModelFromResponse` that Read calls after the mapper. Each one refreshes `name`, because Terraform reconciles a rename in place. Apart from `resource_group_id` (below), every other configured attribute keeps the configured value, because reconciling an out-of-band change to it can destroy the resource. On `gpcn_virtualmachine` that covers `size_id`: a refreshed value plans a downgrade, and the API refuses one. On `gpcn_volume` it covers `name` and `size_gb`, so neither refreshes and the resource has no such function. A drifted volume name requires replacement, and a drifted grow plans a shrink that requires one. `gpcn_ssh_key` and `gpcn_resource_group` refresh `name` inside their shared mapper, which Create and Update call too. `gpcn_volume_attachment` refreshes nothing; its Read compares the attached VM id. Create and Update keep the planned values. The VPC-family resources with a name (`gpcn_vpc`, `gpcn_vpc_subnet`, `gpcn_vpc_nsg`, `gpcn_l2_segment`) refresh `name` and `description` (the subnet also `nsg_id`, the security group also its rule set), because each reconciles in place; live counters such as `attached_nic_count` carry no plan modifier and plan Unknown. Every resource with a `resource_group_id` (`gpcn_virtualmachine`, `gpcn_gpu`, `gpcn_volume`, `gpcn_vpc`, `gpcn_l2_segment`) writes the API's value on Read, because a move reconciles in place, and on Create and Update only when the plan left it unknown (a known planned value is kept, so a move that lands mid-apply shows as drift on the next plan instead of failing the apply); the attribute is Optional+Computed with `UseNonNullStateForUnknown` (state written by 1.4.0 holds null, and `UseStateForUnknown` plans that null), the provider sends it on create when set and on update only when changed, and it never sends null or `""`
 4. **Error/Logging Constants**: Centralized in each resource's `errors.go` and `logging.go`
 5. **API Versioning**: All endpoints use versioned paths (e.g., `/v1/resource/virtual-machines/`), defined in each resource's `constants.go`
-6. **Internal import direction**: `client`, `helpers` and `datacenters` are leaves. `l2segments`, `vpcs`, `vpcsubnets`, `vpcnsgs`, `vpcpublicips`, `networks`, `volumes`, `gpu`, `sshkeys`, `resourcegroups`, `virtualmachineimages` and `virtualmachinesizes` import `client` (and `helpers` where they validate) only; `volumeattachments` imports `volumes` and `client`; `virtualmachines` imports `networks`, `virtualmachineimages`, `vpcpublicips` and `client`, and `vpcpublicips` must never import `virtualmachines`. Keep it acyclic
+6. **Internal import direction**: `client`, `helpers` and `datacenters` are leaves. `l2segments`, `vpcs`, `vpcsubnets`, `vpcnsgs`, `vpcpublicips`, `networks`, `volumes`, `gpu`, `sshkeys`, `resourcegroups`, `virtualmachineimages` and `virtualmachinesizes` import `client` (and `helpers` where they validate) only; `vpcvpngateways` imports `client` only; `vpcvpnconnections` imports `vpcvpngateways` and `client`; `volumeattachments` imports `volumes` and `client`; `virtualmachines` imports `networks`, `virtualmachineimages`, `vpcpublicips` and `client`, and `vpcpublicips` must never import `virtualmachines`. `testutil` imports `client` only; `provider` imports all of them and nothing imports `provider` except external `_test` packages (e.g. `l2segments/schema_guard_test.go`). Only `sshkeys` imports `helpers` among the resource packages; `provider` imports it for the IPv4 and CIDR validators and the whitespace validator. Keep it acyclic
 7. **Plan-test mocks serve the preflight**: `Configure` calls `GET /v1/auth/check` before any resource work, so every `httptest` mock behind a `resource.UnitTest` must answer it with `testutil.HandleAuthCheck`, or every step fails with `Cannot reach the GPCN API`
-8. **`gpcn_network` is deprecated**: `ModifyPlan` refuses a create (prior state null) with `ErrDetailNetworkCreateRetired`; existing networks still read, update and destroy. GPU series are validated against the live inventory (`CheckInventory`), never a fixed list. `volume_type` accepts `SSD`, `NVMe` or a storage component code; the built-in codes `vol-add-ssd` and `vol-add-nvme` are refused at plan in favour of the alias; import writes the alias for the built-in classes
+8. **`gpcn_network` is deprecated**: `ModifyPlan` refuses a create (prior state null) with `ErrDetailNetworkCreateRetired`; existing networks still read, update and destroy, and GPCN has retired legacy networks, so Read drops a network the API answers 404 for from state. GPU series are validated against the live inventory (`CheckInventory`), never a fixed list. `volume_type` accepts `SSD`, `NVMe` or a storage component code; the built-in codes `vol-add-ssd` and `vol-add-nvme` are refused at plan in favour of the alias; import writes the alias for the built-in classes
 
 ### Virtual Machine Specifics
 
@@ -92,6 +92,14 @@ Resource schema definitions live in `internal/provider/{resource}_resource.go`.
 - `initial_auth` is create-only: later changes update Terraform state with no API call
 - Networking is VPC-based: `subnet_id` is required and replaces the machine when changed; `l2_segment_ids` (up to four) attaches layer-2 segments after the machine exists, with a stop and start when the image has no network hotplug; `allocate_public_ip` (optional, default false) acquires an elastic address on the VPC, `public_ip_id` attaches one the operator holds, and the two conflict. An import never infers `allocate_public_ip`: it records the address as `public_ip_id`. `network_interfaces` is computed, one entry per interface, and reports the interface's world (`legacy`, `vpc` or `l2`)
 - Update runs every step after a stop through one runner: a failed step starts the machine again, and a failed start reports a `Virtual machine left stopped` detail that says what to do next. A retry never repeats work the live machine already carries (segment adds are computed against the live interface list; a resize the machine already has is treated as done; the stop decision compares the plan against the live machine)
+
+### VPN Specifics
+
+- `gpcn_vpc_vpn_gateway` is a singleton per VPC. Its API route carries the VPC id and no gateway id, so import takes the VPC id. A gateway that reads `failed` plans replacement (`ModifyPlan` marks `state` unknown and requires replace on it), because the API has no retry
+- `gpcn_vpc_vpn_connection` takes the key as `psk` (sensitive, stored) or `psk_wo` with `psk_wo_version` (write-only, Terraform 1.11+); exactly one. The API never returns the key, so Read keeps the state value. The key is never logged: `vpcvpnconnections/logging.go` carries no request body. Import is `<vpc_id>/<connection_id>` and leaves `psk` and `psk_wo_version` null, so the first apply re-sends the key
+- `peer_address` and `peer_cidrs` are checked at plan by `helpers.IPv4AddressValidator` and `helpers.IPv4CIDRValidator`: no leading zeros, and a CIDR with host bits is refused because the API rewrites it and the plan would never settle
+- A connection adds ingress rules to the security groups of the VPC. `gpcn_vpc_nsg` hides rules whose `vpnConnectionId` is set from its rule set and re-sends them, read fresh, on every rules replace (`vpcnsgs.MergeVpnRuleBodies`)
+- Acceptance tests read `GPCN_TEST_VPN_DATACENTER_ID` (a data center that offers site-to-site VPN) and skip when it is unset
 
 ### GPU Specifics
 
@@ -116,18 +124,24 @@ acceptance test by that call, and pass its exact function name to
 five longer names that start with it.
 
 - **Unit tests**: `testutil.SetupMockServerWithGpcnClient` (`internal/testutil/mock_http.go`) serves mocked HTTP. It bypasses `authTransport`, so not-found and `HTTPError` paths cannot be tested through it — use `testutil.SetupMockServerWithRealTransport`, or `client.NewGpcnClient` against an `httptest` server, for those. Run with `make test`.
-- **Acceptance tests**: Create real resources, and there are no sweepers, so a failed run leaves them behind. Run with `make testacc`. Run individual tests to iterate faster. The network case reads `GPCN_TEST_NETWORK_ID` (an existing network the key can see) and skips when it is unset, because the provider refuses to create a `gpcn_network`. The L2 segment case reads `GPCN_TEST_L2_DATACENTER_ID`, and the public IP cases read `GPCN_TEST_VPC_ID` and `GPCN_TEST_VPC_NIC_ID`; the virtual machine cases build their own VPC and subnet, each in a fixed /16 inside 10.112.0.0/12 with `acknowledge_overlap` set, so a leftover from a failed run does not block the next.
+- **Acceptance tests**: Create real resources, and there are no sweepers, so a failed run leaves them behind. Run with `make testacc`. Run individual tests to iterate faster. The VPN and VPN-rule cases read `GPCN_TEST_VPN_DATACENTER_ID` and build their own VPC and subnet in 10.120.0.0/16 (gateway), 10.121.0.0/16 (connection) and 10.122.0.0/16 (security group). The network case reads `GPCN_TEST_NETWORK_ID` (an existing network the key can see) and skips when it is unset, because the provider refuses to create a `gpcn_network`. The L2 segment case reads `GPCN_TEST_L2_DATACENTER_ID`, and the public IP cases read `GPCN_TEST_VPC_ID` and `GPCN_TEST_VPC_NIC_ID`; the virtual machine cases build their own VPC and subnet, each in a fixed /16 inside 10.112.0.0/12 (second octets 112 to 119 for virtual machines, 120 to 122 for VPN) with `acknowledge_overlap` set, so a leftover from a failed run does not block the next.
 - `TestCase.ErrorCheck` never runs for a step that sets `ExpectError`; assert an error's absence in `ErrorCheck` on a step without `ExpectError`.
 
 ## Documentation
 
-Generated via `make generate` using terraform-plugin-docs. Examples in `examples/resources/gpcn_{resource}/`.
+`make generate` (`tools/tools.go`) runs `terraform fmt` on `examples/` and then tfplugindocs. `docs/` is generated: never edit it by hand; CI regenerates it and fails on any diff.
+
+- Landing page: `templates/index.md.tmpl` (embeds `examples/provider/provider.tf`).
+- Resources and data sources: `templates/resources.md.tmpl` and `templates/data-sources.md.tmpl` are the fallbacks. Their `subcategory:` line is an if/else chain: resources default to Networking (Compute: `gpcn_virtualmachine`, `gpcn_gpu`; Storage: `gpcn_volume`, `gpcn_volume_attachment`; Identity & Access: `gpcn_resource_group`, `gpcn_ssh_key`); data sources default to Data Centers (Compute: images, sizes, gpu_inventory; Identity & Access: resource_groups). Add a new name to the right branch. `templates/resources/<name>.md.tmpl` overrides one page (`network`, `virtualmachine`, `vpc_vpn_gateway`, `vpc_vpn_connection`) and hard-codes its subcategory.
+- Examples: `examples/resources/gpcn_<name>/resource.tf` and `import.sh`, `examples/data-sources/gpcn_<name>/data-source.tf`.
+- Guides: `templates/guides/*.md.tmpl`, with runnable configs under `examples/guides/<guide>/`.
+- Prose follows GPCN Hub style: "GPCN™" (with ™), "data center" (two words; `datacenter_id` and other identifiers keep their names), "security group" (not NSG), "elastic IP" for an address a VPC holds. Schema Descriptions follow the same rule, because they render into docs.
 
 ## Code Quality
 
 ### Linting
 
-The project uses golangci-lint (`.golangci.yml`). Key enabled linters:
+The project uses golangci-lint (`.golangci.yml`). Key enabled linters (also enabled: `misspell`, `nilerr`, `prealloc`, `unconvert`, `unparam`, `wastedassign`):
 
 - `gosec`: Security scanner - use `//nolint:gosec` with explanation for false positives
 - `bodyclose`: Ensures HTTP response bodies are closed
@@ -163,10 +177,10 @@ The `internal/client/` package provides a configurable HTTP client:
 
 ### CI
 
-- `test.yml` (PRs and `main`): lint, unit tests with terraform installed, build, and a docs-drift check that regenerates docs and fails on any difference.
+- `test.yml` (PRs and `main`): lint, unit tests (`go test -race` with coverage uploaded to Codecov, terraform installed), build, and a docs-drift check that regenerates docs and fails on any difference.
 - `security.yml`: govulncheck and CodeQL, on PRs, `main`, and weekly.
 - `release.yml`: goreleaser on `v*` tags, with GPG-signed checksums.
-- Dependabot: gomod at `/` and GitHub Actions, both weekly.
+- Dependabot: gomod at `/` and GitHub Actions, both weekly. `tools/go.mod` (terraform-plugin-docs) is not covered; bump it by hand.
 - Acceptance tests never run in CI.
 
 ## Commits
@@ -178,11 +192,8 @@ Read `.claude/rules/commit-conventions.md` before you commit, push, or open a pu
 To prepare a new release:
 
 1. Update `CHANGELOG.md` with the new version and release notes, and replace `(Unreleased)` with the release date
-2. Update the provider version in all example `.tf` files under `examples/`:
-   - `examples/resources/gpcn_*/resource.tf`
-   - `examples/data-sources/gpcn_*/data-source.tf`
-   - `examples/provider-install-verification/main.tf`
-3. Run `make` to regenerate documentation (this copies examples into `docs/`)
+2. On a minor or major release, update the pin `version = "~>X.Y.0"` in every example file under `examples/` (`grep -rln 'version *=' examples` lists them): `resources/gpcn_*/resource.tf`, `data-sources/gpcn_*/data-source.tf`, `provider/provider.tf`, `guides/getting-started/main.tf` and `provider-install-verification/main.tf`; and `README.md` (`~> X.Y`). A patch release needs no pin change.
+3. Run `make` to regenerate documentation (this renders `docs/` from templates and examples, including the landing page and guides)
 4. Commit all changes
 5. Create the tag (`git tag vX.Y.Z`) and ask the user to push it — pushing needs explicit authorization, see `.claude/rules/commit-conventions.md`
 
