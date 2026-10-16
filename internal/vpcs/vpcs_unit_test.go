@@ -350,3 +350,30 @@ func TestMapVpcResponseToModelMapsAnEmptyResourceGroupToNull(t *testing.T) {
 		t.Errorf("ResourceGroupId = %v, want null", model.ResourceGroupId)
 	}
 }
+
+func TestMapVpcResponseToModelWritesVpnCapable(t *testing.T) {
+	t.Parallel()
+
+	for _, capable := range []bool{true, false} {
+		payload := vpcUnitTestPayload()
+		payload.VpnCapable = &capable
+
+		model := MapVpcResponseToModel(context.Background(), &readVpcResponse{Data: payload}, ResourceModel{
+			VpnCapable: types.BoolValue(!capable),
+		})
+		if model.VpnCapable.IsNull() || model.VpnCapable.ValueBool() != capable {
+			t.Errorf("VpnCapable = %v, want %t", model.VpnCapable, capable)
+		}
+	}
+}
+
+func TestMapVpcResponseToModelLeavesVpnCapableNullWhenAbsent(t *testing.T) {
+	t.Parallel()
+
+	model := MapVpcResponseToModel(context.Background(), &readVpcResponse{Data: vpcUnitTestPayload()}, ResourceModel{
+		VpnCapable: types.BoolUnknown(),
+	})
+	if !model.VpnCapable.IsNull() {
+		t.Errorf("VpnCapable = %v, want null", model.VpnCapable)
+	}
+}

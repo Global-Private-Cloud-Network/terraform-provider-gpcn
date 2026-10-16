@@ -35,6 +35,7 @@ type vpcPayload struct {
 	UpdatedAt       string   `json:"updatedAt"`
 	DnsNameservers  []string `json:"dnsNameservers"`
 	ResourceGroupID string   `json:"resourceGroupId"`
+	VpnCapable      *bool    `json:"vpnCapable"`
 }
 
 type readVpcResponse struct {

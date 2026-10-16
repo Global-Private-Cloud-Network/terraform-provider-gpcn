@@ -1,9 +1,12 @@
 package client_test
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -112,4 +115,89 @@ func TestDoWithRetryHonoursRetryAfter(t *testing.T) {
 			t.Errorf("elapsed = %s, want at least the requested 1s", elapsed)
 		}
 	})
+}
+
+// TestDoOnceSendsOneRequest proves DoOnce does not retry a 503 that DoWithRetry
+// would retry.
+func TestDoOnceSendsOneRequest(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if attempts.Add(1) == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"message":"try later"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(server.Close)
+
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.MaxRetries = 3
+	cfg.InitialRetryDelay = 0
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/test", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := gpcnClient.DoOnce(req)
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatal("expected the 503 error, got a response")
+	}
+	var httpErr *client.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected an HTTP 503 error, got %v", err)
+	}
+	if got := attempts.Load(); got != 1 {
+		t.Fatalf("expected exactly 1 request, got %d", got)
+	}
+}
+
+// TestDoOnceRetriesOnly429 proves DoOnce sends again after a 429, with the body
+// intact, because the API did not process that request.
+func TestDoOnceRetriesOnly429(t *testing.T) {
+	var attempts atomic.Int32
+	var bodies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(raw))
+		if attempts.Add(1) == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"message":"slow down"}`))
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(server.Close)
+
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.MaxRetries = 3
+	cfg.InitialRetryDelay = 0
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/test", strings.NewReader(`{"a":1}`))
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := gpcnClient.DoOnce(req)
+	if err != nil {
+		t.Fatalf("expected the second request to succeed, got %v", err)
+	}
+	_ = resp.Body.Close()
+	if got := attempts.Load(); got != 2 {
+		t.Fatalf("expected 2 requests, got %d", got)
+	}
+	if len(bodies) != 2 || bodies[1] != `{"a":1}` {
+		t.Errorf("expected the body on the second request, got %q", bodies)
+	}
 }

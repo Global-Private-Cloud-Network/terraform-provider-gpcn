@@ -88,6 +88,7 @@ output "gpcn_vpc_example" {
 - `id` (String) Unique identifier for the VPC in UUID format
 - `last_updated` (String) Timestamp when the VPC was last updated
 - `status` (String) Lifecycle state of the VPC: 'creating', 'active', 'failed' or 'deleting'
+- `vpn_capable` (Boolean) Whether the data center of this VPC offers site-to-site VPN right now. When it's false, you can't create a VPN gateway or VPN connection here, but existing ones can still be read and deleted
 
 ## Import
 

@@ -11,7 +11,7 @@ This guide walks you through moving a configuration off `gpcn_network`, the GPCN
 
 When you're done, nothing in your configuration depends on `gpcn_network`, and your plans are empty.
 
-GPCN™ networking is now VPC-based. Since version 1.4, the provider can't create a `gpcn_network`. Existing ones still read, rename and destroy, so nothing breaks until you're ready to move.
+GPCN™ networking is now VPC-based. Since version 1.4, the provider can't create a `gpcn_network`. GPCN™ has now retired legacy networks: the API no longer serves them, so Terraform removes a `gpcn_network` from state on the next refresh.
 
 ## Prerequisites
 
@@ -25,7 +25,7 @@ GPCN™ networking is now VPC-based. Since version 1.4, the provider can't creat
 |------------------------|--------|
 | **A `gpcn_virtualmachine` with `network_ids`** | [Move a VM onto a VPC subnet](#move-a-vm-onto-a-vpc-subnet) |
 | **A custom `gpcn_network` that now answers 404** | [Move an adopted custom network](#move-an-adopted-custom-network) |
-| **A `gpcn_network` that still reads** | Nothing yet. Keep it until no VM uses it, then destroy it. |
+| **Any other `gpcn_network`** | Delete the block. Terraform has removed or will remove the network from state, and a block left behind plans a create that the provider refuses. |
 
 ## Move a VM onto a VPC subnet
 
