@@ -322,6 +322,7 @@ func (p *gpcnProvider) Resources(_ context.Context) []func() resource.Resource {
 		NewVPCPublicIPResource,
 		NewVPCResource,
 		NewVPCSubnetResource,
+		NewVPCVPNGatewayResource,
 		NewVirtualMachinesResource,
 		NewVolumeAttachmentResource,
 		NewVolumesResource,
