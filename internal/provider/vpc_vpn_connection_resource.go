@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"terraform-provider-gpcn/internal/client"
@@ -31,6 +32,7 @@ var (
 	_ resource.Resource                = &vpcVpnConnectionResource{}
 	_ resource.ResourceWithConfigure   = &vpcVpnConnectionResource{}
 	_ resource.ResourceWithImportState = &vpcVpnConnectionResource{}
+	_ resource.ResourceWithModifyPlan  = &vpcVpnConnectionResource{}
 )
 
 func NewVPCVPNConnectionResource() resource.Resource {
@@ -254,6 +256,43 @@ func (r *vpcVpnConnectionResource) Configure(_ context.Context, req resource.Con
 	r.client = gpcnClient
 }
 
+// ModifyPlan covers the two cases where a refresh shows no change but the next
+// apply must act. A failed connection that refuses an update is replaced. A
+// connection whose saved settings do not run gets an update that sends them
+// again, because the API saves the values before the job that applies them.
+func (r *vpcVpnConnectionResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
+	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
+		return
+	}
+
+	var state vpcvpnconnections.ResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	refused, diags := req.Private.GetKey(ctx, vpcvpnconnections.PrivateKeyUpdateRefused)
+	resp.Diagnostics.Append(diags...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if string(refused) == "true" {
+		tflog.Info(ctx, vpcvpnconnections.LogFailedWithoutUpdatePlansReplacement)
+		// Terraform ignores a replace path whose value does not change. The plan
+		// makes state unknown, so the path changes.
+		resp.RequiresReplace = append(resp.RequiresReplace, path.Root("state"))
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("state"), types.StringUnknown())...)
+		return
+	}
+
+	notRunning := !state.DesiredApplied.IsNull() && !state.DesiredApplied.IsUnknown() && !state.DesiredApplied.ValueBool()
+	busy := state.State.ValueString() == vpcvpnconnections.StateCreating || state.State.ValueString() == vpcvpnconnections.StateRemoving
+	if notRunning && !busy {
+		tflog.Info(ctx, vpcvpnconnections.LogUnappliedPlansUpdate)
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("desired_applied"), types.BoolUnknown())...)
+	}
+}
+
 func (r *vpcVpnConnectionResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, vpcvpnconnections.LogStartingCreateGPCNVpnConnection)
@@ -391,6 +430,15 @@ func (r *vpcVpnConnectionResource) Read(ctx context.Context, req resource.ReadRe
 		return
 	}
 
+	updateRefused := detail.State == vpcvpnconnections.StateFailed && !slices.Contains(detail.AcceptedVerbs, vpcvpnconnections.VerbUpdate)
+	privateValue := []byte(nil)
+	if updateRefused {
+		privateValue = []byte("true")
+	}
+	if resp.Private != nil {
+		resp.Diagnostics.Append(resp.Private.SetKey(ctx, vpcvpnconnections.PrivateKeyUpdateRefused, privateValue)...)
+	}
+
 	if !detail.DesiredApplied && detail.ActiveJobID == nil {
 		resp.Diagnostics.AddWarning(vpcvpnconnections.WarnSummaryDesiredNotApplied, vpcvpnconnections.WarnDetailDesiredNotApplied)
 	}
@@ -419,7 +467,7 @@ func (r *vpcVpnConnectionResource) Update(ctx context.Context, req resource.Upda
 	vpcID := plan.VpcID.ValueString()
 	connectionID := state.ID.ValueString()
 
-	body, diags := vpcvpnconnections.BuildUpdateBody(ctx, plan, state, pskWo.ValueString())
+	body, diags := vpcvpnconnections.BuildUpdateBody(ctx, plan, state, pskWo.ValueString(), !state.DesiredApplied.IsNull() && !state.DesiredApplied.ValueBool())
 	resp.Diagnostics.Append(diags...)
 	if resp.Diagnostics.HasError() {
 		return

@@ -86,7 +86,7 @@ func TestVpcVpnConnectionUnitBuildUpdateBodyEachAttributeAlone(t *testing.T) {
 			state, plan := baseModel(), baseModel()
 			tc.mutate(&plan)
 
-			body, diags := BuildUpdateBody(context.Background(), plan, state, "")
+			body, diags := BuildUpdateBody(context.Background(), plan, state, "", false)
 			if diags.HasError() {
 				t.Fatalf("unexpected diagnostics: %v", diags)
 			}
@@ -105,7 +105,7 @@ func TestVpcVpnConnectionUnitBuildUpdateBodyClearedDescriptionSendsNull(t *testi
 	state, plan := baseModel(), baseModel()
 	state.Description = types.StringValue("Chicago")
 
-	body, _ := BuildUpdateBody(context.Background(), plan, state, "")
+	body, _ := BuildUpdateBody(context.Background(), plan, state, "", false)
 
 	value, found := body["description"]
 	if len(body) != 1 || !found || value != nil {
@@ -138,7 +138,7 @@ func TestVpcVpnConnectionUnitBuildUpdateBodyPskRules(t *testing.T) {
 			tc.state(&state)
 			tc.plan(&plan)
 
-			body, _ := BuildUpdateBody(context.Background(), plan, state, tc.pskWo)
+			body, _ := BuildUpdateBody(context.Background(), plan, state, tc.pskWo, false)
 
 			if tc.wantPsk == nil {
 				if len(body) != 0 {
@@ -158,7 +158,7 @@ func TestVpcVpnConnectionUnitBuildUpdateBodyPskRules(t *testing.T) {
 
 func TestVpcVpnConnectionUnitBuildUpdateBodyNothingChangedIsEmpty(t *testing.T) {
 	t.Parallel()
-	body, diags := BuildUpdateBody(context.Background(), baseModel(), baseModel(), "")
+	body, diags := BuildUpdateBody(context.Background(), baseModel(), baseModel(), "", false)
 	if diags.HasError() || len(body) != 0 {
 		t.Errorf("Expected an empty body, got %v (%v)", body, diags)
 	}

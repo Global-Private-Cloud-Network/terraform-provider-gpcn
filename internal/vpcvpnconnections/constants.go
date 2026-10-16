@@ -76,3 +76,10 @@ const (
 	listPageSize = 100
 	listMaxPages = 20
 )
+
+// PrivateKeyUpdateRefused is the private state key that Read sets to "true" when
+// the connection failed and the API no longer accepts an update.
+const (
+	PrivateKeyUpdateRefused = "update_refused"
+	VerbUpdate              = "update"
+)

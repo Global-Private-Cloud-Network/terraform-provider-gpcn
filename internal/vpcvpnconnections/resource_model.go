@@ -158,11 +158,14 @@ func BuildCreateBody(ctx context.Context, plan ResourceModel, pskWo string) (map
 }
 
 // BuildUpdateBody returns the PUT body: only the keys whose plan differs from
-// state. The API keeps a key the body omits. An empty description is sent as
+// state. With reapplyAll set, it also carries every key that is not a label,
+// because the API saved the values of a failed update before the job ran, so a
+// refresh shows no difference but the data center runs the old values. The API
+// keeps a key the body omits. An empty description is sent as
 // null, because the API clears the field on null. The key goes out when psk
 // changes, or when psk_wo_version changes and psk_wo is set. The body is empty
 // when no stored attribute changed.
-func BuildUpdateBody(ctx context.Context, plan, state ResourceModel, pskWo string) (map[string]any, diag.Diagnostics) {
+func BuildUpdateBody(ctx context.Context, plan, state ResourceModel, pskWo string, reapplyAll bool) (map[string]any, diag.Diagnostics) {
 	body := map[string]any{}
 	var diags diag.Diagnostics
 
@@ -176,36 +179,36 @@ func BuildUpdateBody(ctx context.Context, plan, state ResourceModel, pskWo strin
 			body[keyDescription] = plan.Description.ValueString()
 		}
 	}
-	if !plan.PeerAddress.Equal(state.PeerAddress) {
+	if reapplyAll || !plan.PeerAddress.Equal(state.PeerAddress) {
 		body[keyPeerAddress] = plan.PeerAddress.ValueString()
 	}
-	if !plan.PeerCidrs.Equal(state.PeerCidrs) {
+	if reapplyAll || !plan.PeerCidrs.Equal(state.PeerCidrs) {
 		peerCidrs, cidrDiags := sortedElements(ctx, plan.PeerCidrs)
 		diags.Append(cidrDiags...)
 		body[keyPeerCidrs] = peerCidrs
 	}
-	if !plan.IkeVersion.Equal(state.IkeVersion) {
+	if reapplyAll || !plan.IkeVersion.Equal(state.IkeVersion) {
 		body[keyIkeVersion] = plan.IkeVersion.ValueString()
 	}
-	if !plan.Encryption.Equal(state.Encryption) {
+	if reapplyAll || !plan.Encryption.Equal(state.Encryption) {
 		body[keyEncryption] = plan.Encryption.ValueString()
 	}
-	if !plan.Integrity.Equal(state.Integrity) {
+	if reapplyAll || !plan.Integrity.Equal(state.Integrity) {
 		body[keyIntegrity] = plan.Integrity.ValueString()
 	}
-	if !plan.DhGroup.Equal(state.DhGroup) {
+	if reapplyAll || !plan.DhGroup.Equal(state.DhGroup) {
 		body[keyDhGroup] = plan.DhGroup.ValueInt64()
 	}
-	if !plan.PfsGroup.Equal(state.PfsGroup) {
+	if reapplyAll || !plan.PfsGroup.Equal(state.PfsGroup) {
 		body[keyPfsGroup] = plan.PfsGroup.ValueInt64()
 	}
-	if !plan.IkeLifetimeSeconds.Equal(state.IkeLifetimeSeconds) {
+	if reapplyAll || !plan.IkeLifetimeSeconds.Equal(state.IkeLifetimeSeconds) {
 		body[keyIkeLifetimeSeconds] = plan.IkeLifetimeSeconds.ValueInt64()
 	}
-	if !plan.IpsecLifetimeSeconds.Equal(state.IpsecLifetimeSeconds) {
+	if reapplyAll || !plan.IpsecLifetimeSeconds.Equal(state.IpsecLifetimeSeconds) {
 		body[keyIpsecLifetimeSeconds] = plan.IpsecLifetimeSeconds.ValueInt64()
 	}
-	if !plan.Dpd.Equal(state.Dpd) {
+	if reapplyAll || !plan.Dpd.Equal(state.Dpd) {
 		body[keyDpd] = plan.Dpd.ValueBool()
 	}
 

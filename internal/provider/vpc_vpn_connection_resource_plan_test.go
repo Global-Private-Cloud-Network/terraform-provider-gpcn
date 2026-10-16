@@ -162,6 +162,7 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			state.postRaw = append(state.postRaw, raw.String())
 			state.exists = true
 			state.row = vpnConnPlanTestRowFromBody(body, state.createdState)
+			state.desiredApplied = true
 			postStatus := state.postStatus
 			state.mu.Unlock()
 			if postStatus != 0 {
@@ -200,6 +201,7 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			body := testutil.ReadRequestBody(r)
 			state.mu.Lock()
 			state.putBodies = append(state.putBodies, body)
+			state.desiredApplied = true
 			for key, value := range body {
 				if key != "psk" {
 					state.row[key] = value
@@ -496,6 +498,88 @@ func TestVpcVpnConnectionResourcePostJobGetFailsKeepsRow(t *testing.T) {
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVpcVpnConnectionTest, plancheck.ResourceActionReplace),
 					},
+				},
+			},
+		},
+	})
+}
+
+// The API saves the values of an update before its job runs. After a failed
+// job a refresh shows the saved values and no change, yet the data center runs
+// the old ones. The plan updates the connection, and the PUT sends every
+// attribute that is not a label.
+func TestVpcVpnConnectionResourceUnappliedPlansUpdate(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	config := newVpnConnPlanTestConfig().render(server.URL)
+
+	allKeys := []string{"dhGroup", "dpd", "encryption", "ikeLifetimeSeconds", "ikeVersion", "integrity", "ipsecLifetimeSeconds", "peerAddress", "peerCidrs", "pfsGroup"}
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() {
+					state.set(func(s *vpnConnPlanTestServerState) {
+						s.desiredApplied = false
+						s.row["state"] = "connected"
+					})
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(gpcnVpcVpnConnectionTest, plancheck.ResourceActionUpdate)},
+				},
+				Check: func(*terraform.State) error {
+					puts := state.putKeys()
+					if len(puts) != 1 || !slices.Equal(puts[0], allKeys) {
+						return fmt.Errorf("expected one PUT with the keys %v, got %v", allKeys, puts)
+					}
+					return nil
+				},
+			},
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+		},
+	})
+}
+
+// A failed connection that no longer accepts an update can only be deleted. The
+// plan replaces it, where an update would be refused.
+func TestVpcVpnConnectionResourceFailedWithoutUpdatePlansReplace(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	config := newVpnConnPlanTestConfig().render(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() {
+					state.set(func(s *vpnConnPlanTestServerState) {
+						s.desiredApplied = false
+						s.row["state"] = "failed"
+						s.row["failureReason"] = vpnConnPlanTestFailReason
+						s.row["acceptedVerbs"] = []string{"delete"}
+					})
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectResourceAction(gpcnVpcVpnConnectionTest, plancheck.ResourceActionReplace)},
+				},
+				Check: func(*terraform.State) error {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					if len(state.putBodies) != 0 || state.deleteCount != 1 || len(state.postBodies) != 2 {
+						return fmt.Errorf("expected a delete and a second POST with no PUT, got %d PUTs, %d deletes, %d POSTs",
+							len(state.putBodies), state.deleteCount, len(state.postBodies))
+					}
+					return nil
 				},
 			},
 		},
