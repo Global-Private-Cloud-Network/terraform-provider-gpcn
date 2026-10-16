@@ -148,7 +148,7 @@ func TestVpcVpnGatewayUnitParseAPIErrorKeepsDataCenterRefusalMessage(t *testing.
 	gpcnClient := errorServer(t, http.StatusConflict,
 		`{"success":false,"message":"`+message+`","error":{"code":"Duplicate Resource","statusCode":409,"details":null}}`)
 
-	rowMayExist, err := CreateVpnGateway(gpcnClient, context.Background(), testVpcID)
+	rowMayExist, _, err := CreateVpnGateway(gpcnClient, context.Background(), testVpcID)
 	if err == nil {
 		t.Fatal("Expected the 409 to fail the create")
 	}
@@ -195,7 +195,7 @@ func TestVpcVpnGatewayUnitCreateVpnGatewaySendsEmptyObjectBody(t *testing.T) {
 		},
 	})
 
-	if _, err := CreateVpnGateway(gpcnClient, context.Background(), testVpcID); err != nil {
+	if _, _, err := CreateVpnGateway(gpcnClient, context.Background(), testVpcID); err != nil {
 		t.Fatalf("Expected the create to succeed, got %v", err)
 	}
 	body, _ := createBody.Load().(map[string]any)

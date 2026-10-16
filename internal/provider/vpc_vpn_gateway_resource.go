@@ -140,7 +140,7 @@ func (r *vpcVpnGatewayResource) Create(ctx context.Context, req resource.CreateR
 
 	vpcID := plan.VpcID.ValueString()
 	requestStart := time.Now()
-	rowMayExist, createErr := vpcvpngateways.CreateVpnGateway(r.client, ctx, vpcID)
+	rowMayExist, accepted, createErr := vpcvpngateways.CreateVpnGateway(r.client, ctx, vpcID)
 	if createErr != nil && !rowMayExist {
 		resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToCreateVpnGW, vpcvpngateways.ErrorDetail(createErr))
 		return
@@ -152,7 +152,7 @@ func (r *vpcVpnGatewayResource) Create(ctx context.Context, req resource.CreateR
 	var getErr error
 	if createErr != nil {
 		gateway, getErr = vpcvpngateways.ReadAfterFailure(r.client, ctx, vpcID)
-		if getErr == nil && !vpcvpngateways.CreatedSince(gateway.CreatedAt, requestStart) {
+		if getErr == nil && !accepted && !vpcvpngateways.CreatedSince(gateway.CreatedAt, requestStart) {
 			tflog.Info(ctx, vpcvpngateways.LogRowNotCreatedByThisRequest)
 			resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToCreateVpnGW, fmt.Sprintf(vpcvpngateways.ErrFmtNotOwnRow, vpcID))
 			return

@@ -71,27 +71,28 @@ func RowMayExist(err error) bool {
 // CreateVpnGateway posts the gateway once and polls its job. The body is an
 // empty object, because the API refuses any key. The 202 row still says
 // "creating", so the caller reads the gateway with GetVpnGateway. The first
-// result is true when a row may exist, even if the error is not nil.
-func CreateVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string) (bool, error) {
+// result is true when a row may exist, even if the error is not nil. The second
+// result is true when the API accepted the POST with a 2xx answer.
+func CreateVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string) (bool, bool, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingCreateVpnGateway, vpcID))
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, gatewayPath(vpcID), bytes.NewBufferString("{}"))
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 
 	jobID, err := issueJob(gpcnClient.DoOnce, request)
 	if err != nil {
-		return RowMayExist(err), err
+		return RowMayExist(err), false, err
 	}
 	tflog.Info(ctx, LogIssuedCreateVpnGatewayJob)
 
 	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionCreateVpnGateway, jobID); err != nil {
-		return true, fmt.Errorf(ErrFmtCreatePollingFailed, err)
+		return true, true, fmt.Errorf(ErrFmtCreatePollingFailed, err)
 	}
 
 	tflog.Info(ctx, LogLongPollingCompletedCreateVpnGateway)
-	return true, nil
+	return true, true, nil
 }
 
 // ReadAfterFailure reads the gateway after a create failed. A canceled context

@@ -68,6 +68,8 @@ type vpnGatewayPlanTestServerState struct {
 	// createdAt is the creation time of the row. The POST sets it when no row
 	// exists. A test sets it by hand to plant a row that predates the request.
 	createdAt string
+	// createdAtOverride replaces the creation time the POST sets.
+	createdAtOverride string
 	// activeJobID is the job the row still runs. The job poll for it settles the
 	// row to ready.
 	activeJobID  string
@@ -155,6 +157,9 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 				state.createBodies = append(state.createBodies, body)
 				if !state.exists {
 					state.createdAt = time.Now().UTC().Format(time.RFC3339Nano)
+					if state.createdAtOverride != "" {
+						state.createdAt = state.createdAtOverride
+					}
 				}
 				state.exists = true
 				state.rowState = state.createdState
@@ -678,6 +683,43 @@ func TestVpcVpnGatewayResourceCreate5xxDoesNotAdoptOldRow(t *testing.T) {
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
 						plancheck.ExpectResourceAction(gpcnVpcVpnGatewayTest, plancheck.ResourceActionCreate),
+					},
+				},
+			},
+		},
+	})
+}
+
+// A 202 proves the row is this request's, whatever the clocks say. The job
+// fails and the row reads ten minutes old, yet the create adopts it, tainted.
+func TestVpcVpnGatewayResourceCreateAcceptedIgnoresClockSkew(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnGatewayPlanMockServer(t)
+	state.set(func(s *vpnGatewayPlanTestServerState) { s.failJob = true; s.createdState = "failed" })
+	config := vpnGatewayPlanTestConfig(server.URL)
+	old := time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339Nano)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				PreConfig:   func() { state.set(func(s *vpnGatewayPlanTestServerState) { s.createdAtOverride = old }) },
+				Config:      config,
+				ExpectError: vpnGatewayRefusal(vpnGatewayPlanTestJobFail),
+			},
+			{
+				PreConfig: func() {
+					state.set(func(s *vpnGatewayPlanTestServerState) {
+						s.failJob = false
+						s.createdState = "ready"
+						s.rowState = "ready"
+						s.failureReason = ""
+					})
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcVpnGatewayTest, plancheck.ResourceActionReplace),
 					},
 				},
 			},
