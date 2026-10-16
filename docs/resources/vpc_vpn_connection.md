@@ -128,7 +128,7 @@ output "gpcn_vpc_vpn_connection_local_networks" {
 
 ### Read-Only
 
-- `desired_applied` (Boolean) Whether the settings GPCN™ saved are the settings the data center runs. It is false after an update whose job failed. It changes when GPCN™ applies the settings
+- `desired_applied` (Boolean) Whether the connection's saved settings are what the data center is running. It's false while saved settings are not yet applied, for example during an update or after one that failed
 - `failure_reason` (String) Why the last operation on the VPN connection failed, or null when none has. It changes when an operation fails or succeeds
 - `gateway_kind` (String) How the data center provides the VPN gateway: 'router' or 'appliance'
 - `id` (String) Unique identifier for the VPN connection in UUID format
@@ -145,5 +145,5 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 ```shell
 # The import ID is the ID of the VPC and the ID of the VPN connection, joined by
 # a slash. The key is not imported, so the first apply sends it again.
-terraform import gpcn_vpc_vpn_connection.example <vpc_id>/<connection_id>
+terraform import gpcn_vpc_vpn_connection.example "c13808d9-3b7d-42c5-a21d-f0961308a38a/8f1a2b3c-4d5e-6f70-8192-a3b4c5d6e7f8"
 ```

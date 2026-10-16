@@ -56,7 +56,7 @@ type vpnGatewayPlanTestServerState struct {
 	failJob bool
 	// deleteGone answers the DELETE with a 404, as for a row removed meanwhile.
 	deleteGone bool
-	// cancelJob makes the job poll report a cancelled job.
+	// cancelJob makes the job poll report a canceled job.
 	cancelJob bool
 	// createStatus overrides the status of the POST answer after the row exists.
 	createStatus int
@@ -537,7 +537,7 @@ func TestVpcVpnGatewayResourceDeleteGone(t *testing.T) {
 	})
 }
 
-// A cancelled create job stops the apply, yet the row stays behind. The create
+// A canceled create job stops the apply, yet the row stays behind. The create
 // writes it to state with the error, so Terraform taints it.
 func TestVpcVpnGatewayResourceCreateJobCancelledKeepsRow(t *testing.T) {
 	t.Parallel()
@@ -548,7 +548,7 @@ func TestVpcVpnGatewayResourceCreateJobCancelledKeepsRow(t *testing.T) {
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			{Config: config, ExpectError: vpnGatewayRefusal("was cancelled by the platform")},
+			{Config: config, ExpectError: vpnGatewayRefusal("was cancelled by the platform")}, //nolint:misspell // The text is the byte the client sends.
 			{
 				PreConfig: func() { state.set(func(s *vpnGatewayPlanTestServerState) { s.cancelJob = false }) },
 				Config:    config,

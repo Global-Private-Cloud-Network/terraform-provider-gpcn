@@ -213,7 +213,7 @@ func (r *vpcVpnConnectionResource) Schema(_ context.Context, _ resource.SchemaRe
 				Computed:    true,
 			},
 			"desired_applied": schema.BoolAttribute{
-				Description: "Whether the settings GPCN™ saved are the settings the data center runs. It is false after an update whose job failed. It changes when GPCN™ applies the settings",
+				Description: "Whether the connection's saved settings are what the data center is running. It's false while saved settings are not yet applied, for example during an update or after one that failed",
 				Computed:    true,
 			},
 			"gateway_kind": schema.StringAttribute{

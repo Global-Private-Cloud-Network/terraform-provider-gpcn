@@ -94,7 +94,7 @@ func CreateVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID 
 	return true, nil
 }
 
-// ReadAfterFailure reads the gateway after a create failed. A cancelled ctx
+// ReadAfterFailure reads the gateway after a create failed. A canceled context
 // would fail the read, so it runs on a fresh context bounded by the request
 // timeout.
 func ReadAfterFailure(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string) (*ApiVpnGateway, error) {
