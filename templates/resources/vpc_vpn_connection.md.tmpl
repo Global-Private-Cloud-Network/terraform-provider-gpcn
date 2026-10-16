@@ -63,7 +63,7 @@ The blocks can't overlap each other, the VPC, or the peer networks of another VP
 
 - `disconnected` is normal for a tunnel with no traffic. It isn't a fault.
 - Terraform doesn't wait for `connected`. The apply finishes when GPCN™ has built the VPN connection, because a tunnel only comes up when the peer gateway answers.
-- `failed` means the last job failed. `failure_reason` says why, and a create that ends there leaves the resource tainted, so the next apply creates it again. If a failed VPN connection no longer accepts an update, the next plan replaces it.
+- `failed` means the last job failed. `failure_reason` says why, and a create that ends there leaves the resource tainted, so the next apply creates it again.
 
 If `desired_applied` is false, the settings GPCN™ saved aren't the ones the data center is running yet. Terraform shows a warning when it refreshes a VPN connection whose saved settings the data center isn't running and that has no job running. If the data center couldn't apply saved settings, the next plan shows an update that sends them again.
 

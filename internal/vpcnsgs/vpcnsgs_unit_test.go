@@ -369,7 +369,7 @@ func TestDefaultNsgRulesWarningUnit(t *testing.T) {
 	if got := warning.Summary(); got != "Replacing the rules of the VPC default security group" {
 		t.Errorf("expected the ruled summary, got %q", got)
 	}
-	want := "Security group 'nsg-1' is the VPC's own default group. GPCN replaces the whole rule set on every change, so this apply deletes any rule, except rules VPN connections manage, this configuration does not list, including the two GPCN staged with the VPC: 'Default: allow all outbound traffic' and 'Default: allow traffic from this VPC'. Add them to the configuration to keep them."
+	want := "Security group 'nsg-1' is the VPC's own default group. GPCN replaces the whole rule set on every change, so this apply deletes any rule this configuration does not list, except rules VPN connections manage, including the two GPCN staged with the VPC: 'Default: allow all outbound traffic' and 'Default: allow traffic from this VPC'. Add them to the configuration to keep them."
 	if got := warning.Detail(); got != want {
 		t.Errorf("expected the detail %q, got %q", want, got)
 	}

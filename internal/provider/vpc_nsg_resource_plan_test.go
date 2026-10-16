@@ -1392,6 +1392,9 @@ func TestVpcNsgResourceVpnRulesOverLimitRefused(t *testing.T) {
 	if len(errs) != 1 {
 		t.Fatalf("errors = %v, want exactly one", errs)
 	}
+	if got := errs[0].Summary(); got != "Unable to update GPCN™ VPC security group" {
+		t.Errorf("summary = %q", got)
+	}
 	want := "This security group would hold 101 rules: 2 from this configuration and 99 managed by VPN connections. A security group holds at most 100."
 	if got := errs[0].Detail(); got != want {
 		t.Errorf("detail = %q, want %q", got, want)
