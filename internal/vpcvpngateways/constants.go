@@ -19,7 +19,11 @@ const (
 	KindAppliance = "appliance"
 )
 
-const RemovalPollInterval = 5 * time.Second
+// RemovalPollInterval is a variable so that tests can shorten the wait.
+var RemovalPollInterval = 5 * time.Second
+
+// CodeGatewayRemoving is the code of the 409 for a gateway whose removal runs.
+const CodeGatewayRemoving = "VPN_GATEWAY_REMOVING"
 
 const (
 	ActionCreateVpnGateway = "Create GPCN VPN Gateway"

@@ -148,9 +148,12 @@ func TestVpcVpnGatewayUnitParseAPIErrorKeepsDataCenterRefusalMessage(t *testing.
 	gpcnClient := errorServer(t, http.StatusConflict,
 		`{"success":false,"message":"`+message+`","error":{"code":"Duplicate Resource","statusCode":409,"details":null}}`)
 
-	err := CreateVpnGateway(gpcnClient, context.Background(), testVpcID)
+	rowMayExist, err := CreateVpnGateway(gpcnClient, context.Background(), testVpcID)
 	if err == nil {
 		t.Fatal("Expected the 409 to fail the create")
+	}
+	if rowMayExist {
+		t.Error("Expected a refused POST to report that no row exists")
 	}
 	if detail := ErrorDetail(err); detail != message {
 		t.Errorf("Expected %q, got %q", message, detail)
@@ -192,7 +195,7 @@ func TestVpcVpnGatewayUnitCreateVpnGatewaySendsEmptyObjectBody(t *testing.T) {
 		},
 	})
 
-	if err := CreateVpnGateway(gpcnClient, context.Background(), testVpcID); err != nil {
+	if _, err := CreateVpnGateway(gpcnClient, context.Background(), testVpcID); err != nil {
 		t.Fatalf("Expected the create to succeed, got %v", err)
 	}
 	body, _ := createBody.Load().(map[string]any)
@@ -240,23 +243,6 @@ func removingRow(reason string) string {
 		`,"activeJobId":null,"createdAt":"2026-01-02T15:04:05Z","updatedAt":"2026-01-02T15:04:05Z"}}`
 }
 
-func TestVpcVpnGatewayUnitWaitForVpnGatewayGoneKeepsWaitingThroughParkedRemoval(t *testing.T) {
-	t.Parallel()
-	gpcnClient, reads := removalServer(t, []string{
-		removingRow(""),
-		removingRow("The VPN gateway's removal failed; it is retried automatically."),
-		"gone",
-	})
-
-	err := waitForVpnGatewayGone(gpcnClient, context.Background(), testVpcID, time.Millisecond, time.Minute)
-	if err != nil {
-		t.Fatalf("Expected the wait to end at the 404, got %v", err)
-	}
-	if got := reads.Load(); got != 3 {
-		t.Errorf("Expected 3 reads, got %d", got)
-	}
-}
-
 func TestVpcVpnGatewayUnitWaitForVpnGatewayGoneTimeoutNamesLastStateAndFailureReason(t *testing.T) {
 	t.Parallel()
 	const reason = "The VPN gateway's removal failed; it is retried automatically."
@@ -284,5 +270,76 @@ func TestVpcVpnGatewayUnitWaitForVpnGatewayGoneStopsOnReadError(t *testing.T) {
 	}
 	if got := ErrorDetail(err); got != "You do not have permission to perform this action." {
 		t.Errorf("Expected the API message, got %q", got)
+	}
+}
+
+// deleteServer serves a delete. The DELETE answers deleteStatus, the job poll
+// reports a failed job, and the gateway reads follow the scripted answers.
+func deleteServer(t *testing.T, deleteStatus int, answers []string) (*client.GpcnClient, *atomic.Int32) {
+	t.Helper()
+	var reads atomic.Int32
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			path := "/v1/resource/vpcs/" + testVpcID + "/vpn-gateway"
+			switch {
+			case r.Method == http.MethodDelete && r.URL.Path == path && deleteStatus == http.StatusConflict:
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				fmt.Fprint(w, `{"success":false,"message":"The VPN gateway is already being removed.","error":{"code":"VPN_GATEWAY_REMOVING","statusCode":409,"details":null}}`)
+			case r.Method == http.MethodDelete && r.URL.Path == path:
+				testutil.WriteJSONResponse(w, map[string]any{
+					"success": true, "message": "Operation initiated successfully",
+					"data": map[string]any{"jobId": "job-delete"},
+				})
+			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
+					Success: true,
+					Data: client.JobStatusDataResponse{Jobs: []client.JobResponse{{
+						JobID: "job-delete", HasFailed: true, ErrorMessage: "removal failed",
+					}}},
+				})
+			case r.Method == http.MethodGet && r.URL.Path == path:
+				index := min(int(reads.Add(1))-1, len(answers)-1)
+				w.Header().Set("Content-Type", "application/json")
+				if answers[index] == "gone" {
+					w.WriteHeader(http.StatusNotFound)
+					fmt.Fprint(w, `{"success":false,"message":"This VPC has no VPN gateway.","error":{"code":"VPN_GATEWAY_NOT_FOUND","statusCode":404,"details":null}}`)
+					return
+				}
+				fmt.Fprint(w, answers[index])
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	return gpcnClient, &reads
+}
+
+func TestVpcVpnGatewayUnitWaitAfterFailedDeleteJob(t *testing.T) {
+	t.Parallel()
+	gpcnClient, reads := deleteServer(t, http.StatusAccepted, []string{
+		removingRow("The VPN gateway's removal failed; it is retried automatically."),
+		removingRow("The VPN gateway's removal failed; it is retried automatically."),
+		"gone",
+	})
+
+	if err := deleteVpnGateway(gpcnClient, context.Background(), testVpcID, time.Millisecond, time.Minute); err != nil {
+		t.Fatalf("Expected the failed job to fall through to the wait and end at the 404, got %v", err)
+	}
+	if got := reads.Load(); got != 3 {
+		t.Errorf("Expected 3 reads, got %d", got)
+	}
+}
+
+func TestVpcVpnGatewayUnitDeleteRemoving409FallsThroughToWait(t *testing.T) {
+	t.Parallel()
+	gpcnClient, reads := deleteServer(t, http.StatusConflict, []string{removingRow(""), "gone"})
+
+	if err := deleteVpnGateway(gpcnClient, context.Background(), testVpcID, time.Millisecond, time.Minute); err != nil {
+		t.Fatalf("Expected the 409 to fall through to the wait, got %v", err)
+	}
+	if got := reads.Load(); got != 2 {
+		t.Errorf("Expected 2 reads, got %d", got)
 	}
 }

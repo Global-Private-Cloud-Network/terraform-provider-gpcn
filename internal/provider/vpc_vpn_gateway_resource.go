@@ -138,40 +138,59 @@ func (r *vpcVpnGatewayResource) Create(ctx context.Context, req resource.CreateR
 	}
 
 	vpcID := plan.VpcID.ValueString()
-	if err := vpcvpngateways.CreateVpnGateway(r.client, ctx, vpcID); err != nil {
-		// A stopped job leaves a row behind. A refused POST does not.
-		if errors.Is(err, client.ErrJobFailed) || errors.Is(err, client.ErrLongPollingTimeout) {
-			if gateway, getErr := vpcvpngateways.GetVpnGateway(r.client, ctx, vpcID); getErr == nil {
-				resp.Diagnostics.Append(resp.State.Set(ctx, vpcvpngateways.MapGatewayToModel(gateway, plan))...)
-			}
+	rowMayExist, createErr := vpcvpngateways.CreateVpnGateway(r.client, ctx, vpcID)
+	if createErr != nil && !rowMayExist {
+		resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToCreateVpnGW, vpcvpngateways.ErrorDetail(createErr))
+		return
+	}
+
+	// After the POST the API can hold a row whatever happened next. Terraform
+	// taints the resource when state is saved with an error.
+	var gateway *vpcvpngateways.ApiVpnGateway
+	var getErr error
+	if createErr != nil {
+		gateway, getErr = vpcvpngateways.ReadAfterFailure(r.client, ctx, vpcID)
+	} else {
+		gateway, getErr = vpcvpngateways.GetVpnGateway(r.client, ctx, vpcID)
+	}
+	if getErr == nil {
+		resp.Diagnostics.Append(resp.State.Set(ctx, vpcvpngateways.MapGatewayToModel(gateway, plan))...)
+		if resp.Diagnostics.HasError() {
+			return
 		}
-		resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToCreateVpnGW, vpcvpngateways.ErrorDetail(err))
-		return
 	}
 
-	gateway, err := vpcvpngateways.GetVpnGateway(r.client, ctx, vpcID)
-	if err != nil {
-		resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToCreateVpnGW, vpcvpngateways.ErrorDetail(err))
+	switch {
+	case createErr != nil:
+		resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToCreateVpnGW, createFailureDetail(gateway, getErr, createErr))
 		return
-	}
-
-	plan = vpcvpngateways.MapGatewayToModel(gateway, plan)
-	resp.Diagnostics.Append(resp.State.Set(ctx, plan)...)
-	if resp.Diagnostics.HasError() {
+	case getErr != nil:
+		resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToCreateVpnGW, vpcvpngateways.ErrorDetail(getErr))
 		return
-	}
-
-	// The failed gateway is in state, so Terraform taints it.
-	if gateway.State == vpcvpngateways.StateFailed {
-		detail := vpcvpngateways.ErrDetailCreateFailedNoReason
-		if gateway.FailureReason != nil && *gateway.FailureReason != "" {
-			detail = *gateway.FailureReason
-		}
-		resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToCreateVpnGW, detail)
+	case gateway.State == vpcvpngateways.StateFailed:
+		resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToCreateVpnGW, createFailureDetail(gateway, nil, nil))
 		return
 	}
 
 	tflog.Info(ctx, vpcvpngateways.LogSuccessfullyFinishedCreateGPCNVpnGateway)
+}
+
+// createFailureDetail prefers the failure reason of the row. The error text
+// follows after a blank line when it differs.
+func createFailureDetail(gateway *vpcvpngateways.ApiVpnGateway, getErr, createErr error) string {
+	reason := ""
+	if getErr == nil && gateway != nil && gateway.FailureReason != nil {
+		reason = *gateway.FailureReason
+	}
+	switch {
+	case reason == "" && createErr == nil:
+		return vpcvpngateways.ErrDetailCreateFailedNoReason
+	case reason == "":
+		return vpcvpngateways.ErrorDetail(createErr)
+	case createErr == nil || vpcvpngateways.ErrorDetail(createErr) == reason:
+		return reason
+	}
+	return reason + "\n\n" + vpcvpngateways.ErrorDetail(createErr)
 }
 
 func (r *vpcVpnGatewayResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
@@ -240,11 +259,6 @@ func (r *vpcVpnGatewayResource) Delete(ctx context.Context, req resource.DeleteR
 		return
 	}
 	if err != nil {
-		resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToDeleteVpnGW, vpcvpngateways.ErrorDetail(err))
-		return
-	}
-
-	if err := vpcvpngateways.WaitForVpnGatewayGone(r.client, ctx, vpcID); err != nil {
 		resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToDeleteVpnGW, vpcvpngateways.ErrorDetail(err))
 		return
 	}

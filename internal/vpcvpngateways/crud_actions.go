@@ -57,29 +57,53 @@ func ErrorDetail(err error) string {
 	return err.Error()
 }
 
-// CreateVpnGateway posts the gateway and polls its job. The body is an empty
-// object, because the API refuses any key. The 202 row still says "creating", so
-// the caller reads the gateway with GetVpnGateway.
-func CreateVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string) error {
+// RowMayExist reports whether a POST that failed with err can have created a
+// row. A 4xx answer is a refusal. A 5xx answer or a transport error leaves the
+// outcome unknown.
+func RowMayExist(err error) bool {
+	var httpErr *client.HTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.StatusCode >= http.StatusInternalServerError
+	}
+	return true
+}
+
+// CreateVpnGateway posts the gateway once and polls its job. The body is an
+// empty object, because the API refuses any key. The 202 row still says
+// "creating", so the caller reads the gateway with GetVpnGateway. The first
+// result is true when a row may exist, even if the error is not nil.
+func CreateVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string) (bool, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingCreateVpnGateway, vpcID))
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, gatewayPath(vpcID), bytes.NewBufferString("{}"))
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	jobID, err := issueJob(gpcnClient, request)
+	jobID, err := issueJob(gpcnClient.DoOnce, request)
 	if err != nil {
-		return err
+		return RowMayExist(err), err
 	}
 	tflog.Info(ctx, LogIssuedCreateVpnGatewayJob)
 
 	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionCreateVpnGateway, jobID); err != nil {
-		return fmt.Errorf(ErrFmtCreatePollingFailed, err)
+		return true, fmt.Errorf(ErrFmtCreatePollingFailed, err)
 	}
 
 	tflog.Info(ctx, LogLongPollingCompletedCreateVpnGateway)
-	return nil
+	return true, nil
+}
+
+// ReadAfterFailure reads the gateway after a create failed. A cancelled ctx
+// would fail the read, so it runs on a fresh context bounded by the request
+// timeout.
+func ReadAfterFailure(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string) (*ApiVpnGateway, error) {
+	if ctx.Err() != nil {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), gpcnClient.Config().RequestTimeout)
+		defer cancel()
+	}
+	return GetVpnGateway(gpcnClient, ctx, vpcID)
 }
 
 // GetVpnGateway reads the VPC's gateway. A 404 reads as ErrVpnGatewayNotFound.
@@ -114,40 +138,50 @@ func GetVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID str
 	return &gateway.Data, nil
 }
 
-// DeleteVpnGateway issues the removal and polls its job. The job ending does not
-// mean the row is gone, because the platform parks a removal and a sweeper
-// retries it. WaitForVpnGatewayGone settles that.
+// DeleteVpnGateway issues the removal, polls its job, and waits for the 404. The
+// job ending does not mean the row is gone, because the platform parks a removal
+// and a sweeper retries it. A job that failed and a 409 VPN_GATEWAY_REMOVING both
+// mean a removal is under way, so both go on to the wait. The job poll and the
+// wait share one deadline, the polling timeout.
 func DeleteVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string) error {
+	timeout := client.DefaultPollingConfig().Timeout
+	if config := gpcnClient.Config(); config != nil && config.PollingTimeout > 0 {
+		timeout = config.PollingTimeout
+	}
+	return deleteVpnGateway(gpcnClient, ctx, vpcID, RemovalPollInterval, timeout)
+}
+
+func deleteVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string, interval, timeout time.Duration) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteVpnGateway, vpcID))
+	startTime := time.Now()
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, gatewayPath(vpcID), nil)
 	if err != nil {
 		return err
 	}
 
-	jobID, err := issueJob(gpcnClient, request)
-	if err != nil {
+	jobID, err := issueJob(gpcnClient.DoWithRetry, request)
+	if code, _ := ParseAPIError(err); code == CodeGatewayRemoving {
+		tflog.Info(ctx, LogRemovalAlreadyRunning)
+	} else if err != nil {
 		return err
+	} else {
+		tflog.Info(ctx, LogIssuedDeleteVpnGatewayJob)
+		pollConfig := client.DefaultPollingConfig()
+		pollConfig.Timeout = timeout
+		if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, ActionDeleteVpnGateway, jobID, pollConfig); err != nil {
+			if !errors.Is(err, client.ErrJobFailed) {
+				return fmt.Errorf(ErrFmtDeletePollingFailed, err)
+			}
+			tflog.Info(ctx, LogDeleteJobFailedWaiting)
+		}
 	}
-	tflog.Info(ctx, LogIssuedDeleteVpnGatewayJob)
 
-	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionDeleteVpnGateway, jobID); err != nil {
-		return fmt.Errorf(ErrFmtDeletePollingFailed, err)
-	}
-	return nil
+	return waitForVpnGatewayGone(gpcnClient, ctx, vpcID, interval, max(timeout-time.Since(startTime), 0))
 }
 
-// WaitForVpnGatewayGone reads the gateway every RemovalPollInterval until the
-// API answers 404, or until the polling timeout. A parked removal keeps the wait
-// going.
-func WaitForVpnGatewayGone(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string) error {
-	timeout := client.DefaultPollingConfig().Timeout
-	if config := gpcnClient.Config(); config != nil && config.PollingTimeout > 0 {
-		timeout = config.PollingTimeout
-	}
-	return waitForVpnGatewayGone(gpcnClient, ctx, vpcID, RemovalPollInterval, timeout)
-}
-
+// waitForVpnGatewayGone reads the gateway every interval until the API answers
+// 404, or until the timeout. A parked removal keeps the wait going.
 func waitForVpnGatewayGone(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string, interval, timeout time.Duration) error {
 	tflog.Info(ctx, fmt.Sprintf(LogWaitingForVpnGatewayGone, vpcID))
 
@@ -185,8 +219,8 @@ func waitForVpnGatewayGone(gpcnClient *client.GpcnClient, ctx context.Context, v
 
 // issueJob sends a request whose 202 carries a job ID. The singular job envelope
 // decodes the job ID and ignores the row.
-func issueJob(gpcnClient *client.GpcnClient, request *http.Request) (string, error) {
-	response, err := gpcnClient.DoWithRetry(request)
+func issueJob(send func(*http.Request) (*http.Response, error), request *http.Request) (string, error) {
+	response, err := send(request)
 	if err != nil {
 		return "", err
 	}
