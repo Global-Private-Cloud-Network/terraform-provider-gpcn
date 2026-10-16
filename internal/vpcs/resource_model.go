@@ -21,6 +21,7 @@ type ResourceModel struct {
 	EgressIp           types.String `tfsdk:"egress_ip"`
 	FailureReason      types.String `tfsdk:"failure_reason"`
 	ActiveJobId        types.String `tfsdk:"active_job_id"`
+	VpnCapable         types.Bool   `tfsdk:"vpn_capable"`
 	CreatedTime        types.String `tfsdk:"created_time"`
 	LastUpdated        types.String `tfsdk:"last_updated"`
 }
@@ -55,6 +56,9 @@ func mapVpcPayloadToModel(_ context.Context, payload vpcPayload, model ResourceM
 	model.CreatedTime = rfc850Timestamp(payload.CreatedAt)
 	model.LastUpdated = rfc850Timestamp(payload.UpdatedAt)
 	model.ResourceGroupId = emptyAsNull(payload.ResourceGroupID)
+
+	// Only the detail read carries the flag. A row without it stays null.
+	model.VpnCapable = types.BoolPointerValue(payload.VpnCapable)
 
 	// The schema defaults the description to the empty string. A null in state
 	// would plan a change on every apply.

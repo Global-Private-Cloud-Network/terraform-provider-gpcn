@@ -91,7 +91,7 @@ func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Computed:    true,
 			},
 			"rule_count": schema.Int64Attribute{
-				Description: "The number of rules the security group holds",
+				Description: "The number of rules the security group holds, including the rules that VPN connections manage",
 				Computed:    true,
 			},
 			"subnet_count": schema.Int64Attribute{

@@ -209,28 +209,32 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 							Computed:    true,
 						},
 						"world": schema.StringAttribute{
-							Description: "The kind of network the interface attaches to: 'legacy', 'vpc' or 'l2'. The identity attributes below are per world",
+							Description: "The kind of network the interface attaches to: 'vpc' or 'l2'. The identity attributes below are per world",
 							Computed:    true,
 						},
 						"network_name": schema.StringAttribute{
-							Description: "The name of the attached legacy network. Null unless world is 'legacy'",
-							Computed:    true,
+							Description:        "Always null. GPCN™ networking is VPC-based",
+							DeprecationMessage: "network_name is deprecated and always null: GPCN™ networking is VPC-based.",
+							Computed:           true,
 						},
 						"network_id": schema.StringAttribute{
-							Description: "The ID of the attached legacy network. Null unless world is 'legacy'",
-							Computed:    true,
+							Description:        "Always null. GPCN™ networking is VPC-based",
+							DeprecationMessage: "network_id is deprecated and always null: GPCN™ networking is VPC-based.",
+							Computed:           true,
 						},
 						"cidr_block": schema.StringAttribute{
 							Description: "The CIDR block of the attached legacy network or VPC subnet. Null when world is 'l2'",
 							Computed:    true,
 						},
 						"gateway_ip": schema.StringAttribute{
-							Description: "The gateway IP address of the attached legacy network. Null unless world is 'legacy'",
-							Computed:    true,
+							Description:        "Always null. GPCN™ networking is VPC-based",
+							DeprecationMessage: "gateway_ip is deprecated and always null: GPCN™ networking is VPC-based.",
+							Computed:           true,
 						},
 						"network_type": schema.StringAttribute{
-							Description: "The type of the attached legacy network. Null unless world is 'legacy'",
-							Computed:    true,
+							Description:        "Always null. GPCN™ networking is VPC-based",
+							DeprecationMessage: "network_type is deprecated and always null: GPCN™ networking is VPC-based.",
+							Computed:           true,
 						},
 						"vpc_subnet_id": schema.StringAttribute{
 							Description: "The ID of the VPC subnet the interface attaches to. Null unless world is 'vpc'",

@@ -70,7 +70,14 @@ func datacenterPlanTestCapabilityRow(id, name, regionName string, gpuEnabled, vp
 		"vpcCapable":          vpcCapable,
 		"customImages":        true,
 		"l2Capable":           l2Capable,
+		"vpnCapable":          true,
 	}
+}
+
+func datacenterPlanTestVpnRow(id, name, regionName string, vpnCapable bool) map[string]any {
+	row := datacenterPlanTestRow(id, name, regionName, true)
+	row["vpnCapable"] = vpnCapable
+	return row
 }
 
 func datacenterPlanTestBody(rows []map[string]any, page, totalPages int) map[string]any {
@@ -624,7 +631,7 @@ func TestDatacentersDataSourceOmitsUnsetCapabilityFilters(t *testing.T) {
 	t.Parallel()
 
 	server, rec := startDatacenterPlanMockServer(t, func(r *http.Request) map[string]any {
-		for _, key := range []string{"vpcCapable", "l2Capable"} {
+		for _, key := range []string{"vpcCapable", "l2Capable", "vpnCapable"} {
 			if _, sent := r.URL.Query()[key]; sent {
 				t.Errorf("the unfiltered read carries %s: %q", key, r.URL.RawQuery)
 			}
@@ -652,8 +659,68 @@ func TestDatacentersDataSourceOmitsUnsetCapabilityFilters(t *testing.T) {
 
 	_, queries := rec.snapshot()
 	for _, query := range queries {
-		if strings.Contains(query, "vpcCapable") || strings.Contains(query, "l2Capable") {
+		if strings.Contains(query, "vpcCapable") || strings.Contains(query, "l2Capable") || strings.Contains(query, "vpnCapable") {
 			t.Errorf("query %q carries a capability filter, want none", query)
+		}
+	}
+}
+
+func TestDatacentersDataSourceMapsVpnCapable(t *testing.T) {
+	t.Parallel()
+
+	server, rec := startDatacenterPlanMockServer(t, func(_ *http.Request) map[string]any {
+		return datacenterPlanTestBody([]map[string]any{
+			datacenterPlanTestVpnRow("dc-1", "Chicago", datacenterPlanTestRegionAlpha, true),
+			datacenterPlanTestVpnRow("dc-2", "Dallas", datacenterPlanTestRegionBeta, false),
+		}, 1, 1)
+	})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: datacenterPlanTestConfig(server.URL, ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.#", "2"),
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.0.vpn_capable", "true"),
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.1.vpn_capable", "false"),
+				),
+			},
+		},
+	})
+
+	datacenterPlanTestAssertOnlyListPath(t, rec)
+}
+
+func TestDatacentersDataSourceFiltersVpnCapableServerSide(t *testing.T) {
+	t.Parallel()
+
+	// The row contradicts the filter, so a client-side filter would drop it.
+	server, rec := startDatacenterPlanMockServer(t, func(_ *http.Request) map[string]any {
+		return datacenterPlanTestBody([]map[string]any{
+			datacenterPlanTestVpnRow("dc-1", "Chicago", datacenterPlanTestRegionAlpha, false),
+		}, 1, 1)
+	})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: datacenterPlanTestConfig(server.URL, "  vpn_capable = true\n"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.#", "1"),
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.0.vpn_capable", "false"),
+				),
+			},
+		},
+	})
+
+	datacenterPlanTestAssertOnlyListPath(t, rec)
+
+	_, queries := rec.snapshot()
+	for _, query := range queries {
+		if !strings.Contains(query, "vpnCapable=true") {
+			t.Errorf("query %q does not carry vpnCapable=true", query)
 		}
 	}
 }

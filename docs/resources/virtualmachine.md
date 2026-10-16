@@ -169,16 +169,16 @@ Optional:
 Read-Only:
 
 - `cidr_block` (String) The CIDR block of the attached legacy network or VPC subnet. Null when world is 'l2'
-- `gateway_ip` (String) The gateway IP address of the attached legacy network. Null unless world is 'legacy'
+- `gateway_ip` (String, Deprecated) Always null. GPCN™ networking is VPC-based
 - `id` (String) The ID of the network interface
 - `is_primary` (Boolean) Whether this is the primary interface
 - `l2_segment_id` (String) The ID of the L2 segment the interface attaches to. Null unless world is 'l2'
 - `l2_segment_name` (String) The name of the L2 segment the interface attaches to. Null unless world is 'l2'
 - `mac_address` (String) The MAC address of the interface. Null while the platform has not materialized the port
-- `network_id` (String) The ID of the attached legacy network. Null unless world is 'legacy'
+- `network_id` (String, Deprecated) Always null. GPCN™ networking is VPC-based
 - `network_interface` (Number) The interface index on the virtual machine
-- `network_name` (String) The name of the attached legacy network. Null unless world is 'legacy'
-- `network_type` (String) The type of the attached legacy network. Null unless world is 'legacy'
+- `network_name` (String, Deprecated) Always null. GPCN™ networking is VPC-based
+- `network_type` (String, Deprecated) Always null. GPCN™ networking is VPC-based
 - `private_ip` (String) The private IP address on the interface. Null when world is 'l2', because a segment has no subnet to draw an address from
 - `public_ip` (String) The public IP address on the interface, if one is allocated
 - `public_ip_id` (String) The ID of the allocated public IP address, if one is allocated. On a 'vpc' interface this is a gpcn_vpc_public_ip ID
@@ -186,7 +186,7 @@ Read-Only:
 - `vpc_id` (String) The ID of the VPC that holds the subnet. Null unless world is 'vpc'
 - `vpc_name` (String) The name of the VPC that holds the subnet. Null unless world is 'vpc'
 - `vpc_subnet_id` (String) The ID of the VPC subnet the interface attaches to. Null unless world is 'vpc'
-- `world` (String) The kind of network the interface attaches to: 'legacy', 'vpc' or 'l2'. The identity attributes below are per world
+- `world` (String) The kind of network the interface attaches to: 'vpc' or 'l2'. The identity attributes below are per world
 
 ## Import
 

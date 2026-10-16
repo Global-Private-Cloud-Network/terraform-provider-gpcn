@@ -135,6 +135,10 @@ func (r *vpcResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *
 				Description: "Identifier of the job that owns the VPC right now. Null while no job owns it",
 				Computed:    true,
 			},
+			"vpn_capable": schema.BoolAttribute{
+				Description: "Whether the data center of this VPC offers site-to-site VPN right now. When it's false, you can't create a VPN gateway or VPN connection here, but existing ones can still be read and deleted",
+				Computed:    true,
+			},
 			"created_time": schema.StringAttribute{
 				Description: "Timestamp when the VPC was created",
 				Computed:    true,
