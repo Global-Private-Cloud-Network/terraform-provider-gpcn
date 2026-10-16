@@ -18,7 +18,7 @@ func TestIPv4AddressValidatorUnit(t *testing.T) {
 	const (
 		format      = "peer_address must be an IPv4 address in dotted-quad form, such as 203.0.113.10. Got: '%s'"
 		leadingZero = "peer_address must not have leading zeros in an octet. Got: '%s'"
-		notPublic   = "peer_address must be a public IPv4 address. %s is in the reserved range %s"
+		notPublic   = "peer_address must be a public IPv4 address. %s is in the non-public range %s"
 	)
 	sprintf := func(f string, a ...any) string { return fmt.Sprintf(f, a...) }
 

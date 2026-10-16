@@ -17,7 +17,7 @@ const (
 
 	ErrDetailIPv4Format       = "%s must be an IPv4 address in dotted-quad form, such as 203.0.113.10. Got: '%s'"
 	ErrDetailIPv4LeadingZero  = "%s must not have leading zeros in an octet. Got: '%s'"
-	ErrDetailIPv4NotPublic    = "%s must be a public IPv4 address. %s is in the reserved range %s"
+	ErrDetailIPv4NotPublic    = "%s must be a public IPv4 address. %s is in the non-public range %s"
 	ErrDetailCIDRFormat       = "%s must be an IPv4 CIDR, such as 192.168.10.0/24. Got: '%s'"
 	ErrDetailCIDRLeadingZero  = "%s must not have leading zeros in an octet or in the prefix length. Got: '%s'"
 	ErrDetailCIDRPrefixBounds = "%s must have a prefix length between /%d and /32. Got: '%s'"

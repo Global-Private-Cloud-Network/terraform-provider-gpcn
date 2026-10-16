@@ -1,8 +1,8 @@
 # Example: A site-to-site VPN connection for a GPCN™ VPC
 #
 # A VPN connection joins the VPN gateway of a VPC to a peer gateway at your
-# site. Create the VPN gateway first. Your organization needs the VPN feature,
-# and the data center must offer site-to-site VPN.
+# site. Create the VPN gateway first. Your organization needs the Site-to-Site
+# VPN feature, and the data center must offer site-to-site VPN.
 
 terraform {
   required_providers {

@@ -1,8 +1,9 @@
 # Example: A VPN gateway for a GPCN™ VPC
 #
-# A VPN gateway is the public endpoint your peer gateway connects to for
-# site-to-site VPN. A VPC has one. Your organization needs the VPN feature, and
-# the data center must offer site-to-site VPN.
+# A VPN gateway holds the VPN gateway address, the public address your peer
+# gateway connects to for site-to-site VPN. A VPC has one. Your organization
+# needs the Site-to-Site VPN feature, and the data center must offer
+# site-to-site VPN.
 
 terraform {
   required_providers {
