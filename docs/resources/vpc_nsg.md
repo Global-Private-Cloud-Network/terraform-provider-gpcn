@@ -3,12 +3,12 @@
 page_title: "gpcn_vpc_nsg Resource - gpcn"
 subcategory: "Networking"
 description: |-
-  Manages a security group inside a GPCN™ VPC, with its rules inline. GPCN™ replaces the whole rule set on every change and identifies a rule by its content, so the rules belong to this resource rather than to one of their own. The API key needs vpc:read to read a group, and vpc-nsg:create, vpc-nsg:update and vpc-nsg:delete to manage one.
+  Manages a security group inside a GPCN™ VPC, with its rules inline. GPCN™ replaces the whole rule set on every change and identifies a rule by its content, so the rules belong to this resource rather than to one of their own. The API key needs vpc:read to read a group, and vpc-nsg:create, vpc-nsg:update and vpc-nsg:delete to manage one. Rules a site-to-site VPN connection adds to the group are managed by that connection: they don't appear in the rule set, and the provider keeps them when it updates the group.
 ---
 
 # gpcn_vpc_nsg (Resource)
 
-Manages a security group inside a GPCN™ VPC, with its rules inline. GPCN™ replaces the whole rule set on every change and identifies a rule by its content, so the rules belong to this resource rather than to one of their own. The API key needs vpc:read to read a group, and vpc-nsg:create, vpc-nsg:update and vpc-nsg:delete to manage one.
+Manages a security group inside a GPCN™ VPC, with its rules inline. GPCN™ replaces the whole rule set on every change and identifies a rule by its content, so the rules belong to this resource rather than to one of their own. The API key needs vpc:read to read a group, and vpc-nsg:create, vpc-nsg:update and vpc-nsg:delete to manage one. Rules a site-to-site VPN connection adds to the group are managed by that connection: they don't appear in the rule set, and the provider keeps them when it updates the group.
 
 ## Example Usage
 

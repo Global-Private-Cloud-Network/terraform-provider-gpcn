@@ -2,6 +2,7 @@ package provider
 
 import (
 	"fmt"
+	"os"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
@@ -175,4 +176,89 @@ func vpcNsgAccTestImportID(state *terraform.State) (string, error) {
 		return "", fmt.Errorf("resource %s is not in the state", gpcnVpcNsgTest)
 	}
 	return nsg.Primary.Attributes["vpc_id"] + "/" + nsg.Primary.ID, nil
+}
+
+// vpcNsgVpnAccTestConfig builds a group bound to a subnet, with a VPN gateway
+// and a connection on the same VPC. The connection's job adds its rule to the
+// group. The case changes only the customer rule's description.
+func vpcNsgVpnAccTestConfig(datacenterID, suffix, ruleDescription string) string {
+	return providerConfig + fmt.Sprintf(`
+resource "gpcn_vpc" "test" {
+  name                = "tf-vpc-%[2]s"
+  datacenter_id       = %[1]q
+  cidr                = "10.122.0.0/16"
+  acknowledge_overlap = true
+}
+
+resource "gpcn_vpc_nsg" "test" {
+  vpc_id = gpcn_vpc.test.id
+  name   = "tf-nsg-%[2]s"
+
+  rule {
+    direction      = "ingress"
+    protocol       = "tcp"
+    port_range_min = 443
+    port_range_max = 443
+    remote_cidr    = "0.0.0.0/0"
+    description    = %[3]q
+  }
+}
+
+resource "gpcn_vpc_subnet" "test" {
+  vpc_id = gpcn_vpc.test.id
+  name   = "tf-subnet-%[2]s"
+  cidr   = "10.122.1.0/24"
+  nsg_id = gpcn_vpc_nsg.test.id
+}
+
+resource "gpcn_vpc_vpn_gateway" "test" {
+  vpc_id     = gpcn_vpc.test.id
+  depends_on = [gpcn_vpc_subnet.test]
+}
+
+resource "gpcn_vpc_vpn_connection" "test" {
+  vpc_id         = gpcn_vpc.test.id
+  vpn_gateway_id = gpcn_vpc_vpn_gateway.test.id
+  name           = "tf-vpn-%[2]s"
+  peer_address   = "203.0.113.20"
+  peer_cidrs     = ["192.168.20.0/24"]
+  psk            = "tf-acc-test-psk-0123456789"
+}
+`, datacenterID, suffix, ruleDescription)
+}
+
+// The connection adds a rule to the group. An update of the group must keep
+// it and report no drift afterwards.
+func TestVpcNsgResourceKeepsVpnRules(t *testing.T) {
+	t.Parallel()
+	datacenterID := os.Getenv(vpnGatewayAccDatacenterEnvVar)
+	if datacenterID == "" {
+		t.Skipf("%s is not set", vpnGatewayAccDatacenterEnvVar)
+	}
+	suffix := acctest.RandString(8)
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vpcNsgVpnAccTestConfig(datacenterID, suffix, "https"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "rule.#", "1"),
+				),
+			},
+			{
+				Config: vpcNsgVpnAccTestConfig(datacenterID, suffix, "https from anywhere"),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcNsgTest, plancheck.ResourceActionUpdate),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(gpcnVpcNsgTest, "rule.#", "1"),
+			},
+			{
+				Config:   vpcNsgVpnAccTestConfig(datacenterID, suffix, "https from anywhere"),
+				PlanOnly: true,
+			},
+		},
+	})
 }

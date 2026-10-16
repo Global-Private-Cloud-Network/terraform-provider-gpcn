@@ -46,7 +46,7 @@ func (r *vpcNsgResource) Metadata(_ context.Context, req resource.MetadataReques
 // Schema defines the schema for the resource.
 func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a security group inside a GPCN™ VPC, with its rules inline. GPCN™ replaces the whole rule set on every change and identifies a rule by its content, so the rules belong to this resource rather than to one of their own. The API key needs vpc:read to read a group, and vpc-nsg:create, vpc-nsg:update and vpc-nsg:delete to manage one.",
+		Description: "Manages a security group inside a GPCN™ VPC, with its rules inline. GPCN™ replaces the whole rule set on every change and identifies a rule by its content, so the rules belong to this resource rather than to one of their own. The API key needs vpc:read to read a group, and vpc-nsg:create, vpc-nsg:update and vpc-nsg:delete to manage one. Rules a site-to-site VPN connection adds to the group are managed by that connection: they don't appear in the rule set, and the provider keeps them when it updates the group.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the security group in UUID format",
@@ -333,7 +333,9 @@ func (r *vpcNsgResource) Update(ctx context.Context, req resource.UpdateRequest,
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		if err := vpcnsgs.ReplaceNsgRules(r.client, ctx, vpcID, nsgID, rules); err != nil {
+		replaceDiags, err := vpcnsgs.ReplaceNsgRules(r.client, ctx, vpcID, nsgID, rules)
+		resp.Diagnostics.Append(replaceDiags...)
+		if err != nil {
 			resp.Diagnostics.AddError(
 				vpcnsgs.ErrSummaryUnableToUpdateNsg,
 				fmt.Sprintf(vpcnsgs.ErrDetailUnableToUpdateNsgWithID, nsgID)+": "+err.Error(),

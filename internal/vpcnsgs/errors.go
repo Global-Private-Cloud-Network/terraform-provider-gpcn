@@ -49,3 +49,9 @@ const (
 	WarnSummaryDefaultNsgRulesReplaced = "Replacing the rules of the VPC default security group"
 	WarnDetailDefaultNsgRulesReplaced  = "Security group '%s' is the VPC's own default group. GPCN replaces the whole rule set on every change, so this apply deletes any rule this configuration does not list, including the two GPCN staged with the VPC: 'Default: allow all outbound traffic' and 'Default: allow traffic from this VPC'. Add them to the configuration to keep them."
 )
+
+// Warning strings for a VPN rule that lost its owner during a rules replace.
+const (
+	WarnSummaryNsgVpnRuleOwnerChanged = "GPCN™ VPN connection rule changed owner"
+	WarnDetailNsgVpnRuleOwnerChanged  = "Rule for %s was re-sent unchanged but is no longer owned by VPN connection %s; it will stay when that connection is deleted."
+)

@@ -10,6 +10,7 @@ import (
 
 	"terraform-provider-gpcn/internal/client"
 
+	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
@@ -38,6 +39,9 @@ type ApiRule struct {
 	PortRangeMax *int64  `json:"portRangeMax"`
 	RemoteCidr   string  `json:"remoteCidr"`
 	Description  *string `json:"description"`
+	// VpnConnectionID names the site-to-site VPN connection that owns the
+	// rule. The API sends null for every other rule.
+	VpnConnectionID *string `json:"vpnConnectionId"`
 }
 
 // NsgDetail is the shape the single read answers with. The listing puts the
@@ -200,32 +204,50 @@ func RenameNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, nsgID,
 }
 
 // ReplaceNsgRules sends the complete desired set. The API diffs it by content
-// key, so a rule left out of the payload is removed from the group.
-func ReplaceNsgRules(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, nsgID string, rules []RuleModel) error {
+// key, so a rule left out of the payload is removed from the group. Rules a
+// VPN connection owns are not in the configuration, so the call reads the group
+// first and sends them back. A rule that lost its owner during the replace comes
+// back as a warning.
+func ReplaceNsgRules(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, nsgID string, rules []RuleModel) (diag.Diagnostics, error) {
+	var diags diag.Diagnostics
 	tflog.Info(ctx, fmt.Sprintf(LogStartingReplaceNsgRules, nsgID))
 
-	replaceRequestBody, err := json.Marshal(map[string]any{"rules": RuleRequestBodies(rules)})
+	before, err := GetNsg(gpcnClient, ctx, vpcID, nsgID)
 	if err != nil {
-		return err
+		return diags, err
+	}
+	bodies, resent := MergeVpnRuleBodies(rules, before.Rules)
+
+	replaceRequestBody, err := json.Marshal(map[string]any{"rules": bodies})
+	if err != nil {
+		return diags, err
 	}
 
 	request, err := http.NewRequestWithContext(ctx, "PUT", nsgPath(vpcID, nsgID)+rulesPathSegment, bytes.NewBuffer(replaceRequestBody))
 	if err != nil {
-		return err
+		return diags, err
 	}
 
 	jobID, err := issueJob(gpcnClient, request)
 	if err != nil {
-		return err
+		return diags, err
 	}
 	tflog.Info(ctx, LogIssuedReplaceNsgRulesJob)
 
 	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionReplaceNsgRules, jobID); err != nil {
-		return fmt.Errorf("replace security group rules polling failed: %w", err)
+		return diags, fmt.Errorf("replace security group rules polling failed: %w", err)
+	}
+
+	if len(resent) > 0 {
+		after, err := GetNsg(gpcnClient, ctx, vpcID, nsgID)
+		if err != nil {
+			return diags, err
+		}
+		diags.Append(VpnOwnershipLostWarnings(resent, after.Rules)...)
 	}
 
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyReplacedRules, nsgID))
-	return nil
+	return diags, nil
 }
 
 // DeleteNsg tears the group down. The VPC's own default group refuses, and so

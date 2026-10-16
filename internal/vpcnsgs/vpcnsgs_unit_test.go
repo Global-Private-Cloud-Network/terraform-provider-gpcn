@@ -3,6 +3,7 @@ package vpcnsgs
 import (
 	"context"
 	"net/http"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -250,7 +251,7 @@ func TestReplaceNsgRulesSendsCompleteSetUnit(t *testing.T) {
 		t.Fatalf("expected no diagnostics, got %v", diags)
 	}
 
-	if err := ReplaceNsgRules(gpcnClient, context.Background(), unitTestVpcID, unitTestNsgID, rules); err != nil {
+	if _, err := ReplaceNsgRules(gpcnClient, context.Background(), unitTestVpcID, unitTestNsgID, rules); err != nil {
 		t.Fatalf("expected the rules replace to succeed, got %v", err)
 	}
 
@@ -492,7 +493,7 @@ func TestCreateNsgCarriesOneCorrelationIDUnit(t *testing.T) {
 
 	replaceCtx := client.WithCorrelationID(context.Background())
 	callerID := client.GetCorrelationID(replaceCtx)
-	if err := ReplaceNsgRules(replaceClient, replaceCtx, unitTestVpcID, unitTestNsgID, nil); err != nil {
+	if _, err := ReplaceNsgRules(replaceClient, replaceCtx, unitTestVpcID, unitTestNsgID, nil); err != nil {
 		t.Fatalf("expected the rules replace to succeed, got %v", err)
 	}
 	handlerMu.Lock()
@@ -599,5 +600,156 @@ func TestIssueCreateNsgRejectsResponseWithoutIDUnit(t *testing.T) {
 	}
 	if err.Error() != ErrDetailNoNsgIDInCreate {
 		t.Errorf("error = %q, want %q", err.Error(), ErrDetailNoNsgIDInCreate)
+	}
+}
+
+func unitTestVpnRule(connectionID *string) ApiRule {
+	description := "VPN connection office (conn-1)"
+	return ApiRule{
+		ID:              "rule-vpn",
+		Direction:       "ingress",
+		Protocol:        "all",
+		RemoteCidr:      "192.168.20.0/24",
+		Description:     &description,
+		VpnConnectionID: connectionID,
+	}
+}
+
+func unitTestStringPointer(value string) *string {
+	return &value
+}
+
+func TestRulesToSetDropsVpnOwnedRulesUnit(t *testing.T) {
+	t.Parallel()
+
+	empty := ""
+	rules := []ApiRule{
+		unitTestIcmpRule(),
+		unitTestVpnRule(unitTestStringPointer("conn-1")),
+		unitTestVpnRule(nil),
+		unitTestVpnRule(&empty),
+	}
+	rules[2].RemoteCidr = "192.168.21.0/24"
+	rules[3].RemoteCidr = "192.168.22.0/24"
+
+	set, diags := RulesToSet(context.Background(), rules)
+	if diags.HasError() {
+		t.Fatalf("expected no diagnostics, got %v", diags)
+	}
+	kept, diags := RulesFromSet(context.Background(), set)
+	if diags.HasError() {
+		t.Fatalf("expected no diagnostics, got %v", diags)
+	}
+	if len(kept) != 3 {
+		t.Fatalf("expected the owned rule dropped and three kept, got %d", len(kept))
+	}
+	for _, rule := range kept {
+		if rule.RemoteCidr.ValueString() == "192.168.20.0/24" {
+			t.Errorf("the owned rule reached the set")
+		}
+	}
+}
+
+func TestMergeVpnRuleBodiesUnit(t *testing.T) {
+	t.Parallel()
+
+	owner := unitTestStringPointer("conn-1")
+	owned := unitTestVpnRule(owner)
+	ownedWithPorts := unitTestVpnRule(owner)
+	portMin, portMax := int64(500), int64(600)
+	ownedWithPorts.Protocol = "udp"
+	ownedWithPorts.PortRangeMin = &portMin
+	ownedWithPorts.PortRangeMax = &portMax
+	ownedWithPorts.Description = nil
+
+	configRule := func(protocol, cidr, description string, portMin, portMax types.Int64) RuleModel {
+		return RuleModel{
+			Direction:    types.StringValue("ingress"),
+			Protocol:     types.StringValue(protocol),
+			PortRangeMin: portMin,
+			PortRangeMax: portMax,
+			RemoteCidr:   types.StringValue(cidr),
+			Description:  types.StringValue(description),
+		}
+	}
+	customer := configRule("icmp", "0.0.0.0/0", "ping", types.Int64Null(), types.Int64Null())
+	takeover := configRule("all", "192.168.20.0/24", "mine now", types.Int64Null(), types.Int64Null())
+
+	tests := []struct {
+		name       string
+		config     []RuleModel
+		live       []ApiRule
+		wantBodies []map[string]any
+		wantResent int
+	}{
+		{
+			name:   "owned rule is re-sent byte for byte",
+			config: []RuleModel{customer},
+			live:   []ApiRule{owned, ownedWithPorts},
+			wantBodies: []map[string]any{
+				{"direction": "ingress", "protocol": "icmp", "remoteCidr": "0.0.0.0/0", "description": "ping"},
+				{"direction": "ingress", "protocol": "all", "remoteCidr": "192.168.20.0/24", "description": "VPN connection office (conn-1)"},
+				{"direction": "ingress", "protocol": "udp", "remoteCidr": "192.168.20.0/24", "portRangeMin": int64(500), "portRangeMax": int64(600)},
+			},
+			wantResent: 2,
+		},
+		{
+			name:   "config rule with the same content key wins",
+			config: []RuleModel{customer, takeover},
+			live:   []ApiRule{owned},
+			wantBodies: []map[string]any{
+				{"direction": "ingress", "protocol": "icmp", "remoteCidr": "0.0.0.0/0", "description": "ping"},
+				{"direction": "ingress", "protocol": "all", "remoteCidr": "192.168.20.0/24", "description": "mine now"},
+			},
+			wantResent: 0,
+		},
+		{
+			name:       "no owned rules leaves the body equal to the config",
+			config:     []RuleModel{customer},
+			live:       []ApiRule{unitTestIcmpRule(), unitTestVpnRule(nil)},
+			wantBodies: RuleRequestBodies([]RuleModel{customer}),
+			wantResent: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			bodies, resent := MergeVpnRuleBodies(tt.config, tt.live)
+			if !reflect.DeepEqual(bodies, tt.wantBodies) {
+				t.Errorf("body = %v, want %v", bodies, tt.wantBodies)
+			}
+			if len(resent) != tt.wantResent {
+				t.Errorf("re-sent = %d, want %d", len(resent), tt.wantResent)
+			}
+			for _, body := range bodies {
+				if _, has := body["vpnConnectionId"]; has {
+					t.Errorf("the body carries vpnConnectionId: %v", body)
+				}
+			}
+		})
+	}
+}
+
+func TestVpnOwnershipLostWarningsUnit(t *testing.T) {
+	t.Parallel()
+
+	owned := unitTestVpnRule(unitTestStringPointer("conn-1"))
+	lost := unitTestVpnRule(nil)
+
+	diags := VpnOwnershipLostWarnings([]ApiRule{owned}, []ApiRule{lost})
+	if diags.WarningsCount() != 1 || diags.HasError() {
+		t.Fatalf("expected one warning, got %v", diags)
+	}
+	const wantDetail = "Rule for 192.168.20.0/24 was re-sent unchanged but is no longer owned by VPN connection conn-1; it will stay when that connection is deleted."
+	if got := diags[0].Summary(); got != "GPCN™ VPN connection rule changed owner" {
+		t.Errorf("summary = %q", got)
+	}
+	if got := diags[0].Detail(); got != wantDetail {
+		t.Errorf("detail = %q, want %q", got, wantDetail)
+	}
+
+	if diags := VpnOwnershipLostWarnings([]ApiRule{owned}, []ApiRule{owned}); len(diags) != 0 {
+		t.Errorf("expected no warning while the owner holds, got %v", diags)
 	}
 }
