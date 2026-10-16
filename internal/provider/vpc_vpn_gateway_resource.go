@@ -17,7 +17,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
 
-// Ensure the implementation satisfies the expected interfaces.
 var (
 	_ resource.Resource                = &vpcVpnGatewayResource{}
 	_ resource.ResourceWithConfigure   = &vpcVpnGatewayResource{}
@@ -25,22 +24,18 @@ var (
 	_ resource.ResourceWithModifyPlan  = &vpcVpnGatewayResource{}
 )
 
-// NewVPCVPNGatewayResource is a helper function to simplify the provider implementation.
 func NewVPCVPNGatewayResource() resource.Resource {
 	return &vpcVpnGatewayResource{}
 }
 
-// vpcVpnGatewayResource is the resource implementation.
 type vpcVpnGatewayResource struct {
 	client *client.GpcnClient
 }
 
-// Metadata returns the resource type name.
 func (r *vpcVpnGatewayResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_vpc_vpn_gateway"
 }
 
-// Schema defines the schema for the resource.
 func (r *vpcVpnGatewayResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Manages the VPN gateway of a GPCN™ VPC. A VPC has at most one VPN gateway. It is the public endpoint your peer gateway connects to for site-to-site VPN. Your organization needs the VPN feature, and the data center of the VPC must offer site-to-site VPN. The API key needs vpc:read to read the VPN gateway, and vpc-vpn-connection:create and vpc-vpn-connection:delete to manage it. A VPN gateway has no attribute that changes in place. A gateway that fails to build is replaced on the next apply.",
@@ -92,7 +87,6 @@ func (r *vpcVpnGatewayResource) Schema(_ context.Context, _ resource.SchemaReque
 	}
 }
 
-// Configure adds the provider configured client to the resource.
 func (r *vpcVpnGatewayResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
@@ -110,8 +104,7 @@ func (r *vpcVpnGatewayResource) Configure(_ context.Context, req resource.Config
 	r.client = gpcnClient
 }
 
-// ModifyPlan replaces a gateway that failed to build. The API has no retry for
-// it: a failed gateway can only be deleted and created again.
+// ModifyPlan replaces a failed gateway. The API has no retry for it.
 func (r *vpcVpnGatewayResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
 		return
@@ -128,14 +121,12 @@ func (r *vpcVpnGatewayResource) ModifyPlan(ctx context.Context, req resource.Mod
 	}
 
 	tflog.Info(ctx, vpcvpngateways.LogFailedGatewayPlansReplacement)
-	// Terraform ignores a replace path whose value does not change. The
-	// configuration of a failed gateway has not changed, so state is the path:
-	// the plan makes it unknown.
+	// Terraform ignores a replace path whose value does not change. The plan
+	// makes state unknown, so the path changes.
 	resp.RequiresReplace = append(resp.RequiresReplace, path.Root("state"))
 	resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("state"), types.StringUnknown())...)
 }
 
-// Create creates the resource and sets the initial Terraform state.
 func (r *vpcVpnGatewayResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
 	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, vpcvpngateways.LogStartingCreateGPCNVpnGateway)
@@ -148,6 +139,12 @@ func (r *vpcVpnGatewayResource) Create(ctx context.Context, req resource.CreateR
 
 	vpcID := plan.VpcID.ValueString()
 	if err := vpcvpngateways.CreateVpnGateway(r.client, ctx, vpcID); err != nil {
+		// A stopped job leaves a row behind. A refused POST does not.
+		if errors.Is(err, client.ErrJobFailed) || errors.Is(err, client.ErrLongPollingTimeout) {
+			if gateway, getErr := vpcvpngateways.GetVpnGateway(r.client, ctx, vpcID); getErr == nil {
+				resp.Diagnostics.Append(resp.State.Set(ctx, vpcvpngateways.MapGatewayToModel(gateway, plan))...)
+			}
+		}
 		resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToCreateVpnGW, vpcvpngateways.ErrorDetail(err))
 		return
 	}
@@ -164,8 +161,7 @@ func (r *vpcVpnGatewayResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
-	// A gateway that built badly is in state, so Terraform marks it tainted
-	// and the next apply replaces it.
+	// The failed gateway is in state, so Terraform taints it.
 	if gateway.State == vpcvpngateways.StateFailed {
 		detail := vpcvpngateways.ErrDetailCreateFailedNoReason
 		if gateway.FailureReason != nil && *gateway.FailureReason != "" {
@@ -178,7 +174,6 @@ func (r *vpcVpnGatewayResource) Create(ctx context.Context, req resource.CreateR
 	tflog.Info(ctx, vpcvpngateways.LogSuccessfullyFinishedCreateGPCNVpnGateway)
 }
 
-// Read refreshes the Terraform state with the latest data.
 func (r *vpcVpnGatewayResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
 	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, vpcvpngateways.LogStartingReadGPCNVpnGateway)
@@ -191,7 +186,6 @@ func (r *vpcVpnGatewayResource) Read(ctx context.Context, req resource.ReadReque
 
 	gateway, err := vpcvpngateways.GetVpnGateway(r.client, ctx, state.VpcID.ValueString())
 	if err != nil {
-		// A deleted VPC answers 404 for its whole tree, like a missing gateway.
 		if errors.Is(err, vpcvpngateways.ErrVpnGatewayNotFound) {
 			tflog.Info(ctx, vpcvpngateways.LogVpnGatewayNotFoundRemoving)
 			resp.State.RemoveResource(ctx)
@@ -210,8 +204,7 @@ func (r *vpcVpnGatewayResource) Read(ctx context.Context, req resource.ReadReque
 	tflog.Info(ctx, vpcvpngateways.LogSuccessfullyFinishedReadGPCNVpnGateway)
 }
 
-// Update copies the plan to state. No attribute updates in place, because
-// vpc_id replaces, so Terraform does not call it with a real change.
+// Update copies the plan to state. Terraform never calls it with a real change.
 func (r *vpcVpnGatewayResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
 	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, vpcvpngateways.LogStartingUpdateGPCNVpnGateway)
@@ -230,7 +223,6 @@ func (r *vpcVpnGatewayResource) Update(ctx context.Context, req resource.UpdateR
 	tflog.Info(ctx, vpcvpngateways.LogSuccessfullyFinishedUpdateGPCNVpnGateway)
 }
 
-// Delete deletes the resource and removes the Terraform state on success.
 func (r *vpcVpnGatewayResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	ctx = client.WithCorrelationID(ctx)
 	tflog.Info(ctx, vpcvpngateways.LogStartingDeleteGPCNVpnGateway)
@@ -252,7 +244,6 @@ func (r *vpcVpnGatewayResource) Delete(ctx context.Context, req resource.DeleteR
 		return
 	}
 
-	// The job ending does not mean the row is gone. Wait for the 404.
 	if err := vpcvpngateways.WaitForVpnGatewayGone(r.client, ctx, vpcID); err != nil {
 		resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToDeleteVpnGW, vpcvpngateways.ErrorDetail(err))
 		return
@@ -261,8 +252,7 @@ func (r *vpcVpnGatewayResource) Delete(ctx context.Context, req resource.DeleteR
 	tflog.Info(ctx, vpcvpngateways.LogSuccessfullyFinishedDeleteGPCNVpnGateway)
 }
 
-// ImportState takes the ID of the VPC. A VPC has one VPN gateway, and the
-// gateway route is keyed by the VPC. Read fills the rest.
+// ImportState takes the ID of the VPC, because the gateway route is keyed by it.
 func (r *vpcVpnGatewayResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	if req.ID == "" {
 		resp.Diagnostics.AddError(

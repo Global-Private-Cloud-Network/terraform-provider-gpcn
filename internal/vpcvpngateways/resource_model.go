@@ -12,8 +12,7 @@ type ResourceModel struct {
 	FailureReason types.String `tfsdk:"failure_reason"`
 }
 
-// optionalString maps a nullable API field. A null stays null, because a
-// Computed attribute that shows "" for an absent value hides the difference.
+// optionalString keeps a null as null. An empty string would hide the difference.
 func optionalString(raw *string) types.String {
 	if raw == nil {
 		return types.StringNull()
@@ -21,10 +20,8 @@ func optionalString(raw *string) types.String {
 	return types.StringValue(*raw)
 }
 
-// MapGatewayToModel writes every attribute the API reports. The gateway has
-// one configurable attribute, vpc_id, and the API's vpcId is what Create and
-// Read already hold, so the configured value stays. Every other attribute is
-// Computed and comes from the response, null where the API sends null.
+// MapGatewayToModel keeps the configured vpc_id and takes every other
+// attribute from the response.
 func MapGatewayToModel(response *ApiVpnGateway, model ResourceModel) ResourceModel {
 	model.ID = types.StringValue(response.ID)
 	if model.VpcID.IsNull() || model.VpcID.IsUnknown() {

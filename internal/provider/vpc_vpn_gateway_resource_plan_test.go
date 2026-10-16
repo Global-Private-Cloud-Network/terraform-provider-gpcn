@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -23,9 +24,10 @@ const (
 	vpnGatewayPlanTestTimestamp = "2026-01-02T15:04:05Z"
 	gpcnVpcVpnGatewayTest       = "gpcn_vpc_vpn_gateway.test"
 
-	vpnGatewayPlanTestInUse = "Remove the VPC's VPN connections before removing its VPN gateway."
-	vpnGatewayPlanTestNoDC  = "This data center does not offer site-to-site VPN yet."
-	vpnGatewayPlanTestFail  = "The VPN gateway could not be created: its VPC was not ready. Remove it and create it again."
+	vpnGatewayPlanTestInUse   = "Remove the VPC's VPN connections before removing its VPN gateway."
+	vpnGatewayPlanTestNoDC    = "This data center does not offer site-to-site VPN yet."
+	vpnGatewayPlanTestJobFail = "VPN gateway creation failed; delete it and create it again"
+	vpnGatewayPlanTestFail    = "The VPN gateway could not be created: its VPC was not ready. Remove it and create it again."
 )
 
 // vpnGatewayPlanTestServerState is the gateway the mock keeps between requests.
@@ -42,6 +44,10 @@ type vpnGatewayPlanTestServerState struct {
 	refuseCreate string
 	// refuseDelete answers the next DELETE with a 409 carrying this message.
 	refuseDelete string
+	// failJob makes the job poll report a failed job.
+	failJob bool
+	// deleteGone answers the DELETE with a 404, as for a row removed meanwhile.
+	deleteGone   bool
 	createBodies []map[string]any
 	deleteCount  int
 }
@@ -130,11 +136,19 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 			state.mu.Lock()
 			refusal := state.refuseDelete
 			state.refuseDelete = ""
-			if refusal == "" {
+			gone := state.deleteGone
+			if gone {
+				state.exists = false
+			}
+			if refusal == "" && !gone {
 				state.exists = false
 				state.deleteCount++
 			}
 			state.mu.Unlock()
+			if gone {
+				writeVpnGatewayPlanTestError(w, http.StatusNotFound, "VPN_GATEWAY_NOT_FOUND", "This VPC has no VPN gateway.")
+				return
+			}
 			if refusal != "" {
 				writeVpnGatewayPlanTestError(w, http.StatusConflict, "VPN_GATEWAY_IN_USE", refusal)
 				return
@@ -149,6 +163,18 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 			jobID := "job-1"
 			if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
 				jobID, _ = ids[0].(string)
+			}
+			state.mu.Lock()
+			failJob := state.failJob
+			state.mu.Unlock()
+			if failJob {
+				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
+					Success: true,
+					Data: client.JobStatusDataResponse{Jobs: []client.JobResponse{{
+						JobID: jobID, ResourceId: vpnGatewayPlanTestID, HasFailed: true, ErrorMessage: vpnGatewayPlanTestJobFail,
+					}}},
+				})
+				return
 			}
 			testutil.HandleJobResponse(w, jobID, vpnGatewayPlanTestID, true)
 		default:
@@ -381,6 +407,64 @@ func TestVpcVpnGatewayResourceDataCenterRefusal(t *testing.T) {
 				Config:      vpnGatewayPlanTestConfig(server.URL),
 				ExpectError: vpnGatewayRefusal(vpnGatewayPlanTestNoDC),
 			},
+		},
+	})
+}
+
+// A job that stops leaves the row behind. The create writes it to state with
+// the error, so Terraform taints it and the next plan replaces it.
+func TestVpcVpnGatewayResourceCreateJobFailedKeepsRow(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnGatewayPlanMockServer(t)
+	state.set(func(s *vpnGatewayPlanTestServerState) { s.failJob = true; s.createdState = "failed" })
+	config := vpnGatewayPlanTestConfig(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: vpnGatewayRefusal(vpnGatewayPlanTestJobFail),
+			},
+			{
+				PreConfig: func() {
+					state.set(func(s *vpnGatewayPlanTestServerState) {
+						s.failJob = false
+						s.createdState = "ready"
+						s.rowState = "ready"
+						s.failureReason = ""
+					})
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcVpnGatewayTest, plancheck.ResourceActionReplace),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(gpcnVpcVpnGatewayTest, "state", "ready"),
+			},
+		},
+	})
+}
+
+// A delete that answers 404 means the gateway is already gone. The destroy
+// succeeds.
+func TestVpcVpnGatewayResourceDeleteGone(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnGatewayPlanMockServer(t)
+	config := vpnGatewayPlanTestConfig(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: func(*terraform.State) error {
+					state.set(func(s *vpnGatewayPlanTestServerState) { s.deleteGone = true })
+					return nil
+				},
+			},
+			{Config: config, Destroy: true},
 		},
 	})
 }
