@@ -99,6 +99,9 @@ type nsgPlanTestServerState struct {
 	// failNextRead answers the next group read with a 500. The build still
 	// ran, so the group is there and only the read-back fails.
 	failNextRead bool
+	// failReadAt makes the Nth group read answer with a 500. Zero turns it off.
+	failReadAt int
+	reads      int
 	// loseVpnOwnership makes a rules PUT strip the owner from a re-sent VPN
 	// rule. A rename of the connection that races the replace does the same.
 	loseVpnOwnership bool
@@ -214,7 +217,8 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 			})
 		case r.Method == http.MethodGet && r.URL.Path == groupPath:
 			state.mu.Lock()
-			failRead := state.failNextRead
+			state.reads++
+			failRead := state.failNextRead || state.reads == state.failReadAt
 			state.failNextRead = false
 			deleted := state.deleted
 			detail := state.detail()
@@ -1237,29 +1241,8 @@ func TestVpcNsgResourceVpnRuleTakenOver(t *testing.T) {
 	})
 }
 
-// A rename of the connection can race the replace and relabel the rule to the
-// customer. The apply still succeeds and warns, because the rule now outlives
-// the connection.
-func TestVpcNsgResourceVpnRuleOwnershipLostWarns(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	server, state := startNsgPlanMockServer(t)
-	state.name = "nsg-plan-a"
-	state.loseVpnOwnership = true
-	state.storeRules(map[string]any{"rules": []any{map[string]any{
-		"direction": "ingress", "protocol": "tcp", "portRangeMin": float64(443), "portRangeMax": float64(443),
-		"remoteCidr": "0.0.0.0/0", "description": "https",
-	}}})
-	state.addVpnRule(nsgPlanTestVpnConnectionID, nsgPlanTestVpnCidr, nsgPlanTestVpnDescription)
-
-	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{T: t, Handler: server.Config.Handler.ServeHTTP})
-	groupResource := &vpcNsgResource{client: gpcnClient}
-
-	var schemaResponse fwresource.SchemaResponse
-	groupResource.Schema(ctx, fwresource.SchemaRequest{}, &schemaResponse)
-
-	https := vpcnsgs.RuleModel{
+var (
+	nsgPlanTestHTTPSRule = vpcnsgs.RuleModel{
 		Direction:    types.StringValue("ingress"),
 		Protocol:     types.StringValue("tcp"),
 		PortRangeMin: types.Int64Value(443),
@@ -1267,7 +1250,7 @@ func TestVpcNsgResourceVpnRuleOwnershipLostWarns(t *testing.T) {
 		RemoteCidr:   types.StringValue("0.0.0.0/0"),
 		Description:  types.StringValue("https"),
 	}
-	ping := vpcnsgs.RuleModel{
+	nsgPlanTestPingRule = vpcnsgs.RuleModel{
 		Direction:    types.StringValue("ingress"),
 		Protocol:     types.StringValue("icmp"),
 		PortRangeMin: types.Int64Null(),
@@ -1275,6 +1258,30 @@ func TestVpcNsgResourceVpnRuleOwnershipLostWarns(t *testing.T) {
 		RemoteCidr:   types.StringValue("10.60.0.0/16"),
 		Description:  types.StringNull(),
 	}
+)
+
+// seedNsgHTTPSRule files the one customer rule the direct Update tests start
+// from.
+func seedNsgHTTPSRule(state *nsgPlanTestServerState) {
+	state.name = "nsg-plan-a"
+	state.storeRules(map[string]any{"rules": []any{map[string]any{
+		"direction": "ingress", "protocol": "tcp", "portRangeMin": float64(443), "portRangeMax": float64(443),
+		"remoteCidr": "0.0.0.0/0", "description": "https",
+	}}})
+}
+
+// updateNsgDirectly calls Update with a prior state holding the https rule and
+// a plan holding the planned rules.
+func updateNsgDirectly(t *testing.T, server *httptest.Server, planned ...vpcnsgs.RuleModel) fwresource.UpdateResponse {
+	t.Helper()
+
+	ctx := context.Background()
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{T: t, Handler: server.Config.Handler.ServeHTTP})
+	groupResource := &vpcNsgResource{client: gpcnClient}
+
+	var schemaResponse fwresource.SchemaResponse
+	groupResource.Schema(ctx, fwresource.SchemaRequest{}, &schemaResponse)
+
 	model := func(rules ...vpcnsgs.RuleModel) vpcnsgs.ResourceModel {
 		set, diags := types.SetValueFrom(ctx, vpcnsgs.RuleObjectType(), rules)
 		if diags.HasError() {
@@ -1297,16 +1304,31 @@ func TestVpcNsgResourceVpnRuleOwnershipLostWarns(t *testing.T) {
 	}
 
 	priorState := tfsdk.State{Schema: schemaResponse.Schema}
-	if diags := priorState.Set(ctx, model(https)); diags.HasError() {
+	if diags := priorState.Set(ctx, model(nsgPlanTestHTTPSRule)); diags.HasError() {
 		t.Fatalf("failed to build the prior state: %v", diags)
 	}
 	plan := tfsdk.Plan{Schema: schemaResponse.Schema}
-	if diags := plan.Set(ctx, model(https, ping)); diags.HasError() {
+	if diags := plan.Set(ctx, model(planned...)); diags.HasError() {
 		t.Fatalf("failed to build the plan: %v", diags)
 	}
 
 	response := fwresource.UpdateResponse{State: tfsdk.State{Schema: schemaResponse.Schema, Raw: priorState.Raw}}
 	groupResource.Update(ctx, fwresource.UpdateRequest{State: priorState, Plan: plan}, &response)
+	return response
+}
+
+// A rename of the connection can race the replace and relabel the rule to the
+// customer. The apply still succeeds and warns, because the rule now outlives
+// the connection.
+func TestVpcNsgResourceVpnRuleOwnershipLostWarns(t *testing.T) {
+	t.Parallel()
+
+	server, state := startNsgPlanMockServer(t)
+	state.loseVpnOwnership = true
+	seedNsgHTTPSRule(state)
+	state.addVpnRule(nsgPlanTestVpnConnectionID, nsgPlanTestVpnCidr, nsgPlanTestVpnDescription)
+
+	response := updateNsgDirectly(t, server, nsgPlanTestHTTPSRule, nsgPlanTestPingRule)
 	if response.Diagnostics.HasError() {
 		t.Fatalf("Update reported errors: %v", response.Diagnostics.Errors())
 	}
@@ -1318,10 +1340,114 @@ func TestVpcNsgResourceVpnRuleOwnershipLostWarns(t *testing.T) {
 	if got := warnings[0].Summary(); got != "GPCN™ VPN connection rule changed owner" {
 		t.Errorf("summary = %q", got)
 	}
-	wantDetail := "Rule for 192.168.20.0/24 was re-sent unchanged but is no longer owned by VPN connection " + nsgPlanTestVpnConnectionID + "; it will stay when that connection is deleted."
+	wantDetail := "Rule for 192.168.20.0/24 is no longer managed by VPN connection " + nsgPlanTestVpnConnectionID + ", so it's now part of this security group's rule set. Add it to this configuration to keep it; otherwise the next apply removes it."
 	if got := warnings[0].Detail(); got != wantDetail {
 		t.Errorf("detail = %q, want %q", got, wantDetail)
 	}
+}
+
+// The ownership read comes after the replace has succeeded. A failure of that
+// read warns and never fails the apply.
+func TestVpcNsgResourceVpnRuleCheckFailureWarns(t *testing.T) {
+	t.Parallel()
+
+	server, state := startNsgPlanMockServer(t)
+	seedNsgHTTPSRule(state)
+	state.addVpnRule(nsgPlanTestVpnConnectionID, nsgPlanTestVpnCidr, nsgPlanTestVpnDescription)
+	state.failReadAt = 2
+
+	response := updateNsgDirectly(t, server, nsgPlanTestHTTPSRule, nsgPlanTestPingRule)
+	if response.Diagnostics.HasError() {
+		t.Fatalf("Update reported errors: %v", response.Diagnostics.Errors())
+	}
+
+	warnings := response.Diagnostics.Warnings()
+	if len(warnings) != 1 {
+		t.Fatalf("warnings = %v, want exactly one", warnings)
+	}
+	if got := warnings[0].Summary(); got != "GPCN™ VPN connection rule check skipped" {
+		t.Errorf("summary = %q", got)
+	}
+	if got := warnings[0].Detail(); !strings.Contains(got, "Internal server error") {
+		t.Errorf("detail = %q, want the API message", got)
+	}
+}
+
+// The API refuses more than 100 rules. The provider refuses first, with the
+// split between the configuration and the connections, and sends no PUT.
+func TestVpcNsgResourceVpnRulesOverLimitRefused(t *testing.T) {
+	t.Parallel()
+
+	server, state := startNsgPlanMockServer(t)
+	seedNsgHTTPSRule(state)
+	for index := range 99 {
+		state.addVpnRule(nsgPlanTestVpnConnectionID, fmt.Sprintf("192.168.%d.0/24", index), nsgPlanTestVpnDescription)
+	}
+	state.mu.Lock()
+	puts := state.rulesPuts
+	state.mu.Unlock()
+
+	response := updateNsgDirectly(t, server, nsgPlanTestHTTPSRule, nsgPlanTestPingRule)
+	errs := response.Diagnostics.Errors()
+	if len(errs) != 1 {
+		t.Fatalf("errors = %v, want exactly one", errs)
+	}
+	want := "This security group would hold 101 rules: 2 from this configuration and 99 managed by VPN connections. A security group holds at most 100."
+	if got := errs[0].Detail(); got != want {
+		t.Errorf("detail = %q, want %q", got, want)
+	}
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.rulesPuts != puts {
+		t.Errorf("a rules PUT went out despite the refusal")
+	}
+}
+
+// A configured rule that copies an owned rule exactly, description included,
+// stays the connection's. State keeps it, so the next plan is empty.
+func TestVpcNsgResourceVpnRuleDeclaredUnchangedIsStable(t *testing.T) {
+	t.Parallel()
+	server, state := startNsgPlanMockServer(t)
+
+	exact := fmt.Sprintf(`
+  rule {
+    direction   = "ingress"
+    protocol    = "all"
+    remote_cidr = %q
+    description = %q
+  }`, nsgPlanTestVpnCidr, nsgPlanTestVpnDescription)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: nsgPlanTestConfig(server.URL, "nsg-plan-a", nsgPlanTestRuleHTTPS),
+				Check:  seedVpnRule(state),
+			},
+			{
+				Config: nsgPlanTestConfig(server.URL, "nsg-plan-a", nsgPlanTestRuleHTTPS+exact),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "rule.#", "2"),
+					func(*terraform.State) error {
+						sent, err := nsgPlanTestLastRulesPut(state)
+						if err != nil {
+							return err
+						}
+						if len(sent) != 2 {
+							return fmt.Errorf("expected 2 rules in the body, got %v", sent)
+						}
+						return nil
+					},
+				),
+			},
+			{
+				Config: nsgPlanTestConfig(server.URL, "nsg-plan-a", nsgPlanTestRuleHTTPS+exact),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+		},
+	})
 }
 
 // A response with no vpnConnectionId key is the API before the field shipped.

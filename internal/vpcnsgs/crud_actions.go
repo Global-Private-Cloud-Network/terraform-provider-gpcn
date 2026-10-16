@@ -207,47 +207,57 @@ func RenameNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, nsgID,
 // key, so a rule left out of the payload is removed from the group. Rules a
 // VPN connection owns are not in the configuration, so the call reads the group
 // first and sends them back. A rule that lost its owner during the replace comes
-// back as a warning.
-func ReplaceNsgRules(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, nsgID string, rules []RuleModel) (diag.Diagnostics, error) {
+// back as a warning. The group read after the replace comes back too, so the
+// caller does not read it again. It is nil when that read did not happen or
+// failed; a failed read is a warning, because the replace already succeeded.
+func ReplaceNsgRules(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, nsgID string, rules []RuleModel) (*NsgDetail, diag.Diagnostics, error) {
 	var diags diag.Diagnostics
 	tflog.Info(ctx, fmt.Sprintf(LogStartingReplaceNsgRules, nsgID))
 
 	before, err := GetNsg(gpcnClient, ctx, vpcID, nsgID)
 	if err != nil {
-		return diags, err
+		return nil, diags, err
 	}
 	bodies, resent := MergeVpnRuleBodies(rules, before.Rules)
 
+	if len(bodies) > MaxRulesPerNsg {
+		diags.AddError(ErrSummaryUnableToUpdateNsg, fmt.Sprintf(ErrDetailNsgTooManyRules, len(bodies), len(rules), len(bodies)-len(rules)))
+		return nil, diags, nil
+	}
+
 	replaceRequestBody, err := json.Marshal(map[string]any{"rules": bodies})
 	if err != nil {
-		return diags, err
+		return nil, diags, err
 	}
 
 	request, err := http.NewRequestWithContext(ctx, "PUT", nsgPath(vpcID, nsgID)+rulesPathSegment, bytes.NewBuffer(replaceRequestBody))
 	if err != nil {
-		return diags, err
+		return nil, diags, err
 	}
 
 	jobID, err := issueJob(gpcnClient, request)
 	if err != nil {
-		return diags, err
+		return nil, diags, err
 	}
 	tflog.Info(ctx, LogIssuedReplaceNsgRulesJob)
 
 	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionReplaceNsgRules, jobID); err != nil {
-		return diags, fmt.Errorf("replace security group rules polling failed: %w", err)
+		return nil, diags, fmt.Errorf("replace security group rules polling failed: %w", err)
 	}
 
+	var after *NsgDetail
 	if len(resent) > 0 {
-		after, err := GetNsg(gpcnClient, ctx, vpcID, nsgID)
+		after, err = GetNsg(gpcnClient, ctx, vpcID, nsgID)
 		if err != nil {
-			return diags, err
+			diags.AddWarning(WarnSummaryNsgVpnRuleCheckSkipped, err.Error())
+			after = nil
+		} else {
+			diags.Append(VpnOwnershipLostWarnings(resent, after.Rules)...)
 		}
-		diags.Append(VpnOwnershipLostWarnings(resent, after.Rules)...)
 	}
 
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyReplacedRules, nsgID))
-	return diags, nil
+	return after, diags, nil
 }
 
 // DeleteNsg tears the group down. The VPC's own default group refuses, and so

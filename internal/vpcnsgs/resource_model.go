@@ -164,13 +164,15 @@ func apiRuleBody(rule ApiRule) map[string]any {
 
 // MergeVpnRuleBodies builds the rules replace body: the configured rules plus
 // every rule a VPN connection owns. A configured rule with an owned rule's
-// content wins, because the customer takes the rule over. The second result is
-// the owned rules sent back unchanged.
+// content and a different description wins, because the customer takes the rule
+// over. A configured rule that matches an owned rule exactly, description
+// included, stays the connection's. The second result is the owned rules that
+// stay owned.
 func MergeVpnRuleBodies(config []RuleModel, live []ApiRule) ([]map[string]any, []ApiRule) {
 	bodies := RuleRequestBodies(config)
-	configured := make(map[string]struct{}, len(config))
+	configured := make(map[string]RuleModel, len(config))
 	for _, rule := range config {
-		configured[rule.contentKey()] = struct{}{}
+		configured[rule.contentKey()] = rule
 	}
 
 	var resent []ApiRule
@@ -178,13 +180,29 @@ func MergeVpnRuleBodies(config []RuleModel, live []ApiRule) ([]map[string]any, [
 		if !rule.IsVpnOwned() {
 			continue
 		}
-		if _, taken := configured[rule.contentKey()]; taken {
+		if declared, taken := configured[rule.contentKey()]; taken {
+			if rule.matchesExactly(declared) {
+				resent = append(resent, rule)
+			}
 			continue
 		}
 		bodies = append(bodies, apiRuleBody(rule))
 		resent = append(resent, rule)
 	}
 	return bodies, resent
+}
+
+// matchesExactly reports whether a declared rule has the rule's content and
+// its description.
+func (r ApiRule) matchesExactly(declared RuleModel) bool {
+	if r.contentKey() != declared.contentKey() {
+		return false
+	}
+	declaredAbsent := declared.Description.IsNull() || declared.Description.IsUnknown()
+	if r.Description == nil || declaredAbsent {
+		return r.Description == nil && declaredAbsent
+	}
+	return *r.Description == declared.Description.ValueString()
 }
 
 // VpnOwnershipLostWarnings warns for each re-sent rule that the group now
@@ -204,11 +222,13 @@ func VpnOwnershipLostWarnings(resent []ApiRule, after []ApiRule) diag.Diagnostic
 }
 
 // RulesToSet converts the API's rules into the set the schema declares. A rule
-// a VPN connection owns stays out, because the connection manages it.
-func RulesToSet(ctx context.Context, rules []ApiRule) (types.Set, diag.Diagnostics) {
+// a VPN connection owns stays out, because the connection manages it. It stays
+// in only when a declared rule matches it exactly, so a configuration that
+// copies the rule plans no change.
+func RulesToSet(ctx context.Context, rules []ApiRule, declared []RuleModel) (types.Set, diag.Diagnostics) {
 	models := make([]RuleModel, 0, len(rules))
 	for _, rule := range rules {
-		if rule.IsVpnOwned() {
+		if rule.IsVpnOwned() && !matchesAny(rule, declared) {
 			continue
 		}
 		models = append(models, RuleModel{
@@ -221,6 +241,15 @@ func RulesToSet(ctx context.Context, rules []ApiRule) (types.Set, diag.Diagnosti
 		})
 	}
 	return types.SetValueFrom(ctx, RuleObjectType(), models)
+}
+
+func matchesAny(rule ApiRule, declared []RuleModel) bool {
+	for _, candidate := range declared {
+		if rule.matchesExactly(candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 // RulesFromSet reads the rule blocks out of a plan or a state.
@@ -302,7 +331,7 @@ func MapNsgResponseToModel(ctx context.Context, response *NsgDetail, model Resou
 		}
 	}
 	if model.Rules.IsNull() || model.Rules.IsUnknown() {
-		rules, ruleDiags := RulesToSet(ctx, response.Rules)
+		rules, ruleDiags := RulesToSet(ctx, response.Rules, nil)
 		diags.Append(ruleDiags...)
 		model.Rules = rules
 	}
@@ -325,7 +354,9 @@ func RefreshNsgModelFromResponse(ctx context.Context, response *NsgDetail, model
 		model.Description = types.StringValue(*response.Nsg.Description)
 	}
 
-	rules, ruleDiags := RulesToSet(ctx, response.Rules)
+	declared, declaredDiags := RulesFromSet(ctx, model.Rules)
+	diags.Append(declaredDiags...)
+	rules, ruleDiags := RulesToSet(ctx, response.Rules, declared)
 	diags.Append(ruleDiags...)
 	if !diags.HasError() {
 		model.Rules = rules

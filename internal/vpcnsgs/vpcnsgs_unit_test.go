@@ -116,7 +116,7 @@ func TestMapNsgResponseToModelFillsComputedUnit(t *testing.T) {
 func TestRulesToSetMapsNullPortsUnit(t *testing.T) {
 	t.Parallel()
 
-	set, diags := RulesToSet(context.Background(), []ApiRule{unitTestIcmpRule()})
+	set, diags := RulesToSet(context.Background(), []ApiRule{unitTestIcmpRule()}, nil)
 	if diags.HasError() {
 		t.Fatalf("expected no diagnostics, got %v", diags)
 	}
@@ -144,7 +144,7 @@ func TestRulesToSetMapsNullPortsUnit(t *testing.T) {
 func TestRefreshNsgModelFromResponseReplacesRuleSetUnit(t *testing.T) {
 	t.Parallel()
 
-	stale, diags := RulesToSet(context.Background(), []ApiRule{unitTestIcmpRule()})
+	stale, diags := RulesToSet(context.Background(), []ApiRule{unitTestIcmpRule()}, nil)
 	if diags.HasError() {
 		t.Fatalf("expected no diagnostics, got %v", diags)
 	}
@@ -174,7 +174,7 @@ func TestRefreshNsgModelFromResponseReplacesRuleSetUnit(t *testing.T) {
 func TestRuleRequestBodiesOmitNullKeysUnit(t *testing.T) {
 	t.Parallel()
 
-	set, diags := RulesToSet(context.Background(), []ApiRule{unitTestIcmpRule(), unitTestTCPRule()})
+	set, diags := RulesToSet(context.Background(), []ApiRule{unitTestIcmpRule(), unitTestTCPRule()}, nil)
 	if diags.HasError() {
 		t.Fatalf("expected no diagnostics, got %v", diags)
 	}
@@ -242,7 +242,7 @@ func TestReplaceNsgRulesSendsCompleteSetUnit(t *testing.T) {
 	})
 	defer server.Close()
 
-	set, diags := RulesToSet(context.Background(), []ApiRule{unitTestIcmpRule(), unitTestTCPRule()})
+	set, diags := RulesToSet(context.Background(), []ApiRule{unitTestIcmpRule(), unitTestTCPRule()}, nil)
 	if diags.HasError() {
 		t.Fatalf("expected no diagnostics, got %v", diags)
 	}
@@ -251,7 +251,7 @@ func TestReplaceNsgRulesSendsCompleteSetUnit(t *testing.T) {
 		t.Fatalf("expected no diagnostics, got %v", diags)
 	}
 
-	if _, err := ReplaceNsgRules(gpcnClient, context.Background(), unitTestVpcID, unitTestNsgID, rules); err != nil {
+	if _, _, err := ReplaceNsgRules(gpcnClient, context.Background(), unitTestVpcID, unitTestNsgID, rules); err != nil {
 		t.Fatalf("expected the rules replace to succeed, got %v", err)
 	}
 
@@ -369,7 +369,7 @@ func TestDefaultNsgRulesWarningUnit(t *testing.T) {
 	if got := warning.Summary(); got != "Replacing the rules of the VPC default security group" {
 		t.Errorf("expected the ruled summary, got %q", got)
 	}
-	want := "Security group 'nsg-1' is the VPC's own default group. GPCN replaces the whole rule set on every change, so this apply deletes any rule this configuration does not list, including the two GPCN staged with the VPC: 'Default: allow all outbound traffic' and 'Default: allow traffic from this VPC'. Add them to the configuration to keep them."
+	want := "Security group 'nsg-1' is the VPC's own default group. GPCN replaces the whole rule set on every change, so this apply deletes any rule, except rules VPN connections manage, this configuration does not list, including the two GPCN staged with the VPC: 'Default: allow all outbound traffic' and 'Default: allow traffic from this VPC'. Add them to the configuration to keep them."
 	if got := warning.Detail(); got != want {
 		t.Errorf("expected the detail %q, got %q", want, got)
 	}
@@ -493,7 +493,7 @@ func TestCreateNsgCarriesOneCorrelationIDUnit(t *testing.T) {
 
 	replaceCtx := client.WithCorrelationID(context.Background())
 	callerID := client.GetCorrelationID(replaceCtx)
-	if _, err := ReplaceNsgRules(replaceClient, replaceCtx, unitTestVpcID, unitTestNsgID, nil); err != nil {
+	if _, _, err := ReplaceNsgRules(replaceClient, replaceCtx, unitTestVpcID, unitTestNsgID, nil); err != nil {
 		t.Fatalf("expected the rules replace to succeed, got %v", err)
 	}
 	handlerMu.Lock()
@@ -632,7 +632,7 @@ func TestRulesToSetDropsVpnOwnedRulesUnit(t *testing.T) {
 	rules[2].RemoteCidr = "192.168.21.0/24"
 	rules[3].RemoteCidr = "192.168.22.0/24"
 
-	set, diags := RulesToSet(context.Background(), rules)
+	set, diags := RulesToSet(context.Background(), rules, nil)
 	if diags.HasError() {
 		t.Fatalf("expected no diagnostics, got %v", diags)
 	}
@@ -675,6 +675,8 @@ func TestMergeVpnRuleBodiesUnit(t *testing.T) {
 	customer := configRule("icmp", "0.0.0.0/0", "ping", types.Int64Null(), types.Int64Null())
 	takeover := configRule("all", "192.168.20.0/24", "mine now", types.Int64Null(), types.Int64Null())
 
+	exact := configRule("all", "192.168.20.0/24", "VPN connection office (conn-1)", types.Int64Null(), types.Int64Null())
+
 	tests := []struct {
 		name       string
 		config     []RuleModel
@@ -682,6 +684,16 @@ func TestMergeVpnRuleBodiesUnit(t *testing.T) {
 		wantBodies []map[string]any
 		wantResent int
 	}{
+		{
+			name:   "config rule that copies the owned rule exactly is sent once and stays owned",
+			config: []RuleModel{customer, exact},
+			live:   []ApiRule{owned},
+			wantBodies: []map[string]any{
+				{"direction": "ingress", "protocol": "icmp", "remoteCidr": "0.0.0.0/0", "description": "ping"},
+				{"direction": "ingress", "protocol": "all", "remoteCidr": "192.168.20.0/24", "description": "VPN connection office (conn-1)"},
+			},
+			wantResent: 1,
+		},
 		{
 			name:   "owned rule is re-sent byte for byte",
 			config: []RuleModel{customer},
@@ -741,7 +753,7 @@ func TestVpnOwnershipLostWarningsUnit(t *testing.T) {
 	if diags.WarningsCount() != 1 || diags.HasError() {
 		t.Fatalf("expected one warning, got %v", diags)
 	}
-	const wantDetail = "Rule for 192.168.20.0/24 was re-sent unchanged but is no longer owned by VPN connection conn-1; it will stay when that connection is deleted."
+	const wantDetail = "Rule for 192.168.20.0/24 is no longer managed by VPN connection conn-1, so it's now part of this security group's rule set. Add it to this configuration to keep it; otherwise the next apply removes it."
 	if got := diags[0].Summary(); got != "GPCN™ VPN connection rule changed owner" {
 		t.Errorf("summary = %q", got)
 	}
@@ -751,5 +763,36 @@ func TestVpnOwnershipLostWarningsUnit(t *testing.T) {
 
 	if diags := VpnOwnershipLostWarnings([]ApiRule{owned}, []ApiRule{owned}); len(diags) != 0 {
 		t.Errorf("expected no warning while the owner holds, got %v", diags)
+	}
+}
+
+func TestRulesToSetKeepsDeclaredVpnRuleUnit(t *testing.T) {
+	t.Parallel()
+
+	owned := unitTestVpnRule(unitTestStringPointer("conn-1"))
+	declared := []RuleModel{{
+		Direction:    types.StringValue("ingress"),
+		Protocol:     types.StringValue("all"),
+		PortRangeMin: types.Int64Null(),
+		PortRangeMax: types.Int64Null(),
+		RemoteCidr:   types.StringValue("192.168.20.0/24"),
+		Description:  types.StringValue("VPN connection office (conn-1)"),
+	}}
+
+	set, diags := RulesToSet(context.Background(), []ApiRule{owned}, declared)
+	if diags.HasError() {
+		t.Fatalf("expected no diagnostics, got %v", diags)
+	}
+	if got := len(set.Elements()); got != 1 {
+		t.Errorf("an owned rule the configuration copies exactly stays in the set, got %d rules", got)
+	}
+
+	declared[0].Description = types.StringValue("mine")
+	set, diags = RulesToSet(context.Background(), []ApiRule{owned}, declared)
+	if diags.HasError() {
+		t.Fatalf("expected no diagnostics, got %v", diags)
+	}
+	if got := len(set.Elements()); got != 0 {
+		t.Errorf("a different description leaves the owned rule out, got %d rules", got)
 	}
 }

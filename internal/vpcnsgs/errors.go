@@ -22,6 +22,7 @@ const (
 	ErrDetailNsgCreatedJobFailed      = "security group %s was created and is in state, but its creation job failed: %s. Terraform has marked the group tainted, so the next apply deletes it and creates it again."
 	ErrDetailNsgCreatedReadBackFailed = "security group %s was created and is in state, but reading it back failed: %s. Terraform has marked the group tainted, so the next apply deletes it and creates it again."
 	ErrDetailNoNsgIDInCreate          = "the create response carried no security group ID"
+	ErrDetailNsgTooManyRules          = "This security group would hold %d rules: %d from this configuration and %d managed by VPN connections. A security group holds at most 100."
 	ErrDetailImportIDFormat           = "Import ID must be '<vpc_id>/<nsg_id>'. A security group is read through its VPC, so the VPC ID cannot be derived from the group ID alone. Got: '%s'"
 )
 
@@ -47,11 +48,13 @@ const (
 // deletion the configuration prevents.
 const (
 	WarnSummaryDefaultNsgRulesReplaced = "Replacing the rules of the VPC default security group"
-	WarnDetailDefaultNsgRulesReplaced  = "Security group '%s' is the VPC's own default group. GPCN replaces the whole rule set on every change, so this apply deletes any rule this configuration does not list, including the two GPCN staged with the VPC: 'Default: allow all outbound traffic' and 'Default: allow traffic from this VPC'. Add them to the configuration to keep them."
+	WarnDetailDefaultNsgRulesReplaced  = "Security group '%s' is the VPC's own default group. GPCN replaces the whole rule set on every change, so this apply deletes any rule, except rules VPN connections manage, this configuration does not list, including the two GPCN staged with the VPC: 'Default: allow all outbound traffic' and 'Default: allow traffic from this VPC'. Add them to the configuration to keep them."
 )
 
 // Warning strings for a VPN rule that lost its owner during a rules replace.
 const (
 	WarnSummaryNsgVpnRuleOwnerChanged = "GPCN™ VPN connection rule changed owner"
-	WarnDetailNsgVpnRuleOwnerChanged  = "Rule for %s was re-sent unchanged but is no longer owned by VPN connection %s; it will stay when that connection is deleted."
+	WarnDetailNsgVpnRuleOwnerChanged  = "Rule for %s is no longer managed by VPN connection %s, so it's now part of this security group's rule set. Add it to this configuration to keep it; otherwise the next apply removes it."
+
+	WarnSummaryNsgVpnRuleCheckSkipped = "GPCN™ VPN connection rule check skipped"
 )
