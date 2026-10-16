@@ -284,19 +284,26 @@ func (r *vpcVpnConnectionResource) Create(ctx context.Context, req resource.Crea
 		return
 	}
 
-	connectionID, createErr := vpcvpnconnections.CreateVpnConnection(r.client, ctx, vpcID, body)
+	connectionID, rowMayExist, createErr := vpcvpnconnections.CreateVpnConnection(r.client, ctx, vpcID, body)
+	if connectionID == "" && rowMayExist {
+		// A 5xx answer or a lost answer hides the outcome of the POST. The row
+		// can exist, and its name is unique within the VPC.
+		adopted, findErr := vpcvpnconnections.FindVpnConnectionByName(r.client, ctx, vpcID, plan.Name.ValueString())
+		if findErr == nil && adopted != nil {
+			tflog.Info(ctx, vpcvpnconnections.LogAdoptedVpnConnectionByName)
+			connectionID = adopted.ID
+		}
+	}
 	if connectionID == "" {
 		resp.Diagnostics.AddError(vpcvpnconnections.ErrSummaryUnableToCreateVpnConn, vpcvpngateways.ErrorDetail(createErr))
 		return
 	}
 
-	// The API accepted the POST, so a row exists even when its job failed.
-	// Terraform taints the resource when state is saved with an error.
+	// The API holds a row, even when its job failed. Terraform taints the
+	// resource when state is saved with an error.
 	detail, getErr := vpcvpnconnections.GetVpnConnection(r.client, ctx, vpcID, connectionID)
-	if createErr != nil || getErr != nil {
-		if getErr == nil {
-			r.saveCreated(ctx, resp, plan, detail)
-		}
+	if getErr != nil {
+		resp.Diagnostics.Append(resp.State.Set(ctx, vpcvpnconnections.ModelFromPlanWithID(plan, connectionID))...)
 		failure := createErr
 		if failure == nil {
 			failure = getErr
@@ -310,16 +317,30 @@ func (r *vpcVpnConnectionResource) Create(ctx context.Context, req resource.Crea
 		return
 	}
 
-	if detail.State == vpcvpnconnections.StateFailed {
-		reason := vpcvpnconnections.ErrDetailCreateFailedNoReason
-		if detail.FailureReason != nil && *detail.FailureReason != "" {
-			reason = *detail.FailureReason
-		}
-		resp.Diagnostics.AddError(vpcvpnconnections.ErrSummaryUnableToCreateVpnConn, reason)
+	if createErr != nil || detail.State == vpcvpnconnections.StateFailed {
+		resp.Diagnostics.AddError(vpcvpnconnections.ErrSummaryUnableToCreateVpnConn, connectionCreateFailureDetail(detail, createErr))
 		return
 	}
 
 	tflog.Info(ctx, vpcvpnconnections.LogSuccessfullyFinishedCreateGPCNVpnConnection)
+}
+
+// connectionCreateFailureDetail prefers the failure reason of the row. The
+// error text follows after a blank line when it differs.
+func connectionCreateFailureDetail(detail *vpcvpnconnections.ApiVpnConnectionDetail, createErr error) string {
+	reason := ""
+	if detail.FailureReason != nil {
+		reason = *detail.FailureReason
+	}
+	switch {
+	case reason == "" && createErr == nil:
+		return vpcvpnconnections.ErrDetailCreateFailedNoReason
+	case reason == "":
+		return vpcvpngateways.ErrorDetail(createErr)
+	case createErr == nil || vpcvpngateways.ErrorDetail(createErr) == reason:
+		return reason
+	}
+	return reason + "\n\n" + vpcvpngateways.ErrorDetail(createErr)
 }
 
 func (r *vpcVpnConnectionResource) saveCreated(ctx context.Context, resp *resource.CreateResponse, plan vpcvpnconnections.ResourceModel, detail *vpcvpnconnections.ApiVpnConnectionDetail) {

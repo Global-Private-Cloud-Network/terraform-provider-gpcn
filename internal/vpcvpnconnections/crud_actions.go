@@ -10,6 +10,7 @@ import (
 	"net/http"
 
 	"terraform-provider-gpcn/internal/client"
+	"terraform-provider-gpcn/internal/vpcvpngateways"
 
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 )
@@ -85,43 +86,83 @@ func marshalBody(body map[string]any) (*bytes.Reader, error) {
 	return bytes.NewReader(encoded), nil
 }
 
-// CreateVpnConnection posts the VPN connection and polls its job. It returns
-// the connection ID as soon as the API accepts the POST, even when the job then
-// fails, so the caller can read the row the job left. The ID is empty when the
-// API refused the POST.
-func CreateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string, body map[string]any) (string, error) {
+// CreateVpnConnection posts the VPN connection once and polls its job. It
+// returns the connection ID as soon as the API accepts the POST, even when the
+// job then fails, so the caller can read the row the job left. The ID is empty
+// when the answer carried none. The second result is true when a row may exist
+// whatever the ID says: a 5xx answer or a transport error hides the outcome of
+// the POST, and the caller then looks for the row by name.
+func CreateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string, body map[string]any) (string, bool, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingCreateVpnConnection, vpcID))
 
 	reader, err := marshalBody(body)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, collectionPath(vpcID), reader)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
-	raw, err := sendAccepted(gpcnClient, request)
+	raw, err := sendAccepted(gpcnClient.DoOnce, request)
 	if err != nil {
-		return "", err
+		return "", vpcvpngateways.RowMayExist(err), err
 	}
 	var accepted createVpnConnectionResponse
 	if err := json.Unmarshal(raw, &accepted); err != nil {
-		return "", err
-	}
-	if accepted.Data.JobID == "" {
-		return "", errors.New(ErrDetailNoJobIDInResponse)
+		return "", true, err
 	}
 	connectionID := accepted.Data.VpnConnection.ID
+	if accepted.Data.JobID == "" {
+		return connectionID, true, errors.New(ErrDetailNoJobIDInResponse)
+	}
 	if connectionID == "" {
-		return "", errors.New(ErrDetailNoConnectionID)
+		return "", true, errors.New(ErrDetailNoConnectionID)
 	}
 	tflog.Info(ctx, LogIssuedCreateVpnConnectionJob)
 
 	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionCreateVpnConnection, accepted.Data.JobID); err != nil {
-		return connectionID, fmt.Errorf(ErrFmtCreatePollingFailed, err)
+		return connectionID, true, fmt.Errorf(ErrFmtCreatePollingFailed, err)
 	}
-	return connectionID, nil
+	return connectionID, true, nil
+}
+
+type listVpnConnectionsResponse struct {
+	Data []ApiVpnConnection `json:"data"`
+	Meta struct {
+		HasNextPage bool `json:"hasNextPage"`
+	} `json:"meta"`
+}
+
+// FindVpnConnectionByName pages through the connections of the VPC and returns
+// the one with the given name, or nil. Names are unique within a VPC.
+func FindVpnConnectionByName(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, name string) (*ApiVpnConnection, error) {
+	tflog.Info(ctx, fmt.Sprintf(LogStartingFindVpnConnection, vpcID))
+
+	for page := 1; page <= listMaxPages; page++ {
+		target := fmt.Sprintf("%s?page=%d&limit=%d", collectionPath(vpcID), page, listPageSize)
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+		if err != nil {
+			return nil, err
+		}
+		raw, err := sendAccepted(gpcnClient.DoWithRetry, request)
+		if err != nil {
+			return nil, err
+		}
+		var parsed listVpnConnectionsResponse
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			return nil, err
+		}
+		for index := range parsed.Data {
+			if parsed.Data[index].Name == name {
+				return &parsed.Data[index], nil
+			}
+		}
+		if !parsed.Meta.HasNextPage {
+			return nil, nil
+		}
+	}
+	return nil, nil
 }
 
 // GetVpnConnection reads the detail of a VPN connection. A 404 reads as
@@ -205,8 +246,8 @@ func DeleteVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 }
 
 // sendAccepted sends a request and returns the body of the 2xx answer.
-func sendAccepted(gpcnClient *client.GpcnClient, request *http.Request) ([]byte, error) {
-	response, err := gpcnClient.DoWithRetry(request)
+func sendAccepted(send func(*http.Request) (*http.Response, error), request *http.Request) ([]byte, error) {
+	response, err := send(request)
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +258,7 @@ func sendAccepted(gpcnClient *client.GpcnClient, request *http.Request) ([]byte,
 // issueJob sends a request whose 202 carries a job ID in the singular job
 // envelope.
 func issueJob(gpcnClient *client.GpcnClient, request *http.Request) (string, error) {
-	raw, err := sendAccepted(gpcnClient, request)
+	raw, err := sendAccepted(gpcnClient.DoWithRetry, request)
 	if err != nil {
 		return "", err
 	}

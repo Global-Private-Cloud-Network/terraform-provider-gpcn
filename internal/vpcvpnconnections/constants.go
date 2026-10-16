@@ -69,3 +69,10 @@ const (
 
 // ImportIDSeparator joins the VPC ID and the connection ID in an import ID.
 const ImportIDSeparator = "/"
+
+// The list route pages at 100 rows at most. A VPC holds a handful of
+// connections, so the page cap only stops a loop that never ends.
+const (
+	listPageSize = 100
+	listMaxPages = 20
+)

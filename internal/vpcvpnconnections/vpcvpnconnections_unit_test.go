@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"terraform-provider-gpcn/internal/client"
@@ -422,7 +423,7 @@ func TestVpcVpnConnectionUnitCreateVpnConnectionReturnsIDWhenTheJobFails(t *test
 		}
 	})
 
-	id, err := CreateVpnConnection(gpcnClient, context.Background(), testVpcID, map[string]any{"name": "x"})
+	id, _, err := CreateVpnConnection(gpcnClient, context.Background(), testVpcID, map[string]any{"name": "x"})
 	if id != testConnID {
 		t.Errorf("Expected the connection ID with the failed job, got %q", id)
 	}
@@ -440,9 +441,9 @@ func TestVpcVpnConnectionUnitCreateVpnConnectionRefusalKeepsMessageAndReturnsNoI
 		fmt.Fprintf(w, `{"success":false,"message":%q,"error":{"code":"Duplicate Resource","statusCode":409,"details":null}}`, message)
 	})
 
-	id, err := CreateVpnConnection(gpcnClient, context.Background(), testVpcID, map[string]any{"name": "x"})
-	if id != "" {
-		t.Errorf("Expected no ID for a refused POST, got %q", id)
+	id, rowMayExist, err := CreateVpnConnection(gpcnClient, context.Background(), testVpcID, map[string]any{"name": "x"})
+	if id != "" || rowMayExist {
+		t.Errorf("Expected no ID and no row for a refused POST, got %q and %v", id, rowMayExist)
 	}
 	if detail := vpcvpngateways.ErrorDetail(err); detail != message {
 		t.Errorf("Expected %q, got %q", message, detail)
@@ -497,5 +498,49 @@ func TestVpcVpnConnectionUnitDeleteVpnConnectionNotFoundIsReadable(t *testing.T)
 
 	if err := DeleteVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID); !client.IsNotFound(err) {
 		t.Errorf("Expected a not-found error, got %v", err)
+	}
+}
+
+func TestVpcVpnConnectionUnitCreateVpnConnection5xxReportsAMaybeRow(t *testing.T) {
+	t.Parallel()
+	var posts atomic.Int32
+	gpcnClient := apiServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		posts.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		fmt.Fprint(w, `{"success":false,"message":"bad gateway"}`)
+	})
+
+	id, rowMayExist, err := CreateVpnConnection(gpcnClient, context.Background(), testVpcID, map[string]any{"name": "x"})
+	if err == nil || id != "" || !rowMayExist {
+		t.Errorf("Expected an error, no ID and a maybe-row, got %q, %v, %v", id, rowMayExist, err)
+	}
+	if got := posts.Load(); got != 1 {
+		t.Errorf("Expected the POST once, got %d", got)
+	}
+}
+
+func TestVpcVpnConnectionUnitFindVpnConnectionByNameReadsEveryPage(t *testing.T) {
+	t.Parallel()
+	gpcnClient := apiServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/resource/vpcs/"+testVpcID+"/vpn-connections" {
+			testutil.LogUnexpectedRequest(t, w, r)
+			return
+		}
+		page := r.URL.Query().Get("page")
+		rows := []map[string]any{{"id": "other", "name": "first"}}
+		if page == "2" {
+			rows = []map[string]any{{"id": testConnID, "name": "wanted"}}
+		}
+		testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": rows, "meta": map[string]any{"hasNextPage": page == "1"}})
+	})
+
+	found, err := FindVpnConnectionByName(gpcnClient, context.Background(), testVpcID, "wanted")
+	if err != nil || found == nil || found.ID != testConnID {
+		t.Fatalf("Expected the connection on page 2, got %+v, %v", found, err)
+	}
+	missing, err := FindVpnConnectionByName(gpcnClient, context.Background(), testVpcID, "absent")
+	if err != nil || missing != nil {
+		t.Errorf("Expected no connection, got %+v, %v", missing, err)
 	}
 }

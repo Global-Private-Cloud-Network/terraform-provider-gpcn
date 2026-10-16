@@ -5,6 +5,7 @@ package vpcvpnconnections
 const (
 	LogStartingCreateVpnConnection        = "Starting CreateVpnConnection for VPC ID %s"
 	LogIssuedCreateVpnConnectionJob       = "Successfully issued the job to create the GPCN VPN connection. Beginning long-polling to check the status"
+	LogStartingFindVpnConnection          = "Starting FindVpnConnectionByName for VPC ID %s"
 	LogStartingGetVpnConnection           = "Starting GetVpnConnection for VPC ID %s, VPN connection ID %s"
 	LogSuccessfullyRetrievedVpnConnection = "Successfully retrieved VPN connection ID %s"
 	LogStartingUpdateVpnConnection        = "Starting UpdateVpnConnection for VPN connection ID %s"
@@ -23,5 +24,8 @@ const (
 	LogVpnConnectionNotFoundRemoving               = "The GPCN VPN connection was not found. Removing it from the state"
 	LogVpnConnectionAlreadyDeleted                 = "The GPCN VPN connection was already deleted"
 	LogVpnGatewayGoneKeepingID                     = "The VPN gateway of the VPC was not found. Keeping vpn_gateway_id from the state"
+	LogAdoptedVpnConnectionByName                  = "The POST ended without a usable answer, but the VPN connection exists. Adopting it by name"
+	LogUnappliedPlansUpdate                        = "The VPN connection settings are not running, so the plan updates it"
+	LogFailedWithoutUpdatePlansReplacement         = "The VPN connection failed and the API refuses an update, so the plan replaces it"
 	LogUpdateSendsNoRequest                        = "No attribute that the API stores changed. Reading the VPN connection without a PUT"
 )

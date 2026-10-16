@@ -93,6 +93,22 @@ func MapConnectionToModel(ctx context.Context, response *ApiVpnConnectionDetail,
 	return model, diags
 }
 
+// ModelFromPlanWithID returns the planned model with the connection ID, for a
+// create that found the row but could not read it. The computed attributes the
+// plan left unknown become null, because state cannot hold an unknown. The next
+// refresh fills them.
+func ModelFromPlanWithID(plan ResourceModel, connectionID string) ResourceModel {
+	plan.ID = types.StringValue(connectionID)
+	plan.PskWo = types.StringNull()
+	plan.State = types.StringNull()
+	plan.FailureReason = types.StringNull()
+	plan.DesiredApplied = types.BoolNull()
+	plan.GatewayKind = types.StringNull()
+	plan.LocalEndpointAddress = types.StringNull()
+	plan.LocalNetworks = types.ListNull(types.StringType)
+	return plan
+}
+
 // nonNilStrings turns a missing array into an empty one, so the value is known.
 func nonNilStrings(values []string) []string {
 	if values == nil {

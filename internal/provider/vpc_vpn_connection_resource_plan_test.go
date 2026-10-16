@@ -40,6 +40,8 @@ const (
 	vpnConnPlanTestConflict    = "A change to this VPN connection is already in progress; wait for it to finish."
 	vpnConnPlanTestFailReason  = "VPN connection creation failed; delete it and create it again"
 	vpnConnPlanTestJobFailText = "Applying the VPN connection change failed; your saved settings are kept - update to retry"
+	vpnConnPlanTestBadGateway  = "The upstream VPN service answered badly."
+	vpnConnPlanTestGetRefused  = "You may not read this VPN connection."
 	gpcnVpcVpnConnectionTest   = "gpcn_vpc_vpn_connection.test"
 )
 
@@ -58,10 +60,14 @@ type vpnConnPlanTestServerState struct {
 	// deleteConflict answers the next DELETE with a 409 carrying this message.
 	deleteConflict string
 	desiredApplied bool
-	postBodies     []map[string]any
-	postRaw        []string
-	putBodies      []map[string]any
-	deleteCount    int
+	// postStatus makes the POST insert the row and then answer with this status.
+	postStatus int
+	// itemStatus makes the detail GET answer with this status.
+	itemStatus  int
+	postBodies  []map[string]any
+	postRaw     []string
+	putBodies   []map[string]any
+	deleteCount int
 }
 
 func (s *vpnConnPlanTestServerState) set(update func(*vpnConnPlanTestServerState)) {
@@ -156,17 +162,35 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			state.postRaw = append(state.postRaw, raw.String())
 			state.exists = true
 			state.row = vpnConnPlanTestRowFromBody(body, state.createdState)
+			postStatus := state.postStatus
 			state.mu.Unlock()
+			if postStatus != 0 {
+				writeVpnConnPlanTestError(w, postStatus, "Internal Server Error", vpnConnPlanTestBadGateway)
+				return
+			}
 			testutil.WriteJSONResponse(w, map[string]any{
 				"success": true, "message": "Operation initiated successfully", "meta": nil,
 				"data": map[string]any{"jobId": "job-create", "vpnConnection": map[string]any{"id": vpnConnPlanTestConnID, "state": "creating"}},
 			})
+		case r.Method == http.MethodGet && r.URL.Path == collection:
+			state.mu.Lock()
+			rows := []map[string]any{}
+			if state.exists {
+				rows = append(rows, state.detail())
+			}
+			state.mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "", "data": rows, "meta": map[string]any{"hasNextPage": false}})
 		case r.Method == http.MethodGet && r.URL.Path == item:
 			state.mu.Lock()
 			exists := state.exists
+			itemStatus := state.itemStatus
 			detail := state.detail()
 			detail["desiredApplied"] = state.desiredApplied
 			state.mu.Unlock()
+			if itemStatus != 0 {
+				writeVpnConnPlanTestError(w, itemStatus, "Insufficient Permissions", vpnConnPlanTestGetRefused)
+				return
+			}
 			if !exists {
 				writeVpnConnPlanTestError(w, http.StatusNotFound, "Resource Not Found", "VPN connection not found")
 				return
@@ -295,6 +319,14 @@ func vpnConnRefusal(message string) *regexp.Regexp {
 	return regexp.MustCompile(strings.ReplaceAll(regexp.QuoteMeta(message), " ", `\s+`))
 }
 
+// vpnConnDetailOrder builds the pattern for a detail that starts with first and
+// carries then after it. The prefix of each wrapped line may hold the box
+// character that Terraform draws.
+func vpnConnDetailOrder(first, then string) *regexp.Regexp {
+	words := func(text string) string { return strings.ReplaceAll(regexp.QuoteMeta(text), " ", `[\s│]+`) }
+	return regexp.MustCompile(`(?s)Unable to create GPCN™ VPN connection.*resource "gpcn_vpc_vpn_connection" "test" \{[\s│]+` + words(first) + `.*` + words(then))
+}
+
 func TestVpcVpnConnectionResourceCreate(t *testing.T) {
 	t.Parallel()
 	server, state := startVpnConnPlanMockServer(t)
@@ -359,7 +391,7 @@ func TestVpcVpnConnectionResourceCreateFailed(t *testing.T) {
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			{Config: config, ExpectError: vpnConnRefusal(vpnConnPlanTestFailReason)},
+			{Config: config, ExpectError: vpnConnDetailOrder(vpnConnPlanTestFailReason, "")},
 			{
 				PreConfig: func() {
 					state.set(func(s *vpnConnPlanTestServerState) {
@@ -385,15 +417,80 @@ func TestVpcVpnConnectionResourceCreateFailed(t *testing.T) {
 func TestVpcVpnConnectionResourceCreateJobFailedKeepsRow(t *testing.T) {
 	t.Parallel()
 	server, state := startVpnConnPlanMockServer(t)
-	state.set(func(s *vpnConnPlanTestServerState) { s.failJob = true })
+	state.set(func(s *vpnConnPlanTestServerState) { s.failJob = true; s.createdState = "failed" })
 	config := newVpnConnPlanTestConfig().render(server.URL)
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			{Config: config, ExpectError: vpnConnRefusal(vpnConnPlanTestJobFailText)},
+			{Config: config, ExpectError: vpnConnDetailOrder(vpnConnPlanTestFailReason, vpnConnPlanTestJobFailText)},
 			{
-				PreConfig: func() { state.set(func(s *vpnConnPlanTestServerState) { s.failJob = false }) },
+				PreConfig: func() {
+					state.set(func(s *vpnConnPlanTestServerState) {
+						s.failJob = false
+						s.createdState = "connecting"
+						s.row["state"] = "connecting"
+						s.row["failureReason"] = nil
+					})
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcVpnConnectionTest, plancheck.ResourceActionReplace),
+					},
+				},
+			},
+		},
+	})
+}
+
+// A 5xx answer to the POST can hide a row the API did create. The POST goes out
+// once, the create finds the row by name, and it saves the row with the error.
+func TestVpcVpnConnectionResourceCreate5xxAdoptsByName(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	state.set(func(s *vpnConnPlanTestServerState) { s.postStatus = http.StatusBadGateway })
+	config := newVpnConnPlanTestConfig().render(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config, ExpectError: vpnConnRefusal(vpnConnPlanTestBadGateway)},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					if len(state.postBodies) != 1 {
+						t.Errorf("Expected the POST to be sent once, got %d", len(state.postBodies))
+					}
+					state.postStatus = 0
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcVpnConnectionTest, plancheck.ResourceActionReplace),
+					},
+				},
+			},
+		},
+	})
+}
+
+// A job that ended, followed by a detail read that fails, still leaves a row.
+// The create saves the planned values and the ID with the error, so Terraform
+// taints the resource.
+func TestVpcVpnConnectionResourcePostJobGetFailsKeepsRow(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	state.set(func(s *vpnConnPlanTestServerState) { s.itemStatus = http.StatusForbidden })
+	config := newVpnConnPlanTestConfig().render(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config, ExpectError: vpnConnRefusal(vpnConnPlanTestGetRefused)},
+			{
+				PreConfig: func() { state.set(func(s *vpnConnPlanTestServerState) { s.itemStatus = 0 }) },
 				Config:    config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
