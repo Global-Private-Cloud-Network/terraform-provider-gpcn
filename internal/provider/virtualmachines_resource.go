@@ -213,27 +213,27 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 							Computed:    true,
 						},
 						"network_name": schema.StringAttribute{
-							Description:        "Always null. GPCN™ networking is VPC-based",
-							DeprecationMessage: "network_name is deprecated and always null: GPCN™ networking is VPC-based.",
+							Description:        "Deprecated. Null for VPC and L2 interfaces; GPCN™ has retired legacy networks",
+							DeprecationMessage: "network_name is deprecated: GPCN™ has retired legacy networks, so it's null for every VPC and L2 interface.",
 							Computed:           true,
 						},
 						"network_id": schema.StringAttribute{
-							Description:        "Always null. GPCN™ networking is VPC-based",
-							DeprecationMessage: "network_id is deprecated and always null: GPCN™ networking is VPC-based.",
+							Description:        "Deprecated. Null for VPC and L2 interfaces; GPCN™ has retired legacy networks",
+							DeprecationMessage: "network_id is deprecated: GPCN™ has retired legacy networks, so it's null for every VPC and L2 interface.",
 							Computed:           true,
 						},
 						"cidr_block": schema.StringAttribute{
-							Description: "The CIDR block of the attached legacy network or VPC subnet. Null when world is 'l2'",
+							Description: "The CIDR block of the attached VPC subnet. Null when world is 'l2'",
 							Computed:    true,
 						},
 						"gateway_ip": schema.StringAttribute{
-							Description:        "Always null. GPCN™ networking is VPC-based",
-							DeprecationMessage: "gateway_ip is deprecated and always null: GPCN™ networking is VPC-based.",
+							Description:        "Deprecated. Null for VPC and L2 interfaces; GPCN™ has retired legacy networks",
+							DeprecationMessage: "gateway_ip is deprecated: GPCN™ has retired legacy networks, so it's null for every VPC and L2 interface.",
 							Computed:           true,
 						},
 						"network_type": schema.StringAttribute{
-							Description:        "Always null. GPCN™ networking is VPC-based",
-							DeprecationMessage: "network_type is deprecated and always null: GPCN™ networking is VPC-based.",
+							Description:        "Deprecated. Null for VPC and L2 interfaces; GPCN™ has retired legacy networks",
+							DeprecationMessage: "network_type is deprecated: GPCN™ has retired legacy networks, so it's null for every VPC and L2 interface.",
 							Computed:           true,
 						},
 						"vpc_subnet_id": schema.StringAttribute{

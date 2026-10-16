@@ -9,8 +9,8 @@ import (
 )
 
 // TestVirtualMachineNetworkInterfaceDeprecations pins the four notices byte for byte.
-// Terraform prints each notice when a configuration reads the attribute, so a reworded
-// notice is a user-facing change.
+// The generated docs show each notice. Terraform core does not print one for a
+// computed nested attribute, so a reworded notice changes the docs only.
 func TestVirtualMachineNetworkInterfaceDeprecations(t *testing.T) {
 	t.Parallel()
 
@@ -23,10 +23,10 @@ func TestVirtualMachineNetworkInterfaceDeprecations(t *testing.T) {
 	}
 
 	want := map[string]string{
-		"network_name": "network_name is deprecated and always null: GPCN™ networking is VPC-based.",
-		"network_id":   "network_id is deprecated and always null: GPCN™ networking is VPC-based.",
-		"gateway_ip":   "gateway_ip is deprecated and always null: GPCN™ networking is VPC-based.",
-		"network_type": "network_type is deprecated and always null: GPCN™ networking is VPC-based.",
+		"network_name": "network_name is deprecated: GPCN™ has retired legacy networks, so it's null for every VPC and L2 interface.",
+		"network_id":   "network_id is deprecated: GPCN™ has retired legacy networks, so it's null for every VPC and L2 interface.",
+		"gateway_ip":   "gateway_ip is deprecated: GPCN™ has retired legacy networks, so it's null for every VPC and L2 interface.",
+		"network_type": "network_type is deprecated: GPCN™ has retired legacy networks, so it's null for every VPC and L2 interface.",
 	}
 	for name, message := range want {
 		attribute, found := interfaces.NestedObject.Attributes[name]

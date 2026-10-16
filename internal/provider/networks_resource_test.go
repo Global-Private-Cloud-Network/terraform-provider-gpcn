@@ -86,7 +86,7 @@ func TestNetworkResourceSchemaCarriesDeprecation(t *testing.T) {
 	schemaResponse := &fwresource.SchemaResponse{}
 	NewNetworksResource().Schema(context.Background(), fwresource.SchemaRequest{}, schemaResponse)
 
-	const want = "gpcn_network is deprecated: GPCN™ networking is VPC-based. Use gpcn_vpc, gpcn_vpc_subnet and gpcn_l2_segment. Existing networks can still be read and destroyed."
+	const want = "gpcn_network is deprecated: GPCN™ has retired legacy networks. Use gpcn_vpc, gpcn_vpc_subnet and gpcn_l2_segment. Terraform removes a network from state once the API no longer serves it."
 	if got := schemaResponse.Schema.DeprecationMessage; got != want {
 		t.Errorf("DeprecationMessage = %q, want %q", got, want)
 	}

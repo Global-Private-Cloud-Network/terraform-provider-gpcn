@@ -210,7 +210,7 @@ func (d *datacenterDataSource) Schema(_ context.Context, _ datasource.SchemaRequ
 						},
 						"vpn_capable": schema.BoolAttribute{
 							Computed:    true,
-							Description: "Whether you can create site-to-site VPN gateways and connections in this data center",
+							Description: "Whether you can create site-to-site VPN gateways and connections in this data center.",
 						}},
 				},
 			},
