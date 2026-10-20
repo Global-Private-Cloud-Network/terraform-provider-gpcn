@@ -624,7 +624,11 @@ func TestVpcVpnGatewayResourceCreateRefusedWritesNoState(t *testing.T) {
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			{Config: config, ExpectError: vpnGatewayRefusal(vpnGatewayPlanTestExists)},
+			{
+				Config: config,
+				ExpectError: vpnGatewayDetailOrder(vpnGatewayPlanTestExists,
+					"Import it with: terraform import gpcn_vpc_vpn_gateway.<name> "+vpnGatewayPlanTestVpcID),
+			},
 			{
 				PreConfig: func() {
 					state.mu.Lock()

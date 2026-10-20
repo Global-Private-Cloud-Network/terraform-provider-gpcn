@@ -142,7 +142,11 @@ func (r *vpcVpnGatewayResource) Create(ctx context.Context, req resource.CreateR
 	requestStart := time.Now()
 	rowMayExist, accepted, createErr := vpcvpngateways.CreateVpnGateway(r.client, ctx, vpcID)
 	if createErr != nil && !rowMayExist {
-		resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToCreateVpnGW, vpcvpngateways.ErrorDetail(createErr))
+		detail := vpcvpngateways.ErrorDetail(createErr)
+		if code, _ := vpcvpngateways.ParseAPIError(createErr); code == vpcvpngateways.CodeGatewayExists {
+			detail += "\n\n" + fmt.Sprintf(vpcvpngateways.ErrFmtNotOwnRow, vpcID)
+		}
+		resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToCreateVpnGW, detail)
 		return
 	}
 
