@@ -14,6 +14,9 @@ const (
 // operator about it.
 const StateFailed = "failed"
 
+// MaxRulesPerNsg is the most rules one group holds, VPN-owned rules included.
+const MaxRulesPerNsg = 100
+
 // Rule vocabularies. The API stores the wildcard protocol as "all".
 var (
 	RuleDirections = []string{"ingress", "egress"}

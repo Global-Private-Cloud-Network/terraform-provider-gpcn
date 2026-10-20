@@ -47,7 +47,7 @@ func (r *networksResource) Metadata(_ context.Context, req resource.MetadataRequ
 
 // The notice names the three replacements. A deprecation with no destination leaves the
 // reader to guess which resource to move to.
-const networkDeprecationMessage = "gpcn_network is deprecated: GPCN™ networking is VPC-based. Use gpcn_vpc, gpcn_vpc_subnet and gpcn_l2_segment. Existing networks can still be read and destroyed."
+const networkDeprecationMessage = "gpcn_network is deprecated: GPCN™ has retired legacy networks. Use gpcn_vpc, gpcn_vpc_subnet and gpcn_l2_segment. Terraform removes a network from state once the API no longer serves it."
 
 // Schema defines the schema for the resource.
 func (r *networksResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {

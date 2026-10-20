@@ -109,10 +109,134 @@ func DefaultNsgRulesWarning(isDefault bool, nsgID string) diag.Diagnostics {
 	return diags
 }
 
-// RulesToSet converts the API's rules into the set the schema declares.
-func RulesToSet(ctx context.Context, rules []ApiRule) (types.Set, diag.Diagnostics) {
+// IsVpnOwned reports whether a site-to-site VPN connection owns the rule.
+func (r ApiRule) IsVpnOwned() bool {
+	return r.VpnConnectionID != nil && *r.VpnConnectionID != ""
+}
+
+// ruleContentKey is the identity the API gives a rule: direction, protocol,
+// both ports and the remote CIDR. The description is not part of it.
+func ruleContentKey(direction, protocol string, portMin, portMax *int64, remoteCidr string) string {
+	return fmt.Sprintf("%s:%s:%s:%s:%s", direction, protocol, portKey(portMin), portKey(portMax), remoteCidr)
+}
+
+func portKey(port *int64) string {
+	if port == nil {
+		return ""
+	}
+	return fmt.Sprintf("%d", *port)
+}
+
+func (r ApiRule) contentKey() string {
+	return ruleContentKey(r.Direction, r.Protocol, r.PortRangeMin, r.PortRangeMax, r.RemoteCidr)
+}
+
+func (r RuleModel) contentKey() string {
+	var portMin, portMax *int64
+	if !r.PortRangeMin.IsNull() && !r.PortRangeMin.IsUnknown() {
+		portMin = r.PortRangeMin.ValueInt64Pointer()
+	}
+	if !r.PortRangeMax.IsNull() && !r.PortRangeMax.IsUnknown() {
+		portMax = r.PortRangeMax.ValueInt64Pointer()
+	}
+	return ruleContentKey(r.Direction.ValueString(), r.Protocol.ValueString(), portMin, portMax, r.RemoteCidr.ValueString())
+}
+
+// apiRuleBody renders a rule read from the API as a write body. It leaves out
+// the owner, which the API ignores on write, and the null keys.
+func apiRuleBody(rule ApiRule) map[string]any {
+	body := map[string]any{
+		"direction":  rule.Direction,
+		"protocol":   rule.Protocol,
+		"remoteCidr": rule.RemoteCidr,
+	}
+	if rule.PortRangeMin != nil {
+		body["portRangeMin"] = *rule.PortRangeMin
+	}
+	if rule.PortRangeMax != nil {
+		body["portRangeMax"] = *rule.PortRangeMax
+	}
+	if rule.Description != nil {
+		body["description"] = *rule.Description
+	}
+	return body
+}
+
+// MergeVpnRuleBodies builds the rules replace body: the configured rules plus
+// every rule a VPN connection owns. A configured rule with an owned rule's
+// content and a different description wins, because the customer takes the rule
+// over. A configured rule that matches an owned rule exactly, description
+// included, stays the connection's. The second result is the owned rules that
+// stay owned. A configured copy that differs only in description warns, because
+// the connection stops managing that rule.
+func MergeVpnRuleBodies(config []RuleModel, live []ApiRule) ([]map[string]any, []ApiRule, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	bodies := RuleRequestBodies(config)
+	configured := make(map[string]RuleModel, len(config))
+	for _, rule := range config {
+		configured[rule.contentKey()] = rule
+	}
+
+	var resent []ApiRule
+	for _, rule := range live {
+		if !rule.IsVpnOwned() {
+			continue
+		}
+		if declared, taken := configured[rule.contentKey()]; taken {
+			if rule.matchesExactly(declared) {
+				resent = append(resent, rule)
+			} else {
+				diags.AddWarning(WarnSummaryNsgVpnRuleOwnerChanged, fmt.Sprintf(WarnDetailNsgVpnRuleCopyDiffers, rule.RemoteCidr, *rule.VpnConnectionID))
+			}
+			continue
+		}
+		bodies = append(bodies, apiRuleBody(rule))
+		resent = append(resent, rule)
+	}
+	return bodies, resent, diags
+}
+
+// matchesExactly reports whether a declared rule has the rule's content and
+// its description.
+func (r ApiRule) matchesExactly(declared RuleModel) bool {
+	if r.contentKey() != declared.contentKey() {
+		return false
+	}
+	declaredAbsent := declared.Description.IsNull() || declared.Description.IsUnknown()
+	if r.Description == nil || declaredAbsent {
+		return r.Description == nil && declaredAbsent
+	}
+	return *r.Description == declared.Description.ValueString()
+}
+
+// VpnOwnershipLostWarnings warns for each re-sent rule that the group now
+// shows without an owner. The API relabels a rule to the customer when a
+// rename of the connection races the replace. A connection deleted, or a peer
+// network dropped, between the read and the replace has the same effect: the
+// resend puts the released rule back as the group's own.
+func VpnOwnershipLostWarnings(resent []ApiRule, after []ApiRule) diag.Diagnostics {
+	var diags diag.Diagnostics
+	for _, sent := range resent {
+		for _, rule := range after {
+			if rule.contentKey() == sent.contentKey() && !rule.IsVpnOwned() {
+				diags.AddWarning(WarnSummaryNsgVpnRuleOwnerChanged, fmt.Sprintf(WarnDetailNsgVpnRuleOwnerChanged, sent.RemoteCidr, *sent.VpnConnectionID))
+				break
+			}
+		}
+	}
+	return diags
+}
+
+// RulesToSet converts the API's rules into the set the schema declares. A rule
+// a VPN connection owns stays out, because the connection manages it. It stays
+// in only when a declared rule matches it exactly, so a configuration that
+// copies the rule plans no change.
+func RulesToSet(ctx context.Context, rules []ApiRule, declared []RuleModel) (types.Set, diag.Diagnostics) {
 	models := make([]RuleModel, 0, len(rules))
 	for _, rule := range rules {
+		if rule.IsVpnOwned() && !matchesAny(rule, declared) {
+			continue
+		}
 		models = append(models, RuleModel{
 			Direction:    types.StringValue(rule.Direction),
 			Protocol:     types.StringValue(rule.Protocol),
@@ -123,6 +247,15 @@ func RulesToSet(ctx context.Context, rules []ApiRule) (types.Set, diag.Diagnosti
 		})
 	}
 	return types.SetValueFrom(ctx, RuleObjectType(), models)
+}
+
+func matchesAny(rule ApiRule, declared []RuleModel) bool {
+	for _, candidate := range declared {
+		if rule.matchesExactly(candidate) {
+			return true
+		}
+	}
+	return false
 }
 
 // RulesFromSet reads the rule blocks out of a plan or a state.
@@ -204,7 +337,7 @@ func MapNsgResponseToModel(ctx context.Context, response *NsgDetail, model Resou
 		}
 	}
 	if model.Rules.IsNull() || model.Rules.IsUnknown() {
-		rules, ruleDiags := RulesToSet(ctx, response.Rules)
+		rules, ruleDiags := RulesToSet(ctx, response.Rules, nil)
 		diags.Append(ruleDiags...)
 		model.Rules = rules
 	}
@@ -227,7 +360,9 @@ func RefreshNsgModelFromResponse(ctx context.Context, response *NsgDetail, model
 		model.Description = types.StringValue(*response.Nsg.Description)
 	}
 
-	rules, ruleDiags := RulesToSet(ctx, response.Rules)
+	declared, declaredDiags := RulesFromSet(ctx, model.Rules)
+	diags.Append(declaredDiags...)
+	rules, ruleDiags := RulesToSet(ctx, response.Rules, declared)
 	diags.Append(ruleDiags...)
 	if !diags.HasError() {
 		model.Rules = rules

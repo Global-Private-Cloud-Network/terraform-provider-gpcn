@@ -8,7 +8,7 @@ description: |-
 
 # {{.Name}} ({{.Type}})
 
-~> **Deprecated** `gpcn_network` is deprecated in favour of `gpcn_vpc`, `gpcn_vpc_subnet` and `gpcn_l2_segment`. New networks can no longer be created. An existing network is still read, renamed and destroyed by this resource.
+~> **Deprecated** `gpcn_network` is deprecated in favour of `gpcn_vpc`, `gpcn_vpc_subnet` and `gpcn_l2_segment`. GPCN™ has retired legacy networks: the API no longer serves them, so Terraform removes a `gpcn_network` from state on the next refresh. The resource stays, deprecated, until version 2.0.
 
 {{ .Description | trimspace }}
 
@@ -22,33 +22,10 @@ description: |-
 {{- end }}
 
 {{ .SchemaMarkdown | trimspace }}
-{{- if or .HasImport .HasImportIDConfig .HasImportIdentityConfig }}
 
 ## Import
 
-Import is supported using the following syntax:
-{{- end }}
-{{- if .HasImportIdentityConfig }}
-
-In Terraform v1.12.0 and later, the [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used with the `identity` attribute, for example:
-
-{{tffile .ImportIdentityConfigFile }}
-
-{{ .IdentitySchemaMarkdown | trimspace }}
-{{- end }}
-{{- if .HasImportIDConfig }}
-
-In Terraform v1.5.0 and later, the [`import` block](https://developer.hashicorp.com/terraform/language/import) can be used with the `id` attribute, for example:
-
-{{tffile .ImportIDConfigFile }}
-{{- end }}
-{{- if .HasImport }}
-
-The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
-
-{{codefile "shell" .ImportFile }}
-{{- end }}
-
+Import is no longer possible. GPCN™ has retired legacy networks, and the API no longer serves them.
 
 ## Migrating an adopted custom network
 

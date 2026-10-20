@@ -33,7 +33,7 @@ const (
 	ErrDetailUnableToUpdateNetworkWithID  = "Unable to update GPCN Network with ID '%s'"
 	ErrDetailUnableToDeleteNetworkWithID  = "Unable to delete GPCN Network with ID '%s'"
 
-	ErrDetailNetworkCreateRetired = "GPCN has moved to VPC networking. Create a gpcn_vpc and a gpcn_vpc_subnet for routed networking, or a gpcn_l2_segment for a layer-2 network. Existing gpcn_network resources can still be read and destroyed."
+	ErrDetailNetworkCreateRetired = "GPCN™ has moved to VPC networking. Create a gpcn_vpc and a gpcn_vpc_subnet for routed networking, or a gpcn_l2_segment for a layer-2 network. Existing networks are removed from state once the API no longer serves them."
 )
 
 const (

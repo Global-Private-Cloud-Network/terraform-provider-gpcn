@@ -432,6 +432,7 @@ func (m *vpcMock) detailBody() map[string]any {
 	data["subnetCount"] = 0
 	data["nsgCount"] = 1
 	data["publicIpCount"] = 0
+	data["vpnCapable"] = true
 	return map[string]any{"success": true, "message": "", "meta": nil, "data": data}
 }
 
@@ -564,6 +565,7 @@ func TestVpcResourcePlanCreatesRenamesAndDestroys(t *testing.T) {
 					resource.TestCheckResourceAttr(gpcnVpcTest, "cidr", vpcPlanTestCidr),
 					resource.TestCheckResourceAttr(gpcnVpcTest, "description", ""),
 					resource.TestCheckResourceAttr(gpcnVpcTest, "status", "active"),
+					resource.TestCheckResourceAttr(gpcnVpcTest, "vpn_capable", "true"),
 					resource.TestCheckResourceAttr(gpcnVpcTest, "dns_nameservers.#", "2"),
 					resource.TestCheckResourceAttr(gpcnVpcTest, "dns_nameservers.0", "8.8.8.8"),
 					resource.TestCheckResourceAttr(gpcnVpcTest, "dns_nameservers.1", "1.1.1.1"),
@@ -584,6 +586,7 @@ func TestVpcResourcePlanCreatesRenamesAndDestroys(t *testing.T) {
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVpcTest, "name", "vpc-plan-b"),
+					resource.TestCheckResourceAttr(gpcnVpcTest, "vpn_capable", "true"),
 					resource.TestCheckResourceAttr(gpcnVpcTest, "dns_nameservers.#", "2"),
 				),
 			},

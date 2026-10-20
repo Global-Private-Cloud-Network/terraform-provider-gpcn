@@ -1,3 +1,20 @@
+## 1.6.0 (Unreleased)
+
+FEATURES:
+
+- **New Resource `gpcn_vpc_vpn_gateway`**: the VPN gateway of a VPC, which holds the address your peer gateway connects to for site-to-site VPN. A VPC has one. `kind` reports whether the data center provides it as a `router` or an `appliance`, and `address` is the VPN gateway address. A gateway that fails to build is replaced on the next apply. Import takes the ID of the VPC.
+- **New Resource `gpcn_vpc_vpn_connection`**: an encrypted IPsec tunnel between a VPC and a peer gateway at your site. Set the pre-shared key with `psk`, or with the write-only `psk_wo` and `psk_wo_version` (Terraform 1.11 or later). GPCN™ never returns the key. Write each `peer_cidrs` block as its network address. Every attribute except `vpc_id` and `vpn_gateway_id` changes in place. Import takes `<vpc_id>/<connection_id>`.
+
+ENHANCEMENTS:
+
+- **Security Group**: rules that a site-to-site VPN connection adds to a group no longer appear in the `rule` set, and the provider sends them back unchanged whenever it replaces the group's rules. A rule that loses its connection during a replace produces a warning.
+- **VPC, Data Centers**: new computed `vpn_capable` on `gpcn_vpc` and on each data center of `gpcn_datacenters`, which also filters on `vpn_capable`. It reports whether the data center offers site-to-site VPN; creating a VPN gateway or VPN connection also needs your organization's Site-to-Site VPN feature.
+
+DEPRECATIONS:
+
+- **Virtual Machine**: `network_name`, `network_id`, `gateway_ip` and `network_type` in `network_interfaces` are deprecated. GPCN™ has retired legacy networks, so they are null for every VPC and L2 interface.
+- **Network**: GPCN™ has retired legacy networks. The API no longer serves them, so a `gpcn_network` leaves state on the next refresh. The resource stays, deprecated, until 2.0.
+
 ## 1.5.1 (October 14, 2026)
 
 DOCUMENTATION:

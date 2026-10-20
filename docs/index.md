@@ -6,7 +6,7 @@ description: |-
 
 # GPCN™ Provider
 
-The GPCN™ (Global Private Cloud Network™) provider lets you manage your GPCN™ infrastructure with Terraform. You'll describe VPCs, subnets, security groups, elastic IPs, L2 segments, virtual machines (VMs), GPU instances, volumes, SSH keys and resource groups in configuration, and Terraform builds and changes them for you.
+The GPCN™ (Global Private Cloud Network™) provider lets you manage your GPCN™ infrastructure with Terraform. You'll describe VPCs, subnets, security groups, elastic IPs, L2 segments, VPN gateways and VPN connections, virtual machines (VMs), GPU instances, volumes, SSH keys and resource groups in configuration, and Terraform builds and changes them for you.
 
 This page walks you through installing the provider and giving it an API key. By the end you'll have a configuration that Terraform can plan.
 

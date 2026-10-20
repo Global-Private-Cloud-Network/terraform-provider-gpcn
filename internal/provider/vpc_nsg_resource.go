@@ -46,7 +46,7 @@ func (r *vpcNsgResource) Metadata(_ context.Context, req resource.MetadataReques
 // Schema defines the schema for the resource.
 func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
-		Description: "Manages a security group inside a GPCN™ VPC, with its rules inline. GPCN™ replaces the whole rule set on every change and identifies a rule by its content, so the rules belong to this resource rather than to one of their own. The API key needs vpc:read to read a group, and vpc-nsg:create, vpc-nsg:update and vpc-nsg:delete to manage one.",
+		Description: "Manages a security group inside a GPCN™ VPC, with its rules inline. GPCN™ replaces the whole rule set on every change and identifies a rule by its content, so the rules belong to this resource rather than to one of their own. The API key needs vpc:read to read a group, and vpc-nsg:create, vpc-nsg:update and vpc-nsg:delete to manage one. Rules a site-to-site VPN connection adds to the group are managed by that connection: they don't appear in the rule set, and the provider keeps them when it updates the group. A rule you copy exactly, description included, stays the connection's. If a VPN connection adds its rule while this resource updates the group, the group can lose that rule, and the connection won't add it back. To restore it, replace the connection, declare the rule in this resource, or recreate the group and then make a full update of the connection. Renaming a connection changes its rules' descriptions, so an exact copy stops matching and becomes part of this group's rule set. Removing an exact copy from the configuration plans its removal, but the rule stays, because the connection still manages it.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Unique identifier for the security group in UUID format",
@@ -91,7 +91,7 @@ func (r *vpcNsgResource) Schema(_ context.Context, _ resource.SchemaRequest, res
 				Computed:    true,
 			},
 			"rule_count": schema.Int64Attribute{
-				Description: "The number of rules the security group holds",
+				Description: "The number of rules the security group holds, including the rules that VPN connections manage",
 				Computed:    true,
 			},
 			"subnet_count": schema.Int64Attribute{
@@ -325,6 +325,7 @@ func (r *vpcNsgResource) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 	}
 
+	var replaced *vpcnsgs.NsgDetail
 	// The rules route is a full replace, so one changed rule sends them all.
 	// Sending them when nothing changed would file a job for no work.
 	if !plan.Rules.Equal(state.Rules) {
@@ -333,7 +334,13 @@ func (r *vpcNsgResource) Update(ctx context.Context, req resource.UpdateRequest,
 		if resp.Diagnostics.HasError() {
 			return
 		}
-		if err := vpcnsgs.ReplaceNsgRules(r.client, ctx, vpcID, nsgID, rules); err != nil {
+		replacedDetail, replaceDiags, err := vpcnsgs.ReplaceNsgRules(r.client, ctx, vpcID, nsgID, rules)
+		replaced = replacedDetail
+		resp.Diagnostics.Append(replaceDiags...)
+		if resp.Diagnostics.HasError() {
+			return
+		}
+		if err != nil {
 			resp.Diagnostics.AddError(
 				vpcnsgs.ErrSummaryUnableToUpdateNsg,
 				fmt.Sprintf(vpcnsgs.ErrDetailUnableToUpdateNsgWithID, nsgID)+": "+err.Error(),
@@ -342,13 +349,17 @@ func (r *vpcNsgResource) Update(ctx context.Context, req resource.UpdateRequest,
 		}
 	}
 
-	detail, err := vpcnsgs.GetNsg(r.client, ctx, vpcID, nsgID)
-	if err != nil {
-		resp.Diagnostics.AddError(
-			vpcnsgs.ErrSummaryUnableToGetNsg,
-			fmt.Sprintf(vpcnsgs.ErrDetailUnableToGetNsgWithID, nsgID)+": "+err.Error(),
-		)
-		return
+	detail := replaced
+	if detail == nil {
+		var err error
+		detail, err = vpcnsgs.GetNsg(r.client, ctx, vpcID, nsgID)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				vpcnsgs.ErrSummaryUnableToGetNsg,
+				fmt.Sprintf(vpcnsgs.ErrDetailUnableToGetNsgWithID, nsgID)+": "+err.Error(),
+			)
+			return
+		}
 	}
 
 	plan, diags = vpcnsgs.MapNsgResponseToModel(ctx, detail, plan)

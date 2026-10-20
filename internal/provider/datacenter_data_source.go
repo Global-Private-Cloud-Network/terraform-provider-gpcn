@@ -36,6 +36,7 @@ type datacenterDataSourceModel struct {
 	CustomImages types.Bool   `tfsdk:"custom_images"`
 	VPCCapable   types.Bool   `tfsdk:"vpc_capable"`
 	L2Capable    types.Bool   `tfsdk:"l2_capable"`
+	VPNCapable   types.Bool   `tfsdk:"vpn_capable"`
 	DataCenters  types.List   `tfsdk:"datacenters"`
 }
 
@@ -54,6 +55,7 @@ type datacenterRow struct {
 	CustomImages        bool   `json:"customImages"`
 	VPCCapable          bool   `json:"vpcCapable"`
 	L2Capable           bool   `json:"l2Capable"`
+	VPNCapable          *bool  `json:"vpnCapable"`
 }
 
 type datacenterMeta struct {
@@ -82,6 +84,7 @@ type datacenterDataResponseTF struct {
 	CustomImages        types.Bool   `tfsdk:"custom_images"`
 	VPCCapable          types.Bool   `tfsdk:"vpc_capable"`
 	L2Capable           types.Bool   `tfsdk:"l2_capable"`
+	VPNCapable          types.Bool   `tfsdk:"vpn_capable"`
 }
 
 func (o datacenterDataResponseTF) AttrTypes() map[string]attr.Type {
@@ -100,6 +103,7 @@ func (o datacenterDataResponseTF) AttrTypes() map[string]attr.Type {
 		"custom_images":        types.BoolType,
 		"vpc_capable":          types.BoolType,
 		"l2_capable":           types.BoolType,
+		"vpn_capable":          types.BoolType,
 	}
 }
 
@@ -138,6 +142,10 @@ func (d *datacenterDataSource) Schema(_ context.Context, _ datasource.SchemaRequ
 			"l2_capable": schema.BoolAttribute{
 				Optional:    true,
 				Description: "Filter data centers to only those that offer layer-2 segments.",
+			},
+			"vpn_capable": schema.BoolAttribute{
+				Optional:    true,
+				Description: "Filter data centers to only those that offer site-to-site VPN.",
 			},
 			"datacenters": schema.ListNestedAttribute{
 				Computed:    true,
@@ -199,6 +207,10 @@ func (d *datacenterDataSource) Schema(_ context.Context, _ datasource.SchemaRequ
 						"l2_capable": schema.BoolAttribute{
 							Computed:    true,
 							Description: "Whether layer-2 segments are available in this data center.",
+						},
+						"vpn_capable": schema.BoolAttribute{
+							Computed:    true,
+							Description: "Whether the data center offers site-to-site VPN. Creating a VPN gateway or VPN connection also needs your organization's Site-to-Site VPN feature.",
 						}},
 				},
 			},
@@ -253,6 +265,9 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 	}
 	if !state.L2Capable.IsNull() {
 		otherFilters += "&l2Capable=" + strconv.FormatBool(state.L2Capable.ValueBool())
+	}
+	if !state.VPNCapable.IsNull() {
+		otherFilters += "&vpnCapable=" + strconv.FormatBool(state.VPNCapable.ValueBool())
 	}
 
 	query := otherFilters
@@ -315,6 +330,7 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 			CustomImages:        types.BoolValue(datacenter.CustomImages),
 			VPCCapable:          types.BoolValue(datacenter.VPCCapable),
 			L2Capable:           types.BoolValue(datacenter.L2Capable),
+			VPNCapable:          types.BoolPointerValue(datacenter.VPNCapable),
 		})
 	}
 

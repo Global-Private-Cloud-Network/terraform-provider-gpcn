@@ -129,6 +129,7 @@ output "l2_capable_datacenter_ids" {
 - `name` (String) Filter data centers by name
 - `region_name` (String) Filter data centers by region name within a country. (e.g., 'East', 'West', 'Central')
 - `vpc_capable` (Boolean) Filter data centers to only those that offer VPC networking.
+- `vpn_capable` (Boolean) Filter data centers to only those that offer site-to-site VPN.
 
 ### Read-Only
 
@@ -153,3 +154,4 @@ Read-Only:
 - `region_id` (Number) Numeric identifier of the region where the data center is located.
 - `region_name` (String) Name of the region where the data center is located.
 - `vpc_capable` (Boolean) Whether VPC networking is available in this data center.
+- `vpn_capable` (Boolean) Whether the data center offers site-to-site VPN. Creating a VPN gateway or VPN connection also needs your organization's Site-to-Site VPN feature.
