@@ -201,3 +201,87 @@ func TestDoOnceRetriesOnly429(t *testing.T) {
 		t.Errorf("expected the body on the second request, got %q", bodies)
 	}
 }
+
+// TestDoOnceStopsAtMaxRetries proves a 429 on every attempt ends after
+// MaxRetries+1 requests with the 429 error.
+func TestDoOnceStopsAtMaxRetries(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts.Add(1)
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"message":"slow down"}`))
+	}))
+	t.Cleanup(server.Close)
+
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.MaxRetries = 2
+	cfg.InitialRetryDelay = time.Millisecond
+	cfg.MaxRetryDelay = time.Millisecond
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/test", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := gpcnClient.DoOnce(req)
+	if err == nil {
+		_ = resp.Body.Close()
+		t.Fatal("expected the 429 error, got a response")
+	}
+	var httpErr *client.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusTooManyRequests {
+		t.Fatalf("expected an HTTP 429 error, got %v", err)
+	}
+	if got := int(attempts.Load()); got != cfg.MaxRetries+1 {
+		t.Fatalf("expected %d requests, got %d", cfg.MaxRetries+1, got)
+	}
+}
+
+// TestDoOnceHonoursRetryAfter proves the wait after a 429 is the interval the
+// API asks for, not the computed backoff.
+func TestDoOnceHonoursRetryAfter(t *testing.T) {
+	var attempts atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if attempts.Add(1) == 1 {
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"message":"slow down"}`))
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	t.Cleanup(server.Close)
+
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.MaxRetries = 1
+	cfg.InitialRetryDelay = 3 * time.Second
+	cfg.MaxRetryDelay = 3 * time.Second
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/test", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	start := time.Now()
+	resp, err := gpcnClient.DoOnce(req)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("expected the second request to succeed, got %v", err)
+	}
+	_ = resp.Body.Close()
+	if elapsed < time.Second {
+		t.Errorf("elapsed = %s, want at least the requested 1s", elapsed)
+	}
+	if elapsed >= cfg.InitialRetryDelay {
+		t.Errorf("elapsed = %s, want less than the computed backoff %s", elapsed, cfg.InitialRetryDelay)
+	}
+}

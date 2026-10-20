@@ -381,3 +381,118 @@ func TestVpcVpnGatewayUnitCreatedSince(t *testing.T) {
 		}
 	}
 }
+
+func TestVpcVpnGatewayUnitRowMayExist(t *testing.T) {
+	t.Parallel()
+	for name, test := range map[string]struct {
+		err  error
+		want bool
+	}{
+		"a transport error":      {errors.New("connection reset"), true},
+		"a wrapped plain error":  {fmt.Errorf("send: %w", errors.New("EOF")), true},
+		"a 5xx answer":           {&client.HTTPError{StatusCode: http.StatusBadGateway}, true},
+		"a 4xx refusal":          {&client.HTTPError{StatusCode: http.StatusConflict}, false},
+		"a wrapped 4xx refusal":  {fmt.Errorf("send: %w", &client.HTTPError{StatusCode: http.StatusForbidden}), false},
+		"a wrapped 5xx answer":   {fmt.Errorf("send: %w", &client.HTTPError{StatusCode: http.StatusServiceUnavailable}), true},
+		"a 429 rate limit":       {&client.HTTPError{StatusCode: http.StatusTooManyRequests}, false},
+		"the retry limit ending": {fmt.Errorf("%w: %w", client.ErrMaxRetriesExceeded, errors.New("EOF")), true},
+	} {
+		if got := RowMayExist(test.err); got != test.want {
+			t.Errorf("%s: RowMayExist = %v, want %v", name, got, test.want)
+		}
+	}
+}
+
+// pollCountServer answers every job poll with a job that does not end, and
+// counts the polls.
+func pollCountServer(t *testing.T) (*client.GpcnClient, *atomic.Int32) {
+	t.Helper()
+	var polls atomic.Int32
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost || r.URL.Path != "/v1/resource/jobs/" {
+				testutil.LogUnexpectedRequest(t, w, r)
+				return
+			}
+			polls.Add(1)
+			testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
+				Success: true,
+				Data:    client.JobStatusDataResponse{Jobs: []client.JobResponse{{JobID: "job-live", Stage: "running"}}},
+			})
+		},
+	})
+	return gpcnClient, &polls
+}
+
+// The adopted job shares the deadline of the request. A request that started
+// longer ago than the polling timeout leaves no time, so the job is read once
+// and the poll then stops without waiting.
+func TestVpcVpnGatewayUnitPollAdoptedJobSpentDeadlineReadsOnce(t *testing.T) {
+	t.Parallel()
+	gpcnClient, polls := pollCountServer(t)
+	gpcnClient.Config().PollingTimeout = time.Minute
+
+	started := time.Now()
+	PollAdoptedJob(gpcnClient, context.Background(), ActionCreateVpnGateway, ptr("job-live"), time.Now().Add(-time.Hour))
+
+	if got := polls.Load(); got != 1 {
+		t.Errorf("Expected one poll with a spent deadline, got %d", got)
+	}
+	if elapsed := time.Since(started); elapsed >= time.Second {
+		t.Errorf("Expected no backoff wait with a spent deadline, took %s", elapsed)
+	}
+}
+
+func TestVpcVpnGatewayUnitPollAdoptedJobWithoutJobDoesNotPoll(t *testing.T) {
+	t.Parallel()
+	gpcnClient, polls := pollCountServer(t)
+
+	PollAdoptedJob(gpcnClient, context.Background(), ActionCreateVpnGateway, nil, time.Now())
+	PollAdoptedJob(gpcnClient, context.Background(), ActionCreateVpnGateway, ptr(""), time.Now())
+
+	if got := polls.Load(); got != 0 {
+		t.Errorf("Expected no poll without an active job, got %d", got)
+	}
+}
+
+// creatingRow is a gateway that has not finished its create.
+func creatingRow() string {
+	return `{"success":true,"message":"","data":{"id":"` + testGatewayID + `","vpcId":"` + testVpcID +
+		`","kind":"router","state":"creating","address":null,"reservedBlock":null,"failureReason":null,` +
+		`"activeJobId":null,"createdAt":"2026-01-02T15:04:05Z","updatedAt":"2026-01-02T15:04:05Z"}}`
+}
+
+// A delete that waits for a create shares the deadline of the removal. A
+// create that never ends ends the delete with the removal timeout error.
+func TestVpcVpnGatewayUnitDeleteWhileCreatingTimesOut(t *testing.T) {
+	t.Parallel()
+	var deletes atomic.Int32
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.Method {
+			case http.MethodDelete:
+				deletes.Add(1)
+				w.WriteHeader(http.StatusConflict)
+				fmt.Fprint(w, `{"success":false,"message":"The VPN gateway is still being created.","error":{"code":"VPN_GATEWAY_BUSY_CREATING","statusCode":409,"details":null}}`)
+			case http.MethodGet:
+				fmt.Fprint(w, creatingRow())
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+
+	err := deleteVpnGateway(gpcnClient, context.Background(), testVpcID, time.Millisecond, 20*time.Millisecond)
+	if !errors.Is(err, ErrRemovalTimeout) {
+		t.Fatalf("Expected ErrRemovalTimeout, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "'creating'") {
+		t.Errorf("Expected the timeout error to name the creating state, got %q", err.Error())
+	}
+	if got := deletes.Load(); got != 1 {
+		t.Errorf("Expected one DELETE before the timeout, got %d", got)
+	}
+}
