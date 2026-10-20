@@ -47,7 +47,7 @@ A VPN connection opens the tunnel's traffic for you. For each peer network, it a
 
 `gpcn_vpc_nsg` leaves those rules out of its `rule` set, so they never show up as a difference, and it sends them back unchanged whenever it replaces a group's rules. If you write a rule with the same direction, protocol, ports and remote CIDR yourself, give it a description of your own. It then becomes yours, and the connection no longer manages it or removes it. A rule you copy exactly, description included, stays the connection's.
 
-If you create a connection, or change its peer networks, while an update of a `gpcn_vpc_nsg` is replacing that group's rules, the group can lose the connection's rule, and the connection won't add it back. To restore it, replace the connection with `terraform apply -replace`, recreate the group, or declare the rule in `gpcn_vpc_nsg`, which makes it part of that group's rule set.
+If you create a connection, or change its peer networks, while an update of a `gpcn_vpc_nsg` is replacing that group's rules, the group can lose the connection's rule, and the connection won't add it back. To restore it, replace the connection with `terraform apply -replace`, declare the rule in `gpcn_vpc_nsg`, which makes it part of that group's rule set, or recreate the group and then make a full update of the connection.
 
 A security group you bind to a subnet after the connection exists doesn't get the rules right away. It gets them on the connection's next full update, which is any change other than `name` or `description` alone. Raising `psk_wo_version` or editing a peer network counts, for example.
 
@@ -69,7 +69,7 @@ If `desired_applied` is false, the settings GPCN™ saved aren't the ones the da
 
 A connection that failed and can't be updated is replaced: Terraform deletes it and creates it again.
 
-If a create times out or you interrupt it, Terraform marks the connection tainted, and the next apply replaces it. To keep it instead, wait until GPCN™ finishes, then run `terraform untaint <address>`.
+If a create times out, you interrupt it, or GPCN™ gives an unclear answer, Terraform marks the connection tainted, and the next apply replaces it. To keep it instead, wait until GPCN™ finishes, then run `terraform untaint <address>`.
 
 ## Limits
 
