@@ -31,6 +31,7 @@ const (
 	ErrDetailPskPattern           = "%s must be 16–64 printable ASCII characters with no spaces, double quotes or backslashes"
 	ErrDetailMultipleOf           = "%s must be a multiple of %d"
 	ErrFmtNotOwnRow               = "A VPN connection named %s already exists on this VPC that this apply didn't create. Import it with: terraform import gpcn_vpc_vpn_connection.<name> %s/%s"
+	ErrFmtMayCommitLater          = "GPCN™ may still finish creating this connection. Before you apply again, check this VPC for a connection named %s. If it's there, import it with: terraform import gpcn_vpc_vpn_connection.<name> %s/<connection_id>"
 	ErrDetailLookupFailed         = "A VPN connection may have been created; check the VPC and import it if so."
 	ErrFmtWaitForRemovalFailed    = "wait for VPN connection removal failed: %w"
 	ErrFmtRemovalTimeout          = "VPN connection %s: still in state '%s' after %s"

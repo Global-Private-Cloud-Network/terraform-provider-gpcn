@@ -357,6 +357,8 @@ func (r *vpcVpnConnectionResource) Create(ctx context.Context, req resource.Crea
 		failure := vpcvpngateways.ErrorDetail(createErr)
 		if lookupErr != nil {
 			failure += "\n\n" + vpcvpnconnections.ErrDetailLookupFailed + "\n\n" + vpcvpngateways.ErrorDetail(lookupErr)
+		} else if rowMayExist {
+			failure += "\n\n" + fmt.Sprintf(vpcvpnconnections.ErrFmtMayCommitLater, plan.Name.ValueString(), vpcID)
 		}
 		resp.Diagnostics.AddError(vpcvpnconnections.ErrSummaryUnableToCreateVpnConn, failure)
 		return

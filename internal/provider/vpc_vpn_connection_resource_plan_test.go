@@ -680,6 +680,27 @@ func TestVpcVpnConnectionResourceCreate5xxLookupFailsNamesTheRisk(t *testing.T) 
 	})
 }
 
+// A 5xx answer with no row found by name does not prove that no row exists, so
+// the error tells the operator to look before applying again.
+func TestVpcVpnConnectionResourceCreate5xxNoRowNamesTheImport(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	state.set(func(s *vpnConnPlanTestServerState) {
+		s.keepRow = true
+		s.postStatus = http.StatusBadGateway
+	})
+	config := newVpnConnPlanTestConfig().render(server.URL)
+	mayCommit := "GPCN™ may still finish creating this connection. Before you apply again, check this VPC for a connection named branch-office. " +
+		"If it's there, import it with: terraform import gpcn_vpc_vpn_connection.<name> " + vpnConnPlanTestVpcID + "/<connection_id>"
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config, ExpectError: vpnConnDetailOrder(vpnConnPlanTestBadGateway, mayCommit)},
+		},
+	})
+}
+
 // An adopted row that still runs a job is read again once the job ends.
 func TestVpcVpnConnectionResourceCreate5xxPollsAdoptedJob(t *testing.T) {
 	t.Parallel()
