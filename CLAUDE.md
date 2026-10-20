@@ -165,6 +165,7 @@ The `internal/client/` package provides a configurable HTTP client:
 
 - `test.yml` (PRs and `main`): lint, unit tests with terraform installed, build, and a docs-drift check that regenerates docs and fails on any difference.
 - `security.yml`: govulncheck and CodeQL, on PRs, `main`, and weekly.
+- Both skip every job on a draft pull request and run in full when it is marked ready for review, opened or reopened non-draft, or pushed to while not a draft. Pushes to `main`, the weekly scan and manual runs are not gated.
 - `release.yml`: goreleaser on `v*` tags, with GPG-signed checksums.
 - Dependabot: gomod at `/` and GitHub Actions, both weekly.
 - Acceptance tests never run in CI.
