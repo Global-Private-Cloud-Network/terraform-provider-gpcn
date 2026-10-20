@@ -244,6 +244,7 @@ func TestVpcNsgResourceKeepsVpnRules(t *testing.T) {
 				Config: vpcNsgVpnAccTestConfig(datacenterID, suffix, "https"),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "rule.#", "1"),
+					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "rule_count", "2"),
 				),
 			},
 			{
@@ -253,7 +254,10 @@ func TestVpcNsgResourceKeepsVpnRules(t *testing.T) {
 						plancheck.ExpectResourceAction(gpcnVpcNsgTest, plancheck.ResourceActionUpdate),
 					},
 				},
-				Check: resource.TestCheckResourceAttr(gpcnVpcNsgTest, "rule.#", "1"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "rule.#", "1"),
+					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "rule_count", "2"),
+				),
 			},
 			{
 				Config:   vpcNsgVpnAccTestConfig(datacenterID, suffix, "https from anywhere"),

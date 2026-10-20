@@ -369,7 +369,7 @@ func TestDefaultNsgRulesWarningUnit(t *testing.T) {
 	if got := warning.Summary(); got != "Replacing the rules of the VPC default security group" {
 		t.Errorf("expected the ruled summary, got %q", got)
 	}
-	want := "Security group 'nsg-1' is the VPC's own default group. GPCN replaces the whole rule set on every change, so this apply deletes any rule this configuration does not list, except rules VPN connections manage, including the two GPCN staged with the VPC: 'Default: allow all outbound traffic' and 'Default: allow traffic from this VPC'. Add them to the configuration to keep them."
+	want := "Security group 'nsg-1' is the VPC's own default group. GPCN replaces the whole rule set on every change, so this apply deletes any rule this configuration does not list, including the two GPCN staged with the VPC: 'Default: allow all outbound traffic' and 'Default: allow traffic from this VPC'. Add them to the configuration to keep them. Rules that VPN connections manage are kept."
 	if got := warning.Detail(); got != want {
 		t.Errorf("expected the detail %q, got %q", want, got)
 	}
@@ -683,6 +683,7 @@ func TestMergeVpnRuleBodiesUnit(t *testing.T) {
 		live       []ApiRule
 		wantBodies []map[string]any
 		wantResent int
+		wantWarn   int
 	}{
 		{
 			name:   "config rule that copies the owned rule exactly is sent once and stays owned",
@@ -714,6 +715,7 @@ func TestMergeVpnRuleBodiesUnit(t *testing.T) {
 				{"direction": "ingress", "protocol": "all", "remoteCidr": "192.168.20.0/24", "description": "mine now"},
 			},
 			wantResent: 0,
+			wantWarn:   1,
 		},
 		{
 			name:       "no owned rules leaves the body equal to the config",
@@ -727,7 +729,16 @@ func TestMergeVpnRuleBodiesUnit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			bodies, resent := MergeVpnRuleBodies(tt.config, tt.live)
+			bodies, resent, diags := MergeVpnRuleBodies(tt.config, tt.live)
+			if got := diags.WarningsCount(); got != tt.wantWarn {
+				t.Errorf("warnings = %d, want %d: %v", got, tt.wantWarn, diags)
+			}
+			if tt.wantWarn == 1 {
+				const wantDetail = "Rule for 192.168.20.0/24 in this configuration doesn't match the rule VPN connection conn-1 manages, so this apply makes it part of this security group's rule set, and the connection won't manage it again."
+				if got := diags[0].Detail(); got != wantDetail {
+					t.Errorf("detail = %q, want %q", got, wantDetail)
+				}
+			}
 			if !reflect.DeepEqual(bodies, tt.wantBodies) {
 				t.Errorf("body = %v, want %v", bodies, tt.wantBodies)
 			}
@@ -753,7 +764,7 @@ func TestVpnOwnershipLostWarningsUnit(t *testing.T) {
 	if diags.WarningsCount() != 1 || diags.HasError() {
 		t.Fatalf("expected one warning, got %v", diags)
 	}
-	const wantDetail = "Rule for 192.168.20.0/24 is no longer managed by VPN connection conn-1, so it's now part of this security group's rule set. Add it to this configuration to keep it; otherwise the next apply removes it."
+	const wantDetail = "Rule for 192.168.20.0/24 is no longer managed by VPN connection conn-1, so it's now part of this security group's rule set. To keep it, add it to this configuration. If the next apply removes it, the connection won't add it back."
 	if got := diags[0].Summary(); got != "GPCN™ VPN connection rule changed owner" {
 		t.Errorf("summary = %q", got)
 	}

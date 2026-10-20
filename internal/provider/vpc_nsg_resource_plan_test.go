@@ -1340,7 +1340,7 @@ func TestVpcNsgResourceVpnRuleOwnershipLostWarns(t *testing.T) {
 	if got := warnings[0].Summary(); got != "GPCN™ VPN connection rule changed owner" {
 		t.Errorf("summary = %q", got)
 	}
-	wantDetail := "Rule for 192.168.20.0/24 is no longer managed by VPN connection " + nsgPlanTestVpnConnectionID + ", so it's now part of this security group's rule set. Add it to this configuration to keep it; otherwise the next apply removes it."
+	wantDetail := "Rule for 192.168.20.0/24 is no longer managed by VPN connection " + nsgPlanTestVpnConnectionID + ", so it's now part of this security group's rule set. To keep it, add it to this configuration. If the next apply removes it, the connection won't add it back."
 	if got := warnings[0].Detail(); got != wantDetail {
 		t.Errorf("detail = %q, want %q", got, wantDetail)
 	}

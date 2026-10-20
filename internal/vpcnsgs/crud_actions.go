@@ -218,7 +218,8 @@ func ReplaceNsgRules(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 	if err != nil {
 		return nil, diags, err
 	}
-	bodies, resent := MergeVpnRuleBodies(rules, before.Rules)
+	bodies, resent, mergeDiags := MergeVpnRuleBodies(rules, before.Rules)
+	diags.Append(mergeDiags...)
 
 	if len(bodies) > MaxRulesPerNsg {
 		diags.AddError(ErrSummaryNsgTooManyRules, fmt.Sprintf(ErrDetailNsgTooManyRules, len(bodies), len(rules), len(bodies)-len(rules)))

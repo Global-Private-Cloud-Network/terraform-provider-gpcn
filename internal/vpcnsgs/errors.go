@@ -49,13 +49,14 @@ const (
 // deletion the configuration prevents.
 const (
 	WarnSummaryDefaultNsgRulesReplaced = "Replacing the rules of the VPC default security group"
-	WarnDetailDefaultNsgRulesReplaced  = "Security group '%s' is the VPC's own default group. GPCN replaces the whole rule set on every change, so this apply deletes any rule this configuration does not list, except rules VPN connections manage, including the two GPCN staged with the VPC: 'Default: allow all outbound traffic' and 'Default: allow traffic from this VPC'. Add them to the configuration to keep them."
+	WarnDetailDefaultNsgRulesReplaced  = "Security group '%s' is the VPC's own default group. GPCN replaces the whole rule set on every change, so this apply deletes any rule this configuration does not list, including the two GPCN staged with the VPC: 'Default: allow all outbound traffic' and 'Default: allow traffic from this VPC'. Add them to the configuration to keep them. Rules that VPN connections manage are kept."
 )
 
 // Warning strings for a VPN rule that lost its owner during a rules replace.
 const (
 	WarnSummaryNsgVpnRuleOwnerChanged = "GPCN™ VPN connection rule changed owner"
-	WarnDetailNsgVpnRuleOwnerChanged  = "Rule for %s is no longer managed by VPN connection %s, so it's now part of this security group's rule set. Add it to this configuration to keep it; otherwise the next apply removes it."
+	WarnDetailNsgVpnRuleOwnerChanged  = "Rule for %s is no longer managed by VPN connection %s, so it's now part of this security group's rule set. To keep it, add it to this configuration. If the next apply removes it, the connection won't add it back."
+	WarnDetailNsgVpnRuleCopyDiffers   = "Rule for %s in this configuration doesn't match the rule VPN connection %s manages, so this apply makes it part of this security group's rule set, and the connection won't manage it again."
 
 	WarnSummaryNsgVpnRuleCheckSkipped = "GPCN™ VPN connection rule check skipped"
 )

@@ -167,8 +167,10 @@ func apiRuleBody(rule ApiRule) map[string]any {
 // content and a different description wins, because the customer takes the rule
 // over. A configured rule that matches an owned rule exactly, description
 // included, stays the connection's. The second result is the owned rules that
-// stay owned.
-func MergeVpnRuleBodies(config []RuleModel, live []ApiRule) ([]map[string]any, []ApiRule) {
+// stay owned. A configured copy that differs only in description warns, because
+// the connection stops managing that rule.
+func MergeVpnRuleBodies(config []RuleModel, live []ApiRule) ([]map[string]any, []ApiRule, diag.Diagnostics) {
+	var diags diag.Diagnostics
 	bodies := RuleRequestBodies(config)
 	configured := make(map[string]RuleModel, len(config))
 	for _, rule := range config {
@@ -183,13 +185,15 @@ func MergeVpnRuleBodies(config []RuleModel, live []ApiRule) ([]map[string]any, [
 		if declared, taken := configured[rule.contentKey()]; taken {
 			if rule.matchesExactly(declared) {
 				resent = append(resent, rule)
+			} else {
+				diags.AddWarning(WarnSummaryNsgVpnRuleOwnerChanged, fmt.Sprintf(WarnDetailNsgVpnRuleCopyDiffers, rule.RemoteCidr, *rule.VpnConnectionID))
 			}
 			continue
 		}
 		bodies = append(bodies, apiRuleBody(rule))
 		resent = append(resent, rule)
 	}
-	return bodies, resent
+	return bodies, resent, diags
 }
 
 // matchesExactly reports whether a declared rule has the rule's content and
