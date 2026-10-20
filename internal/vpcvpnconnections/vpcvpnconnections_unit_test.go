@@ -501,8 +501,8 @@ func TestVpcVpnConnectionUnitUpdateVpnConnectionSendsOnlyTheBodyItGets(t *testin
 		}
 	})
 
-	if err := UpdateVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID, map[string]any{"description": nil}); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if accepted, err := UpdateVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID, map[string]any{"description": nil}); err != nil || !accepted {
+		t.Fatalf("accepted = %v, err = %v; want true, nil", accepted, err)
 	}
 	if value, found := putBody["description"]; len(putBody) != 1 || !found || value != nil {
 		t.Errorf("Expected a body of description null, got %v", putBody)
@@ -718,7 +718,7 @@ func TestVpcVpnConnectionUnitDeleteParkedWithoutBudgetSendsNoResend(t *testing.T
 	})
 
 	err := deleteVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID, time.Millisecond, 10*time.Second)
-	if want := fmt.Sprintf(ErrFmtRemovalParkedNoTime, reason, testConnID); err == nil || err.Error() != want {
+	if want := fmt.Sprintf(ErrFmtRemovalParkedNoTime, reason, ResendMinBudget, testConnID); err == nil || err.Error() != want {
 		t.Fatalf("Expected %q, got %v", want, err)
 	}
 	if got := deletes.Load(); got != 1 {

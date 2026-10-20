@@ -69,7 +69,7 @@ If `desired_applied` is false, the settings GPCN™ saved aren't the ones the da
 
 A connection that failed and can't be updated is replaced: Terraform deletes it and creates it again.
 
-If a create times out, you interrupt it, or GPCN™ gives an unclear answer, Terraform marks the connection tainted, and the next apply replaces it. To keep it instead, wait until GPCN™ finishes, then run `terraform untaint <address>`.
+If a create times out, you interrupt it, or GPCN™ gives an unclear answer and already has the connection, Terraform marks the connection tainted, and the next apply replaces it. To keep it instead, wait until GPCN™ finishes, then run `terraform untaint <address>`. If the provider can't check for the connection after an unclear answer, it saves nothing, and the error says a connection may exist.
 
 ## Limits
 

@@ -22,7 +22,7 @@ const (
 	ErrDetailImportIDFormat       = "Import ID must be the ID of the VPC that holds the VPN gateway. A VPC has one VPN gateway, so no gateway ID is needed. Got: '%s'"
 	ErrFmtNotOwnRow               = "A VPN gateway already exists on this VPC that this apply didn't create. Import it with: terraform import gpcn_vpc_vpn_gateway.<name> %s"
 	ErrFmtRemovalTimeout          = "VPC %s: the VPN gateway was still in state '%s' after %s (failure reason: %s)"
-	ErrFmtStillCreating           = "VPC %s: the VPN gateway was still being created after %s. Run the destroy again once it reads ready or failed"
+	ErrFmtStillCreating           = "VPC %s: the VPN gateway was still being created after %s. Run the destroy or apply again once it reads ready or failed"
 	ErrFmtWaitForCreateFailed     = "wait for the VPN gateway create to finish failed: %w"
 	ErrFmtCreatePollingFailed     = "create VPN gateway polling failed: %w"
 	ErrFmtDeletePollingFailed     = "delete VPN gateway polling failed: %w"

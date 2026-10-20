@@ -116,7 +116,7 @@ func PerformLongPollingWithConfig(gpcnClient *GpcnClient, ctx context.Context, a
 
 		if job.HasFailed || (job.IsTerminal && !job.IsCompleted) {
 			if job.Stage == JobStageCancelled {
-				return nil, fmt.Errorf(ErrJobCancelled, jobId, action)
+				return nil, &jobCancelledError{message: fmt.Sprintf(ErrJobCancelled, jobId, action)}
 			}
 			if detail := jobFailureDetail(job, jobResponse.Message); detail != "" {
 				return nil, fmt.Errorf("job %s for action %q: %w: %s", jobId, action, ErrJobFailed, detail)

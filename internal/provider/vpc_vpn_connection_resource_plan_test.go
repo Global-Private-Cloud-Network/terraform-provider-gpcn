@@ -32,22 +32,23 @@ import (
 )
 
 const (
-	vpnConnPlanTestVpcID        = "11111111-1111-4111-8111-111111111111"
-	vpnConnPlanTestGatewayID    = "22222222-2222-4222-8222-222222222222"
-	vpnConnPlanTestConnID       = "33333333-3333-4333-8333-333333333333"
-	vpnConnPlanTestOtherGWID    = "44444444-4444-4444-8444-444444444444"
-	vpnConnPlanTestTimestamp    = "2026-01-02T15:04:05Z"
-	vpnConnPlanTestPsk          = "Tr0ub4dor&3-horse-staple"
-	vpnConnPlanTestPskTwo       = "Zx9!correct-battery-wire"
-	vpnConnPlanTestLocalEnd     = "198.51.100.7"
-	vpnConnPlanTestConflict     = "A change to this VPN connection is already in progress; wait for it to finish."
-	vpnConnPlanTestFailReason   = "VPN connection creation failed; delete it and create it again"
-	vpnConnPlanTestDeleteFailed = "VPN connection removal failed; it is safe to retry the delete"
-	vpnConnPlanTestParkedText   = "Applying the VPN connection change failed; your saved settings are kept — update to retry"
-	vpnConnPlanTestJobFailText  = "Applying the VPN connection change failed; your saved settings are kept - update to retry"
-	vpnConnPlanTestBadGateway   = "The upstream VPN service answered badly."
-	vpnConnPlanTestGetRefused   = "You may not read this VPN connection."
-	gpcnVpcVpnConnectionTest    = "gpcn_vpc_vpn_connection.test"
+	vpnConnPlanTestVpcID          = "11111111-1111-4111-8111-111111111111"
+	vpnConnPlanTestGatewayID      = "22222222-2222-4222-8222-222222222222"
+	vpnConnPlanTestConnID         = "33333333-3333-4333-8333-333333333333"
+	vpnConnPlanTestOtherGWID      = "44444444-4444-4444-8444-444444444444"
+	vpnConnPlanTestTimestamp      = "2026-01-02T15:04:05Z"
+	vpnConnPlanTestPsk            = "Tr0ub4dor&3-horse-staple"
+	vpnConnPlanTestPskTwo         = "Zx9!correct-battery-wire"
+	vpnConnPlanTestLocalEnd       = "198.51.100.7"
+	vpnConnPlanTestConflict       = "A change to this VPN connection is already in progress; wait for it to finish."
+	vpnConnPlanTestResendConflict = "A change to this VPN connection is already in progress; wait for it to finish."
+	vpnConnPlanTestFailReason     = "VPN connection creation failed; delete it and create it again"
+	vpnConnPlanTestDeleteFailed   = "VPN connection removal failed; it is safe to retry the delete"
+	vpnConnPlanTestParkedText     = "Applying the VPN connection change failed; your saved settings are kept — update to retry"
+	vpnConnPlanTestJobFailText    = "Applying the VPN connection change failed; your saved settings are kept - update to retry"
+	vpnConnPlanTestBadGateway     = "The upstream VPN service answered badly."
+	vpnConnPlanTestGetRefused     = "You may not read this VPN connection."
+	gpcnVpcVpnConnectionTest      = "gpcn_vpc_vpn_connection.test"
 )
 
 var vpnConnPlanTestLocalNetworks = []string{"10.121.1.0/24", "10.121.2.0/24"}
@@ -68,8 +69,12 @@ type vpnConnPlanTestServerState struct {
 	// putSettles makes a PUT settle the row, as the job of an update does: the
 	// state becomes connecting and the failure reason clears.
 	putSettles bool
-	// putStatus makes the PUT answer with this status and a 5xx body.
+	// putStatus makes the PUT answer with this status and an error body.
 	putStatus int
+	// jobStatus makes the job poll answer with this error status.
+	jobStatus int
+	// cancelJob makes the job poll report a job in the stage the platform sets when it stops a job.
+	cancelJob bool
 	// postStatus makes the POST insert the row and then answer with this status.
 	postStatus int
 	// itemStatus makes the detail GET answer with this status.
@@ -90,15 +95,18 @@ type vpnConnPlanTestServerState struct {
 	// parkDeletes is the number of accepted DELETE requests whose job fails and
 	// leaves the row parked in the removing state with a failure reason.
 	parkDeletes int
-	// resendConflicts makes the next DELETE after the first answer 409, as when
-	// a removal already runs, and leaves the row parked.
+	// resendConflicts makes the next DELETE after the first answer a refusing
+	// 409 whose details still carry the parked reason, and leaves the row parked.
 	resendConflicts bool
-	failDeleteJob   bool
-	getsAfterDel    int
-	postBodies      []map[string]any
-	postRaw         []string
-	putBodies       []map[string]any
-	deleteCount     int
+	// resendMeetsRemoval makes the next DELETE after the first meet a removal
+	// another caller started: a 409 with a null reason, then removing, then 404.
+	resendMeetsRemoval bool
+	failDeleteJob      bool
+	getsAfterDel       int
+	postBodies         []map[string]any
+	postRaw            []string
+	putBodies          []map[string]any
+	deleteCount        int
 }
 
 func (s *vpnConnPlanTestServerState) set(update func(*vpnConnPlanTestServerState)) {
@@ -156,6 +164,13 @@ func writeVpnConnPlanTestError(w http.ResponseWriter, status int, code, message 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	fmt.Fprintf(w, `{"success":false,"message":%q,"error":{"code":%q,"statusCode":%d,"details":null}}`, message, code, status)
+}
+
+func writeVpnConnPlanTestParkedRefusal(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	fmt.Fprintf(w, `{"success":false,"message":%q,"error":{"code":"VPN_STATE_CONFLICT","statusCode":409,`+
+		`"details":{"state":"removing","verb":"delete","failureReason":%q}}}`, vpnConnPlanTestResendConflict, vpnConnPlanTestDeleteFailed)
 }
 
 func writeVpnConnPlanTestRemoving(w http.ResponseWriter) {
@@ -290,13 +305,20 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			state.deleteConflict = ""
 			alreadyRemoving := state.deleteRemoving
 			state.deleteRemoving = false
-			if state.resendConflicts && state.deleteCount > 0 && conflict == "" {
-				conflict = "A removal is already under way."
+			refusesParked := state.resendConflicts && state.deleteCount > 0 && conflict == ""
+			if refusesParked {
 				state.resendConflicts = false
+			}
+			if state.resendMeetsRemoval && state.deleteCount > 0 && conflict == "" {
+				state.resendMeetsRemoval = false
+				alreadyRemoving = true
+				state.removingHold = 1
+				state.row["failureReason"] = nil
 			}
 			switch {
 			case alreadyRemoving:
 				state.removing = true
+			case refusesParked:
 			case conflict == "" && state.parkDeletes > 0:
 				state.parkDeletes--
 				state.failDeleteJob = true
@@ -310,6 +332,10 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			state.mu.Unlock()
 			if alreadyRemoving {
 				writeVpnConnPlanTestRemoving(w)
+				return
+			}
+			if refusesParked {
+				writeVpnConnPlanTestParkedRefusal(w)
 				return
 			}
 			if conflict != "" {
@@ -327,6 +353,7 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			}
 			state.mu.Lock()
 			failJob := state.failJob
+			jobStatus, cancelJob := state.jobStatus, state.cancelJob
 			if jobID == "job-delete" && state.failDeleteJob {
 				state.failDeleteJob = false
 				failJob = true
@@ -336,6 +363,19 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				state.row["state"] = "connecting"
 			}
 			state.mu.Unlock()
+			if jobStatus != 0 {
+				writeVpnConnPlanTestError(w, jobStatus, "Forbidden", "forbidden")
+				return
+			}
+			if cancelJob {
+				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
+					Success: true,
+					Data: client.JobStatusDataResponse{Jobs: []client.JobResponse{{
+						JobID: jobID, ResourceId: vpnConnPlanTestConnID, Stage: client.JobStageCancelled, IsTerminal: true,
+					}}},
+				})
+				return
+			}
 			if failJob {
 				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
 					Success: true,
@@ -1371,6 +1411,68 @@ func TestVpcVpnConnectionResourceUpdateJobFailedReturnsPriorState(t *testing.T) 
 	}
 }
 
+// The note that the change may still apply follows how far the update got: an
+// accepted PUT whose job did not end, or a PUT with an unclear answer. A PUT
+// the API refused, a failed job and a job the platform stopped carry no note.
+func TestVpcVpnConnectionResourceUpdateNoteFollowsHowFarItGot(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		set      func(s *vpnConnPlanTestServerState)
+		wantNote bool
+	}{
+		{"PUT 503", func(s *vpnConnPlanTestServerState) { s.putStatus = http.StatusServiceUnavailable }, true},
+		{"job poll 403 after accepted", func(s *vpnConnPlanTestServerState) { s.jobStatus = http.StatusForbidden }, true},
+		{"job stopped by the platform", func(s *vpnConnPlanTestServerState) { s.cancelJob = true }, false},
+		{"job failed", func(s *vpnConnPlanTestServerState) { s.failJob = true }, false},
+		{"PUT 400", func(s *vpnConnPlanTestServerState) { s.putStatus = http.StatusBadRequest }, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			server, state := startVpnConnPlanMockServer(t)
+			state.set(func(s *vpnConnPlanTestServerState) {
+				s.exists = true
+				s.row = vpnConnPlanTestRowFromBody(map[string]any{
+					"name": "branch-office", "peerAddress": "203.0.113.10", "peerCidrs": []string{"192.168.10.0/24"},
+				}, "connected")
+				tc.set(s)
+			})
+			r, empty := vpnConnDirectCall(t, server.URL)
+
+			prior := empty
+			priorModel := vpnConnDirectModel(vpnConnPlanTestConnID)
+			if diags := prior.Set(context.Background(), &priorModel); diags.HasError() {
+				t.Fatalf("failed to build state: %v", diags)
+			}
+			plan := tfsdk.Plan{Schema: prior.Schema}
+			planModel := priorModel
+			planModel.Name = types.StringValue("branch-office-2")
+			if diags := plan.Set(context.Background(), &planModel); diags.HasError() {
+				t.Fatalf("failed to build plan: %v", diags)
+			}
+
+			resp := &fwresource.UpdateResponse{State: prior}
+			r.Update(context.Background(), fwresource.UpdateRequest{
+				Plan: plan, State: prior, Config: tfsdk.Config{Schema: prior.Schema, Raw: plan.Raw},
+			}, resp)
+
+			if !resp.Diagnostics.HasError() {
+				t.Fatal("Expected the update to fail")
+			}
+			hasNote := false
+			for _, d := range resp.Diagnostics.Errors() {
+				if strings.Contains(d.Detail(), vpcvpnconnections.ErrDetailUpdateMayStillApply) {
+					hasNote = true
+				}
+			}
+			if hasNote != tc.wantNote {
+				t.Errorf("note present = %v, want %v; diagnostics: %v", hasNote, tc.wantNote, resp.Diagnostics)
+			}
+		})
+	}
+}
+
 // vpnConnDirectCall builds the pieces the framework would pass to a CRUD method.
 func vpnConnDirectCall(t *testing.T, host string) (*vpcVpnConnectionResource, tfsdk.State) {
 	t.Helper()
@@ -1614,16 +1716,43 @@ func TestVpcVpnConnectionResourceDeleteParkedTwiceReports(t *testing.T) {
 	})
 }
 
-// A resend that meets a 409 and then reads the row parked again ends the
-// destroy with the failure reason, as a parked job of the resend does.
+// A resend that meets a removal another caller started counts as sent, so the
+// wait goes on and the destroy ends on the 404.
+func TestVpcVpnConnectionResourceDeleteResendMeetsRemovalWaits(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	config := newVpnConnPlanTestConfig().render(server.URL)
+	// A short polling timeout keeps a wait that never ends from stalling the test.
+	config = strings.Replace(config, `api_key = "test-key"`, "api_key = \"test-key\"\n  polling_timeout = 5", 1)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: func(*terraform.State) error {
+					state.set(func(s *vpnConnPlanTestServerState) { s.parkDeletes = 1; s.resendMeetsRemoval = true })
+					return nil
+				},
+			},
+		},
+	})
+}
+
+// A resend the API refuses with a 409 ends the destroy at once. The error
+// carries the failure reason and the API's message, and it tells the operator
+// to run the destroy or apply again.
 func TestVpcVpnConnectionResourceDeleteParkedAfterConflictReports(t *testing.T) {
 	t.Parallel()
 	server, state := startVpnConnPlanMockServer(t)
 	config := newVpnConnPlanTestConfig().render(server.URL)
 	// A short polling timeout keeps a wait that never ends from stalling the test.
 	config = strings.Replace(config, `api_key = "test-key"`, "api_key = \"test-key\"\n  polling_timeout = 5", 1)
-	words := strings.ReplaceAll(regexp.QuoteMeta(vpnConnPlanTestDeleteFailed), " ", `[\s│]+`)
-	parked := regexp.MustCompile(`(?s)Unable to delete GPCN™ VPN connection[\s│]+(with [^\n]*[\s│]+)?` + words + `[\s│]+The provider asked GPCN™ to remove`)
+	words := strings.ReplaceAll(regexp.QuoteMeta(
+		fmt.Sprintf(vpcvpnconnections.ErrFmtRemovalResendRefused, vpnConnPlanTestDeleteFailed, vpnConnPlanTestConnID, vpnConnPlanTestResendConflict)),
+		" ", `[\s│]+`)
+	words = strings.ReplaceAll(words, "\n\n", `[\s│]+`)
+	parked := regexp.MustCompile(`(?s)Unable to delete GPCN™ VPN connection[\s│]+(with [^\n]*[\s│]+)?` + words)
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
