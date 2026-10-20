@@ -55,7 +55,7 @@ type datacenterRow struct {
 	CustomImages        bool   `json:"customImages"`
 	VPCCapable          bool   `json:"vpcCapable"`
 	L2Capable           bool   `json:"l2Capable"`
-	VPNCapable          bool   `json:"vpnCapable"`
+	VPNCapable          *bool  `json:"vpnCapable"`
 }
 
 type datacenterMeta struct {
@@ -210,7 +210,7 @@ func (d *datacenterDataSource) Schema(_ context.Context, _ datasource.SchemaRequ
 						},
 						"vpn_capable": schema.BoolAttribute{
 							Computed:    true,
-							Description: "Whether you can create site-to-site VPN gateways and connections in this data center.",
+							Description: "Whether the data center offers site-to-site VPN. Creating a VPN gateway or VPN connection also needs your organization's Site-to-Site VPN feature.",
 						}},
 				},
 			},
@@ -330,7 +330,7 @@ func (d *datacenterDataSource) Read(ctx context.Context, req datasource.ReadRequ
 			CustomImages:        types.BoolValue(datacenter.CustomImages),
 			VPCCapable:          types.BoolValue(datacenter.VPCCapable),
 			L2Capable:           types.BoolValue(datacenter.L2Capable),
-			VPNCapable:          types.BoolValue(datacenter.VPNCapable),
+			VPNCapable:          types.BoolPointerValue(datacenter.VPNCapable),
 		})
 	}
 

@@ -692,6 +692,34 @@ func TestDatacentersDataSourceMapsVpnCapable(t *testing.T) {
 	datacenterPlanTestAssertOnlyListPath(t, rec)
 }
 
+func TestDatacentersDataSourceVpnCapableNullWhenAbsent(t *testing.T) {
+	t.Parallel()
+
+	server, rec := startDatacenterPlanMockServer(t, func(_ *http.Request) map[string]any {
+		absent := datacenterPlanTestVpnRow("dc-1", "Chicago", datacenterPlanTestRegionAlpha, true)
+		delete(absent, "vpnCapable")
+		return datacenterPlanTestBody([]map[string]any{
+			absent,
+			datacenterPlanTestVpnRow("dc-2", "Dallas", datacenterPlanTestRegionBeta, false),
+		}, 1, 1)
+	})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: datacenterPlanTestConfig(server.URL, ""),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckNoResourceAttr(datacenterPlanTestDataSource, "datacenters.0.vpn_capable"),
+					resource.TestCheckResourceAttr(datacenterPlanTestDataSource, "datacenters.1.vpn_capable", "false"),
+				),
+			},
+		},
+	})
+
+	datacenterPlanTestAssertOnlyListPath(t, rec)
+}
+
 func TestDatacentersDataSourceFiltersVpnCapableServerSide(t *testing.T) {
 	t.Parallel()
 
