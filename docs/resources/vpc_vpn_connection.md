@@ -126,7 +126,7 @@ A VPN connection opens the tunnel's traffic for you. For each peer network, it a
 
 `gpcn_vpc_nsg` leaves those rules out of its `rule` set, so they never show up as a difference, and it sends them back unchanged whenever it replaces a group's rules. If you write a rule with the same direction, protocol, ports and remote CIDR yourself, give it a description of your own. It then becomes yours, and the connection no longer manages it or removes it. A rule you copy exactly, description included, stays the connection's.
 
-If you create a connection, or change its peer networks, while an update of a `gpcn_vpc_nsg` is replacing that group's rules, the group can lose the connection's rule, and the connection won't add it back. To restore it, replace the connection with `terraform apply -replace`, recreate the group, or declare the rule in `gpcn_vpc_nsg`, which makes it part of that group's rule set.
+If you create a connection, or change its peer networks, while an update of a `gpcn_vpc_nsg` is replacing that group's rules, the group can lose the connection's rule, and the connection won't add it back. To restore it, replace the connection with `terraform apply -replace`, declare the rule in `gpcn_vpc_nsg`, which makes it part of that group's rule set, or recreate the group and then make a full update of the connection.
 
 A security group you bind to a subnet after the connection exists doesn't get the rules right away. It gets them on the connection's next full update, which is any change other than `name` or `description` alone. Raising `psk_wo_version` or editing a peer network counts, for example.
 
@@ -148,7 +148,7 @@ If `desired_applied` is false, the settings GPCN™ saved aren't the ones the da
 
 A connection that failed and can't be updated is replaced: Terraform deletes it and creates it again.
 
-If a create times out or you interrupt it, Terraform marks the connection tainted, and the next apply replaces it. To keep it instead, wait until GPCN™ finishes, then run `terraform untaint <address>`.
+If a create times out, you interrupt it, or GPCN™ gives an unclear answer, Terraform marks the connection tainted, and the next apply replaces it. To keep it instead, wait until GPCN™ finishes, then run `terraform untaint <address>`.
 
 ## Limits
 
@@ -172,7 +172,7 @@ If a create times out or you interrupt it, Terraform marks the connection tainte
 
 > **NOTE**: [Write-only arguments](https://developer.hashicorp.com/terraform/language/resources/ephemeral#write-only-arguments) are supported in Terraform 1.11 and later.
 
-- `description` (String) Additional information about the VPN connection, up to 500 characters
+- `description` (String) Additional information about the VPN connection, up to 500 characters as the API counts them (UTF-16 code units)
 - `dh_group` (Number) Diffie-Hellman group for the IKE exchange: 2, 5 or 14. GPCN™ uses 14 when omitted
 - `dpd` (Boolean) Whether dead peer detection is on. When on, GPCN™ probes the peer gateway every 30 seconds and restarts the VPN connection after 120 seconds without an answer. GPCN™ turns it on when omitted
 - `encryption` (String) Encryption algorithm: 'aes128', 'aes192' or 'aes256'. GPCN™ uses 'aes256' when omitted

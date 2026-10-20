@@ -88,7 +88,7 @@ For both kinds, `address` is the VPN gateway address, the public address your pe
 
 If the VPN gateway fails to build, the apply reports the reason and Terraform marks the resource tainted. If a gateway reads as `failed` later, the next plan replaces it. GPCN™ can't retry a failed gateway, so Terraform deletes it and creates it again in one apply.
 
-If a create times out or you interrupt it, Terraform marks the gateway tainted, and the next apply replaces it. Replacing an appliance gateway gives it a new VPN gateway address, so your peer gateway needs the new one. To keep the gateway instead, wait until it reads `ready`, then run `terraform untaint <address>`.
+If a create times out, you interrupt it, or GPCN™ gives an unclear answer, Terraform marks the gateway tainted, and the next apply replaces it. Replacing an appliance gateway gives it a new VPN gateway address, so your peer gateway needs the new one. To keep the gateway instead, wait until it reads `ready`, then run `terraform untaint <address>`.
 
 ## Deleting
 
