@@ -29,6 +29,10 @@ const AdoptWindow = 2 * time.Minute
 // CodeGatewayRemoving is the code of the 409 for a gateway whose removal runs.
 const CodeGatewayRemoving = "VPN_GATEWAY_REMOVING"
 
+// CodeGatewayBusyCreating is the code of the 409 for a gateway whose create
+// still runs.
+const CodeGatewayBusyCreating = "VPN_GATEWAY_BUSY_CREATING"
+
 const (
 	ActionCreateVpnGateway = "Create GPCN VPN Gateway"
 	ActionDeleteVpnGateway = "Delete GPCN VPN Gateway"

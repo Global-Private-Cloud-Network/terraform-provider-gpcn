@@ -11,6 +11,7 @@ const (
 	LogStartingDeleteVpnGateway   = "Starting DeleteVpnGateway for VPC ID %s"
 	LogIssuedDeleteVpnGatewayJob  = "Successfully issued the job to delete the GPCN VPN gateway. Beginning long-polling to check the status"
 	LogRemovalAlreadyRunning      = "The API answered that the removal of the VPN gateway already runs. Waiting for it to finish"
+	LogDeleteWaitsForCreate       = "The API answered that the VPN gateway is still being created. Waiting for the create to end before the removal is sent again"
 	LogDeleteJobFailedWaiting     = "The delete job failed. The platform retries a parked removal, so waiting for the VPN gateway to go"
 	LogWaitingForVpnGatewayGone   = "Waiting for the VPN gateway of VPC ID %s to be removed"
 	LogVpnGatewayStillRemoving    = "The VPN gateway of VPC ID %s is still in state %s"

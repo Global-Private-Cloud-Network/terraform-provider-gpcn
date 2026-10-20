@@ -166,8 +166,9 @@ func GetVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID str
 // DeleteVpnGateway issues the removal, polls its job, and waits for the 404. The
 // job ending does not mean the row is gone, because the platform parks a removal
 // and a sweeper retries it. A job that failed and a 409 VPN_GATEWAY_REMOVING both
-// mean a removal is under way, so both go on to the wait. The job poll and the
-// wait share one deadline, the polling timeout.
+// mean a removal is under way, so both go on to the wait. A 409
+// VPN_GATEWAY_BUSY_CREATING waits for the create to end and sends the removal
+// again. The job poll and the waits share one deadline, the polling timeout.
 func DeleteVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string) error {
 	timeout := client.DefaultPollingConfig().Timeout
 	if config := gpcnClient.Config(); config != nil && config.PollingTimeout > 0 {
@@ -180,29 +181,72 @@ func deleteVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID 
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteVpnGateway, vpcID))
 	startTime := time.Now()
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, gatewayPath(vpcID), nil)
-	if err != nil {
-		return err
-	}
+	for {
+		request, err := http.NewRequestWithContext(ctx, http.MethodDelete, gatewayPath(vpcID), nil)
+		if err != nil {
+			return err
+		}
 
-	jobID, err := issueJob(gpcnClient.DoWithRetry, request)
-	if code, _ := ParseAPIError(err); code == CodeGatewayRemoving {
-		tflog.Info(ctx, LogRemovalAlreadyRunning)
-	} else if err != nil {
-		return err
-	} else {
-		tflog.Info(ctx, LogIssuedDeleteVpnGatewayJob)
-		pollConfig := client.DefaultPollingConfig()
-		pollConfig.Timeout = timeout
-		if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, ActionDeleteVpnGateway, jobID, pollConfig); err != nil {
-			if !errors.Is(err, client.ErrJobFailed) {
-				return fmt.Errorf(ErrFmtDeletePollingFailed, err)
+		jobID, err := issueJob(gpcnClient.DoWithRetry, request)
+		code, _ := ParseAPIError(err)
+		if code == CodeGatewayBusyCreating {
+			tflog.Info(ctx, LogDeleteWaitsForCreate)
+			gone, waitErr := waitForVpnGatewayCreated(gpcnClient, ctx, vpcID, interval, max(timeout-time.Since(startTime), 0))
+			if waitErr != nil {
+				return waitErr
 			}
-			tflog.Info(ctx, LogDeleteJobFailedWaiting)
+			if gone {
+				return nil
+			}
+			continue
+		}
+		if code == CodeGatewayRemoving {
+			tflog.Info(ctx, LogRemovalAlreadyRunning)
+		} else if err != nil {
+			return err
+		} else {
+			tflog.Info(ctx, LogIssuedDeleteVpnGatewayJob)
+			pollConfig := client.DefaultPollingConfig()
+			pollConfig.Timeout = max(timeout-time.Since(startTime), 0)
+			if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, ActionDeleteVpnGateway, jobID, pollConfig); err != nil {
+				if !errors.Is(err, client.ErrJobFailed) {
+					return fmt.Errorf(ErrFmtDeletePollingFailed, err)
+				}
+				tflog.Info(ctx, LogDeleteJobFailedWaiting)
+			}
+		}
+
+		return waitForVpnGatewayGone(gpcnClient, ctx, vpcID, interval, max(timeout-time.Since(startTime), 0))
+	}
+}
+
+// waitForVpnGatewayCreated reads the gateway every interval until it leaves
+// the creating state, or until the timeout. The first result is true when the
+// API answers 404, which means no removal is left to send.
+func waitForVpnGatewayCreated(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string, interval, timeout time.Duration) (bool, error) {
+	startTime := time.Now()
+	for {
+		gateway, err := GetVpnGateway(gpcnClient, ctx, vpcID)
+		if errors.Is(err, ErrVpnGatewayNotFound) {
+			return true, nil
+		}
+		if err != nil {
+			return false, fmt.Errorf(ErrFmtWaitForRemovalFailed, err)
+		}
+		if gateway.State != StateCreating {
+			return false, nil
+		}
+
+		if time.Since(startTime) >= timeout {
+			return false, fmt.Errorf("%w: "+ErrFmtRemovalTimeout, ErrRemovalTimeout, vpcID, gateway.State, timeout, removalTimeoutNoReason)
+		}
+
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(interval):
 		}
 	}
-
-	return waitForVpnGatewayGone(gpcnClient, ctx, vpcID, interval, max(timeout-time.Since(startTime), 0))
 }
 
 // waitForVpnGatewayGone reads the gateway every interval until the API answers
