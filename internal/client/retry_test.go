@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -222,7 +223,9 @@ func TestDoOnceStopsAtMaxRetries(t *testing.T) {
 		t.Fatalf("failed to create client: %v", err)
 	}
 
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "/test", nil)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "/test", nil)
 	if err != nil {
 		t.Fatalf("failed to create request: %v", err)
 	}
