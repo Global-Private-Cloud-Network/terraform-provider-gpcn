@@ -31,21 +31,22 @@ import (
 )
 
 const (
-	vpnConnPlanTestVpcID       = "11111111-1111-4111-8111-111111111111"
-	vpnConnPlanTestGatewayID   = "22222222-2222-4222-8222-222222222222"
-	vpnConnPlanTestConnID      = "33333333-3333-4333-8333-333333333333"
-	vpnConnPlanTestOtherGWID   = "44444444-4444-4444-8444-444444444444"
-	vpnConnPlanTestTimestamp   = "2026-01-02T15:04:05Z"
-	vpnConnPlanTestPsk         = "Tr0ub4dor&3-horse-staple"
-	vpnConnPlanTestPskTwo      = "Zx9!correct-battery-wire"
-	vpnConnPlanTestLocalEnd    = "198.51.100.7"
-	vpnConnPlanTestConflict    = "A change to this VPN connection is already in progress; wait for it to finish."
-	vpnConnPlanTestFailReason  = "VPN connection creation failed; delete it and create it again"
-	vpnConnPlanTestParkedText  = "Applying the VPN connection change failed; your saved settings are kept — update to retry"
-	vpnConnPlanTestJobFailText = "Applying the VPN connection change failed; your saved settings are kept - update to retry"
-	vpnConnPlanTestBadGateway  = "The upstream VPN service answered badly."
-	vpnConnPlanTestGetRefused  = "You may not read this VPN connection."
-	gpcnVpcVpnConnectionTest   = "gpcn_vpc_vpn_connection.test"
+	vpnConnPlanTestVpcID        = "11111111-1111-4111-8111-111111111111"
+	vpnConnPlanTestGatewayID    = "22222222-2222-4222-8222-222222222222"
+	vpnConnPlanTestConnID       = "33333333-3333-4333-8333-333333333333"
+	vpnConnPlanTestOtherGWID    = "44444444-4444-4444-8444-444444444444"
+	vpnConnPlanTestTimestamp    = "2026-01-02T15:04:05Z"
+	vpnConnPlanTestPsk          = "Tr0ub4dor&3-horse-staple"
+	vpnConnPlanTestPskTwo       = "Zx9!correct-battery-wire"
+	vpnConnPlanTestLocalEnd     = "198.51.100.7"
+	vpnConnPlanTestConflict     = "A change to this VPN connection is already in progress; wait for it to finish."
+	vpnConnPlanTestFailReason   = "VPN connection creation failed; delete it and create it again"
+	vpnConnPlanTestDeleteFailed = "VPN connection removal failed; it is safe to retry the delete"
+	vpnConnPlanTestParkedText   = "Applying the VPN connection change failed; your saved settings are kept — update to retry"
+	vpnConnPlanTestJobFailText  = "Applying the VPN connection change failed; your saved settings are kept - update to retry"
+	vpnConnPlanTestBadGateway   = "The upstream VPN service answered badly."
+	vpnConnPlanTestGetRefused   = "You may not read this VPN connection."
+	gpcnVpcVpnConnectionTest    = "gpcn_vpc_vpn_connection.test"
 )
 
 var vpnConnPlanTestLocalNetworks = []string{"10.121.1.0/24", "10.121.2.0/24"}
@@ -83,11 +84,15 @@ type vpnConnPlanTestServerState struct {
 	// the row as removing. The read after that answers 404.
 	removingHold int
 	removing     bool
-	getsAfterDel int
-	postBodies   []map[string]any
-	postRaw      []string
-	putBodies    []map[string]any
-	deleteCount  int
+	// parkDeletes is the number of accepted DELETE requests whose job fails and
+	// leaves the row parked in the removing state with a failure reason.
+	parkDeletes   int
+	failDeleteJob bool
+	getsAfterDel  int
+	postBodies    []map[string]any
+	postRaw       []string
+	putBodies     []map[string]any
+	deleteCount   int
 }
 
 func (s *vpnConnPlanTestServerState) set(update func(*vpnConnPlanTestServerState)) {
@@ -272,9 +277,16 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			state.deleteConflict = ""
 			alreadyRemoving := state.deleteRemoving
 			state.deleteRemoving = false
-			if alreadyRemoving {
+			switch {
+			case alreadyRemoving:
 				state.removing = true
-			} else if conflict == "" {
+			case conflict == "" && state.parkDeletes > 0:
+				state.parkDeletes--
+				state.failDeleteJob = true
+				state.deleteCount++
+				state.row["state"] = "removing"
+				state.row["failureReason"] = vpnConnPlanTestDeleteFailed
+			case conflict == "":
 				state.exists = false
 				state.deleteCount++
 			}
@@ -298,12 +310,16 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			}
 			state.mu.Lock()
 			failJob := state.failJob
+			if jobID == "job-delete" && state.failDeleteJob {
+				state.failDeleteJob = false
+				failJob = true
+			}
 			if active, _ := state.row["activeJobId"].(string); active != "" && jobID == active {
 				state.row["activeJobId"] = nil
 				state.row["state"] = "connecting"
 			}
 			state.mu.Unlock()
-			if failJob && jobID != "job-delete" {
+			if failJob {
 				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
 					Success: true,
 					Data: client.JobStatusDataResponse{Jobs: []client.JobResponse{{
@@ -1437,4 +1453,61 @@ func TestVpcVpnConnectionResourcePskNotLogged(t *testing.T) {
 			t.Errorf("Expected the log to omit the key %q, got:\n%s", secret, logs.String())
 		}
 	}
+}
+
+// A delete whose job fails parks the row in the removing state with a failure
+// reason. The destroy sends the DELETE once more and ends at the 404.
+func TestVpcVpnConnectionResourceDeleteParkedResends(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	config := newVpnConnPlanTestConfig().render(server.URL)
+	// A short polling timeout keeps a wait that never ends from stalling the test.
+	config = strings.Replace(config, `api_key = "test-key"`, "api_key = \"test-key\"\n  polling_timeout = 5", 1)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		CheckDestroy: func(*terraform.State) error {
+			state.mu.Lock()
+			defer state.mu.Unlock()
+			if state.deleteCount != 2 {
+				return fmt.Errorf("expected 2 DELETE requests (the parked one and the resend), got %d", state.deleteCount)
+			}
+			return nil
+		},
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: func(*terraform.State) error {
+					state.set(func(s *vpnConnPlanTestServerState) { s.parkDeletes = 1 })
+					return nil
+				},
+			},
+		},
+	})
+}
+
+// A removal that parks again after the resend ends the destroy with the failure
+// reason first.
+func TestVpcVpnConnectionResourceDeleteParkedTwiceReports(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	config := newVpnConnPlanTestConfig().render(server.URL)
+	// A short polling timeout keeps a wait that never ends from stalling the test.
+	config = strings.Replace(config, `api_key = "test-key"`, "api_key = \"test-key\"\n  polling_timeout = 5", 1)
+	words := strings.ReplaceAll(regexp.QuoteMeta(vpnConnPlanTestDeleteFailed), " ", `[\s│]+`)
+	parked := regexp.MustCompile(`(?s)Unable to delete GPCN™ VPN connection[\s│]+(with [^\n]*[\s│]+)?` + words + `[\s│]+GPCN™ sent the removal`)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: func(*terraform.State) error {
+					state.set(func(s *vpnConnPlanTestServerState) { s.parkDeletes = 2 })
+					return nil
+				},
+			},
+			{Config: config, Destroy: true, ExpectError: parked},
+		},
+	})
 }

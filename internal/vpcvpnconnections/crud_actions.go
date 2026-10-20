@@ -263,9 +263,10 @@ func UpdateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 }
 
 // DeleteVpnConnection issues the removal and polls its job. A 409 that says the
-// removal already runs goes on to the wait for the 404. Any other 409 reaches
-// the caller as the API error, and a 404 as an error that client.IsNotFound
-// reads.
+// removal already runs goes on to the wait for the 404, and so does a job that
+// failed. A removal that parks with a failure reason is sent once more. Any
+// other 409 reaches the caller as the API error, and a 404 as an error that
+// client.IsNotFound reads.
 func DeleteVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string) error {
 	timeout := client.DefaultPollingConfig().Timeout
 	if config := gpcnClient.Config(); config != nil && config.PollingTimeout > 0 {
@@ -278,15 +279,10 @@ func deleteVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteVpnConnection, connectionID))
 	startTime := time.Now()
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, connectionPath(vpcID, connectionID), nil)
-	if err != nil {
-		return err
-	}
-
-	jobID, err := issueJob(gpcnClient, request)
+	jobID, err := sendDelete(gpcnClient, ctx, vpcID, connectionID)
 	if removalAlreadyRunning(err) {
 		tflog.Info(ctx, LogRemovalAlreadyRunning)
-		return waitForVpnConnectionGone(gpcnClient, ctx, vpcID, connectionID, interval, max(timeout-time.Since(startTime), 0))
+		return waitForVpnConnectionGone(gpcnClient, ctx, vpcID, connectionID, interval, startTime, timeout)
 	}
 	if err != nil {
 		return err
@@ -294,9 +290,21 @@ func deleteVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 	tflog.Info(ctx, LogIssuedDeleteVpnConnectionJob)
 
 	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionDeleteVpnConnection, jobID); err != nil {
-		return fmt.Errorf(ErrFmtDeletePollingFailed, err)
+		if !errors.Is(err, client.ErrJobFailed) {
+			return fmt.Errorf(ErrFmtDeletePollingFailed, err)
+		}
+		tflog.Info(ctx, LogDeleteJobFailedWaiting)
+		return waitForVpnConnectionGone(gpcnClient, ctx, vpcID, connectionID, interval, startTime, timeout)
 	}
 	return nil
+}
+
+func sendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string) (string, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, connectionPath(vpcID, connectionID), nil)
+	if err != nil {
+		return "", err
+	}
+	return issueJob(gpcnClient, request)
 }
 
 // removalAlreadyRunning reports a 409 for a connection that is being removed
@@ -309,12 +317,24 @@ func removalAlreadyRunning(err error) bool {
 	return httpErr.Details["state"] == StateRemoving && httpErr.Details["failureReason"] == nil
 }
 
+// The states of the removal resend during the wait.
+const (
+	resendNotSent = iota
+	// resendJob means the second DELETE started a job of its own.
+	resendJob
+	// resendConflict means the second DELETE met a removal that already runs.
+	resendConflict
+)
+
 // waitForVpnConnectionGone reads the connection every interval until the API
-// answers 404, or until the timeout.
-func waitForVpnConnectionGone(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, interval, timeout time.Duration) error {
+// answers 404, or until the timeout counted from startTime. A row that parks
+// in the removing state with a failure reason gets the DELETE once more. When
+// the row parks again after a job of that second DELETE, the wait fails with
+// the failure reason.
+func waitForVpnConnectionGone(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, interval time.Duration, startTime time.Time, timeout time.Duration) error {
 	tflog.Info(ctx, fmt.Sprintf(LogWaitingForVpnConnectionGone, connectionID))
 
-	startTime := time.Now()
+	resend := resendNotSent
 	for {
 		detail, err := GetVpnConnection(gpcnClient, ctx, vpcID, connectionID)
 		if errors.Is(err, ErrVpnConnectionNotFound) {
@@ -324,6 +344,19 @@ func waitForVpnConnectionGone(gpcnClient *client.GpcnClient, ctx context.Context
 			return fmt.Errorf(ErrFmtWaitForRemovalFailed, err)
 		}
 		tflog.Info(ctx, fmt.Sprintf(LogVpnConnectionStillRemoving, connectionID, detail.State))
+
+		parked := detail.State == StateRemoving && detail.FailureReason != nil && *detail.FailureReason != ""
+		if parked && resend == resendJob {
+			return fmt.Errorf(ErrFmtRemovalParkedAgain, *detail.FailureReason, connectionID)
+		}
+		if parked && resend == resendNotSent {
+			tflog.Info(ctx, LogParkedRemovalResent)
+			resend, err = resendDelete(gpcnClient, ctx, vpcID, connectionID, startTime, timeout)
+			if err != nil {
+				return err
+			}
+			continue
+		}
 
 		if time.Since(startTime) >= timeout {
 			return fmt.Errorf("%w: "+ErrFmtRemovalTimeout, ErrRemovalTimeout, connectionID, detail.State, timeout)
@@ -335,6 +368,28 @@ func waitForVpnConnectionGone(gpcnClient *client.GpcnClient, ctx context.Context
 		case <-time.After(interval):
 		}
 	}
+}
+
+// resendDelete sends the DELETE again for a parked removal. A 202 gets its job
+// polled inside the shared deadline, and a failed job is not an error, because
+// the next read shows the row. A 409 means a removal already runs, so the wait
+// goes on.
+func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, startTime time.Time, timeout time.Duration) (int, error) {
+	jobID, err := sendDelete(gpcnClient, ctx, vpcID, connectionID)
+	if client.IsConflict(err) {
+		return resendConflict, nil
+	}
+	if err != nil {
+		return resendNotSent, err
+	}
+	tflog.Info(ctx, LogIssuedDeleteVpnConnectionJob)
+
+	pollConfig := client.DefaultPollingConfig()
+	pollConfig.Timeout = max(timeout-time.Since(startTime), 0)
+	if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, ActionDeleteVpnConnection, jobID, pollConfig); err != nil && !errors.Is(err, client.ErrJobFailed) {
+		return resendNotSent, fmt.Errorf(ErrFmtDeletePollingFailed, err)
+	}
+	return resendJob, nil
 }
 
 // sendAccepted sends a request and returns the body of the 2xx answer.

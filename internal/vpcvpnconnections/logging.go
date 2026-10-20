@@ -26,6 +26,8 @@ const (
 	LogVpnGatewayGoneKeepingID                     = "The VPN gateway of the VPC was not found. Keeping vpn_gateway_id from the state"
 	LogAdoptedVpnConnectionByName                  = "The POST ended without a usable answer, but the VPN connection exists. Adopting it by name"
 	LogRowNotCreatedByThisRequest                  = "The VPN connection with this name does not come from this request, so the create does not adopt it"
+	LogDeleteJobFailedWaiting                      = "The delete job failed. Waiting to see whether the VPN connection goes or parks"
+	LogParkedRemovalResent                         = "The removal of the VPN connection parked with a failure reason. Sending the delete again"
 	LogRemovalAlreadyRunning                       = "The API answered that the removal of the VPN connection already runs. Waiting for it to finish"
 	LogWaitingForVpnConnectionGone                 = "Waiting for VPN connection ID %s to be removed"
 	LogVpnConnectionStillRemoving                  = "VPN connection ID %s is still in state %s"
