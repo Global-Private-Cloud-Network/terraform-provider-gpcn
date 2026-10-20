@@ -182,6 +182,9 @@ func deleteVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID 
 	startTime := time.Now()
 
 	for {
+		if time.Since(startTime) >= timeout {
+			return fmt.Errorf(ErrFmtStillCreating, vpcID, timeout)
+		}
 		request, err := http.NewRequestWithContext(ctx, http.MethodDelete, gatewayPath(vpcID), nil)
 		if err != nil {
 			return err
@@ -191,7 +194,7 @@ func deleteVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID 
 		code, _ := ParseAPIError(err)
 		if code == CodeGatewayBusyCreating {
 			tflog.Info(ctx, LogDeleteWaitsForCreate)
-			gone, waitErr := waitForVpnGatewayCreated(gpcnClient, ctx, vpcID, interval, max(timeout-time.Since(startTime), 0))
+			gone, waitErr := waitForVpnGatewayCreated(gpcnClient, ctx, vpcID, interval, startTime, timeout)
 			if waitErr != nil {
 				return waitErr
 			}
@@ -216,29 +219,29 @@ func deleteVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID 
 			}
 		}
 
-		return waitForVpnGatewayGone(gpcnClient, ctx, vpcID, interval, max(timeout-time.Since(startTime), 0))
+		return waitForVpnGatewayGone(gpcnClient, ctx, vpcID, interval, startTime, timeout)
 	}
 }
 
 // waitForVpnGatewayCreated reads the gateway every interval until it leaves
-// the creating state, or until the timeout. The first result is true when the
-// API answers 404, which means no removal is left to send.
-func waitForVpnGatewayCreated(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string, interval, timeout time.Duration) (bool, error) {
-	startTime := time.Now()
+// the creating state, or until the timeout counted from startTime. The first
+// result is true when the API answers 404, which means no removal is left to
+// send.
+func waitForVpnGatewayCreated(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string, interval time.Duration, startTime time.Time, timeout time.Duration) (bool, error) {
 	for {
 		gateway, err := GetVpnGateway(gpcnClient, ctx, vpcID)
 		if errors.Is(err, ErrVpnGatewayNotFound) {
 			return true, nil
 		}
 		if err != nil {
-			return false, fmt.Errorf(ErrFmtWaitForRemovalFailed, err)
+			return false, fmt.Errorf(ErrFmtWaitForCreateFailed, err)
 		}
 		if gateway.State != StateCreating {
 			return false, nil
 		}
 
 		if time.Since(startTime) >= timeout {
-			return false, fmt.Errorf("%w: "+ErrFmtRemovalTimeout, ErrRemovalTimeout, vpcID, gateway.State, timeout, removalTimeoutNoReason)
+			return false, fmt.Errorf(ErrFmtStillCreating, vpcID, timeout)
 		}
 
 		select {
@@ -250,11 +253,11 @@ func waitForVpnGatewayCreated(gpcnClient *client.GpcnClient, ctx context.Context
 }
 
 // waitForVpnGatewayGone reads the gateway every interval until the API answers
-// 404, or until the timeout. A parked removal keeps the wait going.
-func waitForVpnGatewayGone(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string, interval, timeout time.Duration) error {
+// 404, or until the timeout counted from startTime. A parked removal keeps the
+// wait going.
+func waitForVpnGatewayGone(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string, interval time.Duration, startTime time.Time, timeout time.Duration) error {
 	tflog.Info(ctx, fmt.Sprintf(LogWaitingForVpnGatewayGone, vpcID))
 
-	startTime := time.Now()
 	var lastState, lastReason string
 
 	for {

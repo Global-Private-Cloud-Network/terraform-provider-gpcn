@@ -695,3 +695,33 @@ func TestVpcVpnConnectionUnitDeleteOtherConflictsAreRefusals(t *testing.T) {
 		}
 	}
 }
+
+// A parked removal gets the second DELETE only when the shared deadline leaves
+// ResendMinBudget. Below it, the wait reports the failure and sends nothing.
+// The test changes the package variable, so it does not run in parallel.
+func TestVpcVpnConnectionUnitDeleteParkedWithoutBudgetSendsNoResend(t *testing.T) {
+	previous := ResendMinBudget
+	ResendMinBudget = time.Minute
+	t.Cleanup(func() { ResendMinBudget = previous })
+
+	const reason = "The tunnel is stuck."
+	var deletes atomic.Int32
+	gpcnClient := apiServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodDelete {
+			deletes.Add(1)
+			w.WriteHeader(http.StatusConflict)
+			fmt.Fprint(w, `{"success":false,"message":"busy","error":{"code":"VPN_STATE_CONFLICT","statusCode":409,"details":{"state":"removing","verb":"delete","failureReason":null}}}`)
+			return
+		}
+		fmt.Fprintf(w, `{"success":true,"data":{"id":%q,"name":"x","state":"removing","failureReason":%q}}`, testConnID, reason)
+	})
+
+	err := deleteVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID, time.Millisecond, 10*time.Second)
+	if want := fmt.Sprintf(ErrFmtRemovalParkedNoTime, reason, testConnID); err == nil || err.Error() != want {
+		t.Fatalf("Expected %q, got %v", want, err)
+	}
+	if got := deletes.Load(); got != 1 {
+		t.Errorf("Expected only the first DELETE, got %d", got)
+	}
+}

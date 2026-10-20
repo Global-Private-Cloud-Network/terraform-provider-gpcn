@@ -96,3 +96,7 @@ const CodeStateConflict = "VPN_STATE_CONFLICT"
 
 // RemovalPollInterval is a variable so that tests can shorten the wait.
 var RemovalPollInterval = 5 * time.Second
+
+// ResendMinBudget is the least time a destroy needs left to send a parked
+// removal again. It is a variable so that tests can shorten it.
+var ResendMinBudget = 30 * time.Second

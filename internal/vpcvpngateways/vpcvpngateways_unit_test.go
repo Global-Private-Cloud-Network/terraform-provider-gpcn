@@ -248,11 +248,11 @@ func TestVpcVpnGatewayUnitWaitForVpnGatewayGoneTimeoutNamesLastStateAndFailureRe
 	const reason = "The VPN gateway's removal failed; it is retried automatically."
 	gpcnClient, _ := removalServer(t, []string{removingRow(""), removingRow(reason)})
 
-	err := waitForVpnGatewayGone(gpcnClient, context.Background(), testVpcID, time.Millisecond, 20*time.Millisecond)
+	err := waitForVpnGatewayGone(gpcnClient, context.Background(), testVpcID, time.Millisecond, time.Now(), 20*time.Millisecond)
 	if !errors.Is(err, ErrRemovalTimeout) {
 		t.Fatalf("Expected ErrRemovalTimeout, got %v", err)
 	}
-	for _, want := range []string{"'removing'", reason, testVpcID} {
+	for _, want := range []string{"'removing'", "after 20ms", reason, testVpcID} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Expected the timeout error to contain %q, got %q", want, err.Error())
 		}
@@ -264,7 +264,7 @@ func TestVpcVpnGatewayUnitWaitForVpnGatewayGoneStopsOnReadError(t *testing.T) {
 	gpcnClient := errorServer(t, http.StatusForbidden,
 		`{"success":false,"message":"You do not have permission to perform this action.","error":{"code":"Insufficient Permissions","statusCode":403,"details":null}}`)
 
-	err := waitForVpnGatewayGone(gpcnClient, context.Background(), testVpcID, time.Millisecond, time.Minute)
+	err := waitForVpnGatewayGone(gpcnClient, context.Background(), testVpcID, time.Millisecond, time.Now(), time.Minute)
 	if err == nil {
 		t.Fatal("Expected the 403 to stop the wait")
 	}
@@ -486,13 +486,38 @@ func TestVpcVpnGatewayUnitDeleteWhileCreatingTimesOut(t *testing.T) {
 	})
 
 	err := deleteVpnGateway(gpcnClient, context.Background(), testVpcID, time.Millisecond, 20*time.Millisecond)
-	if !errors.Is(err, ErrRemovalTimeout) {
-		t.Fatalf("Expected ErrRemovalTimeout, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "'creating'") {
-		t.Errorf("Expected the timeout error to name the creating state, got %q", err.Error())
+	if want := fmt.Sprintf(ErrFmtStillCreating, testVpcID, 20*time.Millisecond); err == nil || err.Error() != want {
+		t.Fatalf("Expected %q, got %v", want, err)
 	}
 	if got := deletes.Load(); got != 1 {
 		t.Errorf("Expected one DELETE before the timeout, got %d", got)
+	}
+}
+
+// A gateway that leaves the creating state only for the next DELETE to meet
+// 409 again must not keep the loop going past the shared deadline.
+func TestVpcVpnGatewayUnitDeleteRepeatedBusyStopsAtDeadline(t *testing.T) {
+	t.Parallel()
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.Method {
+			case http.MethodDelete:
+				w.WriteHeader(http.StatusConflict)
+				fmt.Fprint(w, `{"success":false,"message":"The VPN gateway is still being created.","error":{"code":"VPN_GATEWAY_BUSY_CREATING","statusCode":409,"details":null}}`)
+			case http.MethodGet:
+				fmt.Fprint(w, removingRow(""))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := deleteVpnGateway(gpcnClient, ctx, testVpcID, time.Millisecond, 20*time.Millisecond)
+	if want := fmt.Sprintf(ErrFmtStillCreating, testVpcID, 20*time.Millisecond); err == nil || err.Error() != want {
+		t.Fatalf("Expected %q, got %v", want, err)
 	}
 }

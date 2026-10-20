@@ -330,9 +330,9 @@ const (
 
 // waitForVpnConnectionGone reads the connection every interval until the API
 // answers 404, or until the timeout counted from startTime. A row that parks
-// in the removing state with a failure reason gets the DELETE once more. When
-// the row parks again after a job of that second DELETE, the wait fails with
-// the failure reason.
+// in the removing state with a failure reason gets the DELETE once more, when
+// at least ResendMinBudget is left. When the row parks again after that second
+// DELETE, the wait fails with the failure reason.
 func waitForVpnConnectionGone(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, interval time.Duration, startTime time.Time, timeout time.Duration) error {
 	tflog.Info(ctx, fmt.Sprintf(LogWaitingForVpnConnectionGone, connectionID))
 
@@ -348,10 +348,13 @@ func waitForVpnConnectionGone(gpcnClient *client.GpcnClient, ctx context.Context
 		tflog.Info(ctx, fmt.Sprintf(LogVpnConnectionStillRemoving, connectionID, detail.State))
 
 		parked := detail.State == StateRemoving && detail.FailureReason != nil && *detail.FailureReason != ""
-		if parked && resend == resendJob {
+		if parked && resend != resendNotSent {
 			return fmt.Errorf(ErrFmtRemovalParkedAgain, *detail.FailureReason, connectionID)
 		}
-		if parked && resend == resendNotSent {
+		if parked {
+			if timeout-time.Since(startTime) < ResendMinBudget {
+				return fmt.Errorf(ErrFmtRemovalParkedNoTime, *detail.FailureReason, connectionID)
+			}
 			tflog.Info(ctx, LogParkedRemovalResent)
 			resend, err = resendDelete(gpcnClient, ctx, vpcID, connectionID, startTime, timeout)
 			if err != nil {

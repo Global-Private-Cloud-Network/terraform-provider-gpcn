@@ -83,7 +83,7 @@ func (r *vpcVpnConnectionResource) Schema(_ context.Context, _ resource.SchemaRe
 				},
 			},
 			"description": schema.StringAttribute{
-				Description: "Additional information about the VPN connection, up to 500 characters",
+				Description: "Additional information about the VPN connection, up to 500 characters as the API counts them (UTF-16 code units)",
 				Optional:    true,
 				Computed:    true,
 				Default:     stringdefault.StaticString(""),
@@ -516,7 +516,11 @@ func (r *vpcVpnConnectionResource) Update(ctx context.Context, req resource.Upda
 		tflog.Info(ctx, vpcvpnconnections.LogUpdateSendsNoRequest)
 	} else if err := vpcvpnconnections.UpdateVpnConnection(r.client, ctx, vpcID, connectionID, body); err != nil {
 		// The state stays as it was, so the failed job does not change it.
-		resp.Diagnostics.AddError(vpcvpnconnections.ErrSummaryUnableToUpdateVpnConn, vpcvpngateways.ErrorDetail(err))
+		failure := vpcvpngateways.ErrorDetail(err)
+		if vpcvpngateways.RowMayExist(err) {
+			failure += "\n\n" + vpcvpnconnections.ErrDetailUpdateMayStillApply
+		}
+		resp.Diagnostics.AddError(vpcvpnconnections.ErrSummaryUnableToUpdateVpnConn, failure)
 		return
 	}
 

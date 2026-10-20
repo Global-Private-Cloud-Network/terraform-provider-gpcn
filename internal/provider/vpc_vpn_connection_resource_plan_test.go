@@ -89,13 +89,16 @@ type vpnConnPlanTestServerState struct {
 	removing     bool
 	// parkDeletes is the number of accepted DELETE requests whose job fails and
 	// leaves the row parked in the removing state with a failure reason.
-	parkDeletes   int
-	failDeleteJob bool
-	getsAfterDel  int
-	postBodies    []map[string]any
-	postRaw       []string
-	putBodies     []map[string]any
-	deleteCount   int
+	parkDeletes int
+	// resendConflicts makes the next DELETE after the first answer 409, as when
+	// a removal already runs, and leaves the row parked.
+	resendConflicts bool
+	failDeleteJob   bool
+	getsAfterDel    int
+	postBodies      []map[string]any
+	postRaw         []string
+	putBodies       []map[string]any
+	deleteCount     int
 }
 
 func (s *vpnConnPlanTestServerState) set(update func(*vpnConnPlanTestServerState)) {
@@ -164,6 +167,7 @@ func writeVpnConnPlanTestRemoving(w http.ResponseWriter) {
 
 func init() {
 	vpcvpnconnections.RemovalPollInterval = 5 * time.Millisecond
+	vpcvpnconnections.ResendMinBudget = time.Millisecond
 }
 
 func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTestServerState) {
@@ -286,6 +290,10 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			state.deleteConflict = ""
 			alreadyRemoving := state.deleteRemoving
 			state.deleteRemoving = false
+			if state.resendConflicts && state.deleteCount > 0 && conflict == "" {
+				conflict = "A removal is already under way."
+				state.resendConflicts = false
+			}
 			switch {
 			case alreadyRemoving:
 				state.removing = true
@@ -836,6 +844,7 @@ func TestVpcVpnConnectionResourceParkedFailedRetrySettles(t *testing.T) {
 						plancheck.ExpectResourceAction(gpcnVpcVpnConnectionTest, plancheck.ResourceActionUpdate),
 						plancheck.ExpectUnknownValue(gpcnVpcVpnConnectionTest, tfjsonpath.New("state")),
 						plancheck.ExpectUnknownValue(gpcnVpcVpnConnectionTest, tfjsonpath.New("failure_reason")),
+						plancheck.ExpectUnknownValue(gpcnVpcVpnConnectionTest, tfjsonpath.New("local_networks")),
 					},
 				},
 				Check: resource.ComposeAggregateTestCheckFunc(
@@ -1600,6 +1609,32 @@ func TestVpcVpnConnectionResourceDeleteParkedTwiceReports(t *testing.T) {
 	})
 }
 
+// A resend that meets a 409 and then reads the row parked again ends the
+// destroy with the failure reason, as a parked job of the resend does.
+func TestVpcVpnConnectionResourceDeleteParkedAfterConflictReports(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	config := newVpnConnPlanTestConfig().render(server.URL)
+	// A short polling timeout keeps a wait that never ends from stalling the test.
+	config = strings.Replace(config, `api_key = "test-key"`, "api_key = \"test-key\"\n  polling_timeout = 5", 1)
+	words := strings.ReplaceAll(regexp.QuoteMeta(vpnConnPlanTestDeleteFailed), " ", `[\s│]+`)
+	parked := regexp.MustCompile(`(?s)Unable to delete GPCN™ VPN connection[\s│]+(with [^\n]*[\s│]+)?` + words + `[\s│]+The provider asked GPCN™ to remove`)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: config,
+				Check: func(*terraform.State) error {
+					state.set(func(s *vpnConnPlanTestServerState) { s.parkDeletes = 1; s.resendConflicts = true })
+					return nil
+				},
+			},
+			{Config: config, Destroy: true, ExpectError: parked},
+		},
+	})
+}
+
 // The update PUT goes out once. A retry after a lost answer would meet the job
 // the first PUT started.
 func TestVpcVpnConnectionResourceUpdateSendsOnce(t *testing.T) {
@@ -1614,9 +1649,11 @@ func TestVpcVpnConnectionResourceUpdateSendsOnce(t *testing.T) {
 		Steps: []resource.TestStep{
 			{Config: cfg.render(server.URL)},
 			{
-				PreConfig:   func() { state.set(func(s *vpnConnPlanTestServerState) { s.putStatus = http.StatusServiceUnavailable }) },
-				Config:      renamed.render(server.URL),
-				ExpectError: vpnConnRefusal(vpnConnPlanTestBadGateway),
+				PreConfig: func() { state.set(func(s *vpnConnPlanTestServerState) { s.putStatus = http.StatusServiceUnavailable }) },
+				Config:    renamed.render(server.URL),
+				ExpectError: regexp.MustCompile(`(?s)Unable to update GPCN™ VPN connection.*` +
+					strings.ReplaceAll(regexp.QuoteMeta(vpnConnPlanTestBadGateway), " ", `[\s│]+`) + `.*` +
+					strings.ReplaceAll(regexp.QuoteMeta(vpcvpnconnections.ErrDetailUpdateMayStillApply), " ", `[\s│]+`)),
 			},
 			{
 				PreConfig: func() {
