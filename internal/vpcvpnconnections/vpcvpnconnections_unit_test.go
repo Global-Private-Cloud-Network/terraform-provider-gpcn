@@ -365,6 +365,41 @@ func TestVpcVpnConnectionUnitMultipleOfValidator(t *testing.T) {
 	}
 }
 
+func TestVpcVpnConnectionUnitUtf16LengthAtMostValidator(t *testing.T) {
+	t.Parallel()
+	v := Utf16LengthAtMostValidator{Attribute: "description", Max: DescriptionMax}
+	for name, test := range map[string]struct {
+		value string
+		ok    bool
+	}{
+		"300 accented letters, 300 units": {strings.Repeat("é", 300), true},
+		"500 ASCII letters":               {strings.Repeat("a", DescriptionMax), true},
+		"501 ASCII letters":               {strings.Repeat("a", DescriptionMax+1), false},
+		"250 emoji, 500 units":            {strings.Repeat("😀", 250), true},
+		"251 emoji, 502 units":            {strings.Repeat("😀", 251), false},
+	} {
+		resp := &validator.StringResponse{}
+		v.ValidateString(context.Background(), validator.StringRequest{Path: path.Root("description"), ConfigValue: types.StringValue(test.value)}, resp)
+		if resp.Diagnostics.HasError() == test.ok {
+			t.Errorf("%s: expected ok=%v, got diagnostics %v", name, test.ok, resp.Diagnostics)
+		}
+	}
+
+	resp := &validator.StringResponse{}
+	v.ValidateString(context.Background(), validator.StringRequest{Path: path.Root("description"), ConfigValue: types.StringValue(strings.Repeat("😀", 251))}, resp)
+	const want = "Attribute description must be at most 500 characters (counted in UTF-16 code units), got: 502"
+	if resp.Diagnostics.HasError() && resp.Diagnostics.Errors()[0].Detail() != want {
+		t.Errorf("Expected the detail %q, got %q", want, resp.Diagnostics.Errors()[0].Detail())
+	}
+
+	resp = &validator.StringResponse{}
+	v.ValidateString(context.Background(), validator.StringRequest{ConfigValue: types.StringUnknown()}, resp)
+	v.ValidateString(context.Background(), validator.StringRequest{ConfigValue: types.StringNull()}, resp)
+	if resp.Diagnostics.HasError() {
+		t.Errorf("Expected null and unknown to pass, got %v", resp.Diagnostics)
+	}
+}
+
 func apiServer(t *testing.T, handler func(w http.ResponseWriter, r *http.Request)) *client.GpcnClient {
 	t.Helper()
 	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{T: t, Handler: handler})

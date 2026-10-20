@@ -29,6 +29,7 @@ const (
 	ErrDetailCreateFailedNoReason = "The VPN connection is in the failed state and GPCN™ recorded no reason. Terraform has marked it tainted, so the next apply deletes it and creates it again."
 	ErrDetailImportIDFormat       = "Import ID must be '<vpc_id>/<connection_id>', the ID of the VPC and the ID of the VPN connection joined by a slash. Got: '%s'"
 	ErrDetailPskPattern           = "%s must be 16–64 printable ASCII characters with no spaces, double quotes or backslashes"
+	ErrFmtUtf16Max                = "Attribute %s must be at most %d characters (counted in UTF-16 code units)"
 	ErrDetailMultipleOf           = "%s must be a multiple of %d"
 	ErrFmtNotOwnRow               = "A VPN connection named %s already exists on this VPC that this apply didn't create. Import it with: terraform import gpcn_vpc_vpn_connection.<name> %s/%s"
 	ErrFmtMayCommitLater          = "GPCN™ may still finish creating this connection. Before you apply again, check this VPC for a connection named %s. If it's there, import it with: terraform import gpcn_vpc_vpn_connection.<name> %s/<connection_id>"

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"unicode/utf16"
 
 	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 )
@@ -67,4 +68,35 @@ func (v MultipleOfValidator) ValidateInt64(ctx context.Context, request validato
 	}
 	response.Diagnostics.AddAttributeError(request.Path, fmt.Sprintf(ErrSummaryInvalidAttribute, v.Attribute),
 		fmt.Sprintf("%s, got: %d", v.Description(ctx), request.ConfigValue.ValueInt64()))
+}
+
+// Utf16LengthAtMostValidator checks a string length the way the API counts it,
+// in UTF-16 code units. The framework's length validator counts characters,
+// which differs for a character outside the basic multilingual plane.
+type Utf16LengthAtMostValidator struct {
+	// Attribute names the schema attribute the message points at.
+	Attribute string
+	Max       int
+}
+
+var _ validator.String = Utf16LengthAtMostValidator{}
+
+func (v Utf16LengthAtMostValidator) Description(_ context.Context) string {
+	return fmt.Sprintf(ErrFmtUtf16Max, v.Attribute, v.Max)
+}
+
+func (v Utf16LengthAtMostValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (v Utf16LengthAtMostValidator) ValidateString(_ context.Context, request validator.StringRequest, response *validator.StringResponse) {
+	if request.ConfigValue.IsNull() || request.ConfigValue.IsUnknown() {
+		return
+	}
+	units := len(utf16.Encode([]rune(request.ConfigValue.ValueString())))
+	if units <= v.Max {
+		return
+	}
+	response.Diagnostics.AddAttributeError(request.Path, fmt.Sprintf(ErrSummaryInvalidAttribute, v.Attribute),
+		fmt.Sprintf(ErrFmtUtf16Max+", got: %d", v.Attribute, v.Max, units))
 }

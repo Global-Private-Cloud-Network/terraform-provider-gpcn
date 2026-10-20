@@ -89,7 +89,7 @@ func (r *vpcVpnConnectionResource) Schema(_ context.Context, _ resource.SchemaRe
 				Default:     stringdefault.StaticString(""),
 				Validators: []validator.String{
 					helpers.NoOuterWhitespaceValidator{Summary: vpcvpnconnections.ErrSummaryInvalidAttribute, Attribute: "description"},
-					stringvalidator.LengthAtMost(vpcvpnconnections.DescriptionMax),
+					vpcvpnconnections.Utf16LengthAtMostValidator{Attribute: "description", Max: vpcvpnconnections.DescriptionMax},
 				},
 			},
 			"peer_address": schema.StringAttribute{
