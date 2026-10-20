@@ -8,7 +8,7 @@ FEATURES:
 ENHANCEMENTS:
 
 - **Security Group**: rules that a site-to-site VPN connection adds to a group no longer appear in the `rule` set, and the provider sends them back unchanged whenever it replaces the group's rules. A rule that loses its connection during a replace produces a warning.
-- **VPC, Data Centers**: new computed `vpn_capable` on `gpcn_vpc` and on each data center of `gpcn_datacenters`, which also filters on `vpn_capable`. It reports whether you can create a VPN gateway and VPN connections there.
+- **VPC, Data Centers**: new computed `vpn_capable` on `gpcn_vpc` and on each data center of `gpcn_datacenters`, which also filters on `vpn_capable`. It reports whether the data center offers site-to-site VPN; creating a VPN gateway or VPN connection also needs your organization's Site-to-Site VPN feature.
 
 DEPRECATIONS:
 
