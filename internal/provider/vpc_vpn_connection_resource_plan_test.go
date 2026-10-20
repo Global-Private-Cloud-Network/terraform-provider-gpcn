@@ -1583,7 +1583,7 @@ func TestVpcVpnConnectionResourceDeleteParkedTwiceReports(t *testing.T) {
 	// A short polling timeout keeps a wait that never ends from stalling the test.
 	config = strings.Replace(config, `api_key = "test-key"`, "api_key = \"test-key\"\n  polling_timeout = 5", 1)
 	words := strings.ReplaceAll(regexp.QuoteMeta(vpnConnPlanTestDeleteFailed), " ", `[\s│]+`)
-	parked := regexp.MustCompile(`(?s)Unable to delete GPCN™ VPN connection[\s│]+(with [^\n]*[\s│]+)?` + words + `[\s│]+GPCN™ sent the removal`)
+	parked := regexp.MustCompile(`(?s)Unable to delete GPCN™ VPN connection[\s│]+(with [^\n]*[\s│]+)?` + words + `[\s│]+The provider asked GPCN™ to remove`)
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
