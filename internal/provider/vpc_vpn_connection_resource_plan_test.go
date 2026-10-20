@@ -1351,6 +1351,11 @@ func TestVpcVpnConnectionResourceUpdateJobFailedReturnsPriorState(t *testing.T) 
 	if !resp.Diagnostics.HasError() {
 		t.Fatal("Expected the failed job to fail the update")
 	}
+	for _, d := range resp.Diagnostics.Errors() {
+		if strings.Contains(d.Detail(), vpcvpnconnections.ErrDetailUpdateMayStillApply) {
+			t.Errorf("A failed job has ended, so the error must not say the change may still be applying: %q", d.Detail())
+		}
+	}
 	var got vpcvpnconnections.ResourceModel
 	if diags := resp.State.Get(context.Background(), &got); diags.HasError() {
 		t.Fatalf("failed to read the returned state: %v", diags)

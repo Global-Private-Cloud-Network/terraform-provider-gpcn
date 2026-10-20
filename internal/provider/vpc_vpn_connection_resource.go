@@ -517,7 +517,7 @@ func (r *vpcVpnConnectionResource) Update(ctx context.Context, req resource.Upda
 	} else if err := vpcvpnconnections.UpdateVpnConnection(r.client, ctx, vpcID, connectionID, body); err != nil {
 		// The state stays as it was, so the failed job does not change it.
 		failure := vpcvpngateways.ErrorDetail(err)
-		if vpcvpngateways.RowMayExist(err) {
+		if vpcvpngateways.RowMayExist(err) && !errors.Is(err, client.ErrJobFailed) {
 			failure += "\n\n" + vpcvpnconnections.ErrDetailUpdateMayStillApply
 		}
 		resp.Diagnostics.AddError(vpcvpnconnections.ErrSummaryUnableToUpdateVpnConn, failure)
