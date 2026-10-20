@@ -36,7 +36,7 @@ const (
 	ErrDetailLookupFailed         = "A VPN connection may have been created; check the VPC and import it if so."
 	ErrFmtWaitForRemovalFailed    = "wait for VPN connection removal failed: %w"
 	ErrFmtRemovalTimeout          = "VPN connection %s: still in state '%s' after %s"
-	ErrFmtRemovalParkedAgain      = "%s\n\nGPCN™ sent the removal of VPN connection %s again, and it failed again."
+	ErrFmtRemovalParkedAgain      = "%s\n\nGPCN™ sent the removal of VPN connection %s again, and it failed again"
 	ErrFmtCreatePollingFailed     = "create VPN connection polling failed: %w"
 	ErrFmtUpdatePollingFailed     = "update VPN connection polling failed: %w"
 	ErrFmtDeletePollingFailed     = "delete VPN connection polling failed: %w"
