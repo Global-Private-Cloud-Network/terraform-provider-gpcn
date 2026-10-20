@@ -250,7 +250,9 @@ func UpdateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 		return err
 	}
 
-	jobID, err := issueJob(gpcnClient, request)
+	// A second PUT after a lost answer meets 409 VPN_CHANGE_IN_PROGRESS while the
+	// first one still runs, so the PUT goes out once.
+	jobID, err := issueJob(gpcnClient.DoOnce, request)
 	if err != nil {
 		return err
 	}
@@ -304,7 +306,7 @@ func sendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, conne
 	if err != nil {
 		return "", err
 	}
-	return issueJob(gpcnClient, request)
+	return issueJob(gpcnClient.DoWithRetry, request)
 }
 
 // removalAlreadyRunning reports a 409 for a connection that is being removed
@@ -404,8 +406,8 @@ func sendAccepted(send func(*http.Request) (*http.Response, error), request *htt
 
 // issueJob sends a request whose 202 carries a job ID in the singular job
 // envelope.
-func issueJob(gpcnClient *client.GpcnClient, request *http.Request) (string, error) {
-	raw, err := sendAccepted(gpcnClient.DoWithRetry, request)
+func issueJob(send func(*http.Request) (*http.Response, error), request *http.Request) (string, error) {
+	raw, err := sendAccepted(send, request)
 	if err != nil {
 		return "", err
 	}

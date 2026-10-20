@@ -67,6 +67,8 @@ type vpnConnPlanTestServerState struct {
 	// putSettles makes a PUT settle the row, as the job of an update does: the
 	// state becomes connecting and the failure reason clears.
 	putSettles bool
+	// putStatus makes the PUT answer with this status and a 5xx body.
+	putStatus int
 	// postStatus makes the POST insert the row and then answer with this status.
 	postStatus int
 	// itemStatus makes the detail GET answer with this status.
@@ -256,6 +258,12 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			body := testutil.ReadRequestBody(r)
 			state.mu.Lock()
 			state.putBodies = append(state.putBodies, body)
+			putStatus := state.putStatus
+			if putStatus != 0 {
+				state.mu.Unlock()
+				writeVpnConnPlanTestError(w, putStatus, "Service Unavailable", vpnConnPlanTestBadGateway)
+				return
+			}
 			state.desiredApplied = true
 			for key, value := range body {
 				if key != "psk" {
@@ -1508,6 +1516,39 @@ func TestVpcVpnConnectionResourceDeleteParkedTwiceReports(t *testing.T) {
 				},
 			},
 			{Config: config, Destroy: true, ExpectError: parked},
+		},
+	})
+}
+
+// The update PUT goes out once. A retry after a lost answer would meet the job
+// the first PUT started.
+func TestVpcVpnConnectionResourceUpdateSendsOnce(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	cfg := newVpnConnPlanTestConfig()
+	renamed := cfg
+	renamed.Name = "branch-office-2"
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: cfg.render(server.URL)},
+			{
+				PreConfig:   func() { state.set(func(s *vpnConnPlanTestServerState) { s.putStatus = http.StatusServiceUnavailable }) },
+				Config:      renamed.render(server.URL),
+				ExpectError: vpnConnRefusal(vpnConnPlanTestBadGateway),
+			},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					if len(state.putBodies) != 1 {
+						t.Errorf("Expected the PUT to be sent once, got %d", len(state.putBodies))
+					}
+					state.putStatus = 0
+				},
+				Config: cfg.render(server.URL),
+			},
 		},
 	})
 }
