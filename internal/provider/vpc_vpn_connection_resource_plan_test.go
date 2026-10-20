@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -1294,8 +1295,66 @@ func TestVpcVpnConnectionResourceUpdateJobFailedKeepsState(t *testing.T) {
 				Config:      renamed.render(server.URL),
 				ExpectError: vpnConnRefusal(vpnConnPlanTestJobFailText),
 			},
+			{
+				PreConfig:    func() { state.set(func(s *vpnConnPlanTestServerState) { s.failJob = false }) },
+				RefreshState: true,
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcVpnConnectionTest, "name", "branch-office-2"),
+					resource.TestCheckResourceAttr(gpcnVpcVpnConnectionTest, "id", vpnConnPlanTestConnID),
+					resource.TestCheckResourceAttr(gpcnVpcVpnConnectionTest, "psk_wo_version", "1"),
+				),
+			},
 		},
 	})
+}
+
+// Update leaves the state it was given when the job fails, whatever the plan
+// held.
+func TestVpcVpnConnectionResourceUpdateJobFailedReturnsPriorState(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	state.set(func(s *vpnConnPlanTestServerState) {
+		s.exists = true
+		s.failJob = true
+		s.row = vpnConnPlanTestRowFromBody(map[string]any{
+			"name": "branch-office", "peerAddress": "203.0.113.10", "peerCidrs": []string{"192.168.10.0/24"},
+		}, "connected")
+	})
+	r, empty := vpnConnDirectCall(t, server.URL)
+
+	prior := empty
+	priorModel := vpnConnDirectModel(vpnConnPlanTestConnID)
+	if diags := prior.Set(context.Background(), &priorModel); diags.HasError() {
+		t.Fatalf("failed to build state: %v", diags)
+	}
+	plan := tfsdk.Plan{Schema: prior.Schema}
+	planModel := priorModel
+	planModel.Name = types.StringValue("branch-office-2")
+	if diags := plan.Set(context.Background(), &planModel); diags.HasError() {
+		t.Fatalf("failed to build plan: %v", diags)
+	}
+
+	resp := &fwresource.UpdateResponse{State: prior}
+	r.Update(context.Background(), fwresource.UpdateRequest{
+		Plan: plan, State: prior, Config: tfsdk.Config{Schema: prior.Schema, Raw: plan.Raw},
+	}, resp)
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("Expected the failed job to fail the update")
+	}
+	var got vpcvpnconnections.ResourceModel
+	if diags := resp.State.Get(context.Background(), &got); diags.HasError() {
+		t.Fatalf("failed to read the returned state: %v", diags)
+	}
+	if got.Name.ValueString() != "branch-office" {
+		t.Errorf("Expected the prior name, got %q", got.Name.ValueString())
+	}
+	if got.State.ValueString() != "connected" || !got.DesiredApplied.ValueBool() {
+		t.Errorf("Expected the prior computed values, got state %q and desired_applied %v", got.State.ValueString(), got.DesiredApplied)
+	}
+	if !reflect.DeepEqual(got, priorModel) {
+		t.Errorf("Expected the prior state unchanged, got %+v", got)
+	}
 }
 
 // vpnConnDirectCall builds the pieces the framework would pass to a CRUD method.
