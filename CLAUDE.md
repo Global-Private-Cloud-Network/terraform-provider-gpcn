@@ -10,6 +10,10 @@ Data sources: `gpcn_datacenters`, `gpcn_gpu_inventory`, `gpcn_resource_groups`, 
 
 Registration lives in `Resources()` / `DataSources()` in `internal/provider/provider.go`.
 
+## Public Repository
+
+This repository is public: code, comments, commit messages, pull request bodies and review comments are all published. The GPCN™ API's server source is private. Describe API behaviour only as a client observes it: routes, status codes, error codes, response fields and what they mean. Never cite server source: no file paths, line numbers, function, table or column names, commit hashes, or how the server implements a behaviour. Evidence from server source goes to the author privately, never into the repository or a pull request.
+
 ## Environment Setup
 
 Required environment variables:
