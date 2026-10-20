@@ -242,10 +242,11 @@ func TestVpcNsgResourceKeepsVpnRules(t *testing.T) {
 		Steps: []resource.TestStep{
 			{
 				Config: vpcNsgVpnAccTestConfig(datacenterID, suffix, "https"),
-				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "rule.#", "1"),
-					resource.TestCheckResourceAttr(gpcnVpcNsgTest, "rule_count", "2"),
-				),
+				Check:  resource.TestCheckResourceAttr(gpcnVpcNsgTest, "rule.#", "1"),
+			},
+			{
+				RefreshState: true,
+				Check:        resource.TestCheckResourceAttr(gpcnVpcNsgTest, "rule_count", "2"),
 			},
 			{
 				Config: vpcNsgVpnAccTestConfig(datacenterID, suffix, "https from anywhere"),

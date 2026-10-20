@@ -807,3 +807,58 @@ func TestRulesToSetKeepsDeclaredVpnRuleUnit(t *testing.T) {
 		t.Errorf("a different description leaves the owned rule out, got %d rules", got)
 	}
 }
+
+// The merge warnings describe what an accepted replace does. A replace the API
+// refuses reports its error and no warning.
+func TestReplaceNsgRulesMergeWarningsFollowAcceptanceUnit(t *testing.T) {
+	t.Parallel()
+
+	for name, putStatus := range map[string]int{"accepted": http.StatusOK, "refused": http.StatusBadRequest} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			detail := unitTestDetail()
+			detail.Rules = []ApiRule{unitTestVpnRule(unitTestStringPointer("conn-1"))}
+			server, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+				T: t,
+				Handler: func(w http.ResponseWriter, r *http.Request) {
+					switch {
+					case r.Method == http.MethodGet && r.URL.Path == nsgPath(unitTestVpcID, unitTestNsgID):
+						testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": detail})
+					case r.Method == http.MethodPut && putStatus != http.StatusOK:
+						w.Header().Set("Content-Type", "application/json")
+						w.WriteHeader(putStatus)
+						_, _ = w.Write([]byte(`{"success":false,"message":"refused","error":{"code":"Bad Request","statusCode":400,"details":null}}`))
+					case r.Method == http.MethodPut:
+						testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{"jobId": "job-rules"}})
+					default:
+						testutil.HandleJobResponse(w, "job-rules", unitTestNsgID, true)
+					}
+				},
+			})
+			defer server.Close()
+
+			description := "mine now"
+			rules := []RuleModel{{
+				Direction:   types.StringValue("ingress"),
+				Protocol:    types.StringValue("all"),
+				RemoteCidr:  types.StringValue("192.168.20.0/24"),
+				Description: types.StringValue(description),
+			}}
+
+			_, diags, err := ReplaceNsgRules(gpcnClient, context.Background(), unitTestVpcID, unitTestNsgID, rules)
+			wantWarnings := 1
+			if putStatus != http.StatusOK {
+				wantWarnings = 0
+				if err == nil {
+					t.Error("expected the refused replace to fail")
+				}
+			} else if err != nil {
+				t.Fatalf("expected the replace to succeed, got %v", err)
+			}
+			if got := diags.WarningsCount(); got != wantWarnings {
+				t.Errorf("warnings = %d, want %d: %v", got, wantWarnings, diags)
+			}
+		})
+	}
+}

@@ -211,7 +211,9 @@ func (r ApiRule) matchesExactly(declared RuleModel) bool {
 
 // VpnOwnershipLostWarnings warns for each re-sent rule that the group now
 // shows without an owner. The API relabels a rule to the customer when a
-// rename of the connection races the replace.
+// rename of the connection races the replace. A connection deleted, or a peer
+// network dropped, between the read and the replace has the same effect: the
+// resend puts the released rule back as the group's own.
 func VpnOwnershipLostWarnings(resent []ApiRule, after []ApiRule) diag.Diagnostics {
 	var diags diag.Diagnostics
 	for _, sent := range resent {
