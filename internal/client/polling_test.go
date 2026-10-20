@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -77,6 +78,12 @@ func TestPollStopsOnCancelledStage(t *testing.T) {
 
 	if err.Error() != pollTestCancelStageError {
 		t.Errorf("error = %q, want %q", err.Error(), pollTestCancelStageError)
+	}
+	if !errors.Is(err, client.ErrJobCancelledByPlatform) {
+		t.Errorf("errors.Is(err, ErrJobCancelledByPlatform) = false, want true")
+	}
+	if errors.Is(err, client.ErrJobFailed) {
+		t.Errorf("a platform-stopped job must not match ErrJobFailed")
 	}
 	if got := int(calls.Load()); got != 1 {
 		t.Errorf("poll calls = %d, want exactly 1", got)

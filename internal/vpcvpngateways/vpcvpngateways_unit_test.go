@@ -521,3 +521,47 @@ func TestVpcVpnGatewayUnitDeleteRepeatedBusyStopsAtDeadline(t *testing.T) {
 		t.Fatalf("Expected %q, got %v", want, err)
 	}
 }
+
+// A read that fails while the delete waits for a create reports the create
+// wait, not the removal wait.
+func TestVpcVpnGatewayUnitDeleteWhileCreatingReadFailureNamesTheCreateWait(t *testing.T) {
+	t.Parallel()
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.Method {
+			case http.MethodDelete:
+				w.WriteHeader(http.StatusConflict)
+				fmt.Fprint(w, `{"success":false,"message":"The VPN gateway is still being created.","error":{"code":"VPN_GATEWAY_BUSY_CREATING","statusCode":409,"details":null}}`)
+			case http.MethodGet:
+				w.WriteHeader(http.StatusForbidden)
+				fmt.Fprint(w, `{"success":false,"message":"forbidden","error":{"code":"FORBIDDEN","statusCode":403,"details":null}}`)
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+
+	err := deleteVpnGateway(gpcnClient, context.Background(), testVpcID, time.Millisecond, time.Minute)
+	prefix := strings.TrimSuffix(ErrFmtWaitForCreateFailed, "%w")
+	if err == nil || !strings.HasPrefix(err.Error(), prefix) {
+		t.Fatalf("Expected an error that starts with %q, got %v", prefix, err)
+	}
+}
+
+// The removal timeout names the configured total, not what was left when the
+// wait started.
+func TestVpcVpnGatewayUnitDeleteTimeoutNamesTheConfiguredTotal(t *testing.T) {
+	t.Parallel()
+	const reason = "The VPN gateway's removal failed; it is retried automatically."
+	gpcnClient, _ := deleteServer(t, http.StatusAccepted, []string{removingRow(reason)})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	err := deleteVpnGateway(gpcnClient, ctx, testVpcID, time.Millisecond, 100*time.Millisecond)
+	want := fmt.Sprintf("%v: "+ErrFmtRemovalTimeout, ErrRemovalTimeout, testVpcID, "removing", 100*time.Millisecond, reason)
+	if err == nil || err.Error() != want {
+		t.Fatalf("Expected %q, got %v", want, err)
+	}
+}

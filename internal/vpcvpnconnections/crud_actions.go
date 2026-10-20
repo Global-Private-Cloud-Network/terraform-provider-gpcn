@@ -237,31 +237,33 @@ func GetVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpcID,
 }
 
 // UpdateVpnConnection puts the changed keys and polls the job. The API saves
-// the values before the job runs, so a failed job keeps them.
-func UpdateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, body map[string]any) error {
+// the values before the job runs, so a failed job keeps them. The first result
+// is true when the API accepted the PUT with a 2xx answer, even if the error is
+// not nil.
+func UpdateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, body map[string]any) (bool, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateVpnConnection, connectionID))
 
 	reader, err := marshalBody(body)
 	if err != nil {
-		return err
+		return false, err
 	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPut, connectionPath(vpcID, connectionID), reader)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	// A second PUT after a lost answer meets 409 VPN_CHANGE_IN_PROGRESS while the
-	// first one still runs, so the PUT goes out once.
+	// The PUT goes out once, because a second PUT starts a second job, or meets
+	// VPN_CHANGE_IN_PROGRESS while the first one runs.
 	jobID, err := issueJob(gpcnClient.DoOnce, request)
 	if err != nil {
-		return err
+		return false, err
 	}
 	tflog.Info(ctx, LogIssuedUpdateVpnConnectionJob)
 
 	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionUpdateVpnConnection, jobID); err != nil {
-		return fmt.Errorf(ErrFmtUpdatePollingFailed, err)
+		return true, fmt.Errorf(ErrFmtUpdatePollingFailed, err)
 	}
-	return nil
+	return true, nil
 }
 
 // DeleteVpnConnection issues the removal and polls its job. A 409 that says the
@@ -324,7 +326,7 @@ const (
 	resendNotSent = iota
 	// resendJob means the second DELETE started a job of its own.
 	resendJob
-	// resendConflict means the second DELETE met a removal that already runs.
+	// resendConflict means the API refused the second DELETE with a 409.
 	resendConflict
 )
 
@@ -332,7 +334,8 @@ const (
 // answers 404, or until the timeout counted from startTime. A row that parks
 // in the removing state with a failure reason gets the DELETE once more, when
 // at least ResendMinBudget is left. When the row parks again after that second
-// DELETE, the wait fails with the failure reason.
+// DELETE, the wait fails with the failure reason. When the API refuses the
+// second DELETE with a 409, the wait fails with the API's message.
 func waitForVpnConnectionGone(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, interval time.Duration, startTime time.Time, timeout time.Duration) error {
 	tflog.Info(ctx, fmt.Sprintf(LogWaitingForVpnConnectionGone, connectionID))
 
@@ -353,12 +356,16 @@ func waitForVpnConnectionGone(gpcnClient *client.GpcnClient, ctx context.Context
 		}
 		if parked {
 			if timeout-time.Since(startTime) < ResendMinBudget {
-				return fmt.Errorf(ErrFmtRemovalParkedNoTime, *detail.FailureReason, connectionID)
+				return fmt.Errorf(ErrFmtRemovalParkedNoTime, *detail.FailureReason, ResendMinBudget, connectionID)
 			}
 			tflog.Info(ctx, LogParkedRemovalResent)
-			resend, err = resendDelete(gpcnClient, ctx, vpcID, connectionID, startTime, timeout)
+			var refusal string
+			resend, refusal, err = resendDelete(gpcnClient, ctx, vpcID, connectionID, startTime, timeout)
 			if err != nil {
 				return err
+			}
+			if resend == resendConflict {
+				return fmt.Errorf(ErrFmtRemovalResendRefused, *detail.FailureReason, connectionID, refusal)
 			}
 			continue
 		}
@@ -377,24 +384,24 @@ func waitForVpnConnectionGone(gpcnClient *client.GpcnClient, ctx context.Context
 
 // resendDelete sends the DELETE again for a parked removal. A 202 gets its job
 // polled inside the shared deadline, and a failed job is not an error, because
-// the next read shows the row. A 409 means a removal already runs, so the wait
-// goes on.
-func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, startTime time.Time, timeout time.Duration) (int, error) {
+// the next read shows the row. A 409 is a refusal, and the second result then
+// holds the API's message, because the row still reads parked.
+func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, startTime time.Time, timeout time.Duration) (int, string, error) {
 	jobID, err := sendDelete(gpcnClient, ctx, vpcID, connectionID)
 	if client.IsConflict(err) {
-		return resendConflict, nil
+		return resendConflict, vpcvpngateways.ErrorDetail(err), nil
 	}
 	if err != nil {
-		return resendNotSent, err
+		return resendNotSent, "", err
 	}
 	tflog.Info(ctx, LogIssuedDeleteVpnConnectionJob)
 
 	pollConfig := client.DefaultPollingConfig()
 	pollConfig.Timeout = max(timeout-time.Since(startTime), 0)
 	if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, ActionDeleteVpnConnection, jobID, pollConfig); err != nil && !errors.Is(err, client.ErrJobFailed) {
-		return resendNotSent, fmt.Errorf(ErrFmtDeletePollingFailed, err)
+		return resendNotSent, "", fmt.Errorf(ErrFmtDeletePollingFailed, err)
 	}
-	return resendJob, nil
+	return resendJob, "", nil
 }
 
 // sendAccepted sends a request and returns the body of the 2xx answer.

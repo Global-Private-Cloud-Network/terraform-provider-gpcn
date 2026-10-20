@@ -7,7 +7,21 @@ var (
 	ErrLongPollingTimeout = errors.New("after polling timeout, the job status was still not completed")
 	ErrJobFailed          = errors.New("job operation failed, please check parameters and retry operation")
 	ErrEmptyJobsResponse  = errors.New("API returned empty jobs array in response")
+
+	// ErrJobCancelledByPlatform matches, through errors.Is, the error of a job
+	// that the platform stopped.
+	ErrJobCancelledByPlatform = errors.New("job stopped by the platform")
 )
+
+// jobCancelledError keeps the stopped-job sentence and matches
+// ErrJobCancelledByPlatform.
+type jobCancelledError struct {
+	message string
+}
+
+func (e *jobCancelledError) Error() string { return e.message }
+
+func (e *jobCancelledError) Is(target error) bool { return target == ErrJobCancelledByPlatform }
 
 // Configuration errors
 var (
