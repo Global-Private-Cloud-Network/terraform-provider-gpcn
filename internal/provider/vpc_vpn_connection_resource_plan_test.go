@@ -27,6 +27,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/hashicorp/terraform-plugin-testing/tfjsonpath"
 )
 
 const (
@@ -40,6 +41,7 @@ const (
 	vpnConnPlanTestLocalEnd    = "198.51.100.7"
 	vpnConnPlanTestConflict    = "A change to this VPN connection is already in progress; wait for it to finish."
 	vpnConnPlanTestFailReason  = "VPN connection creation failed; delete it and create it again"
+	vpnConnPlanTestParkedText  = "Applying the VPN connection change failed; your saved settings are kept — update to retry"
 	vpnConnPlanTestJobFailText = "Applying the VPN connection change failed; your saved settings are kept - update to retry"
 	vpnConnPlanTestBadGateway  = "The upstream VPN service answered badly."
 	vpnConnPlanTestGetRefused  = "You may not read this VPN connection."
@@ -61,6 +63,9 @@ type vpnConnPlanTestServerState struct {
 	// deleteConflict answers the next DELETE with a 409 carrying this message.
 	deleteConflict string
 	desiredApplied bool
+	// putSettles makes a PUT settle the row, as the job of an update does: the
+	// state becomes connecting and the failure reason clears.
+	putSettles bool
 	// postStatus makes the POST insert the row and then answer with this status.
 	postStatus int
 	// itemStatus makes the detail GET answer with this status.
@@ -251,6 +256,10 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				if key != "psk" {
 					state.row[key] = value
 				}
+			}
+			if state.putSettles {
+				state.row["state"] = "connecting"
+				state.row["failureReason"] = nil
 			}
 			state.mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{
@@ -743,6 +752,51 @@ func TestVpcVpnConnectionResourceUnappliedPlansUpdate(t *testing.T) {
 					}
 					return nil
 				},
+			},
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+		},
+	})
+}
+
+// A failed update parks the row as failed with desiredApplied false, and the
+// retried job settles it. The plan must mark every attribute that the job
+// rewrites unknown, or Terraform rejects the apply as inconsistent.
+func TestVpcVpnConnectionResourceParkedFailedRetrySettles(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	config := newVpnConnPlanTestConfig().render(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() {
+					state.set(func(s *vpnConnPlanTestServerState) {
+						s.desiredApplied = false
+						s.putSettles = true
+						s.row["state"] = "failed"
+						s.row["failureReason"] = vpnConnPlanTestParkedText
+					})
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcVpnConnectionTest, plancheck.ResourceActionUpdate),
+						plancheck.ExpectUnknownValue(gpcnVpcVpnConnectionTest, tfjsonpath.New("state")),
+						plancheck.ExpectUnknownValue(gpcnVpcVpnConnectionTest, tfjsonpath.New("failure_reason")),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcVpnConnectionTest, "state", "connecting"),
+					resource.TestCheckNoResourceAttr(gpcnVpcVpnConnectionTest, "failure_reason"),
+					resource.TestCheckResourceAttr(gpcnVpcVpnConnectionTest, "desired_applied", "true"),
+				),
 			},
 			{
 				Config: config,

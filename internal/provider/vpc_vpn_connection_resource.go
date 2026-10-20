@@ -294,7 +294,11 @@ func (r *vpcVpnConnectionResource) ModifyPlan(ctx context.Context, req resource.
 	known := !state.DesiredApplied.IsNull() && !state.DesiredApplied.IsUnknown()
 	if known && vpcvpnconnections.RetryUnappliedDue(state.DesiredApplied.ValueBool(), state.State.ValueString(), string(jobActive) == "true") {
 		tflog.Info(ctx, vpcvpnconnections.LogUnappliedPlansUpdate)
+		// The retried job settles the row, so the attributes it rewrites plan unknown.
 		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("desired_applied"), types.BoolUnknown())...)
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("state"), types.StringUnknown())...)
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("failure_reason"), types.StringUnknown())...)
+		resp.Diagnostics.Append(resp.Plan.SetAttribute(ctx, path.Root("local_networks"), types.ListUnknown(types.StringType))...)
 	}
 }
 
