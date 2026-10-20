@@ -238,8 +238,8 @@ func GetVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpcID,
 
 // UpdateVpnConnection puts the changed keys and polls the job. The API saves
 // the values before the job runs, so a failed job keeps them. The first result
-// is true when the API accepted the PUT with a 2xx answer, even if the error is
-// not nil.
+// is true when the API accepted the PUT with a 2xx answer that carried a job ID,
+// even if the error is not nil.
 func UpdateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, body map[string]any) (bool, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateVpnConnection, connectionID))
 
@@ -253,7 +253,7 @@ func UpdateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 	}
 
 	// The PUT goes out once, because a second PUT starts a second job, or meets
-	// VPN_CHANGE_IN_PROGRESS while the first one runs.
+	// a 409 VPN_STATE_CONFLICT while the first one runs.
 	jobID, err := issueJob(gpcnClient.DoOnce, request)
 	if err != nil {
 		return false, err
@@ -384,10 +384,14 @@ func waitForVpnConnectionGone(gpcnClient *client.GpcnClient, ctx context.Context
 
 // resendDelete sends the DELETE again for a parked removal. A 202 gets its job
 // polled inside the shared deadline, and a failed job is not an error, because
-// the next read shows the row. A 409 is a refusal, and the second result then
-// holds the API's message, because the row still reads parked.
+// the next read shows the row. A 409 for a removal that another caller started
+// counts as sent, so the wait goes on. Any other 409 is a refusal, and the
+// second result then holds the API's message.
 func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, startTime time.Time, timeout time.Duration) (int, string, error) {
 	jobID, err := sendDelete(gpcnClient, ctx, vpcID, connectionID)
+	if removalAlreadyRunning(err) {
+		return resendJob, "", nil
+	}
 	if client.IsConflict(err) {
 		return resendConflict, vpcvpngateways.ErrorDetail(err), nil
 	}
