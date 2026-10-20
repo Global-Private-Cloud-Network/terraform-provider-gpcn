@@ -544,7 +544,7 @@ func TestVpcVpnGatewayUnitDeleteWhileCreatingReadFailureNamesTheCreateWait(t *te
 	})
 
 	err := deleteVpnGateway(gpcnClient, context.Background(), testVpcID, time.Millisecond, time.Minute)
-	prefix := strings.TrimSuffix(ErrFmtWaitForCreateFailed, "%w")
+	const prefix = "wait for the VPN gateway create to finish failed: "
 	if err == nil || !strings.HasPrefix(err.Error(), prefix) {
 		t.Fatalf("Expected an error that starts with %q, got %v", prefix, err)
 	}
