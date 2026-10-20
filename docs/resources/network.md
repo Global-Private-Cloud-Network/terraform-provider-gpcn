@@ -99,14 +99,7 @@ output "gpcn_network_existing" {
 
 ## Import
 
-Import is supported using the following syntax:
-
-The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/commands/import) can be used, for example:
-
-```shell
-terraform import gpcn_network.existing "c13808d9-3b7d-42c5-a21d-f0961308a38a"
-```
-
+Import is no longer possible. GPCN™ has retired legacy networks, and the API no longer serves them.
 
 ## Migrating an adopted custom network
 

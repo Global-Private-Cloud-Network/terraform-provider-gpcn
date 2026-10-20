@@ -154,4 +154,4 @@ Read-Only:
 - `region_id` (Number) Numeric identifier of the region where the data center is located.
 - `region_name` (String) Name of the region where the data center is located.
 - `vpc_capable` (Boolean) Whether VPC networking is available in this data center.
-- `vpn_capable` (Boolean) Whether you can create site-to-site VPN gateways and connections in this data center.
+- `vpn_capable` (Boolean) Whether the data center offers site-to-site VPN. Creating a VPN gateway or VPN connection also needs your organization's Site-to-Site VPN feature.
