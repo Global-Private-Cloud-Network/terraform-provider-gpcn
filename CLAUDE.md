@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Terraform provider for GPCN (cloud infrastructure platform) built with Terraform Plugin Framework (v1.19.0), Go 1.26.9 and terraform-plugin-testing v1.16.0 (`go.mod`), and terraform-plugin-docs v0.25.0 (`tools/go.mod`).
+Terraform provider for GPCN (cloud infrastructure platform) built with Terraform Plugin Framework (v1.19.0), Go 1.26.10 and terraform-plugin-testing v1.16.0 (`go.mod`), and terraform-plugin-docs v0.25.0 (`tools/go.mod`).
 
 Resources: `gpcn_gpu`, `gpcn_l2_segment`, `gpcn_network` (deprecated; create refused), `gpcn_resource_group`, `gpcn_ssh_key`, `gpcn_virtualmachine`, `gpcn_volume`, `gpcn_volume_attachment`, `gpcn_vpc`, `gpcn_vpc_nsg`, `gpcn_vpc_public_ip`, `gpcn_vpc_public_ip_attachment`, `gpcn_vpc_subnet`, `gpcn_vpc_vpn_connection`, `gpcn_vpc_vpn_gateway`.
 
