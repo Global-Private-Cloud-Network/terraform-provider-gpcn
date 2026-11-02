@@ -16,16 +16,17 @@ import (
 )
 
 type ApiVpnGateway struct {
-	ID            string  `json:"id"`
-	VpcID         string  `json:"vpcId"`
-	Kind          string  `json:"kind"`
-	State         string  `json:"state"`
-	Address       *string `json:"address"`
-	ReservedBlock *string `json:"reservedBlock"`
-	FailureReason *string `json:"failureReason"`
-	ActiveJobID   *string `json:"activeJobId"`
-	CreatedAt     string  `json:"createdAt"`
-	UpdatedAt     string  `json:"updatedAt"`
+	ID            string         `json:"id"`
+	VpcID         string         `json:"vpcId"`
+	Kind          string         `json:"kind"`
+	State         string         `json:"state"`
+	Address       *string        `json:"address"`
+	ReservedBlock *string        `json:"reservedBlock"`
+	FailureReason *string        `json:"failureReason"`
+	ActiveJobID   *string        `json:"activeJobId"`
+	HeldBy        *client.HeldBy `json:"heldBy"`
+	CreatedAt     string         `json:"createdAt"`
+	UpdatedAt     string         `json:"updatedAt"`
 }
 
 type getVpnGatewayResponse struct {

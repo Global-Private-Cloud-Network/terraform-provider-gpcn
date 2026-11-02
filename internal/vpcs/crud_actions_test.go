@@ -2,6 +2,7 @@ package vpcs
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -579,5 +580,28 @@ func TestDeleteVpcWaitsOutBusyHolder(t *testing.T) {
 	}
 	if counts["poll h1"] != 1 || counts["poll j-delete"] != 1 {
 		t.Errorf("polls = %v, want one of h1 and one of j-delete", counts)
+	}
+}
+
+func TestMapVpcPayloadReadsHeldBy(t *testing.T) {
+	t.Parallel()
+
+	for name, test := range map[string]struct {
+		keys string
+		want types.String
+	}{
+		"held by a job":   {keys: `"heldBy":{"jobId":"j9","operation":"delete","verb":"delete"}`, want: types.StringValue("j9")},
+		"an active job":   {keys: `"activeJobId":"j8"`, want: types.StringValue("j8")},
+		"held by nothing": {keys: `"heldBy":null`, want: types.StringNull()},
+	} {
+		var payload vpcPayload
+		row := `{"id":"` + vpcUnitTestID + `","name":"vpc-a","status":"active",` + test.keys + `}`
+		if err := json.Unmarshal([]byte(row), &payload); err != nil {
+			t.Fatalf("%s: decode: %v", name, err)
+		}
+		model := mapVpcPayloadToModel(context.Background(), payload, ResourceModel{Name: types.StringValue("vpc-a")})
+		if !model.ActiveJobId.Equal(test.want) {
+			t.Errorf("%s: active_job_id = %v, want %v", name, model.ActiveJobId, test.want)
+		}
 	}
 }

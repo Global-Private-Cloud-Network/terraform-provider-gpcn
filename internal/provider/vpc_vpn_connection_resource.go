@@ -350,7 +350,7 @@ func (r *vpcVpnConnectionResource) Create(ctx context.Context, req resource.Crea
 			}
 			tflog.Info(ctx, vpcvpnconnections.LogAdoptedVpnConnectionByName)
 			connectionID = adopted.ID
-			vpcvpngateways.PollAdoptedJob(r.client, ctx, vpcvpnconnections.ActionCreateVpnConnection, adopted.ActiveJobID, requestStart)
+			vpcvpngateways.PollAdoptedJob(r.client, ctx, vpcvpnconnections.ActionCreateVpnConnection, client.ActiveJobID(adopted.HeldBy, adopted.ActiveJobID), requestStart)
 		}
 	}
 	if connectionID == "" {
@@ -463,7 +463,7 @@ func (r *vpcVpnConnectionResource) Read(ctx context.Context, req resource.ReadRe
 	}
 
 	updateRefused := detail.State == vpcvpnconnections.StateFailed && !slices.Contains(detail.AcceptedVerbs, vpcvpnconnections.VerbUpdate)
-	jobActive := detail.ActiveJobID != nil
+	jobActive := client.ActiveJobID(detail.HeldBy, detail.ActiveJobID) != nil
 	if resp.Private != nil {
 		resp.Diagnostics.Append(resp.Private.SetKey(ctx, vpcvpnconnections.PrivateKeyUpdateRefused, privateFlag(updateRefused))...)
 		resp.Diagnostics.Append(resp.Private.SetKey(ctx, vpcvpnconnections.PrivateKeyJobActive, privateFlag(jobActive))...)

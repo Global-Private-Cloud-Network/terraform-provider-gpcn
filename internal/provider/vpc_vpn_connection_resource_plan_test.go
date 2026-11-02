@@ -107,6 +107,9 @@ type vpnConnPlanTestServerState struct {
 	postRaw            []string
 	putBodies          []map[string]any
 	deleteCount        int
+	// postHeldByJob is the job that holds the row made by the POST, named in
+	// heldBy.
+	postHeldByJob string
 }
 
 func (s *vpnConnPlanTestServerState) set(update func(*vpnConnPlanTestServerState)) {
@@ -223,6 +226,9 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				state.row = vpnConnPlanTestRowFromBody(body, state.createdState)
 				if state.postActiveJob != "" {
 					state.row["activeJobId"] = state.postActiveJob
+				}
+				if state.postHeldByJob != "" {
+					state.row["heldBy"] = map[string]any{"jobId": state.postHeldByJob, "operation": "create", "verb": "create"}
 				}
 				state.desiredApplied = true
 			}
@@ -360,6 +366,10 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			}
 			if active, _ := state.row["activeJobId"].(string); active != "" && jobID == active {
 				state.row["activeJobId"] = nil
+				state.row["state"] = "connecting"
+			}
+			if heldBy, _ := state.row["heldBy"].(map[string]any); heldBy != nil && heldBy["jobId"] == jobID {
+				state.row["heldBy"] = nil
 				state.row["state"] = "connecting"
 			}
 			state.mu.Unlock()
@@ -1799,6 +1809,71 @@ func TestVpcVpnConnectionResourceUpdateSendsOnce(t *testing.T) {
 					state.putStatus = 0
 				},
 				Config: cfg.render(server.URL),
+			},
+		},
+	})
+}
+
+// A runtime read names a running job in heldBy and carries no activeJobId.
+// Saved settings that do not run then call for no update.
+func TestVpcVpnConnectionHeldByWithholdsResend(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	config := newVpnConnPlanTestConfig().render(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() {
+					state.set(func(s *vpnConnPlanTestServerState) {
+						s.desiredApplied = false
+						s.row["state"] = "connected"
+						s.row["activeJobId"] = nil
+						s.row["heldBy"] = map[string]any{"jobId": "job-live", "operation": "update", "verb": "update"}
+					})
+				},
+				Config:   config,
+				PlanOnly: true,
+			},
+		},
+	})
+}
+
+// An adopted row whose heldBy names a running job is read again once the job
+// ends.
+func TestVpcVpnConnectionCreateAdoptionPollsHeldByJob(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	state.set(func(s *vpnConnPlanTestServerState) {
+		s.postStatus = http.StatusBadGateway
+		s.createdState = "creating"
+		s.postHeldByJob = "job-live"
+	})
+	config := newVpnConnPlanTestConfig().render(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config, ExpectError: vpnConnRefusal(vpnConnPlanTestBadGateway)},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					if state.row["heldBy"] != nil {
+						t.Errorf("Expected the create to poll the job of the adopted row, which is still held by %v", state.row["heldBy"])
+					}
+					state.postStatus = 0
+					state.postHeldByJob = ""
+					state.createdState = "connecting"
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcVpnConnectionTest, plancheck.ResourceActionReplace),
+					},
+				},
 			},
 		},
 	})

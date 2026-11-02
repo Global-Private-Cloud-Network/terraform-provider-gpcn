@@ -1449,8 +1449,9 @@ func TestVpcResourcePlanReplacementWithUnsetGroupJoinsDefault(t *testing.T) {
 const vpcAcceptedPlanTestID = "vpc-accepted-1"
 
 // startVpcAcceptedPlanMockServer answers in the runtime shapes: the 202 carries
-// data.job and data.resource, and the job read carries an outcome.
-func startVpcAcceptedPlanMockServer(t *testing.T) *httptest.Server {
+// data.job and data.resource, and the job read carries an outcome. A detailHeldBy
+// is the heldBy of every detail read.
+func startVpcAcceptedPlanMockServer(t *testing.T, detailHeldBy ...map[string]any) *httptest.Server {
 	t.Helper()
 
 	var mu sync.Mutex
@@ -1527,6 +1528,9 @@ func startVpcAcceptedPlanMockServer(t *testing.T) *httptest.Server {
 				return
 			}
 			detail["vpnCapable"] = true
+			if len(detailHeldBy) > 0 {
+				detail["heldBy"] = detailHeldBy[0]
+			}
 			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "", "meta": nil, "data": detail})
 		case r.Method == http.MethodDelete && r.URL.Path == vpcPath:
 			mu.Lock()
@@ -1563,6 +1567,23 @@ func TestVpcCreateReadsAcceptedResource(t *testing.T) {
 					resource.TestCheckResourceAttr(gpcnVpcTest, "status", "active"),
 					resource.TestCheckResourceAttr(gpcnVpcTest, "name", "vpc-accepted"),
 				),
+			},
+		},
+	})
+}
+
+// A runtime read names the job that holds the VPC in heldBy and carries no
+// activeJobId. active_job_id reads that job.
+func TestVpcActiveJobIDFromHeldBy(t *testing.T) {
+	t.Parallel()
+	server := startVpcAcceptedPlanMockServer(t, map[string]any{"jobId": "job-h", "operation": "update", "verb": "update"})
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vpcPlanTestConfig(server.URL, "vpc-held"),
+				Check:  resource.TestCheckResourceAttr(gpcnVpcTest, "active_job_id", "job-h"),
 			},
 		},
 	})

@@ -28,15 +28,16 @@ type vpcPayload struct {
 		Code *string `json:"code"`
 		Name string  `json:"name"`
 	} `json:"datacenter"`
-	Status          string   `json:"status"`
-	FailureReason   *string  `json:"failureReason"`
-	EgressIp        *string  `json:"egressIp"`
-	ActiveJobId     *string  `json:"activeJobId"`
-	CreatedAt       string   `json:"createdAt"`
-	UpdatedAt       string   `json:"updatedAt"`
-	DnsNameservers  []string `json:"dnsNameservers"`
-	ResourceGroupID string   `json:"resourceGroupId"`
-	VpnCapable      *bool    `json:"vpnCapable"`
+	Status          string         `json:"status"`
+	FailureReason   *string        `json:"failureReason"`
+	EgressIp        *string        `json:"egressIp"`
+	ActiveJobId     *string        `json:"activeJobId"`
+	HeldBy          *client.HeldBy `json:"heldBy"`
+	CreatedAt       string         `json:"createdAt"`
+	UpdatedAt       string         `json:"updatedAt"`
+	DnsNameservers  []string       `json:"dnsNameservers"`
+	ResourceGroupID string         `json:"resourceGroupId"`
+	VpnCapable      *bool          `json:"vpnCapable"`
 }
 
 type readVpcResponse struct {
@@ -207,6 +208,7 @@ func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string)
 		if readErr != nil {
 			return readErr
 		}
+		activeJobIDRef := client.ActiveJobID(vpcResponse.Data.HeldBy, vpcResponse.Data.ActiveJobId)
 		switch {
 		// A teardown that parked writes a failure reason, and no job then
 		// drives the row. The platform re-admits a delete on it, so a wait
@@ -216,8 +218,8 @@ func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string)
 			return awaitVpcGone(gpcnClient, ctx, vpcID)
 		case vpcResponse.Data.Status == VPC_STATUS_DELETING:
 			tflog.Info(ctx, fmt.Sprintf(LogReclaimingParkedVpcTeardown, vpcID, *vpcResponse.Data.FailureReason))
-		case vpcResponse.Data.Status == VPC_STATUS_CREATING && vpcResponse.Data.ActiveJobId != nil:
-			activeJobID := *vpcResponse.Data.ActiveJobId
+		case vpcResponse.Data.Status == VPC_STATUS_CREATING && activeJobIDRef != nil:
+			activeJobID := *activeJobIDRef
 			tflog.Info(ctx, fmt.Sprintf(LogWaitingForVpcActiveJob, vpcID, activeJobID))
 			if pollErr := AwaitVpcJob(gpcnClient, ctx, ACTION_CREATE_VPC, activeJobID); pollErr != nil {
 				tflog.Warn(ctx, fmt.Sprintf(LogVpcActiveJobPollFailed, vpcID, pollErr.Error()))

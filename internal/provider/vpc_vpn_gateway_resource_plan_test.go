@@ -88,6 +88,9 @@ type vpnGatewayPlanTestServerState struct {
 	// resendRemoving answers every DELETE after the first with a 409 for a
 	// gateway whose removal runs.
 	resendRemoving bool
+	// heldByJobID is the job the row names in heldBy. The job poll for it
+	// settles the row to ready.
+	heldByJobID string
 }
 
 func (s *vpnGatewayPlanTestServerState) row() map[string]any {
@@ -108,7 +111,7 @@ func (s *vpnGatewayPlanTestServerState) row() map[string]any {
 	if s.rowState != "creating" {
 		address = vpnGatewayPlanTestAddress
 	}
-	return map[string]any{
+	row := map[string]any{
 		"id":            vpnGatewayPlanTestID,
 		"vpcId":         vpnGatewayPlanTestVpcID,
 		"kind":          s.kind,
@@ -120,6 +123,10 @@ func (s *vpnGatewayPlanTestServerState) row() map[string]any {
 		"createdAt":     createdAt,
 		"updatedAt":     vpnGatewayPlanTestTimestamp,
 	}
+	if s.heldByJobID != "" {
+		row["heldBy"] = map[string]any{"jobId": s.heldByJobID, "operation": "create", "verb": "create"}
+	}
+	return row
 }
 
 func writeVpnGatewayPlanTestError(w http.ResponseWriter, status int, code, message string) {
@@ -267,6 +274,10 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 			failJob := state.failJob || (state.failDeleteJob && jobID == "job-delete")
 			if state.activeJobID != "" && jobID == state.activeJobID {
 				state.activeJobID = ""
+				state.rowState = "ready"
+			}
+			if state.heldByJobID != "" && jobID == state.heldByJobID {
+				state.heldByJobID = ""
 				state.rowState = "ready"
 			}
 			cancelJob := state.cancelJob
@@ -891,6 +902,43 @@ func TestVpcVpnGatewayResourceDeleteWhileCreatingWaits(t *testing.T) {
 				Check: func(*terraform.State) error {
 					state.set(func(s *vpnGatewayPlanTestServerState) { s.deleteBusyCreating = true; s.creatingReads = 2 })
 					return nil
+				},
+			},
+		},
+	})
+}
+
+// An adopted row whose heldBy names a running job is read again once the job
+// ends, so the state holds the settled row.
+func TestVpcVpnGatewayCreateAdoptionPollsHeldByJob(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnGatewayPlanMockServer(t)
+	state.set(func(s *vpnGatewayPlanTestServerState) {
+		s.createStatus = http.StatusBadGateway
+		s.createdState = "creating"
+		s.heldByJobID = "job-live"
+	})
+	config := vpnGatewayPlanTestConfig(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config, ExpectError: vpnGatewayRefusal(vpnGatewayPlanTestBadGateway)},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					if state.heldByJobID != "" {
+						t.Errorf("Expected the create to poll the job of the adopted row, which is still held by %q", state.heldByJobID)
+					}
+					state.createStatus = 0
+					state.createdState = "ready"
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcVpnGatewayTest, plancheck.ResourceActionReplace),
+					},
 				},
 			},
 		},

@@ -19,29 +19,30 @@ import (
 // ApiVpnConnection is the VpnConnection projection. The nullable fields are
 // pointers.
 type ApiVpnConnection struct {
-	ID                   string   `json:"id"`
-	Name                 string   `json:"name"`
-	Description          *string  `json:"description"`
-	State                string   `json:"state"`
-	ProviderState        *string  `json:"providerState"`
-	FailureReason        *string  `json:"failureReason"`
-	GatewayKind          string   `json:"gatewayKind"`
-	LocalEndpointAddress *string  `json:"localEndpointAddress"`
-	PeerAddress          string   `json:"peerAddress"`
-	PeerCidrs            []string `json:"peerCidrs"`
-	IkeVersion           string   `json:"ikeVersion"`
-	Encryption           string   `json:"encryption"`
-	Integrity            string   `json:"integrity"`
-	DhGroup              int64    `json:"dhGroup"`
-	PfsGroup             int64    `json:"pfsGroup"`
-	IkeLifetimeSeconds   int64    `json:"ikeLifetimeSeconds"`
-	IpsecLifetimeSeconds int64    `json:"ipsecLifetimeSeconds"`
-	Dpd                  bool     `json:"dpd"`
-	DesiredApplied       bool     `json:"desiredApplied"`
-	ActiveJobID          *string  `json:"activeJobId"`
-	AcceptedVerbs        []string `json:"acceptedVerbs"`
-	CreatedAt            string   `json:"createdAt"`
-	UpdatedAt            string   `json:"updatedAt"`
+	ID                   string         `json:"id"`
+	Name                 string         `json:"name"`
+	Description          *string        `json:"description"`
+	State                string         `json:"state"`
+	ProviderState        *string        `json:"providerState"`
+	FailureReason        *string        `json:"failureReason"`
+	GatewayKind          string         `json:"gatewayKind"`
+	LocalEndpointAddress *string        `json:"localEndpointAddress"`
+	PeerAddress          string         `json:"peerAddress"`
+	PeerCidrs            []string       `json:"peerCidrs"`
+	IkeVersion           string         `json:"ikeVersion"`
+	Encryption           string         `json:"encryption"`
+	Integrity            string         `json:"integrity"`
+	DhGroup              int64          `json:"dhGroup"`
+	PfsGroup             int64          `json:"pfsGroup"`
+	IkeLifetimeSeconds   int64          `json:"ikeLifetimeSeconds"`
+	IpsecLifetimeSeconds int64          `json:"ipsecLifetimeSeconds"`
+	Dpd                  bool           `json:"dpd"`
+	DesiredApplied       bool           `json:"desiredApplied"`
+	ActiveJobID          *string        `json:"activeJobId"`
+	HeldBy               *client.HeldBy `json:"heldBy"`
+	AcceptedVerbs        []string       `json:"acceptedVerbs"`
+	CreatedAt            string         `json:"createdAt"`
+	UpdatedAt            string         `json:"updatedAt"`
 }
 
 // ApiParameterSheet is the part of the detail's parameter sheet that the
