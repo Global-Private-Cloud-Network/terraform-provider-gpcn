@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -161,11 +160,7 @@ func TestCreateVolumeMockHTTP(t *testing.T) {
 					t.Error("Request body should not contain volumeSizeId")
 				}
 
-				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
-					Success: true,
-					Message: "Volume creation job started",
-					Data:    client.JobResponse{JobID: jobID},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"Volume creation job started","data":{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -266,11 +261,7 @@ func TestUpdateVolumeMockHTTP(t *testing.T) {
 				if _, hasSkuId := req["skuId"]; hasSkuId {
 					t.Error("Request body should not contain skuId")
 				}
-				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
-					Success: true,
-					Message: "Volume resize job started",
-					Data:    client.JobResponse{JobID: "job-456"},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"Volume resize job started","data":{"jobId":"job-456","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -342,11 +333,7 @@ func TestUpdateVolumeLooksUpSkuByComponentCodeMockHTTP(t *testing.T) {
 
 			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+volumeID+"/resize"):
 				updateCalled = true
-				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
-					Success: true,
-					Message: "Volume resize job started",
-					Data:    client.JobResponse{JobID: "job-ultra"},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"Volume resize job started","data":{"jobId":"job-ultra","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, "job-ultra", volumeID, true)
@@ -408,11 +395,7 @@ func TestUpdateVolumeRefusesUnresolvableTypeMockHTTP(t *testing.T) {
 
 			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+volumeID+"/resize"):
 				resizeCalled = true
-				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
-					Success: true,
-					Message: "Volume resize job started",
-					Data:    client.JobResponse{JobID: "job-unknown"},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"Volume resize job started","data":{"jobId":"job-unknown","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
 
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
@@ -712,10 +695,7 @@ func createVolumeBodyFor(t *testing.T, model ResourceModel) map[string]any {
 				}))
 			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/volumes/"):
 				created = testutil.ReadRequestBody(r)
-				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
-					Success: true,
-					Data:    client.JobResponse{JobID: jobID},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, volumeID, true)
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID):

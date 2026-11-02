@@ -2,11 +2,11 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
 
-	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/helpers"
 	"terraform-provider-gpcn/internal/testutil"
 	"terraform-provider-gpcn/internal/vpcs"
@@ -266,14 +266,7 @@ func TestVpcResourceCreateWritesIdBeforePolling(t *testing.T) {
 					},
 				})
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Data: client.JobStatusDataResponse{Jobs: []client.JobResponse{{
-						JobID:        vpcPlanTestCreateJobID,
-						HasFailed:    true,
-						IsTerminal:   true,
-						ErrorMessage: "the anchor router never came up",
-					}}},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":false,"message":"","data":{"jobs":[{"jobId":"`+vpcPlanTestCreateJobID+`","stage":"","isCompleted":false,"isTerminal":true,"hasFailed":true,"progressPercentage":0,"message":"","errorMessage":"the anchor router never came up","resourceId":"","resourceName":"","resourceType":""}]}}`))
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
 			}

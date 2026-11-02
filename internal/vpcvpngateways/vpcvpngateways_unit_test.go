@@ -2,6 +2,7 @@ package vpcvpngateways
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -312,12 +313,7 @@ func deleteServer(t *testing.T, deleteStatus int, answers []string, options ...d
 					"data": map[string]any{"jobId": "job-delete"},
 				})
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Success: true,
-					Data: client.JobStatusDataResponse{Jobs: []client.JobResponse{{
-						JobID: "job-delete", HasFailed: true, ErrorMessage: "removal failed",
-					}}},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"job-delete","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":true,"progressPercentage":0,"message":"","errorMessage":"removal failed","resourceId":"","resourceName":"","resourceType":""}]}}`))
 			case r.Method == http.MethodGet && r.URL.Path == path:
 				index := min(int(reads.Add(1))-1, len(answers)-1)
 				w.Header().Set("Content-Type", "application/json")
@@ -439,10 +435,7 @@ func pollCountServer(t *testing.T) (*client.GpcnClient, *atomic.Int32) {
 				return
 			}
 			polls.Add(1)
-			testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-				Success: true,
-				Data:    client.JobStatusDataResponse{Jobs: []client.JobResponse{{JobID: "job-live", Stage: "running"}}},
-			})
+			testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"job-live","stage":"running","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}]}}`))
 		},
 	})
 	return gpcnClient, &polls

@@ -473,13 +473,7 @@ func TestCreateGPUWithSkuCodeMockHTTP(t *testing.T) {
 				if int64(req["gpuCount"].(float64)) != 2 {
 					t.Errorf("Expected gpuCount 2, got '%v'", req["gpuCount"])
 				}
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Success: true,
-					Message: "GPU creation job started",
-					Data: client.JobStatusDataResponse{
-						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: gpuID}},
-					},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"GPU creation job started","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+gpuID+`","resourceName":"","resourceType":""}]}}`))
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, gpuID, true)
@@ -640,13 +634,7 @@ func TestCreateGPUMockHTTP(t *testing.T) {
 					t.Errorf("Expected sshKeyId '%s', got '%v'", testSSHKeyID, req["sshKeyId"])
 				}
 
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Success: true,
-					Message: "GPU creation job started",
-					Data: client.JobStatusDataResponse{
-						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: gpuID}},
-					},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"GPU creation job started","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+gpuID+`","resourceName":"","resourceType":""}]}}`))
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -771,11 +759,7 @@ func TestDeleteGPUMockHTTP(t *testing.T) {
 			switch {
 			case r.Method == "DELETE" && strings.Contains(r.URL.Path, "/gpu/"+gpuID):
 				deleteCalled = true
-				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
-					Success: true,
-					Message: "GPU deletion job started",
-					Data:    client.JobResponse{JobID: jobID, ResourceId: gpuID},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"GPU deletion job started","data":{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+gpuID+`","resourceName":"","resourceType":""}}`))
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -1332,12 +1316,7 @@ func gpuUnitCreateKeys(t *testing.T, group types.String) map[string]any {
 			switch {
 			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/gpu/"):
 				got = testutil.ReadRequestBody(r)
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Success: true,
-					Data: client.JobStatusDataResponse{
-						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: gpuID}},
-					},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+gpuID+`","resourceName":"","resourceType":""}]}}`))
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, gpuID, true)
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/"+gpuID):

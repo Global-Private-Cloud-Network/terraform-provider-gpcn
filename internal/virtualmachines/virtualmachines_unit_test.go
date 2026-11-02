@@ -193,13 +193,7 @@ func TestCreateVirtualMachineMockHTTP(t *testing.T) {
 					t.Error("Expected networkId to be absent when the model names no network")
 				}
 
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Success: true,
-					Message: "VM creation job started",
-					Data: client.JobStatusDataResponse{
-						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: vmID}},
-					},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"VM creation job started","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+vmID+`","resourceName":"","resourceType":""}]}}`))
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -1051,13 +1045,7 @@ func TestCreateVirtualMachineAcceptsStoppedStatus(t *testing.T) {
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Success: true,
-					Message: "VM creation job started",
-					Data: client.JobStatusDataResponse{
-						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: vmID}},
-					},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"VM creation job started","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+vmID+`","resourceName":"","resourceType":""}]}}`))
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, vmID, true)
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
@@ -1412,13 +1400,7 @@ func TestCreateVirtualMachineSendsSubnetIdBodyMockHTTP(t *testing.T) {
 				if err := json.Unmarshal(body, &createBody); err != nil {
 					t.Fatalf("unmarshaling the create body failed: %v", err)
 				}
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Success: true,
-					Message: "VM creation job started",
-					Data: client.JobStatusDataResponse{
-						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: vmID}},
-					},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"VM creation job started","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+vmID+`","resourceName":"","resourceType":""}]}}`))
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, vmID, true)
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
@@ -1477,13 +1459,7 @@ func createBodyForResourceGroup(t *testing.T, group types.String) map[string]any
 				if err := json.Unmarshal(body, &createBody); err != nil {
 					t.Fatalf("unmarshaling the create body failed: %v", err)
 				}
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Success: true,
-					Message: "VM creation job started",
-					Data: client.JobStatusDataResponse{
-						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: vmID}},
-					},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"VM creation job started","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+vmID+`","resourceName":"","resourceType":""}]}}`))
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, vmID, true)
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
@@ -1631,13 +1607,7 @@ func TestCreateVirtualMachineSendsPublicIpKeysMockHTTP(t *testing.T) {
 					if err := json.Unmarshal(body, captured); err != nil {
 						t.Fatalf("unmarshaling the create body failed: %v", err)
 					}
-					testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-						Success: true,
-						Message: "VM creation job started",
-						Data: client.JobStatusDataResponse{
-							Jobs: []client.JobResponse{{JobID: jobID, ResourceId: vmID}},
-						},
-					})
+					testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"VM creation job started","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+vmID+`","resourceName":"","resourceType":""}]}}`))
 				case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 					testutil.HandleJobResponse(w, jobID, vmID, true)
 				case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):

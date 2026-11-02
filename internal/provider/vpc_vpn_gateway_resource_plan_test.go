@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -283,21 +284,11 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 			cancelJob := state.cancelJob
 			state.mu.Unlock()
 			if cancelJob {
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Success: true,
-					Data: client.JobStatusDataResponse{Jobs: []client.JobResponse{{
-						JobID: jobID, ResourceId: vpnGatewayPlanTestID, Stage: client.JobStageCancelled, IsTerminal: true,
-					}}},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"`+jobID+`","stage":"`+client.JobStageCancelled+`","isCompleted":false,"isTerminal":true,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+vpnGatewayPlanTestID+`","resourceName":"","resourceType":""}]}}`))
 				return
 			}
 			if failJob {
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Success: true,
-					Data: client.JobStatusDataResponse{Jobs: []client.JobResponse{{
-						JobID: jobID, ResourceId: vpnGatewayPlanTestID, HasFailed: true, ErrorMessage: vpnGatewayPlanTestJobFail,
-					}}},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":true,"progressPercentage":0,"message":"","errorMessage":"`+vpnGatewayPlanTestJobFail+`","resourceId":"`+vpnGatewayPlanTestID+`","resourceName":"","resourceType":""}]}}`))
 				return
 			}
 			testutil.HandleJobResponse(w, jobID, vpnGatewayPlanTestID, true)

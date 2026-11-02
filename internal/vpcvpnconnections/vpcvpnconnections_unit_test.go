@@ -455,9 +455,7 @@ func TestVpcVpnConnectionUnitCreateVpnConnectionReturnsIDWhenTheJobFails(t *test
 				"jobId": "job-1", "vpnConnection": map[string]any{"id": testConnID},
 			}})
 		case r.URL.Path == "/v1/resource/jobs/":
-			testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{Success: true, Data: client.JobStatusDataResponse{
-				Jobs: []client.JobResponse{{JobID: "job-1", HasFailed: true, ErrorMessage: "boom"}},
-			}})
+			testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"job-1","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":true,"progressPercentage":0,"message":"","errorMessage":"boom","resourceId":"","resourceName":"","resourceType":""}]}}`))
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
