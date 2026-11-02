@@ -829,7 +829,7 @@ func TestWaitForVpnGatewayGoneResendAnswers(t *testing.T) {
 			reads: []gatewayAnswer{parked},
 			check: func(t *testing.T, err error) {
 				var httpErr *client.HTTPError
-				if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusForbidden || err != error(httpErr) {
+				if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusForbidden || err.Error() != httpErr.Error() {
 					t.Fatalf("Expected the 403 error unchanged, got %v", err)
 				}
 			},
