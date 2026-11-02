@@ -4476,6 +4476,9 @@ type vmV3Mock struct {
 	// events records the machine read, the interface listing, the stop and
 	// the delete, in order.
 	events []string
+	// segmentNics are L2 interfaces the listing reports after the primary
+	// one. A detach removes its interface and records "detach-interface".
+	segmentNics []vmSegmentNic
 }
 
 // vmV3Read is a status and a failure reason as a read reports them. A nil
@@ -4588,13 +4591,31 @@ func startVirtualMachineV3MockServer(t *testing.T) *vmV3Mock {
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
 			mock.mu.Lock()
 			boundID := mock.boundID
+			segmentNics := slices.Clone(mock.segmentNics)
 			mock.events = append(mock.events, "list-interfaces")
 			mock.mu.Unlock()
 			address := ""
 			if boundID != "" {
 				address = vmPlanTestAcquiredIpAddress
 			}
+			if len(segmentNics) > 0 {
+				body := vmSegmentPlanTestNetworkInterfacesBody(vmPlanTestSubnetID, segmentNics)
+				if boundID != "" {
+					primary := body["data"].([]map[string]any)[0]
+					primary["publicIp"] = address
+					primary["publicIpId"] = boundID
+				}
+				testutil.WriteJSONResponse(w, body)
+				return
+			}
 			testutil.WriteJSONResponse(w, vmPublicIpPlanTestInterfacesBody(boundID, address))
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/"):
+			nicID := strings.TrimPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/")
+			mock.mu.Lock()
+			mock.events = append(mock.events, "detach-interface")
+			mock.segmentNics = slices.DeleteFunc(mock.segmentNics, func(nic vmSegmentNic) bool { return nic.nicID == nicID })
+			mock.mu.Unlock()
+			accepted(w, map[string]any{"job": queuedJob("job-v3-detach", "detach")})
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
 			mock.mu.Lock()
 			name, parked, gone, stopped := mock.name, mock.parked, mock.gone, mock.stopped
@@ -4792,8 +4813,8 @@ func TestVirtualMachineDeleteParkedReportsDeleteFailure(t *testing.T) {
 	})
 }
 
-// deletePhase returns the events from the read that Delete makes before it
-// sends the first DELETE, through that DELETE.
+// deletePhase returns the events from the last read before the first DELETE
+// through that DELETE.
 func (m *vmV3Mock) deletePhase() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -4814,7 +4835,24 @@ func (m *vmV3Mock) deletePhase() []string {
 func TestVirtualMachineDeleteErrorWithoutReasonSkipsStop(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	mock := startVirtualMachineV3MockServer(t)
-	vmV3PlanTestDestroyWithRead(t, mock, "vm-v3-error-no-reason", vmV3Read{status: virtualmachines.VMStatusError.String(), failureReason: nil})
+	config := vmPlanTestConfig(mock.server.URL, "vm-v3-error-no-reason")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() {
+					mock.set(func(m *vmV3Mock) {
+						m.readAs = &vmV3Read{status: virtualmachines.VMStatusError.String(), failureReason: nil}
+						m.segmentNics = vmSegmentNicsFromIds([]string{vmPlanTestSegmentID})
+					})
+				},
+				Config:  config,
+				Destroy: true,
+			},
+		},
+	})
 
 	stops, deleteBodies := mock.recorded()
 	if stops != 0 {
@@ -4823,8 +4861,42 @@ func TestVirtualMachineDeleteErrorWithoutReasonSkipsStop(t *testing.T) {
 	if len(deleteBodies) != 1 {
 		t.Errorf("Expected one delete, got %d", len(deleteBodies))
 	}
-	want := []string{"read", "list-interfaces", "delete"}
+	want := []string{"read", "list-interfaces", "detach-interface", "delete"}
 	if got := mock.deletePhase(); !slices.Equal(got, want) {
-		t.Errorf("Expected the delete to read, list the interfaces once and delete, got %v", got)
+		t.Errorf("Expected the delete to read, list the interfaces, detach the segment interface and delete, got %v", got)
+	}
+}
+
+// A machine in Error without a failure reason skips the stop, and the delete
+// still releases the address this resource acquired. The status match ignores
+// case.
+func TestVirtualMachineDeleteErrorWithoutReasonReleasesAcquiredAddress(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineV3MockServer(t)
+	config := vmPublicIpPlanTestConfig(mock.server.URL, "vm-v3-error-release", true, "")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() {
+					mock.set(func(m *vmV3Mock) { m.readAs = &vmV3Read{status: "error", failureReason: nil} })
+				},
+				Config:  config,
+				Destroy: true,
+			},
+		},
+	})
+
+	stops, deleteBodies := mock.recorded()
+	if stops != 0 {
+		t.Errorf("Expected no stop, got %d", stops)
+	}
+	if len(deleteBodies) != 1 {
+		t.Fatalf("Expected one delete, got %d", len(deleteBodies))
+	}
+	if deleteBodies[0] != `{"releasePublicIps":true}` {
+		t.Errorf("Expected the delete body '{\"releasePublicIps\":true}', got '%s'", deleteBodies[0])
 	}
 }
