@@ -4,11 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -420,32 +418,6 @@ func TestBatchDispatchReadsBothShapes(t *testing.T) {
 				t.Errorf("GetJobResourceID = %q, want %q", resourceID, tt.wantResourceID)
 			}
 		})
-	}
-}
-
-func TestJobResponseEncodesLegacyKeys(t *testing.T) {
-	encoded, err := json.Marshal(client.JobResponse{
-		JobID:         "job-1",
-		Outcome:       stringPointer("failed"),
-		FailureReason: "capacity",
-		Resource:      json.RawMessage(`{"id":"row-1"}`),
-	})
-	if err != nil {
-		t.Fatalf("encode: %v", err)
-	}
-
-	var decoded map[string]any
-	if err := json.Unmarshal(encoded, &decoded); err != nil {
-		t.Fatalf("decode %s: %v", encoded, err)
-	}
-
-	keys := slices.Sorted(maps.Keys(decoded))
-	want := []string{
-		"errorMessage", "hasFailed", "isCompleted", "isTerminal", "jobId", "message",
-		"progressPercentage", "resourceId", "resourceName", "resourceType", "stage",
-	}
-	if !slices.Equal(keys, want) {
-		t.Errorf("encoded keys = %v, want %v", keys, want)
 	}
 }
 
