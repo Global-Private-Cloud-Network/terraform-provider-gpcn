@@ -58,37 +58,72 @@ func SetupMockServerWithGpcnClient(config MockServerConfig) (*httptest.Server, *
 	return server, gpcnClient
 }
 
-// HandleJobResponse is a helper function to handle job status polling requests
-func HandleJobResponse(w http.ResponseWriter, jobID, resourceID string, completed bool) {
-	response := client.JobStatusMultiResponse{
-		Success: true,
-		Message: "Job status retrieved",
-		Data: client.JobStatusDataResponse{
-			Jobs: []client.JobResponse{
-				{
-					JobID:       jobID,
-					ResourceId:  resourceID,
-					IsCompleted: completed,
-					HasFailed:   false,
-				},
-			},
-		},
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
+// The helpers below write literal JSON, never the client's own types, so a
+// change to the client's decoder cannot make its fixtures agree with it.
+
+// jsonString renders s as a JSON string, escaped as encoding/json escapes it.
+func jsonString(s string) string {
+	encoded, _ := json.Marshal(s)
+	return string(encoded)
 }
 
-// HandleCreateJobResponse is a helper function to handle responses that start a job
-func HandleCreateJobResponse(w http.ResponseWriter, jobID string, message string) {
-	response := client.JobStatusSingularResponse{
-		Success: true,
-		Message: message,
-		Data: client.JobResponse{
-			JobID: jobID,
-		},
+// jsonStringOrNull renders "" as null and any other value as a JSON string.
+func jsonStringOrNull(s string) string {
+	if s == "" {
+		return "null"
 	}
+	return jsonString(s)
+}
+
+func writeLiteralJSON(w http.ResponseWriter, body string) {
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
+	_, _ = io.WriteString(w, body)
+}
+
+// HandleJobResponse answers a job status read with one job, as the API reports
+// it: an id, a stage and an outcome that stays null until the job ends.
+func HandleJobResponse(w http.ResponseWriter, jobID, resourceID string, completed bool) {
+	stage, outcome, progress, completedAt := `"running"`, "null", "50", "null"
+	if completed {
+		stage, outcome, progress, completedAt = `"completed"`, `"succeeded"`, "100", `"2026-11-02T00:00:01Z"`
+	}
+	writeLiteralJSON(w, `{"success":true,"message":"Job status retrieved","data":{"jobs":[{`+
+		`"id":`+jsonString(jobID)+`,"resourceType":"virtual_machine","operation":"create","verb":"Creating",`+
+		`"resourceId":`+jsonStringOrNull(resourceID)+`,"resourceName":null,"stage":`+stage+`,"outcome":`+outcome+`,`+
+		`"progress":`+progress+`,"message":null,"failureReason":null,"retryable":false,`+
+		`"createdAt":"2026-11-02T00:00:00Z","startedAt":"2026-11-02T00:00:00Z","lastProgressAt":"2026-11-02T00:00:00Z",`+
+		`"completedAt":`+completedAt+`,"version":1}],"notFound":[]}}`)
+}
+
+// HandleCreateJobResponse answers a request that starts a job, as the API
+// accepts it: the job under data.job, queued.
+func HandleCreateJobResponse(w http.ResponseWriter, jobID string, message string) {
+	writeLiteralJSON(w, `{"success":true,"message":`+jsonString(message)+`,"data":{"job":{`+
+		`"id":`+jsonString(jobID)+`,"resourceType":"virtual_machine","operation":"create","verb":"Creating",`+
+		`"resourceId":null,"resourceName":null,"stage":"queued","outcome":null,"progress":0,`+
+		`"message":null,"failureReason":null,"retryable":false,`+
+		`"createdAt":"2026-11-02T00:00:00Z","startedAt":null,"lastProgressAt":null,"completedAt":null,"version":1}}}`)
+}
+
+// HandleLegacyJobResponse answers a job status read in the older form: the
+// job id under jobId and the state as booleans.
+func HandleLegacyJobResponse(w http.ResponseWriter, jobID, resourceID string, completed bool) {
+	isCompleted := "false"
+	if completed {
+		isCompleted = "true"
+	}
+	writeLiteralJSON(w, `{"success":true,"message":"Job status retrieved","data":{"jobs":[{`+
+		`"jobId":`+jsonString(jobID)+`,"stage":"","isCompleted":`+isCompleted+`,"isTerminal":false,"hasFailed":false,`+
+		`"progressPercentage":0,"message":"","errorMessage":"","resourceId":`+jsonString(resourceID)+`,`+
+		`"resourceName":"","resourceType":""}]}}`+"\n")
+}
+
+// HandleLegacyCreateJobResponse answers a request that starts a job in the
+// older form: the job id under data.jobId.
+func HandleLegacyCreateJobResponse(w http.ResponseWriter, jobID string, message string) {
+	writeLiteralJSON(w, `{"success":true,"message":`+jsonString(message)+`,"data":{`+
+		`"jobId":`+jsonString(jobID)+`,"stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,`+
+		`"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`+"\n")
 }
 
 // ReadRequestBody reads and unmarshals the request body into a map
