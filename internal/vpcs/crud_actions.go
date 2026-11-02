@@ -170,7 +170,27 @@ func UpdateVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string,
 func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteVpcWithID, vpcID))
 
+	start := time.Now()
+	timeout := client.DefaultPollingConfig().Timeout
+	if config := gpcnClient.Config(); config != nil && config.PollingTimeout > 0 {
+		timeout = config.PollingTimeout
+	}
+	deadline := start.Add(timeout)
+
+	// A 409 RESOURCE_BUSY names the job that holds the VPC. The delete goes out
+	// again once that job ends, however it ends.
 	jobID, err := issueVpcDelete(gpcnClient, ctx, vpcID)
+	for holder, busy := client.BusyHolder(err); busy; holder, busy = client.BusyHolder(err) {
+		if err := client.AwaitHolder(gpcnClient, ctx, holder, deadline); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(BusyRetryInterval):
+		}
+		jobID, err = issueVpcDelete(gpcnClient, ctx, vpcID)
+	}
 	if err != nil {
 		if !client.HasErrorCode(err, ERROR_CODE_VPC_NOT_ACTIVE) {
 			return err

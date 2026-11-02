@@ -519,3 +519,65 @@ func TestIssueVpcDeleteReadsAcceptedJobID(t *testing.T) {
 		t.Errorf("job ID = %q, want %q", jobID, "j-delete")
 	}
 }
+
+// A job that holds the VPC refuses the delete with RESOURCE_BUSY. The delete
+// goes out again once that job ends. The test changes a package variable, so
+// it does not run in parallel.
+func TestDeleteVpcWaitsOutBusyHolder(t *testing.T) {
+	previous := BusyRetryInterval
+	BusyRetryInterval = time.Millisecond
+	t.Cleanup(func() { BusyRetryInterval = previous })
+
+	const busyBody = `{"success":false,"message":"VPC is busy: create in progress.",` +
+		`"error":{"code":"RESOURCE_BUSY","statusCode":409,"details":{"resourceType":"vpc",` +
+		`"resourceId":"` + vpcUnitTestID + `","heldBy":{"jobId":"h1","operation":"create","verb":"create"}}}}`
+	const acceptedBody = `{"success":true,"data":{` +
+		`"job":{"id":"j-delete","operation":"delete","resourceId":"` + vpcUnitTestID + `","stage":"queued",` +
+		`"outcome":null,"progress":0,"message":null,"failureReason":null},` +
+		`"resource":{"id":"` + vpcUnitTestID + `","name":"vpc-a","status":"deleting"}}}`
+	jobBody := func(jobID string) string {
+		return `{"success":true,"data":{"jobs":[{"id":"` + jobID + `","operation":"delete","resourceId":"` + vpcUnitTestID + `",` +
+			`"stage":"completed","outcome":"succeeded","progress":100,"message":null,"failureReason":null}],"notFound":[]}}`
+	}
+
+	var mutex sync.Mutex
+	counts := map[string]int{}
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			mutex.Lock()
+			defer mutex.Unlock()
+			switch {
+			case r.Method == http.MethodDelete && r.URL.Path == BASE_URL_V1+vpcUnitTestID:
+				counts[http.MethodDelete]++
+				if counts[http.MethodDelete] == 1 {
+					w.WriteHeader(http.StatusConflict)
+					_, _ = w.Write([]byte(busyBody))
+					return
+				}
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(acceptedBody))
+			case r.Method == http.MethodPost && r.URL.Path == client.JOBS_BASE_URL_V1:
+				ids, _ := testutil.ReadRequestBody(r)["jobIds"].([]any)
+				jobID, _ := ids[0].(string)
+				counts["poll "+jobID]++
+				_, _ = w.Write([]byte(jobBody(jobID)))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+
+	if err := DeleteVpc(gpcnClient, context.Background(), vpcUnitTestID); err != nil {
+		t.Fatalf("Expected the delete after the holder to succeed, got %v", err)
+	}
+	mutex.Lock()
+	defer mutex.Unlock()
+	if counts[http.MethodDelete] != 2 {
+		t.Errorf("DELETE count = %d, want 2", counts[http.MethodDelete])
+	}
+	if counts["poll h1"] != 1 || counts["poll j-delete"] != 1 {
+		t.Errorf("polls = %v, want one of h1 and one of j-delete", counts)
+	}
+}
