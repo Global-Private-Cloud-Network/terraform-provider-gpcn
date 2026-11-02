@@ -12,6 +12,12 @@ var (
 	// ErrJobCancelledByPlatform matches, through errors.Is, the error of a job
 	// that the platform stopped.
 	ErrJobCancelledByPlatform = errors.New("job stopped by the platform")
+	// ErrJobNotVisibleTarget matches, through errors.Is, the error of a job
+	// that the batch read does not return.
+	ErrJobNotVisibleTarget = errors.New("job not visible")
+	// ErrHolderStillRunning matches, through errors.Is, the error of a holder
+	// job that outlived the wait.
+	ErrHolderStillRunning = errors.New("a job still holds the resource")
 )
 
 // jobCancelledError keeps the stopped-job sentence and matches
@@ -23,6 +29,22 @@ type jobCancelledError struct {
 func (e *jobCancelledError) Error() string { return e.message }
 
 func (e *jobCancelledError) Is(target error) bool { return target == ErrJobCancelledByPlatform }
+
+type jobNotVisibleError struct {
+	message string
+}
+
+func (e *jobNotVisibleError) Error() string { return e.message }
+
+func (e *jobNotVisibleError) Is(target error) bool { return target == ErrJobNotVisibleTarget }
+
+type holderStillRunningError struct {
+	message string
+}
+
+func (e *holderStillRunningError) Error() string { return e.message }
+
+func (e *holderStillRunningError) Is(target error) bool { return target == ErrHolderStillRunning }
 
 // Configuration errors
 var (
@@ -43,5 +65,6 @@ const (
 	ErrJobAbandoned  = "job %s for action %q was abandoned by the platform"
 	ErrJobNotVisible = "job %s is not visible to this API key (it does not exist, belongs to another tenant, or was deleted)"
 
-	ErrDetailUnknownOutcome = "the job ended with outcome %q, which this provider version does not recognize"
+	ErrDetailUnknownOutcome  = "the job ended with outcome %q, which this provider version does not recognize"
+	ErrFmtHolderStillRunning = "job %s still holds this resource after %s; run the apply or destroy again once that job ends"
 )
