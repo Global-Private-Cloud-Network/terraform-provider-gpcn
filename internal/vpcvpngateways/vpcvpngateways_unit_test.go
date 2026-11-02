@@ -805,6 +805,10 @@ func TestWaitForVpnGatewayGoneResendAnswers(t *testing.T) {
 		"not found":                       {deletes: []gatewayAnswer{accepted, gone}, reads: []gatewayAnswer{parked}},
 		"removal runs, then gone":         {deletes: []gatewayAnswer{accepted, removing}, reads: []gatewayAnswer{parked, gone}},
 		"removal runs, parked, then gone": {deletes: []gatewayAnswer{accepted, removing}, reads: []gatewayAnswer{parked, parked, gone}},
+		"the resend fails in transit, then gone": {
+			deletes: []gatewayAnswer{accepted, {http.StatusBadGateway, `{"success":false,"message":"bad gateway"}`}},
+			reads:   []gatewayAnswer{parked, gone},
+		},
 		"busy, then accepted": {
 			deletes: []gatewayAnswer{accepted, {http.StatusConflict, busyGatewayBody("delete")}, {http.StatusAccepted, gatewayAcceptedBody("job-resend")}},
 			reads:   []gatewayAnswer{parked, gone},

@@ -381,6 +381,11 @@ func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, rea
 	if client.IsConflict(err) {
 		return resendNotSent, false, fmt.Errorf(ErrFmtRemovalResendRefused, reason, vpcID, ErrorDetail(err))
 	}
+	// A resend lost in transit can still reach the platform, and the
+	// platform can still finish the removal, so the wait goes on.
+	if err != nil && ctx.Err() == nil && RowMayExist(err) {
+		return resendExhausted, false, nil
+	}
 	if err != nil {
 		return resendNotSent, false, err
 	}
