@@ -802,8 +802,8 @@ func TestVpcVpnGatewayResourceCreate5xxPollsAdoptedJob(t *testing.T) {
 	})
 }
 
-// A delete job that fails leaves the removal to the sweeper. The destroy keeps
-// reading until the API answers 404.
+// A delete job that fails can leave the removal parked while the platform still
+// removes it. The destroy keeps reading until the API answers 404.
 func TestVpcVpnGatewayResourceDeleteParkedRemovalWaits(t *testing.T) {
 	t.Parallel()
 	server, state := startVpnGatewayPlanMockServer(t)
