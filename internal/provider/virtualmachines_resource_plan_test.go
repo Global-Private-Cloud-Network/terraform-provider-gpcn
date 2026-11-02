@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/networks"
 	"terraform-provider-gpcn/internal/testutil"
 	"terraform-provider-gpcn/internal/virtualmachines"
@@ -4464,6 +4465,21 @@ type vmV3Mock struct {
 	boundID       string
 	stops         int
 	deleteBodies  []string
+
+	// readAs replaces the status and the failure reason a read reports while
+	// the machine is not stopped.
+	readAs *vmV3Read
+	// failDeleteJobs counts the delete jobs that answer a failed outcome with
+	// deleteJobFailureReason. The row stays parked after each one.
+	failDeleteJobs         int
+	deleteJobFailureReason string
+}
+
+// vmV3Read is a status and a failure reason as a read reports them. A nil
+// failure reason reads as JSON null.
+type vmV3Read struct {
+	status        string
+	failureReason any
 }
 
 func startVirtualMachineV3MockServer(t *testing.T) *vmV3Mock {
@@ -4542,7 +4558,18 @@ func startVirtualMachineV3MockServer(t *testing.T) *vmV3Mock {
 			if failing {
 				mock.parked = true
 			}
+			deleteFailing := jobID == vmV3PlanTestDeleteJobID && mock.failDeleteJobs > 0
+			deleteFailureReason := mock.deleteJobFailureReason
+			if deleteFailing {
+				mock.failDeleteJobs--
+				mock.gone = false
+				mock.parked = true
+			}
 			mock.mu.Unlock()
+			if deleteFailing {
+				testutil.WriteJSONResponse(w, jobBody(jobID, "delete", "failed", deleteFailureReason))
+				return
+			}
 			if failing {
 				testutil.WriteJSONResponse(w, jobBody(jobID, "create", "failed", vmV3PlanTestFailureReason))
 				return
@@ -4566,6 +4593,7 @@ func startVirtualMachineV3MockServer(t *testing.T) *vmV3Mock {
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
 			mock.mu.Lock()
 			name, parked, gone, stopped := mock.name, mock.parked, mock.gone, mock.stopped
+			readAs := mock.readAs
 			mock.mu.Unlock()
 			if gone {
 				w.Header().Set("Content-Type", "application/json")
@@ -4582,6 +4610,11 @@ func startVirtualMachineV3MockServer(t *testing.T) *vmV3Mock {
 				data := body["data"].(map[string]any)
 				data["status"] = virtualmachines.VMStatusError.String()
 				data["failureReason"] = vmV3PlanTestFailureReason
+			}
+			if readAs != nil && !stopped {
+				data := body["data"].(map[string]any)
+				data["status"] = readAs.status
+				data["failureReason"] = readAs.failureReason
 			}
 			testutil.WriteJSONResponse(w, body)
 		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
@@ -4686,4 +4719,84 @@ func TestVirtualMachineDeleteParkedSkipsStop(t *testing.T) {
 	if stops != 0 {
 		t.Errorf("Expected no stop of the parked machine, got %d", stops)
 	}
+}
+
+// vmV3PlanTestDestroyWithRead creates the machine, then destroys it while reads report the
+// given status and failure reason.
+func vmV3PlanTestDestroyWithRead(t *testing.T, mock *vmV3Mock, name string, read vmV3Read) {
+	t.Helper()
+	config := vmPlanTestConfig(mock.server.URL, name)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() { mock.set(func(m *vmV3Mock) { m.readAs = &read }) },
+				Config:    config,
+				Destroy:   true,
+			},
+		},
+	})
+}
+
+// A machine in Error without a failure reason is not parked. The destroy takes
+// the stop before the delete.
+func TestVirtualMachineDeleteErrorWithoutReasonStops(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineV3MockServer(t)
+	vmV3PlanTestDestroyWithRead(t, mock, "vm-v3-error-no-reason", vmV3Read{status: virtualmachines.VMStatusError.String(), failureReason: nil})
+
+	stops, deleteBodies := mock.recorded()
+	if stops != 1 {
+		t.Errorf("Expected one stop, got %d", stops)
+	}
+	if len(deleteBodies) != 1 {
+		t.Errorf("Expected one delete, got %d", len(deleteBodies))
+	}
+}
+
+// A running machine with a failure reason is not parked. The destroy takes the
+// stop before the delete.
+func TestVirtualMachineDeleteRunningWithReasonStops(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineV3MockServer(t)
+	vmV3PlanTestDestroyWithRead(t, mock, "vm-v3-running-reason", vmV3Read{status: virtualmachines.VMStatusRunning.String(), failureReason: "x"})
+
+	stops, deleteBodies := mock.recorded()
+	if stops != 1 {
+		t.Errorf("Expected one stop, got %d", stops)
+	}
+	if len(deleteBodies) != 1 {
+		t.Errorf("Expected one delete, got %d", len(deleteBodies))
+	}
+}
+
+// A failed delete job on a parked machine reports the parked sentence with the
+// machine ID and the job error.
+func TestVirtualMachineDeleteParkedReportsDeleteFailure(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineV3MockServer(t)
+	config := vmPlanTestConfig(mock.server.URL, "vm-v3-parked-delete-fails")
+	jobError := fmt.Sprintf("job %s for action %q: %s: %s",
+		vmV3PlanTestDeleteJobID, "Delete GPCN Virtual Machine", client.ErrJobFailed.Error(), "hypervisor gone")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() {
+					mock.set(func(m *vmV3Mock) {
+						m.parked = true
+						m.failDeleteJobs = 1
+						m.deleteJobFailureReason = "hypervisor gone"
+					})
+				},
+				Config:      config,
+				Destroy:     true,
+				ExpectError: vmPlanTestSentencePattern(fmt.Sprintf(virtualmachines.ErrDetailParkedDeleteFailed, vmPlanTestID, jobError)),
+			},
+		},
+	})
 }
