@@ -60,7 +60,8 @@ func ErrorDetail(err error) string {
 
 // RowMayExist reports whether a POST that failed with err can have created a
 // row. A 4xx answer is a refusal. A 5xx answer or a transport error leaves the
-// outcome unknown.
+// outcome unknown. For a DELETE, the same unclear answer means the API may have
+// accepted the removal.
 func RowMayExist(err error) bool {
 	var httpErr *client.HTTPError
 	if errors.As(err, &httpErr) {
@@ -277,8 +278,8 @@ const (
 	resendNotSent = iota
 	// resendSent means the second DELETE started a job of its own.
 	resendSent
-	// resendExhausted means the API already removes the gateway again, so no
-	// resend is left to send.
+	// resendExhausted means no further resend: the platform reported a removal
+	// already running, or the resend failed in transit.
 	resendExhausted
 )
 
@@ -291,6 +292,7 @@ func waitForVpnGatewayGone(gpcnClient *client.GpcnClient, ctx context.Context, v
 	tflog.Info(ctx, fmt.Sprintf(LogWaitingForVpnGatewayGone, vpcID))
 
 	var lastState, lastReason string
+	var transitErr error
 	resend := resendNotSent
 
 	for {
@@ -316,7 +318,7 @@ func waitForVpnGatewayGone(gpcnClient *client.GpcnClient, ctx context.Context, v
 		}
 		if parked && resend == resendNotSent && timeout-time.Since(startTime) >= ResendMinBudget {
 			var gone bool
-			resend, gone, err = resendDelete(gpcnClient, ctx, vpcID, *gateway.FailureReason, startTime, timeout)
+			resend, gone, transitErr, err = resendDelete(gpcnClient, ctx, vpcID, *gateway.FailureReason, startTime, timeout)
 			if err != nil {
 				return err
 			}
@@ -330,7 +332,11 @@ func waitForVpnGatewayGone(gpcnClient *client.GpcnClient, ctx context.Context, v
 		}
 
 		if time.Since(startTime) >= timeout {
-			return fmt.Errorf("%w: "+ErrFmtRemovalTimeout, ErrRemovalTimeout, vpcID, lastState, timeout, lastReason)
+			timeoutErr := fmt.Errorf("%w: "+ErrFmtRemovalTimeout, ErrRemovalTimeout, vpcID, lastState, timeout, lastReason)
+			if transitErr != nil {
+				return fmt.Errorf("%w\n\n%s", timeoutErr, fmt.Sprintf(ErrFmtResendFailedInTransit, transitErr.Error()))
+			}
+			return timeoutErr
 		}
 
 		select {
@@ -346,15 +352,16 @@ func waitForVpnGatewayGone(gpcnClient *client.GpcnClient, ctx context.Context, v
 // again, and those sends together are the one resend. A 202 gets its job
 // polled inside the shared deadline. A failed job is not an error, because the
 // next read shows the row. A 409 VPN_GATEWAY_REMOVING means the API already
-// removes the gateway again, so the wait goes on. The second result is true
-// when the API answers 404.
-func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, reason string, startTime time.Time, timeout time.Duration) (int, bool, error) {
+// removes the gateway again, so the wait goes on. A 5xx or a transport error
+// means the resend failed in transit. The wait then goes on too, and the third
+// result holds that error. The second result is true when the API answers 404.
+func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, reason string, startTime time.Time, timeout time.Duration) (int, bool, error, error) {
 	var jobID string
 	var err error
 	for {
 		request, requestErr := http.NewRequestWithContext(ctx, http.MethodDelete, gatewayPath(vpcID), nil)
 		if requestErr != nil {
-			return resendNotSent, false, requestErr
+			return resendNotSent, false, nil, requestErr
 		}
 		jobID, err = issueJob(gpcnClient.DoWithRetry, request)
 		holder, busy := client.BusyHolder(err)
@@ -362,41 +369,41 @@ func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, rea
 			break
 		}
 		if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime.Add(timeout)); err != nil {
-			return resendNotSent, false, err
+			return resendNotSent, false, nil, err
 		}
 		select {
 		case <-ctx.Done():
-			return resendNotSent, false, ctx.Err()
+			return resendNotSent, false, nil, ctx.Err()
 		case <-time.After(RemovalPollInterval):
 		}
 	}
 
 	if client.IsNotFound(err) {
-		return resendNotSent, true, nil
+		return resendNotSent, true, nil, nil
 	}
 	if code, _ := ParseAPIError(err); code == CodeGatewayRemoving {
 		tflog.Info(ctx, LogRemovalAlreadyRunning)
-		return resendExhausted, false, nil
+		return resendExhausted, false, nil, nil
 	}
 	if client.IsConflict(err) {
-		return resendNotSent, false, fmt.Errorf(ErrFmtRemovalResendRefused, reason, vpcID, ErrorDetail(err))
+		return resendNotSent, false, nil, fmt.Errorf(ErrFmtRemovalResendRefused, reason, vpcID, ErrorDetail(err))
 	}
 	// A resend lost in transit can still reach the platform, and the
 	// platform can still finish the removal, so the wait goes on.
 	if err != nil && ctx.Err() == nil && RowMayExist(err) {
-		return resendExhausted, false, nil
+		return resendExhausted, false, err, nil
 	}
 	if err != nil {
-		return resendNotSent, false, err
+		return resendNotSent, false, nil, err
 	}
 	tflog.Info(ctx, LogIssuedDeleteVpnGatewayJob)
 
 	pollConfig := client.DefaultPollingConfig()
 	pollConfig.Timeout = max(timeout-time.Since(startTime), 0)
 	if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, ActionDeleteVpnGateway, jobID, pollConfig); err != nil && !errors.Is(err, client.ErrJobFailed) {
-		return resendNotSent, false, fmt.Errorf(ErrFmtDeletePollingFailed, err)
+		return resendNotSent, false, nil, fmt.Errorf(ErrFmtDeletePollingFailed, err)
 	}
-	return resendSent, false, nil
+	return resendSent, false, nil, nil
 }
 
 // issueJob sends a request whose 202 carries a job ID. The singular job envelope

@@ -798,6 +798,13 @@ func TestWaitForVpnGatewayGoneResendAnswers(t *testing.T) {
 		deletes []gatewayAnswer
 		reads   []gatewayAnswer
 		want    string
+		// check replaces the want comparison when it is set.
+		check func(*testing.T, error)
+		// pollingTimeout and resendMinBudget shorten the wait when they are set.
+		pollingTimeout  time.Duration
+		resendMinBudget time.Duration
+		// anyReads skips the read count of a wait that runs until its timeout.
+		anyReads bool
 	}{
 		"not found":                       {deletes: []gatewayAnswer{accepted, gone}, reads: []gatewayAnswer{parked}},
 		"removal runs, then gone":         {deletes: []gatewayAnswer{accepted, removing}, reads: []gatewayAnswer{parked, gone}},
@@ -816,6 +823,33 @@ func TestWaitForVpnGatewayGoneResendAnswers(t *testing.T) {
 			reads: []gatewayAnswer{parked},
 			want:  fmt.Sprintf(ErrFmtRemovalResendRefused, parkedGatewayReason, testVpcID, inUse),
 		},
+		"the resend is forbidden": {
+			deletes: []gatewayAnswer{accepted, {http.StatusForbidden, `{"success":false,"message":"You do not have permission to perform this action.",` +
+				`"error":{"code":"Insufficient Permissions","statusCode":403,"details":null}}`}},
+			reads: []gatewayAnswer{parked},
+			check: func(t *testing.T, err error) {
+				var httpErr *client.HTTPError
+				if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusForbidden || err != error(httpErr) {
+					t.Fatalf("Expected the 403 error unchanged, got %v", err)
+				}
+			},
+		},
+		"the resend fails in transit and the wait times out": {
+			deletes:         []gatewayAnswer{accepted, {http.StatusBadGateway, `{"success":false,"message":"bad gateway"}`}},
+			reads:           []gatewayAnswer{parked},
+			pollingTimeout:  200 * time.Millisecond,
+			resendMinBudget: 50 * time.Millisecond,
+			anyReads:        true,
+			check: func(t *testing.T, err error) {
+				if !errors.Is(err, ErrRemovalTimeout) {
+					t.Fatalf("Expected a removal timeout, got %v", err)
+				}
+				transit := fmt.Sprintf("%v: HTTP 502: bad gateway", client.ErrMaxRetriesExceeded)
+				if want := "\n\n" + fmt.Sprintf(ErrFmtResendFailedInTransit, transit); !strings.HasSuffix(err.Error(), want) {
+					t.Errorf("Expected the error to end with %q, got %q", want, err.Error())
+				}
+			},
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			server := &scriptedGatewayServer{
@@ -827,18 +861,28 @@ func TestWaitForVpnGatewayGoneResendAnswers(t *testing.T) {
 				},
 			}
 			gpcnClient := server.client(t)
+			if test.pollingTimeout != 0 {
+				gpcnClient.Config().PollingTimeout = test.pollingTimeout
+			}
+			if test.resendMinBudget != 0 {
+				previous := ResendMinBudget
+				ResendMinBudget = test.resendMinBudget
+				t.Cleanup(func() { ResendMinBudget = previous })
+			}
 
 			err := DeleteVpnGateway(gpcnClient, context.Background(), testVpcID)
-			if test.want == "" && err != nil {
+			switch {
+			case test.check != nil:
+				test.check(t, err)
+			case test.want == "" && err != nil:
 				t.Fatalf("Expected the gateway to go, got %v", err)
-			}
-			if test.want != "" && (err == nil || err.Error() != test.want) {
+			case test.want != "" && (err == nil || err.Error() != test.want):
 				t.Fatalf("Expected %q, got %v", test.want, err)
 			}
 			if got := server.count(http.MethodDelete); got != len(test.deletes) {
 				t.Errorf("Expected %d DELETEs, got %d", len(test.deletes), got)
 			}
-			if got := server.count(http.MethodGet); got != len(test.reads) {
+			if got := server.count(http.MethodGet); !test.anyReads && got != len(test.reads) {
 				t.Errorf("Expected %d reads, got %d", len(test.reads), got)
 			}
 			server.mu.Lock()
