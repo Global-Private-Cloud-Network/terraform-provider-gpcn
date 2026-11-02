@@ -303,6 +303,21 @@ func TestJobResponseDecodesV3FlatJob(t *testing.T) {
 				FailureReason:      "capacity",
 			},
 		},
+		{
+			name: "an empty id falls back to jobId",
+			body: `{"jobId":"j1","id":""}`,
+			want: client.JobResponse{JobID: "j1"},
+		},
+		{
+			name: "progress wins over progressPercentage",
+			body: `{"jobId":"j1","progress":40,"progressPercentage":10}`,
+			want: client.JobResponse{JobID: "j1", ProgressPercentage: 40},
+		},
+		{
+			name: "a null progress falls back to progressPercentage",
+			body: `{"jobId":"j1","progress":null,"progressPercentage":10}`,
+			want: client.JobResponse{JobID: "j1", ProgressPercentage: 10},
+		},
 	}
 
 	for _, tt := range tests {
@@ -339,6 +354,24 @@ func TestJobResponseDecodesV3DispatchElement(t *testing.T) {
 			}
 			if job.ResourceId != tt.wantResourceID {
 				t.Errorf("ResourceId = %q, want %q", job.ResourceId, tt.wantResourceID)
+			}
+		})
+	}
+
+	edges := []struct {
+		name string
+		body string
+	}{
+		{name: "a null resource", body: `{"job":{"id":"j1"},"resource":null}`},
+		{name: "a null job reads as a flat job", body: `{"jobId":"j1","job":null}`},
+		{name: "a string job reads as a flat job", body: `{"jobId":"j1","job":"str"}`},
+	}
+
+	for _, tt := range edges {
+		t.Run(tt.name, func(t *testing.T) {
+			want := client.JobResponse{JobID: "j1"}
+			if job := decodeJob(t, tt.body); !reflect.DeepEqual(job, want) {
+				t.Errorf("decoded job = %+v, want %+v", job, want)
 			}
 		})
 	}
@@ -577,7 +610,12 @@ func TestPollFailureDetailPrefersFailureReason(t *testing.T) {
 func TestPollRefusesEmptyJobID(t *testing.T) {
 	gpcnClient, calls := jobsServer(t, v3JobsBody(`{"id":"job-1","stage":"running","outcome":null}`))
 
-	_, err := client.PerformLongPolling(gpcnClient, t.Context(), pollTestAction, "")
+	config := &client.PollingConfig{
+		Timeout:         50 * time.Millisecond,
+		InitialInterval: time.Millisecond,
+		MaxInterval:     time.Millisecond,
+	}
+	_, err := client.PerformLongPollingWithConfig(gpcnClient, t.Context(), pollTestAction, "", config)
 	if !errors.Is(err, client.ErrNoJobID) {
 		t.Errorf("error = %v, want ErrNoJobID", err)
 	}
