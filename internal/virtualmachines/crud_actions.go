@@ -46,6 +46,7 @@ type ReadVirtualMachinesResponse struct {
 		SshKeyName      string                `json:"sshKeyName"`
 		NetworkHotplug  int                   `json:"networkHotplug"`
 		ResourceGroupId string                `json:"resourceGroupId"`
+		FailureReason   *string               `json:"failureReason"`
 		Datacenter      struct {
 			ID          string `json:"id"`
 			Name        string `json:"name"`

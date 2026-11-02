@@ -4442,3 +4442,248 @@ func TestVirtualMachineResourcePlanCreateKeepsPlannedGroup(t *testing.T) {
 		},
 	})
 }
+
+const (
+	vmV3PlanTestCreateJobID   = "job-v3-create"
+	vmV3PlanTestDeleteJobID   = "job-v3-delete"
+	vmV3PlanTestFailureReason = "the hypervisor refused the machine"
+)
+
+// vmV3Mock serves the machine in the runtime shapes: a batch 202 whose element
+// carries the job and the row, and job reads that carry an outcome. A failed
+// create job parks the row in Error with a failure reason, as the platform does.
+type vmV3Mock struct {
+	server *httptest.Server
+
+	mu            sync.Mutex
+	failCreateJob bool
+	parked        bool
+	gone          bool
+	stopped       bool
+	name          string
+	boundID       string
+	stops         int
+	deleteBodies  []string
+}
+
+func startVirtualMachineV3MockServer(t *testing.T) *vmV3Mock {
+	t.Helper()
+	mock := &vmV3Mock{}
+
+	jobBody := func(jobID, operation, outcome, failureReason string) map[string]any {
+		var reason any
+		stage := "completed"
+		if failureReason != "" {
+			reason = failureReason
+			stage = "failed"
+		}
+		return map[string]any{
+			"success": true,
+			"data": map[string]any{
+				"jobs": []map[string]any{{
+					"id":            jobID,
+					"operation":     operation,
+					"resourceId":    vmPlanTestID,
+					"stage":         stage,
+					"outcome":       outcome,
+					"progress":      100,
+					"message":       nil,
+					"failureReason": reason,
+				}},
+				"notFound": []string{},
+			},
+		}
+	}
+	accepted := func(w http.ResponseWriter, data map[string]any) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": data})
+	}
+	queuedJob := func(jobID, operation string) map[string]any {
+		return map[string]any{
+			"id":            jobID,
+			"operation":     operation,
+			"resourceId":    vmPlanTestID,
+			"stage":         "queued",
+			"outcome":       nil,
+			"progress":      0,
+			"message":       nil,
+			"failureReason": nil,
+		}
+	}
+
+	mock.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mock.mu.Lock()
+			mock.name, _ = body["name"].(string)
+			name := mock.name
+			mock.gone = false
+			mock.stopped = false
+			mock.boundID = ""
+			if acquire, ok := body["acquirePublicIp"].(bool); ok && acquire {
+				mock.boundID = vmPlanTestAcquiredIpID
+			}
+			mock.mu.Unlock()
+			accepted(w, map[string]any{"jobs": []map[string]any{{
+				"job":      queuedJob(vmV3PlanTestCreateJobID, "create"),
+				"resource": map[string]any{"id": vmPlanTestID, "name": name, "status": "Building"},
+			}}})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			jobID := vmV3PlanTestCreateJobID
+			if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
+				jobID, _ = ids[0].(string)
+			}
+			mock.mu.Lock()
+			failing := jobID == vmV3PlanTestCreateJobID && mock.failCreateJob
+			if failing {
+				mock.parked = true
+			}
+			mock.mu.Unlock()
+			if failing {
+				testutil.WriteJSONResponse(w, jobBody(jobID, "create", "failed", vmV3PlanTestFailureReason))
+				return
+			}
+			testutil.WriteJSONResponse(w, jobBody(jobID, "create", "succeeded", ""))
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mock.mu.Lock()
+			mock.stops++
+			mock.stopped = true
+			mock.mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mock.mu.Lock()
+			boundID := mock.boundID
+			mock.mu.Unlock()
+			address := ""
+			if boundID != "" {
+				address = vmPlanTestAcquiredIpAddress
+			}
+			testutil.WriteJSONResponse(w, vmPublicIpPlanTestInterfacesBody(boundID, address))
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mock.mu.Lock()
+			name, parked, gone, stopped := mock.name, mock.parked, mock.gone, mock.stopped
+			mock.mu.Unlock()
+			if gone {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"success":false,"message":"Virtual machine not found","error":{"code":"Resource Not Found","statusCode":404,"details":null}}`))
+				return
+			}
+			status := virtualmachines.VMStatusRunning.String()
+			if stopped {
+				status = virtualmachines.VMStatusShutoff.String()
+			}
+			body := vmPlanTestReadBody(name, status, vmPlanTestSizeID)
+			if parked {
+				data := body["data"].(map[string]any)
+				data["status"] = virtualmachines.VMStatusError.String()
+				data["failureReason"] = vmV3PlanTestFailureReason
+			}
+			testutil.WriteJSONResponse(w, body)
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			raw, _ := io.ReadAll(r.Body)
+			mock.mu.Lock()
+			mock.deleteBodies = append(mock.deleteBodies, string(raw))
+			mock.gone = true
+			mock.parked = false
+			mock.mu.Unlock()
+			accepted(w, map[string]any{"job": queuedJob(vmV3PlanTestDeleteJobID, "delete")})
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(mock.server.Close)
+	return mock
+}
+
+func (m *vmV3Mock) set(change func(*vmV3Mock)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	change(m)
+}
+
+// recorded returns the stop count and the body of every delete.
+func (m *vmV3Mock) recorded() (int, []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.stops, slices.Clone(m.deleteBodies)
+}
+
+// A create job that fails on the runtime wire leaves a parked machine. The
+// create saves its ID, so Terraform taints it, and the next apply replaces it.
+// The replacement deletes the parked machine without a stop, which the
+// platform refuses on such a machine.
+func TestVirtualMachineCreateJobFailedIsReplaced(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineV3MockServer(t)
+	mock.set(func(m *vmV3Mock) { m.failCreateJob = true })
+	config := vmPlanTestConfig(mock.server.URL, "vm-v3-failed-create")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexp.MustCompile(`the\s+hypervisor\s+refused\s+the\s+machine`),
+			},
+			{
+				PreConfig: func() { mock.set(func(m *vmV3Mock) { m.failCreateJob = false }) },
+				Config:    config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionReplace),
+					},
+				},
+				Check: func(*terraform.State) error {
+					stops, deleteBodies := mock.recorded()
+					if len(deleteBodies) != 1 {
+						return fmt.Errorf("expected one delete of the parked machine, got %d", len(deleteBodies))
+					}
+					if deleteBodies[0] != "" {
+						return fmt.Errorf("expected a delete with no body, got %q", deleteBodies[0])
+					}
+					if stops != 0 {
+						return fmt.Errorf("expected no stop of the parked machine, got %d", stops)
+					}
+					return nil
+				},
+			},
+		},
+	})
+}
+
+// A machine that reads Error with a failure reason is parked. The destroy skips
+// the stop the platform refuses on it, sends the delete, and releases the
+// address the machine acquired.
+func TestVirtualMachineDeleteParkedSkipsStop(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineV3MockServer(t)
+	config := vmPublicIpPlanTestConfig(mock.server.URL, "vm-v3-parked-delete", true, "")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() { mock.set(func(m *vmV3Mock) { m.parked = true }) },
+				Config:    config,
+				Destroy:   true,
+			},
+		},
+	})
+
+	stops, deleteBodies := mock.recorded()
+	if len(deleteBodies) != 1 {
+		t.Fatalf("Expected one delete, got %d", len(deleteBodies))
+	}
+	if deleteBodies[0] != `{"releasePublicIps":true}` {
+		t.Errorf("Expected the delete body '{\"releasePublicIps\":true}', got '%s'", deleteBodies[0])
+	}
+	if stops != 0 {
+		t.Errorf("Expected no stop of the parked machine, got %d", stops)
+	}
+}
