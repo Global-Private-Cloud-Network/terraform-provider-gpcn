@@ -68,8 +68,7 @@ func updateRequestBody(plan, state ResourceModel) map[string]any {
 	return body
 }
 
-// CreateL2Segment orders a segment and reads it back. The 202 names a job and
-// nothing else, and the job names the segment only once it completes.
+// CreateL2Segment orders a segment and reads it back.
 // CreateL2Segment also returns the segment ID it knows when it fails: the ID
 // the completed job names, else the ID the 202 carried. A row can outlive a
 // failed create, so the caller records that ID and Terraform taints the segment.

@@ -105,7 +105,7 @@ func (r *vpcVpnGatewayResource) Configure(_ context.Context, req resource.Config
 	r.client = gpcnClient
 }
 
-// ModifyPlan replaces a failed gateway. The API has no retry for it.
+// ModifyPlan replaces a failed gateway rather than retrying it.
 func (r *vpcVpnGatewayResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
 		return

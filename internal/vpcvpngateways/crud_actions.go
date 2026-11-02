@@ -166,9 +166,11 @@ func GetVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID str
 }
 
 // DeleteVpnGateway issues the removal, polls its job, and waits for the 404. The
-// job ending does not mean the row is gone, because the platform parks a removal
-// and a sweeper retries it. A job that failed and a 409 VPN_GATEWAY_REMOVING both
-// mean a removal is under way, so both go on to the wait. A 409
+// job ending does not mean the row is gone, because the platform can park a
+// removal. The provider then sends the removal once more when the budget allows.
+// It keeps waiting when the platform reports that the removal is already running.
+// A job that failed and a 409 VPN_GATEWAY_REMOVING both mean a removal is under
+// way, so both go on to the wait. A 409
 // VPN_GATEWAY_BUSY_CREATING waits for the create to end and sends the removal
 // again. The job poll and the waits share one deadline, the polling timeout.
 func DeleteVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string) error {
