@@ -49,14 +49,17 @@ type readVolumesResponse struct {
 // ReadVolumesResponse lets the resource hold the read-back from either branch of Update.
 type ReadVolumesResponse = readVolumesResponse
 
-func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*readVolumesResponse, error) {
+// CreateVolume also returns the volume ID it knows when it fails: the ID the
+// completed job names, else the ID the 202 carried. A row can outlive a failed
+// create, so the caller records that ID and Terraform taints the volume.
+func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*readVolumesResponse, string, error) {
 	tflog.Info(ctx, LogStartingCreateVolume)
 	componentCode := ComponentCodeForVolumeType(model.VolumeType.ValueString())
 
 	tflog.Info(ctx, LogLookingUpVolumeSkuId)
 	skuId, err := GetVolumeSkuId(gpcnClient, ctx, model.DatacenterId.ValueString(), componentCode, model.SizeGb.ValueInt64())
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	createVolumeRequestBody := map[string]any{
@@ -70,18 +73,18 @@ func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model Reso
 
 	jsonCreateVolumeRequestBody, err := json.Marshal(createVolumeRequestBody)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	request, err := http.NewRequestWithContext(ctx, "POST", BASE_URL_V1, bytes.NewBuffer(jsonCreateVolumeRequestBody))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	tflog.Info(ctx, LogConstructedCreateVolumeRequest)
 
 	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer response.Body.Close()
 	tflog.Info(ctx, LogIssuedCreateVolumeJob)
@@ -89,19 +92,22 @@ func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model Reso
 	// Read the response body and process it as createVolumeResponse
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	var createVolumeResponse client.JobStatusSingularResponse
 	err = json.Unmarshal(body, &createVolumeResponse)
 
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
+
+	// The ID the 202 names, if any. The completed job names it again.
+	volumeID := createVolumeResponse.Data.ResourceId
 
 	jobResp, err := client.PerformLongPolling(gpcnClient, ctx, "Create GPCN Volume", createVolumeResponse.Data.JobID)
 	if err != nil {
-		return nil, fmt.Errorf("create volume polling failed: %w", err)
+		return nil, volumeID, fmt.Errorf("create volume polling failed: %w", err)
 	}
 
 	tflog.Info(ctx, LogLongPollingCompletedCreateVolume)
@@ -109,17 +115,20 @@ func CreateVolume(gpcnClient *client.GpcnClient, ctx context.Context, model Reso
 	// Extract resource ID with bounds checking
 	resourceID, err := client.GetJobResourceID(jobResp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get resource ID from create volume job response: %w", err)
+		return nil, volumeID, fmt.Errorf("failed to get resource ID from create volume job response: %w", err)
+	}
+	if resourceID != "" {
+		volumeID = resourceID
 	}
 
 	// Perform a GET call to retrieve actual information about the Volume
 	getVolumeResponse, err := GetVolume(gpcnClient, ctx, resourceID)
 	if err != nil {
-		return nil, err
+		return nil, volumeID, err
 	}
 
 	tflog.Info(ctx, LogSuccessfullyRetrievedVolumeCreate)
-	return getVolumeResponse, nil
+	return getVolumeResponse, volumeID, nil
 }
 
 // Helper function to get a volume by ID. Shared between Read and the final action of Create and Update

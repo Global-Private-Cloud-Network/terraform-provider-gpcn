@@ -219,7 +219,7 @@ func TestCreateVirtualMachineMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	response, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, createTestVMModel("test-vm", testVMImage, false))
+	response, _, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, createTestVMModel("test-vm", testVMImage, false))
 	if err != nil {
 		t.Fatalf("CreateVirtualMachine failed: %v", err)
 	}
@@ -1073,7 +1073,7 @@ func TestCreateVirtualMachineAcceptsStoppedStatus(t *testing.T) {
 	})
 	defer server.Close()
 
-	response, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, createTestVMModel("test-vm", testVMImage, false))
+	response, _, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, createTestVMModel("test-vm", testVMImage, false))
 	if err != nil {
 		t.Fatalf("CreateVirtualMachine failed: %v", err)
 	}
@@ -1433,7 +1433,7 @@ func TestCreateVirtualMachineSendsSubnetIdBodyMockHTTP(t *testing.T) {
 	model := createTestVMModel("test-vm", testVMImage, false)
 	model.SubnetId = types.StringValue(subnetID)
 
-	if _, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, model); err != nil {
+	if _, _, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, model); err != nil {
 		t.Fatalf("CreateVirtualMachine failed: %v", err)
 	}
 
@@ -1498,7 +1498,7 @@ func createBodyForResourceGroup(t *testing.T, group types.String) map[string]any
 	model := createTestVMModel("test-vm", testVMImage, false)
 	model.ResourceGroupId = group
 
-	if _, err := CreateVirtualMachine(gpcnClient, context.Background(), "550e8400-e29b-41d4-a716-446655440000", "sku-abc-123", model); err != nil {
+	if _, _, err := CreateVirtualMachine(gpcnClient, context.Background(), "550e8400-e29b-41d4-a716-446655440000", "sku-abc-123", model); err != nil {
 		t.Fatalf("CreateVirtualMachine failed: %v", err)
 	}
 	if createBody == nil {
@@ -1656,7 +1656,7 @@ func TestCreateVirtualMachineSendsPublicIpKeysMockHTTP(t *testing.T) {
 
 		model := createTestVMModel("test-vm", testVMImage, true)
 		model.SubnetId = types.StringValue(subnetID)
-		if _, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, model); err != nil {
+		if _, _, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, model); err != nil {
 			t.Fatalf("CreateVirtualMachine failed: %v", err)
 		}
 		if acquire, ok := createBody[acquireKey].(bool); !ok || !acquire {
@@ -1675,7 +1675,7 @@ func TestCreateVirtualMachineSendsPublicIpKeysMockHTTP(t *testing.T) {
 		model := createTestVMModel("test-vm", testVMImage, false)
 		model.SubnetId = types.StringValue(subnetID)
 		model.PublicIpId = types.StringValue(publicIpID)
-		if _, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, model); err != nil {
+		if _, _, err := CreateVirtualMachine(gpcnClient, context.Background(), imageID, sizeID, model); err != nil {
 			t.Fatalf("CreateVirtualMachine failed: %v", err)
 		}
 		if _, present := createBody[acquireKey]; present {
@@ -2474,5 +2474,97 @@ func TestPrimaryInterfaceCarriesAForeignAddressDetailBytes(t *testing.T) {
 
 	if ErrDetailPrimaryInterfaceCarriesAForeignAddress != expected {
 		t.Errorf("Expected '%s', got '%s'", expected, ErrDetailPrimaryInterfaceCarriesAForeignAddress)
+	}
+}
+
+// A runtime 202 names the machine before the job ends. A failed job then still
+// returns that ID, so the caller saves it and Terraform taints the machine.
+func TestCreateVirtualMachineReturnsIDWhenJobFails(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	useNoInitialPollDelay(t)
+	const (
+		jobID = "job-v3-create"
+		vmID  = "vm-v3-1"
+	)
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(`{"success":true,"data":{"jobs":[{` +
+					`"job":{"id":"` + jobID + `","operation":"create","resourceId":"` + vmID + `","stage":"queued",` +
+					`"outcome":null,"progress":0,"message":null,"failureReason":null},` +
+					`"resource":{"id":"` + vmID + `","name":"test-vm","status":"Building"}}]}}`))
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				_, _ = w.Write([]byte(`{"success":true,"data":{"jobs":[{"id":"` + jobID + `","operation":"create",` +
+					`"resourceId":"` + vmID + `","stage":"failed","outcome":"failed","progress":60,` +
+					`"message":null,"failureReason":"the hypervisor refused the machine"}],"notFound":[]}}`))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	response, id, err := CreateVirtualMachine(gpcnClient, context.Background(), "image-1", "sku-1", createTestVMModel("test-vm", testVMImage, false))
+	if err == nil {
+		t.Fatal("Expected the failed job to fail the create")
+	}
+	if !strings.Contains(err.Error(), "the hypervisor refused the machine") {
+		t.Errorf("Expected the job's failure reason in %q", err.Error())
+	}
+	if response != nil {
+		t.Errorf("Expected no response, got %+v", response)
+	}
+	if id != vmID {
+		t.Errorf("Expected ID %q from the 202, got %q", vmID, id)
+	}
+}
+
+// The current 202 names no machine. The completed job does, so a status wait
+// that fails after it still returns that ID.
+func TestCreateVirtualMachineReturnsIDWhenStatusWaitFails(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	useNoInitialPollDelay(t)
+	const (
+		jobID = "job-legacy-create"
+		vmID  = "vm-legacy-1"
+	)
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+				_, _ = w.Write([]byte(`{"success":true,"message":"VM creation job started",` +
+					`"data":{"jobs":[{"jobId":"` + jobID + `","stage":"queued","isCompleted":false,` +
+					`"isTerminal":false,"hasFailed":false,"progressPercentage":0}]}}`))
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				_, _ = w.Write([]byte(`{"success":true,"message":"Job status retrieved",` +
+					`"data":{"jobs":[{"jobId":"` + jobID + `","stage":"completed","isCompleted":true,` +
+					`"isTerminal":true,"hasFailed":false,"progressPercentage":100,"resourceId":"` + vmID + `"}]}}`))
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+vmID):
+				_, _ = w.Write([]byte(`{"success":true,"message":"VM retrieved",` +
+					`"data":{"id":"` + vmID + `","name":"test-vm","status":"Destroyed"}}`))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	response, id, err := CreateVirtualMachine(gpcnClient, context.Background(), "image-1", "sku-1", createTestVMModel("test-vm", testVMImage, false))
+	if !IsTerminalStatusError(err) {
+		t.Fatalf("Expected the terminal status to fail the create, got %v", err)
+	}
+	if response != nil {
+		t.Errorf("Expected no response, got %+v", response)
+	}
+	if id != vmID {
+		t.Errorf("Expected ID %q from the completed job, got %q", vmID, id)
 	}
 }

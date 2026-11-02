@@ -159,10 +159,14 @@ func (r *l2SegmentResource) Create(ctx context.Context, req resource.CreateReque
 		return
 	}
 
-	// A create the platform refuses, and a job that fails, both leave no id to
-	// write. Terraform then plans a create again rather than a stale read.
-	getResponse, err := l2segments.CreateL2Segment(r.client, ctx, plan)
+	getResponse, segmentID, err := l2segments.CreateL2Segment(r.client, ctx, plan)
 	if err != nil {
+		// A segment the create left behind goes to state with the error, so
+		// Terraform taints it and the next apply replaces it. A refused create
+		// leaves no ID, and Terraform plans a create again.
+		if segmentID != "" {
+			resp.Diagnostics.Append(resp.State.Set(ctx, l2segments.ModelFromPlanWithID(plan, segmentID))...)
+		}
 		resp.Diagnostics.AddError(
 			l2segments.ErrSummaryUnableToCreateL2Segment,
 			err.Error(),

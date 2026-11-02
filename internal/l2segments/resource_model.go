@@ -21,6 +21,42 @@ type ResourceModel struct {
 	LastUpdated      types.String `tfsdk:"last_updated"`
 }
 
+// ModelFromPlanWithID returns the planned model with the segment ID, for a
+// create that failed after the row existed. State cannot hold an unknown, so
+// every computed attribute the plan left unknown becomes null. The next refresh
+// fills them.
+func ModelFromPlanWithID(plan ResourceModel, id string) ResourceModel {
+	plan.ID = types.StringValue(id)
+	if plan.Description.IsUnknown() {
+		plan.Description = types.StringNull()
+	}
+	if plan.ResourceGroupId.IsUnknown() {
+		plan.ResourceGroupId = types.StringNull()
+	}
+	if plan.State.IsUnknown() {
+		plan.State = types.StringNull()
+	}
+	if plan.Offering.IsUnknown() {
+		plan.Offering = types.StringNull()
+	}
+	if plan.FailureReason.IsUnknown() {
+		plan.FailureReason = types.StringNull()
+	}
+	if plan.DatacenterName.IsUnknown() {
+		plan.DatacenterName = types.StringNull()
+	}
+	if plan.AttachedNicCount.IsUnknown() {
+		plan.AttachedNicCount = types.Int64Null()
+	}
+	if plan.CreatedTime.IsUnknown() {
+		plan.CreatedTime = types.StringNull()
+	}
+	if plan.LastUpdated.IsUnknown() {
+		plan.LastUpdated = types.StringNull()
+	}
+	return plan
+}
+
 // nullableString keeps a platform null as a Terraform null. A null failure reason
 // means the segment never failed, which is not the same as an empty explanation.
 func nullableString(raw *string) types.String {

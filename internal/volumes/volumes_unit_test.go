@@ -182,7 +182,7 @@ func TestCreateVolumeMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	response, err := CreateVolume(gpcnClient, context.Background(), createTestVolumeModel("test-volume", "SSD", 256))
+	response, _, err := CreateVolume(gpcnClient, context.Background(), createTestVolumeModel("test-volume", "SSD", 256))
 	if err != nil {
 		t.Fatalf("CreateVolume failed: %v", err)
 	}
@@ -727,7 +727,7 @@ func createVolumeBodyFor(t *testing.T, model ResourceModel) map[string]any {
 	})
 	defer server.Close()
 
-	if _, err := CreateVolume(gpcnClient, context.Background(), model); err != nil {
+	if _, _, err := CreateVolume(gpcnClient, context.Background(), model); err != nil {
 		t.Fatalf("CreateVolume failed: %v", err)
 	}
 	return created
@@ -786,5 +786,56 @@ func TestMoveVolumeMockHTTP(t *testing.T) {
 	}
 	if !called {
 		t.Error("expected the move endpoint to be called")
+	}
+}
+
+// A runtime 202 names the volume before the job ends. A failed job then still
+// returns that ID, so the caller saves it and Terraform taints the volume.
+func TestCreateVolumeReturnsIDWhenJobFails(t *testing.T) {
+	const (
+		jobID    = "job-v3-volume"
+		volumeID = "volume-v3-1"
+		skuId    = "sku-uuid-10"
+	)
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/volume-sizes"):
+				testutil.WriteJSONResponse(w, newVolumeSizesResponse(testDatacenterID, []volumeSizesDataVolumeTypesAvailableSizesResponse{
+					{SkuId: skuId, SizeGb: 256},
+				}))
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/volumes/"):
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(`{"success":true,"data":{` +
+					`"job":{"id":"` + jobID + `","operation":"create","resourceId":"` + volumeID + `","stage":"queued",` +
+					`"outcome":null,"progress":0,"message":null,"failureReason":null},` +
+					`"resource":{"id":"` + volumeID + `","name":"test-volume","status":"Creating"}}}`))
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"success":true,"data":{"jobs":[{"id":"` + jobID + `","operation":"create",` +
+					`"resourceId":"` + volumeID + `","stage":"failed","outcome":"failed","progress":20,` +
+					`"message":null,"failureReason":"the storage pool is full"}],"notFound":[]}}`))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	response, id, err := CreateVolume(gpcnClient, context.Background(), createTestVolumeModel("test-volume", "SSD", 256))
+	if err == nil {
+		t.Fatal("Expected the failed job to fail the create")
+	}
+	if !strings.Contains(err.Error(), "the storage pool is full") {
+		t.Errorf("Expected the job's failure reason in %q", err.Error())
+	}
+	if response != nil {
+		t.Errorf("Expected no response, got %+v", response)
+	}
+	if id != volumeID {
+		t.Errorf("Expected ID %q from the 202, got %q", volumeID, id)
 	}
 }

@@ -2,6 +2,7 @@ package l2segments
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"testing"
 
@@ -427,7 +428,7 @@ func TestCreateL2SegmentRejectsJobWithoutSegmentIDUnit(t *testing.T) {
 		},
 	})
 
-	_, err := CreateL2Segment(gpcnClient, context.Background(), ResourceModel{
+	_, _, err := CreateL2Segment(gpcnClient, context.Background(), ResourceModel{
 		Name:         types.StringValue("segment-a"),
 		DatacenterId: types.StringValue(unitTestDatacenterID),
 		Description:  types.StringValue(""),
@@ -438,5 +439,50 @@ func TestCreateL2SegmentRejectsJobWithoutSegmentIDUnit(t *testing.T) {
 	}
 	if err.Error() != ErrDetailNoSegmentIDInJob {
 		t.Errorf("error = %q, want %q", err.Error(), ErrDetailNoSegmentIDInJob)
+	}
+}
+
+// A runtime 202 names the segment before the job ends. A failed job then still
+// returns that ID, so the caller saves it and Terraform taints the segment.
+func TestCreateL2SegmentReturnsIDWhenJobFails(t *testing.T) {
+	t.Parallel()
+
+	_, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.Method == http.MethodPost && r.URL.Path == BASE_URL_V1:
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(`{"success":true,"data":{` +
+					`"job":{"id":"job-create","operation":"create","resourceId":"` + unitTestSegmentID + `","stage":"queued",` +
+					`"outcome":null,"progress":0,"message":null,"failureReason":null},` +
+					`"resource":{"id":"` + unitTestSegmentID + `","name":"segment-a","state":"creating"}}}`))
+			case r.Method == http.MethodPost && r.URL.Path == client.JOBS_BASE_URL_V1:
+				_, _ = w.Write([]byte(`{"success":true,"data":{"jobs":[{"id":"job-create","operation":"create",` +
+					`"resourceId":"` + unitTestSegmentID + `","stage":"failed","outcome":"failed","progress":10,` +
+					`"message":null,"failureReason":"the segment could not be provisioned"}],"notFound":[]}}`))
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			}
+		},
+	})
+
+	response, id, err := CreateL2Segment(gpcnClient, context.Background(), ResourceModel{
+		Name:         types.StringValue("segment-a"),
+		DatacenterId: types.StringValue(unitTestDatacenterID),
+		Description:  types.StringValue(""),
+	})
+	if err == nil {
+		t.Fatal("expected the failed job to fail the create")
+	}
+	if !errors.Is(err, client.ErrJobFailed) {
+		t.Errorf("error = %v, want a failed-job error", err)
+	}
+	if response != nil {
+		t.Errorf("response = %+v, want none", response)
+	}
+	if id != unitTestSegmentID {
+		t.Errorf("id = %q, want %q from the 202", id, unitTestSegmentID)
 	}
 }

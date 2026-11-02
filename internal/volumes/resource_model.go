@@ -23,6 +23,33 @@ type ResourceModel struct {
 	ResourceGroupId types.String `tfsdk:"resource_group_id"`
 }
 
+// ModelFromPlanWithID returns the planned model with the volume ID, for a
+// create that failed after the row existed. State cannot hold an unknown, so
+// every computed attribute the plan left unknown becomes null. The next refresh
+// fills them.
+func ModelFromPlanWithID(plan ResourceModel, id string) ResourceModel {
+	plan.ID = types.StringValue(id)
+	if plan.VolumeTypeCode.IsUnknown() {
+		plan.VolumeTypeCode = types.StringNull()
+	}
+	if plan.VolumeTypeId.IsUnknown() {
+		plan.VolumeTypeId = types.Int64Null()
+	}
+	if plan.CreatedTime.IsUnknown() {
+		plan.CreatedTime = types.StringNull()
+	}
+	if plan.LastUpdated.IsUnknown() {
+		plan.LastUpdated = types.StringNull()
+	}
+	if plan.Location.IsUnknown() {
+		plan.Location = types.MapNull(types.StringType)
+	}
+	if plan.ResourceGroupId.IsUnknown() {
+		plan.ResourceGroupId = types.StringNull()
+	}
+	return plan
+}
+
 // Update the plan or state with new values from the GET response
 func MapVolumeResponseToModel(ctx context.Context, response *readVolumesResponse, model ResourceModel) ResourceModel {
 	// Construct most of the data object

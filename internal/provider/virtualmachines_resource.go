@@ -356,8 +356,13 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
-	getVirtualMachineResponse, err := virtualmachines.CreateVirtualMachine(r.client, ctx, plan.ImageId.ValueString(), plan.SizeId.ValueString(), plan)
+	getVirtualMachineResponse, virtualMachineID, err := virtualmachines.CreateVirtualMachine(r.client, ctx, plan.ImageId.ValueString(), plan.SizeId.ValueString(), plan)
 	if err != nil {
+		// A machine the create left behind goes to state with the error, so
+		// Terraform taints it and the next apply replaces it.
+		if virtualMachineID != "" {
+			resp.Diagnostics.Append(resp.State.Set(ctx, virtualmachines.ModelFromPlanWithID(plan, virtualMachineID))...)
+		}
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToCreateVM,
 			err.Error(),

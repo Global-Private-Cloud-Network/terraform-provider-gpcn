@@ -497,7 +497,7 @@ func TestCreateGPUWithSkuCodeMockHTTP(t *testing.T) {
 	model := createTestGPUModel("test-gpu", "", "nvidia-rtx_a6000-series", testImageName, 2)
 	model.SkuCode = types.StringValue(skuCode)
 
-	response, err := CreateGPU(gpcnClient, context.Background(), seriesID, model)
+	response, _, err := CreateGPU(gpcnClient, context.Background(), seriesID, model)
 	if err != nil {
 		t.Fatalf("CreateGPU failed: %v", err)
 	}
@@ -665,7 +665,7 @@ func TestCreateGPUMockHTTP(t *testing.T) {
 
 	model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100-series", testImageName, 2)
 
-	response, err := CreateGPU(gpcnClient, context.Background(), seriesID, model)
+	response, _, err := CreateGPU(gpcnClient, context.Background(), seriesID, model)
 	if err != nil {
 		t.Fatalf("CreateGPU failed: %v", err)
 	}
@@ -1351,7 +1351,7 @@ func gpuUnitCreateKeys(t *testing.T, group types.String) map[string]any {
 
 	model := createTestGPUModel("test-gpu", "", "nvidia-rtx_a6000-series", testImageName, 2)
 	model.ResourceGroupId = group
-	if _, err := CreateGPU(gpcnClient, context.Background(), seriesID, model); err != nil {
+	if _, _, err := CreateGPU(gpcnClient, context.Background(), seriesID, model); err != nil {
 		t.Fatalf("CreateGPU failed: %v", err)
 	}
 	return got
@@ -1461,5 +1461,51 @@ func TestMapGPUResponseToModelResourceGroupUnit(t *testing.T) {
 	result := MapGPUResponseToModel(context.Background(), response, model)
 	if !result.ResourceGroupId.IsNull() {
 		t.Errorf("Expected an empty group to map to null, got %v", result.ResourceGroupId)
+	}
+}
+
+// A runtime 202 names the GPU before the job ends. A failed job then still
+// returns that ID, so the caller saves it and Terraform taints the GPU.
+func TestCreateGPUReturnsIDWhenJobFails(t *testing.T) {
+	const (
+		jobID = "job-v3-gpu"
+		gpuID = "gpu-v3-1"
+	)
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/gpu/"):
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(`{"success":true,"data":{"jobs":[{` +
+					`"job":{"id":"` + jobID + `","operation":"create","resourceId":"` + gpuID + `","stage":"queued",` +
+					`"outcome":null,"progress":0,"message":null,"failureReason":null},` +
+					`"resource":{"id":"` + gpuID + `","name":"test-gpu","status":"Building"}}]}}`))
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				_, _ = w.Write([]byte(`{"success":true,"data":{"jobs":[{"id":"` + jobID + `","operation":"create",` +
+					`"resourceId":"` + gpuID + `","stage":"failed","outcome":"failed","progress":50,` +
+					`"message":null,"failureReason":"no GPU host had capacity"}],"notFound":[]}}`))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	model := createTestGPUModel("test-gpu", "", "nvidia-rtx_a6000-series", testImageName, 1)
+	response, id, err := CreateGPU(gpcnClient, context.Background(), "series-1", model)
+	if err == nil {
+		t.Fatal("Expected the failed job to fail the create")
+	}
+	if !strings.Contains(err.Error(), "no GPU host had capacity") {
+		t.Errorf("Expected the job's failure reason in %q", err.Error())
+	}
+	if response != nil {
+		t.Errorf("Expected no response, got %+v", response)
+	}
+	if id != gpuID {
+		t.Errorf("Expected ID %q from the 202, got %q", gpuID, id)
 	}
 }
