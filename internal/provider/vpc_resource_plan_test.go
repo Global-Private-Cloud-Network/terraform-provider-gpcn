@@ -1448,7 +1448,7 @@ func TestVpcResourcePlanReplacementWithUnsetGroupJoinsDefault(t *testing.T) {
 // it when the create read the row from data.resource.
 const vpcAcceptedPlanTestID = "vpc-accepted-1"
 
-// startVpcAcceptedPlanMockServer answers in the runtime shapes: the 202 carries
+// startVpcAcceptedPlanMockServer answers in the updated-wire shapes: the 202 carries
 // data.job and data.resource, and the job read carries an outcome. A detailHeldBy
 // is the heldBy of every detail read.
 func startVpcAcceptedPlanMockServer(t *testing.T, detailHeldBy ...map[string]any) *httptest.Server {
@@ -1551,7 +1551,7 @@ func startVpcAcceptedPlanMockServer(t *testing.T, detailHeldBy ...map[string]any
 	return server
 }
 
-// A runtime 202 drives the create to a green apply, and the id in state is
+// An updated-wire 202 drives the create to a green apply, and the id in state is
 // the one data.resource carries.
 func TestVpcCreateReadsAcceptedResource(t *testing.T) {
 	t.Parallel()
@@ -1572,7 +1572,7 @@ func TestVpcCreateReadsAcceptedResource(t *testing.T) {
 	})
 }
 
-// A runtime read names the job that holds the VPC in heldBy and carries no
+// An updated-wire read names the job that holds the VPC in heldBy and carries no
 // activeJobId. active_job_id reads that job.
 func TestVpcActiveJobIDFromHeldBy(t *testing.T) {
 	t.Parallel()

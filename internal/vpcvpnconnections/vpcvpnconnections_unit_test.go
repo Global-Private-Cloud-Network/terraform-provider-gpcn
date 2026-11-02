@@ -728,7 +728,7 @@ func TestVpcVpnConnectionUnitDeleteParkedWithoutBudgetSendsNoResend(t *testing.T
 	}
 }
 
-// The runtime 202 names the connection in data.resource. A failed create job
+// The updated-wire 202 names the connection in data.resource. A failed create job
 // still returns that id, so the caller records the connection.
 func TestCreateVpnConnectionReadsAcceptedResource(t *testing.T) {
 	t.Parallel()

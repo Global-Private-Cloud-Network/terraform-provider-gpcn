@@ -1101,9 +1101,9 @@ func TestL2SegmentResourcePlanGroupDescriptionBytes(t *testing.T) {
 	}
 }
 
-const l2V3PlanTestFailureReason = "the segment could not be provisioned"
+const l2UpdatedPlanTestFailureReason = "the segment could not be provisioned"
 
-// A create job that fails on the runtime wire leaves the segment behind. The
+// A create job that fails on the updated wire leaves the segment behind. The
 // 202 named it, so the create saves its ID, Terraform taints it, and the next
 // apply replaces it.
 func TestL2SegmentCreateJobFailedIsReplaced(t *testing.T) {
@@ -1154,13 +1154,13 @@ func TestL2SegmentCreateJobFailedIsReplaced(t *testing.T) {
 			if jobID == "job-create" {
 				segmentState, failureReason = "ready", nil
 				if failing {
-					segmentState, failureReason = l2PlanTestFailedState, l2V3PlanTestFailureReason
+					segmentState, failureReason = l2PlanTestFailedState, l2UpdatedPlanTestFailureReason
 				}
 			}
 			mu.Unlock()
 			answer := job(jobID, "create", "completed", "succeeded", nil)
 			if failing {
-				answer = job(jobID, "create", "failed", "failed", l2V3PlanTestFailureReason)
+				answer = job(jobID, "create", "failed", "failed", l2UpdatedPlanTestFailureReason)
 			}
 			testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{
 				"jobs": []map[string]any{answer}, "notFound": []string{},

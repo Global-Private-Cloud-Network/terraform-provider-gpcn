@@ -461,7 +461,7 @@ func vpcAcceptedTestModel() ResourceModel {
 	}
 }
 
-// The runtime 202 carries the job as data.job and the row as data.resource.
+// The updated-wire 202 carries the job as data.job and the row as data.resource.
 func TestCreateVpcReadsAcceptedResource(t *testing.T) {
 	t.Parallel()
 

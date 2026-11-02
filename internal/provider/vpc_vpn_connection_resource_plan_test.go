@@ -1804,7 +1804,7 @@ func TestVpcVpnConnectionResourceUpdateSendsOnce(t *testing.T) {
 	})
 }
 
-// A runtime read names a running job in heldBy and carries no activeJobId.
+// An updated-wire read names a running job in heldBy and carries no activeJobId.
 // Saved settings that do not run then call for no update.
 func TestVpcVpnConnectionHeldByWithholdsResend(t *testing.T) {
 	t.Parallel()

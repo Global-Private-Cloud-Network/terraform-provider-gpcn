@@ -1443,12 +1443,12 @@ func TestMapGPUResponseToModelResourceGroupUnit(t *testing.T) {
 	}
 }
 
-// A runtime 202 names the GPU before the job ends. A failed job then still
+// An updated-wire 202 names the GPU before the job ends. A failed job then still
 // returns that ID, so the caller saves it and Terraform taints the GPU.
 func TestCreateGPUReturnsIDWhenJobFails(t *testing.T) {
 	const (
-		jobID = "job-v3-gpu"
-		gpuID = "gpu-v3-1"
+		jobID = "job-updated-gpu"
+		gpuID = "gpu-updated-1"
 	)
 
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{

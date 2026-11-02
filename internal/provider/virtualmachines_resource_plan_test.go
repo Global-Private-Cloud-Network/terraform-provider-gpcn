@@ -4445,15 +4445,15 @@ func TestVirtualMachineResourcePlanCreateKeepsPlannedGroup(t *testing.T) {
 }
 
 const (
-	vmV3PlanTestCreateJobID   = "job-v3-create"
-	vmV3PlanTestDeleteJobID   = "job-v3-delete"
-	vmV3PlanTestFailureReason = "the hypervisor refused the machine"
+	vmUpdatedPlanTestCreateJobID   = "job-updated-create"
+	vmUpdatedPlanTestDeleteJobID   = "job-updated-delete"
+	vmUpdatedPlanTestFailureReason = "the hypervisor refused the machine"
 )
 
-// vmV3Mock serves the machine in the runtime shapes: a batch 202 whose element
+// vmUpdatedMock serves the machine in the updated-wire shapes: a batch 202 whose element
 // carries the job and the row, and job reads that carry an outcome. A failed
 // create job parks the row in Error with a failure reason, as the platform does.
-type vmV3Mock struct {
+type vmUpdatedMock struct {
 	server *httptest.Server
 
 	mu            sync.Mutex
@@ -4468,7 +4468,7 @@ type vmV3Mock struct {
 
 	// readAs replaces the status and the failure reason a read reports while
 	// the machine is not stopped.
-	readAs *vmV3Read
+	readAs *vmUpdatedRead
 	// failDeleteJobs counts the delete jobs that answer a failed outcome with
 	// deleteJobFailureReason. The row stays parked after each one.
 	failDeleteJobs         int
@@ -4481,16 +4481,16 @@ type vmV3Mock struct {
 	segmentNics []vmSegmentNic
 }
 
-// vmV3Read is a status and a failure reason as a read reports them. A nil
+// vmUpdatedRead is a status and a failure reason as a read reports them. A nil
 // failure reason reads as JSON null.
-type vmV3Read struct {
+type vmUpdatedRead struct {
 	status        string
 	failureReason any
 }
 
-func startVirtualMachineV3MockServer(t *testing.T) *vmV3Mock {
+func startVirtualMachineUpdatedMockServer(t *testing.T) *vmUpdatedMock {
 	t.Helper()
-	mock := &vmV3Mock{}
+	mock := &vmUpdatedMock{}
 
 	jobBody := func(jobID, operation, outcome, failureReason string) map[string]any {
 		var reason any
@@ -4551,20 +4551,20 @@ func startVirtualMachineV3MockServer(t *testing.T) *vmV3Mock {
 			}
 			mock.mu.Unlock()
 			accepted(w, map[string]any{"jobs": []map[string]any{{
-				"job":      queuedJob(vmV3PlanTestCreateJobID, "create"),
+				"job":      queuedJob(vmUpdatedPlanTestCreateJobID, "create"),
 				"resource": map[string]any{"id": vmPlanTestID, "name": name, "status": "Building"},
 			}}})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
-			jobID := vmV3PlanTestCreateJobID
+			jobID := vmUpdatedPlanTestCreateJobID
 			if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
 				jobID, _ = ids[0].(string)
 			}
 			mock.mu.Lock()
-			failing := jobID == vmV3PlanTestCreateJobID && mock.failCreateJob
+			failing := jobID == vmUpdatedPlanTestCreateJobID && mock.failCreateJob
 			if failing {
 				mock.parked = true
 			}
-			deleteFailing := jobID == vmV3PlanTestDeleteJobID && mock.failDeleteJobs > 0
+			deleteFailing := jobID == vmUpdatedPlanTestDeleteJobID && mock.failDeleteJobs > 0
 			deleteFailureReason := mock.deleteJobFailureReason
 			if deleteFailing {
 				mock.failDeleteJobs--
@@ -4577,7 +4577,7 @@ func startVirtualMachineV3MockServer(t *testing.T) *vmV3Mock {
 				return
 			}
 			if failing {
-				testutil.WriteJSONResponse(w, jobBody(jobID, "create", "failed", vmV3PlanTestFailureReason))
+				testutil.WriteJSONResponse(w, jobBody(jobID, "create", "failed", vmUpdatedPlanTestFailureReason))
 				return
 			}
 			testutil.WriteJSONResponse(w, jobBody(jobID, "create", "succeeded", ""))
@@ -4615,7 +4615,7 @@ func startVirtualMachineV3MockServer(t *testing.T) *vmV3Mock {
 			mock.events = append(mock.events, "detach-interface")
 			mock.segmentNics = slices.DeleteFunc(mock.segmentNics, func(nic vmSegmentNic) bool { return nic.nicID == nicID })
 			mock.mu.Unlock()
-			accepted(w, map[string]any{"job": queuedJob("job-v3-detach", "detach")})
+			accepted(w, map[string]any{"job": queuedJob("job-updated-detach", "detach")})
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
 			mock.mu.Lock()
 			name, parked, gone, stopped := mock.name, mock.parked, mock.gone, mock.stopped
@@ -4636,7 +4636,7 @@ func startVirtualMachineV3MockServer(t *testing.T) *vmV3Mock {
 			if parked {
 				data := body["data"].(map[string]any)
 				data["status"] = virtualmachines.VMStatusError.String()
-				data["failureReason"] = vmV3PlanTestFailureReason
+				data["failureReason"] = vmUpdatedPlanTestFailureReason
 			}
 			if readAs != nil && !stopped {
 				data := body["data"].(map[string]any)
@@ -4652,7 +4652,7 @@ func startVirtualMachineV3MockServer(t *testing.T) *vmV3Mock {
 			mock.gone = true
 			mock.parked = false
 			mock.mu.Unlock()
-			accepted(w, map[string]any{"job": queuedJob(vmV3PlanTestDeleteJobID, "delete")})
+			accepted(w, map[string]any{"job": queuedJob(vmUpdatedPlanTestDeleteJobID, "delete")})
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -4661,28 +4661,28 @@ func startVirtualMachineV3MockServer(t *testing.T) *vmV3Mock {
 	return mock
 }
 
-func (m *vmV3Mock) set(change func(*vmV3Mock)) {
+func (m *vmUpdatedMock) set(change func(*vmUpdatedMock)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	change(m)
 }
 
 // recorded returns the stop count and the body of every delete.
-func (m *vmV3Mock) recorded() (int, []string) {
+func (m *vmUpdatedMock) recorded() (int, []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.stops, slices.Clone(m.deleteBodies)
 }
 
-// A create job that fails on the runtime wire leaves a parked machine. The
+// A create job that fails on the updated wire leaves a parked machine. The
 // create saves its ID, so Terraform taints it, and the next apply replaces it.
 // The replacement deletes the parked machine without a stop, which the
 // platform refuses on such a machine.
 func TestVirtualMachineCreateJobFailedIsReplaced(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	mock := startVirtualMachineV3MockServer(t)
-	mock.set(func(m *vmV3Mock) { m.failCreateJob = true })
-	config := vmPlanTestConfig(mock.server.URL, "vm-v3-failed-create")
+	mock := startVirtualMachineUpdatedMockServer(t)
+	mock.set(func(m *vmUpdatedMock) { m.failCreateJob = true })
+	config := vmPlanTestConfig(mock.server.URL, "vm-updated-failed-create")
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -4692,7 +4692,7 @@ func TestVirtualMachineCreateJobFailedIsReplaced(t *testing.T) {
 				ExpectError: regexp.MustCompile(`the\s+hypervisor\s+refused\s+the\s+machine`),
 			},
 			{
-				PreConfig: func() { mock.set(func(m *vmV3Mock) { m.failCreateJob = false }) },
+				PreConfig: func() { mock.set(func(m *vmUpdatedMock) { m.failCreateJob = false }) },
 				Config:    config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{
 					PreApply: []plancheck.PlanCheck{
@@ -4722,15 +4722,15 @@ func TestVirtualMachineCreateJobFailedIsReplaced(t *testing.T) {
 // address the machine acquired.
 func TestVirtualMachineDeleteParkedSkipsStop(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	mock := startVirtualMachineV3MockServer(t)
-	config := vmPublicIpPlanTestConfig(mock.server.URL, "vm-v3-parked-delete", true, "")
+	mock := startVirtualMachineUpdatedMockServer(t)
+	config := vmPublicIpPlanTestConfig(mock.server.URL, "vm-updated-parked-delete", true, "")
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
 			{Config: config},
 			{
-				PreConfig: func() { mock.set(func(m *vmV3Mock) { m.parked = true }) },
+				PreConfig: func() { mock.set(func(m *vmUpdatedMock) { m.parked = true }) },
 				Config:    config,
 				Destroy:   true,
 			},
@@ -4749,9 +4749,9 @@ func TestVirtualMachineDeleteParkedSkipsStop(t *testing.T) {
 	}
 }
 
-// vmV3PlanTestDestroyWithRead creates the machine, then destroys it while reads report the
+// vmUpdatedPlanTestDestroyWithRead creates the machine, then destroys it while reads report the
 // given status and failure reason.
-func vmV3PlanTestDestroyWithRead(t *testing.T, mock *vmV3Mock, name string, read vmV3Read) {
+func vmUpdatedPlanTestDestroyWithRead(t *testing.T, mock *vmUpdatedMock, name string, read vmUpdatedRead) {
 	t.Helper()
 	config := vmPlanTestConfig(mock.server.URL, name)
 
@@ -4760,7 +4760,7 @@ func vmV3PlanTestDestroyWithRead(t *testing.T, mock *vmV3Mock, name string, read
 		Steps: []resource.TestStep{
 			{Config: config},
 			{
-				PreConfig: func() { mock.set(func(m *vmV3Mock) { m.readAs = &read }) },
+				PreConfig: func() { mock.set(func(m *vmUpdatedMock) { m.readAs = &read }) },
 				Config:    config,
 				Destroy:   true,
 			},
@@ -4772,8 +4772,8 @@ func vmV3PlanTestDestroyWithRead(t *testing.T, mock *vmV3Mock, name string, read
 // stop before the delete.
 func TestVirtualMachineDeleteRunningWithReasonStops(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	mock := startVirtualMachineV3MockServer(t)
-	vmV3PlanTestDestroyWithRead(t, mock, "vm-v3-running-reason", vmV3Read{status: virtualmachines.VMStatusRunning.String(), failureReason: "x"})
+	mock := startVirtualMachineUpdatedMockServer(t)
+	vmUpdatedPlanTestDestroyWithRead(t, mock, "vm-updated-running-reason", vmUpdatedRead{status: virtualmachines.VMStatusRunning.String(), failureReason: "x"})
 
 	stops, deleteBodies := mock.recorded()
 	if stops != 1 {
@@ -4788,10 +4788,10 @@ func TestVirtualMachineDeleteRunningWithReasonStops(t *testing.T) {
 // machine ID and the job error.
 func TestVirtualMachineDeleteParkedReportsDeleteFailure(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	mock := startVirtualMachineV3MockServer(t)
-	config := vmPlanTestConfig(mock.server.URL, "vm-v3-parked-delete-fails")
+	mock := startVirtualMachineUpdatedMockServer(t)
+	config := vmPlanTestConfig(mock.server.URL, "vm-updated-parked-delete-fails")
 	jobError := fmt.Sprintf("job %s for action %q: %s: %s",
-		vmV3PlanTestDeleteJobID, "Delete GPCN Virtual Machine", client.ErrJobFailed.Error(), "hypervisor gone")
+		vmUpdatedPlanTestDeleteJobID, "Delete GPCN Virtual Machine", client.ErrJobFailed.Error(), "hypervisor gone")
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -4799,7 +4799,7 @@ func TestVirtualMachineDeleteParkedReportsDeleteFailure(t *testing.T) {
 			{Config: config},
 			{
 				PreConfig: func() {
-					mock.set(func(m *vmV3Mock) {
+					mock.set(func(m *vmUpdatedMock) {
 						m.parked = true
 						m.failDeleteJobs = 1
 						m.deleteJobFailureReason = "hypervisor gone"
@@ -4815,7 +4815,7 @@ func TestVirtualMachineDeleteParkedReportsDeleteFailure(t *testing.T) {
 
 // deletePhase returns the events from the last read before the first DELETE
 // through that DELETE.
-func (m *vmV3Mock) deletePhase() []string {
+func (m *vmUpdatedMock) deletePhase() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	deleteAt := slices.Index(m.events, "delete")
@@ -4834,8 +4834,8 @@ func (m *vmV3Mock) deletePhase() []string {
 // detaches the interfaces.
 func TestVirtualMachineDeleteErrorWithoutReasonSkipsStop(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	mock := startVirtualMachineV3MockServer(t)
-	config := vmPlanTestConfig(mock.server.URL, "vm-v3-error-no-reason")
+	mock := startVirtualMachineUpdatedMockServer(t)
+	config := vmPlanTestConfig(mock.server.URL, "vm-updated-error-no-reason")
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -4843,8 +4843,8 @@ func TestVirtualMachineDeleteErrorWithoutReasonSkipsStop(t *testing.T) {
 			{Config: config},
 			{
 				PreConfig: func() {
-					mock.set(func(m *vmV3Mock) {
-						m.readAs = &vmV3Read{status: virtualmachines.VMStatusError.String(), failureReason: nil}
+					mock.set(func(m *vmUpdatedMock) {
+						m.readAs = &vmUpdatedRead{status: virtualmachines.VMStatusError.String(), failureReason: nil}
 						m.segmentNics = vmSegmentNicsFromIds([]string{vmPlanTestSegmentID})
 					})
 				},
@@ -4872,8 +4872,8 @@ func TestVirtualMachineDeleteErrorWithoutReasonSkipsStop(t *testing.T) {
 // case.
 func TestVirtualMachineDeleteErrorWithoutReasonReleasesAcquiredAddress(t *testing.T) {
 	shortenVirtualMachinePolling(t)
-	mock := startVirtualMachineV3MockServer(t)
-	config := vmPublicIpPlanTestConfig(mock.server.URL, "vm-v3-error-release", true, "")
+	mock := startVirtualMachineUpdatedMockServer(t)
+	config := vmPublicIpPlanTestConfig(mock.server.URL, "vm-updated-error-release", true, "")
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -4881,7 +4881,7 @@ func TestVirtualMachineDeleteErrorWithoutReasonReleasesAcquiredAddress(t *testin
 			{Config: config},
 			{
 				PreConfig: func() {
-					mock.set(func(m *vmV3Mock) { m.readAs = &vmV3Read{status: "error", failureReason: nil} })
+					mock.set(func(m *vmUpdatedMock) { m.readAs = &vmUpdatedRead{status: "error", failureReason: nil} })
 				},
 				Config:  config,
 				Destroy: true,

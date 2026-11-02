@@ -895,9 +895,9 @@ func TestGPUResourcePlanGroupDescriptionBytes(t *testing.T) {
 	}
 }
 
-const gpuV3PlanTestFailureReason = "no GPU host had capacity"
+const gpuUpdatedPlanTestFailureReason = "no GPU host had capacity"
 
-// A create job that fails on the runtime wire leaves the GPU behind. The 202
+// A create job that fails on the updated wire leaves the GPU behind. The 202
 // named it, so the create saves its ID, Terraform taints it, and the next
 // apply replaces it.
 func TestGpuCreateJobFailedIsReplaced(t *testing.T) {
@@ -948,7 +948,7 @@ func TestGpuCreateJobFailedIsReplaced(t *testing.T) {
 			mu.Unlock()
 			answer := job(jobID, "completed", "succeeded", nil)
 			if failing {
-				answer = job(jobID, "failed", "failed", gpuV3PlanTestFailureReason)
+				answer = job(jobID, "failed", "failed", gpuUpdatedPlanTestFailureReason)
 			}
 			testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{
 				"jobs": []map[string]any{answer}, "notFound": []string{},
@@ -973,7 +973,7 @@ func TestGpuCreateJobFailedIsReplaced(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	config := gpuPlanTestConfig(server.URL, fmt.Sprintf("series_code = %q", gpuPlanTestSeriesCode), "gpu-v3-failed-create")
+	config := gpuPlanTestConfig(server.URL, fmt.Sprintf("series_code = %q", gpuPlanTestSeriesCode), "gpu-updated-failed-create")
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,

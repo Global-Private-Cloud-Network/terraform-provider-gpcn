@@ -2447,14 +2447,14 @@ func TestPrimaryInterfaceCarriesAForeignAddressDetailBytes(t *testing.T) {
 	}
 }
 
-// A runtime 202 names the machine before the job ends. A failed job then still
+// An updated-wire 202 names the machine before the job ends. A failed job then still
 // returns that ID, so the caller saves it and Terraform taints the machine.
 func TestCreateVirtualMachineReturnsIDWhenJobFails(t *testing.T) {
 	useFastVMStatusPollInterval(t)
 	useNoInitialPollDelay(t)
 	const (
-		jobID = "job-v3-create"
-		vmID  = "vm-v3-1"
+		jobID = "job-updated-create"
+		vmID  = "vm-updated-1"
 	)
 
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{

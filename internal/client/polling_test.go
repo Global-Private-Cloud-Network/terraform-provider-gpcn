@@ -200,8 +200,8 @@ func TestPollDecodesFractionalProgress(t *testing.T) {
 	}
 }
 
-// v3JobsBody wraps one job in the batch read answer that carries notFound.
-func v3JobsBody(job string) string {
+// updatedJobsBody wraps one job in the batch read answer that carries notFound.
+func updatedJobsBody(job string) string {
 	return `{"success":true,"message":"Job progress retrieved successfully","data":{"jobs":[` + job + `],"notFound":[]}}`
 }
 
@@ -271,7 +271,7 @@ func TestJobResponseDecodesLegacyFlatJob(t *testing.T) {
 	}
 }
 
-func TestJobResponseDecodesV3FlatJob(t *testing.T) {
+func TestJobResponseDecodesUpdatedFlatJob(t *testing.T) {
 	tests := []struct {
 		name string
 		body string
@@ -329,7 +329,7 @@ func TestJobResponseDecodesV3FlatJob(t *testing.T) {
 	}
 }
 
-func TestJobResponseDecodesV3DispatchElement(t *testing.T) {
+func TestJobResponseDecodesUpdatedDispatchElement(t *testing.T) {
 	const row = `{"id":"row-1","name":"x"}`
 
 	tests := []struct {
@@ -388,7 +388,7 @@ func TestSingularResponseReadsBothDispatchShapes(t *testing.T) {
 			body: `{"success":true,"data":{"jobId":"j1"}}`,
 		},
 		{
-			name: "v3",
+			name: "updated",
 			body: `{"success":true,"data":{"job":{"id":"j1","stage":"queued","outcome":null,"progress":0,` +
 				`"resourceId":"r1"},"resource":{"id":"r1"}}}`,
 			wantResourceID: "r1",
@@ -422,7 +422,7 @@ func TestBatchDispatchReadsBothShapes(t *testing.T) {
 			body: `{"data":{"jobs":[{"jobId":"j1"}]}}`,
 		},
 		{
-			name:           "v3",
+			name:           "updated",
 			body:           `{"data":{"jobs":[{"job":{"id":"j1","resourceId":"r1"},"resource":{"id":"r1"}}]}}`,
 			wantResourceID: "r1",
 		},
@@ -458,13 +458,13 @@ func TestBatchDispatchReadsBothShapes(t *testing.T) {
 //
 //nolint:misspell // Byte-exact quotes of the wire value.
 const (
-	pollTestV3CancelledJob = `{"id":"job-1","stage":"cancelled","outcome":"cancelled","progress":40,` +
+	pollTestUpdatedCancelledJob = `{"id":"job-1","stage":"cancelled","outcome":"cancelled","progress":40,` +
 		`"message":"Stopped by an administrator","failureReason":null,"resourceId":"vm-1"}`
-	pollTestV3AbandonedCancelStageJob = `{"id":"job-1","stage":"cancelled","outcome":"abandoned","progress":40,` +
+	pollTestUpdatedAbandonedCancelStageJob = `{"id":"job-1","stage":"cancelled","outcome":"abandoned","progress":40,` +
 		`"message":null,"failureReason":null,"resourceId":"vm-1"}`
 )
 
-func TestPollV3Outcomes(t *testing.T) {
+func TestPollUpdatedOutcomes(t *testing.T) {
 	const (
 		runningJob = `{"id":"job-1","stage":"running","outcome":null,"progress":40,"message":"Working",` +
 			`"failureReason":null,"resourceId":"vm-1"}`
@@ -493,40 +493,40 @@ func TestPollV3Outcomes(t *testing.T) {
 	}{
 		{
 			name:      "a live job that then succeeds",
-			bodies:    []string{v3JobsBody(runningJob), v3JobsBody(succeededJob)},
+			bodies:    []string{updatedJobsBody(runningJob), updatedJobsBody(succeededJob)},
 			wantCalls: 2,
 		},
 		{
 			name:       "a compensating job that then fails",
-			bodies:     []string{v3JobsBody(compensatingJob), v3JobsBody(failedJob)},
+			bodies:     []string{updatedJobsBody(compensatingJob), updatedJobsBody(failedJob)},
 			wantIs:     client.ErrJobFailed,
 			wantSuffix: "No capacity in the data center",
 			wantCalls:  2,
 		},
 		{
 			name:      "a job the platform stopped",
-			bodies:    []string{v3JobsBody(pollTestV3CancelledJob)},
+			bodies:    []string{updatedJobsBody(pollTestUpdatedCancelledJob)},
 			wantIs:    client.ErrJobCancelledByPlatform,
 			wantText:  fmt.Sprintf(client.ErrJobCancelled, pollTestJobID, pollTestAction),
 			wantCalls: 1,
 		},
 		{
 			name:      "an abandoned job in the cancel stage",
-			bodies:    []string{v3JobsBody(pollTestV3AbandonedCancelStageJob)},
+			bodies:    []string{updatedJobsBody(pollTestUpdatedAbandonedCancelStageJob)},
 			wantIs:    client.ErrJobCancelledByPlatform,
 			wantText:  abandoned,
 			wantCalls: 1,
 		},
 		{
 			name:      "an abandoned job in the failed stage",
-			bodies:    []string{v3JobsBody(abandonedFailStageJob)},
+			bodies:    []string{updatedJobsBody(abandonedFailStageJob)},
 			wantIs:    client.ErrJobCancelledByPlatform,
 			wantText:  abandoned,
 			wantCalls: 1,
 		},
 		{
 			name:         "an outcome this provider does not know",
-			bodies:       []string{v3JobsBody(exoticJob)},
+			bodies:       []string{updatedJobsBody(exoticJob)},
 			wantIs:       client.ErrJobFailed,
 			wantContains: fmt.Sprintf(client.ErrDetailUnknownOutcome, "exotic"),
 			wantCalls:    1,
@@ -577,8 +577,8 @@ func TestPollFailureDetailPrefersFailureReason(t *testing.T) {
 		wantDetail string
 	}{
 		{
-			name: "a v3 job",
-			body: v3JobsBody(`{"id":"job-1","stage":"failed","outcome":"failed","message":"C",` +
+			name: "an updated-wire job",
+			body: updatedJobsBody(`{"id":"job-1","stage":"failed","outcome":"failed","message":"C",` +
 				`"failureReason":"A","errorMessage":"B"}`),
 			wantDetail: "A",
 		},
@@ -608,7 +608,7 @@ func TestPollFailureDetailPrefersFailureReason(t *testing.T) {
 }
 
 func TestPollRefusesEmptyJobID(t *testing.T) {
-	gpcnClient, calls := jobsServer(t, v3JobsBody(`{"id":"job-1","stage":"running","outcome":null}`))
+	gpcnClient, calls := jobsServer(t, updatedJobsBody(`{"id":"job-1","stage":"running","outcome":null}`))
 
 	config := &client.PollingConfig{
 		Timeout:         50 * time.Millisecond,

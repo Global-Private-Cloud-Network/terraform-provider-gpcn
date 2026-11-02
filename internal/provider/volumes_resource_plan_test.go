@@ -1249,9 +1249,9 @@ func TestVolumeResourcePlanUnsupportedGrowDoesNotMove(t *testing.T) {
 	}
 }
 
-const volV3PlanTestFailureReason = "the storage pool is full"
+const volUpdatedPlanTestFailureReason = "the storage pool is full"
 
-// A create job that fails on the runtime wire leaves the volume behind. The
+// A create job that fails on the updated wire leaves the volume behind. The
 // 202 named it, so the create saves its ID, Terraform taints it, and the next
 // apply replaces it.
 func TestVolumeCreateJobFailedIsReplaced(t *testing.T) {
@@ -1299,7 +1299,7 @@ func TestVolumeCreateJobFailedIsReplaced(t *testing.T) {
 			mu.Unlock()
 			answer := job(jobID, "create", "completed", "succeeded", nil)
 			if failing {
-				answer = job(jobID, "create", "failed", "failed", volV3PlanTestFailureReason)
+				answer = job(jobID, "create", "failed", "failed", volUpdatedPlanTestFailureReason)
 			}
 			testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{
 				"jobs": []map[string]any{answer}, "notFound": []string{},
