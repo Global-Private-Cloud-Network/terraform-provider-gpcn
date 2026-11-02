@@ -253,20 +253,44 @@ func GetVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpcID,
 func UpdateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, body map[string]any) (bool, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateVpnConnection, connectionID))
 
-	reader, err := marshalBody(body)
-	if err != nil {
-		return false, err
+	start := time.Now()
+	timeout := client.DefaultPollingConfig().Timeout
+	if config := gpcnClient.Config(); config != nil && config.PollingTimeout > 0 {
+		timeout = config.PollingTimeout
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPut, connectionPath(vpcID, connectionID), reader)
-	if err != nil {
-		return false, err
-	}
+	deadline := start.Add(timeout)
 
-	// The PUT goes out once, because a second PUT starts a second job, or meets
-	// a 409 VPN_STATE_CONFLICT while the first one runs.
-	jobID, err := issueJob(gpcnClient.DoOnce, request)
-	if err != nil {
-		return false, err
+	var jobID string
+	for {
+		reader, err := marshalBody(body)
+		if err != nil {
+			return false, err
+		}
+		request, err := http.NewRequestWithContext(ctx, http.MethodPut, connectionPath(vpcID, connectionID), reader)
+		if err != nil {
+			return false, err
+		}
+
+		// Each PUT goes out once, because a second PUT starts a second job, or
+		// meets a 409 VPN_STATE_CONFLICT while the first one runs. A 409
+		// RESOURCE_BUSY means the API did not take the PUT, so the PUT goes out
+		// again after the job that holds the connection ends.
+		jobID, err = issueJob(gpcnClient.DoOnce, request)
+		holder, busy := client.BusyHolder(err)
+		if !busy {
+			if err != nil {
+				return false, err
+			}
+			break
+		}
+		if err := client.AwaitHolder(gpcnClient, ctx, holder, deadline); err != nil {
+			return false, err
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(RemovalPollInterval):
+		}
 	}
 	tflog.Info(ctx, LogIssuedUpdateVpnConnectionJob)
 
@@ -293,7 +317,21 @@ func deleteVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteVpnConnection, connectionID))
 	startTime := time.Now()
 
+	// A 409 RESOURCE_BUSY names the job that holds the connection. That job can
+	// belong to another resource of the VPC, so the DELETE goes out again once
+	// the job ends, however it ends.
 	jobID, err := sendDelete(gpcnClient, ctx, vpcID, connectionID)
+	for holder, busy := client.BusyHolder(err); busy; holder, busy = client.BusyHolder(err) {
+		if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime.Add(timeout)); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(RemovalPollInterval):
+		}
+		jobID, err = sendDelete(gpcnClient, ctx, vpcID, connectionID)
+	}
 	if removalAlreadyRunning(err) {
 		tflog.Info(ctx, LogRemovalAlreadyRunning)
 		return waitForVpnConnectionGone(gpcnClient, ctx, vpcID, connectionID, interval, startTime, timeout)
@@ -392,13 +430,26 @@ func waitForVpnConnectionGone(gpcnClient *client.GpcnClient, ctx context.Context
 	}
 }
 
-// resendDelete sends the DELETE again for a parked removal. A 202 gets its job
-// polled inside the shared deadline, and a failed job is not an error, because
-// the next read shows the row. A 409 for a removal that another caller started
-// counts as sent, so the wait goes on. Any other 409 is a refusal, and the
-// second result then holds the API's message.
+// resendDelete sends the DELETE again for a parked removal. A 409
+// RESOURCE_BUSY waits for the job that holds the connection and sends the
+// DELETE again, and those sends together are the one resend. A 202 gets its
+// job polled inside the shared deadline, and a failed job is not an error,
+// because the next read shows the row. A 409 for a removal that another caller
+// started counts as sent, so the wait goes on. Any other 409 is a refusal, and
+// the second result then holds the API's message.
 func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, startTime time.Time, timeout time.Duration) (int, string, error) {
 	jobID, err := sendDelete(gpcnClient, ctx, vpcID, connectionID)
+	for holder, busy := client.BusyHolder(err); busy; holder, busy = client.BusyHolder(err) {
+		if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime.Add(timeout)); err != nil {
+			return resendNotSent, "", err
+		}
+		select {
+		case <-ctx.Done():
+			return resendNotSent, "", ctx.Err()
+		case <-time.After(RemovalPollInterval):
+		}
+		jobID, err = sendDelete(gpcnClient, ctx, vpcID, connectionID)
+	}
 	if removalAlreadyRunning(err) {
 		return resendJob, "", nil
 	}

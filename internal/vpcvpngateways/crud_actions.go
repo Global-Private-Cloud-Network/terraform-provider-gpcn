@@ -181,8 +181,14 @@ func deleteVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID 
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteVpnGateway, vpcID))
 	startTime := time.Now()
 
+	// lastHolder is the job that held the gateway at the last answer. The
+	// deadline error then names that job.
+	var lastHolder string
 	for {
 		if time.Since(startTime) >= timeout {
+			if lastHolder != "" {
+				return client.AwaitHolder(gpcnClient, ctx, lastHolder, startTime.Add(timeout))
+			}
 			return fmt.Errorf(ErrFmtStillCreating, vpcID, timeout)
 		}
 		request, err := http.NewRequestWithContext(ctx, http.MethodDelete, gatewayPath(vpcID), nil)
@@ -191,6 +197,19 @@ func deleteVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID 
 		}
 
 		jobID, err := issueJob(gpcnClient.DoWithRetry, request)
+		holder, busy := client.BusyHolder(err)
+		lastHolder = holder
+		if busy {
+			if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime.Add(timeout)); err != nil {
+				return err
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(RemovalPollInterval):
+			}
+			continue
+		}
 		code, _ := ParseAPIError(err)
 		if code == CodeGatewayBusyCreating {
 			tflog.Info(ctx, LogDeleteWaitsForCreate)

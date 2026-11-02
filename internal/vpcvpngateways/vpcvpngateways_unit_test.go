@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -563,5 +564,156 @@ func TestVpcVpnGatewayUnitDeleteTimeoutNamesTheConfiguredTotal(t *testing.T) {
 	want := fmt.Sprintf("%v: "+ErrFmtRemovalTimeout, ErrRemovalTimeout, testVpcID, "removing", 100*time.Millisecond, reason)
 	if err == nil || err.Error() != want {
 		t.Fatalf("Expected %q, got %v", want, err)
+	}
+}
+
+// busyGatewayBody is the 409 the API answers while job h1 holds the gateway.
+func busyGatewayBody(operation string) string {
+	return `{"success":false,"message":"VPN gateway is busy: ` + operation + ` in progress.",` +
+		`"error":{"code":"RESOURCE_BUSY","statusCode":409,"details":{"resourceType":"vpnGateway",` +
+		`"resourceId":"` + testGatewayID + `","heldBy":{"jobId":"h1","operation":"` + operation + `","verb":"` + operation + `"}}}}`
+}
+
+const goneGatewayBody = `{"success":false,"message":"This VPC has no VPN gateway.","error":{"code":"VPN_GATEWAY_NOT_FOUND","statusCode":404,"details":null}}`
+
+// gatewayJobBody is a batch read of one job. An empty outcome is a live job.
+func gatewayJobBody(jobID, outcome string) string {
+	if outcome == "" {
+		return `{"success":true,"data":{"jobs":[{"id":"` + jobID + `","operation":"create","resourceId":null,` +
+			`"stage":"running","outcome":null,"progress":10,"message":null,"failureReason":null}],"notFound":[]}}`
+	}
+	return `{"success":true,"data":{"jobs":[{"id":"` + jobID + `","operation":"delete","resourceId":"` + testGatewayID + `",` +
+		`"stage":"completed","outcome":"` + outcome + `","progress":100,"message":null,"failureReason":null}],"notFound":[]}}`
+}
+
+// gatewayAcceptedBody is the 202 of a DELETE that started jobID.
+func gatewayAcceptedBody(jobID string) string {
+	return `{"success":true,"data":{"job":{"id":"` + jobID + `","operation":"delete","resourceId":"` + testGatewayID + `",` +
+		`"stage":"queued","outcome":null,"progress":0,"message":null,"failureReason":null},` +
+		`"resource":{"id":"` + testGatewayID + `","vpcId":"` + testVpcID + `","state":"removing"}}}`
+}
+
+type gatewayAnswer struct {
+	status int
+	body   string
+}
+
+// scriptedGatewayServer answers each request of a method with the next
+// scripted answer, and the last answer repeats. A job poll answers from jobs
+// by job id. It counts the requests per method, and the polls per job id.
+type scriptedGatewayServer struct {
+	mu      sync.Mutex
+	answers map[string][]gatewayAnswer
+	jobs    map[string]string
+	counts  map[string]int
+	times   map[string][]time.Time
+}
+
+func (s *scriptedGatewayServer) count(key string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.counts[key]
+}
+
+func (s *scriptedGatewayServer) client(t *testing.T) *client.GpcnClient {
+	t.Helper()
+	s.counts = map[string]int{}
+	s.times = map[string][]time.Time{}
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			if r.URL.Path == client.JOBS_BASE_URL_V1 {
+				ids, _ := testutil.ReadRequestBody(r)["jobIds"].([]any)
+				jobID, _ := ids[0].(string)
+				s.counts["poll "+jobID]++
+				_, _ = w.Write([]byte(s.jobs[jobID]))
+				return
+			}
+			answers := s.answers[r.Method]
+			if r.URL.Path != "/v1/resource/vpcs/"+testVpcID+"/vpn-gateway" || len(answers) == 0 {
+				testutil.LogUnexpectedRequest(t, w, r)
+				return
+			}
+			index := min(s.counts[r.Method], len(answers)-1)
+			s.counts[r.Method]++
+			s.times[r.Method] = append(s.times[r.Method], time.Now())
+			w.WriteHeader(answers[index].status)
+			_, _ = w.Write([]byte(answers[index].body))
+		},
+	})
+	return gpcnClient
+}
+
+// setRemovalPollInterval changes a package variable, so a test that calls it
+// does not run in parallel.
+func setRemovalPollInterval(t *testing.T, interval time.Duration) {
+	t.Helper()
+	previous := RemovalPollInterval
+	RemovalPollInterval = interval
+	t.Cleanup(func() { RemovalPollInterval = previous })
+}
+
+func TestDeleteVpnGatewayWaitsOutBusyHolder(t *testing.T) {
+	setRemovalPollInterval(t, time.Millisecond)
+	for _, operation := range []string{"create", "delete"} {
+		t.Run(operation, func(t *testing.T) {
+			server := &scriptedGatewayServer{
+				answers: map[string][]gatewayAnswer{
+					http.MethodDelete: {{http.StatusConflict, busyGatewayBody(operation)}, {http.StatusAccepted, gatewayAcceptedBody("job-delete")}},
+					http.MethodGet:    {{http.StatusNotFound, goneGatewayBody}},
+				},
+				jobs: map[string]string{"h1": gatewayJobBody("h1", "succeeded"), "job-delete": gatewayJobBody("job-delete", "succeeded")},
+			}
+			gpcnClient := server.client(t)
+
+			if err := deleteVpnGateway(gpcnClient, context.Background(), testVpcID, time.Millisecond, time.Minute); err != nil {
+				t.Fatalf("Expected the DELETE after the holder to remove the gateway, got %v", err)
+			}
+			if got := server.count(http.MethodDelete); got != 2 {
+				t.Errorf("Expected 2 DELETEs, got %d", got)
+			}
+			if got := server.count("poll h1"); got != 1 {
+				t.Errorf("Expected one poll of the holder, got %d", got)
+			}
+		})
+	}
+}
+
+// The deadline can pass inside the holder poll, or in the wait after the
+// holder ended. Both name the holder, never a create that still runs.
+func TestDeleteVpnGatewayBusyDeadlineNamesTheHolder(t *testing.T) {
+	for name, test := range map[string]struct {
+		holder   string
+		interval time.Duration
+		timeout  time.Duration
+	}{
+		"the holder outlives the wait":              {holder: "", interval: time.Millisecond, timeout: 300 * time.Millisecond},
+		"the deadline passes after the holder ends": {holder: "succeeded", interval: 400 * time.Millisecond, timeout: 200 * time.Millisecond},
+	} {
+		t.Run(name, func(t *testing.T) {
+			setRemovalPollInterval(t, test.interval)
+			server := &scriptedGatewayServer{
+				answers: map[string][]gatewayAnswer{http.MethodDelete: {{http.StatusConflict, busyGatewayBody("create")}}},
+				jobs:    map[string]string{"h1": gatewayJobBody("h1", test.holder)},
+			}
+			gpcnClient := server.client(t)
+
+			err := deleteVpnGateway(gpcnClient, context.Background(), testVpcID, time.Millisecond, test.timeout)
+			if !errors.Is(err, client.ErrHolderStillRunning) {
+				t.Fatalf("Expected the holder deadline error, got %v", err)
+			}
+			if stillCreating := fmt.Sprintf("VPC %s: the VPN gateway was still being created", testVpcID); strings.HasPrefix(err.Error(), stillCreating) {
+				t.Errorf("Expected the holder sentence, got %q", err.Error())
+			}
+			if !strings.HasPrefix(err.Error(), "job h1 ") {
+				t.Errorf("Expected the error to name job h1, got %q", err.Error())
+			}
+			if got := server.count(http.MethodDelete); got != 1 {
+				t.Errorf("Expected one DELETE, got %d", got)
+			}
+		})
 	}
 }
