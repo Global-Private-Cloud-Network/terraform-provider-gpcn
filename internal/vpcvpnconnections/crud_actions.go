@@ -62,9 +62,11 @@ type getVpnConnectionResponse struct {
 	Data    ApiVpnConnectionDetail `json:"data"`
 }
 
+// createVpnConnectionResponse reads the connection id under its own key. The job
+// id, and the id an answer carries in data.resource, come from
+// client.JobStatusSingularResponse.
 type createVpnConnectionResponse struct {
 	Data struct {
-		JobID         string `json:"jobId"`
 		VpnConnection struct {
 			ID string `json:"id"`
 		} `json:"vpnConnection"`
@@ -109,11 +111,19 @@ func CreateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 	if err != nil {
 		return "", vpcvpngateways.RowMayExist(err), err
 	}
-	var accepted createVpnConnectionResponse
+	var accepted client.JobStatusSingularResponse
 	if err := json.Unmarshal(raw, &accepted); err != nil {
 		return "", true, err
 	}
-	connectionID := accepted.Data.VpnConnection.ID
+	var created createVpnConnectionResponse
+	if err := json.Unmarshal(raw, &created); err != nil {
+		return "", true, err
+	}
+	// The answer names the connection in data.resource or in data.vpnConnection.
+	connectionID := accepted.Data.ResourceId
+	if connectionID == "" {
+		connectionID = created.Data.VpnConnection.ID
+	}
 	if accepted.Data.JobID == "" {
 		return connectionID, true, errors.New(ErrDetailNoJobIDInResponse)
 	}

@@ -725,3 +725,50 @@ func TestVpcVpnConnectionUnitDeleteParkedWithoutBudgetSendsNoResend(t *testing.T
 		t.Errorf("Expected only the first DELETE, got %d", got)
 	}
 }
+
+// The runtime 202 names the connection in data.resource. A failed create job
+// still returns that id, so the caller records the connection.
+func TestCreateVpnConnectionReadsAcceptedResource(t *testing.T) {
+	t.Parallel()
+
+	accepted := `{"success":true,"data":{` +
+		`"job":{"id":"job-1","operation":"create","resourceId":null,"stage":"queued",` +
+		`"outcome":null,"progress":0,"message":null,"failureReason":null},` +
+		`"resource":{"id":"` + testConnID + `","name":"x","state":"creating"}}}`
+	jobs := map[string]string{
+		"succeeded": `{"success":true,"data":{"jobs":[{"id":"job-1","operation":"create",` +
+			`"resourceId":"` + testConnID + `","stage":"completed","outcome":"succeeded","progress":100,` +
+			`"message":null,"failureReason":null}],"notFound":[]}}`,
+		"failed": `{"success":true,"data":{"jobs":[{"id":"job-1","operation":"create",` +
+			`"resourceId":"` + testConnID + `","stage":"failed","outcome":"failed","progress":30,` +
+			`"message":null,"failureReason":"the tunnel did not come up"}],"notFound":[]}}`,
+	}
+	for name, jobBody := range jobs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			gpcnClient := apiServer(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/vpcs/"+testVpcID+"/vpn-connections":
+					w.WriteHeader(http.StatusAccepted)
+					_, _ = w.Write([]byte(accepted))
+				case r.URL.Path == "/v1/resource/jobs/":
+					_, _ = w.Write([]byte(jobBody))
+				default:
+					testutil.LogUnexpectedRequest(t, w, r)
+				}
+			})
+
+			id, rowMayExist, err := CreateVpnConnection(gpcnClient, context.Background(), testVpcID, map[string]any{"name": "x"})
+			if id != testConnID || !rowMayExist {
+				t.Errorf("Expected the connection ID %q and a row, got %q and %v", testConnID, id, rowMayExist)
+			}
+			if name == "succeeded" && err != nil {
+				t.Errorf("Expected no error, got %v", err)
+			}
+			if name == "failed" && !errors.Is(err, client.ErrJobFailed) {
+				t.Errorf("Expected a failed-job error, got %v", err)
+			}
+		})
+	}
+}

@@ -427,3 +427,95 @@ func TestUpdateVpcSendsTheGroupAloneWhenOnlyTheGroupChanged(t *testing.T) {
 		})
 	}
 }
+
+// vpcAcceptedServer answers the VPC create and delete with the given bytes.
+func vpcAcceptedServer(t *testing.T, method, body string) *client.GpcnClient {
+	t.Helper()
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != method {
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(body))
+		},
+	})
+	return gpcnClient
+}
+
+func vpcAcceptedTestModel() ResourceModel {
+	return ResourceModel{
+		Name:            types.StringValue("vpc-a"),
+		CIDR:            types.StringValue("10.50.0.0/16"),
+		DatacenterId:    types.StringValue("dc-1"),
+		Description:     types.StringNull(),
+		DNSNameservers:  types.ListNull(types.StringType),
+		ResourceGroupId: types.StringNull(),
+	}
+}
+
+// The runtime 202 carries the job as data.job and the row as data.resource.
+func TestCreateVpcReadsAcceptedResource(t *testing.T) {
+	t.Parallel()
+
+	gpcnClient := vpcAcceptedServer(t, http.MethodPost, `{"success":true,"data":{`+
+		`"job":{"id":"j1","operation":"create","resourceId":"v1","resourceName":"vpc-a","stage":"queued",`+
+		`"outcome":null,"progress":0,"message":null,"failureReason":null},`+
+		`"resource":{"id":"v1","name":"vpc-a","description":null,"cidr":"10.50.0.0/16",`+
+		`"datacenter":{"id":"dc-1","code":null,"name":"Kansas"},"status":"creating","failureReason":null,`+
+		`"egressIp":null,"activeJobId":"j1","createdAt":"2026-01-02T15:04:05Z","updatedAt":"2026-01-02T15:04:05Z",`+
+		`"dnsNameservers":[],"resourceGroupId":"rg-api"}}}`)
+
+	created, err := CreateVpc(gpcnClient, context.Background(), vpcAcceptedTestModel())
+	if err != nil {
+		t.Fatalf("CreateVpc: %v", err)
+	}
+	if created.Data.Vpc.ID != "v1" {
+		t.Errorf("row ID = %q, want %q", created.Data.Vpc.ID, "v1")
+	}
+	if created.Data.JobID != "j1" {
+		t.Errorf("job ID = %q, want %q", created.Data.JobID, "j1")
+	}
+	if created.Data.Vpc.ResourceGroupID != "rg-api" {
+		t.Errorf("row resource group = %q, want %q", created.Data.Vpc.ResourceGroupID, "rg-api")
+	}
+}
+
+// A row the answer does not name cannot reach state, so the create stops.
+func TestCreateVpcRefusesEmptyRowID(t *testing.T) {
+	t.Parallel()
+
+	gpcnClient := vpcAcceptedServer(t, http.MethodPost, `{"success":true,"data":{`+
+		`"job":{"id":"j1","operation":"create","resourceId":null,"stage":"queued",`+
+		`"outcome":null,"progress":0,"message":null,"failureReason":null},`+
+		`"resource":{"name":"vpc-a","cidr":"10.50.0.0/16","status":"creating"}}}`)
+
+	_, err := CreateVpc(gpcnClient, context.Background(), vpcAcceptedTestModel())
+	if err == nil {
+		t.Fatal("CreateVpc returned no error for a row without an ID")
+	}
+	if err.Error() != ErrDetailNoVpcIDInCreate {
+		t.Errorf("error = %q, want %q", err.Error(), ErrDetailNoVpcIDInCreate)
+	}
+}
+
+func TestIssueVpcDeleteReadsAcceptedJobID(t *testing.T) {
+	t.Parallel()
+
+	gpcnClient := vpcAcceptedServer(t, http.MethodDelete, `{"success":true,"data":{`+
+		`"job":{"id":"j-delete","operation":"delete","resourceId":"v1","stage":"queued",`+
+		`"outcome":null,"progress":0,"message":null,"failureReason":null},`+
+		`"resource":{"id":"v1","name":"vpc-a","status":"deleting"}}}`)
+
+	jobID, err := issueVpcDelete(gpcnClient, context.Background(), "v1")
+	if err != nil {
+		t.Fatalf("issueVpcDelete: %v", err)
+	}
+	if jobID != "j-delete" {
+		t.Errorf("job ID = %q, want %q", jobID, "j-delete")
+	}
+}

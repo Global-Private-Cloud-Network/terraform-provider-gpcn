@@ -51,12 +51,13 @@ type NsgDetail struct {
 	Rules []ApiRule `json:"rules"`
 }
 
+// createNsgResponse reads the group id under its own key. The job id, and the
+// id an answer carries in data.resource, come from client.JobStatusSingularResponse.
 type createNsgResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Data    struct {
 		NsgID string `json:"nsgId"`
-		JobID string `json:"jobId"`
 	} `json:"data"`
 }
 
@@ -117,18 +118,27 @@ func IssueCreateNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, n
 		return nil, err
 	}
 
+	var accepted client.JobStatusSingularResponse
+	if err := json.Unmarshal(body, &accepted); err != nil {
+		return nil, err
+	}
 	var created createNsgResponse
 	if err := json.Unmarshal(body, &created); err != nil {
 		return nil, err
 	}
+	// The answer names the group in data.resource or as data.nsgId.
+	nsgID := accepted.Data.ResourceId
+	if nsgID == "" {
+		nsgID = created.Data.NsgID
+	}
 	// The ID is what Create writes to state before the poll. Without one the
 	// group exists and Terraform cannot name it, so the create stops here.
-	if created.Data.NsgID == "" {
+	if nsgID == "" {
 		return nil, fmt.Errorf("%s", ErrDetailNoNsgIDInCreate)
 	}
 	tflog.Info(ctx, LogIssuedCreateNsgJob)
 
-	return &IssuedNsg{JobID: created.Data.JobID, NsgID: created.Data.NsgID}, nil
+	return &IssuedNsg{JobID: accepted.Data.JobID, NsgID: nsgID}, nil
 }
 
 // PollCreateNsg waits for the build job. It stands apart from the issue so the

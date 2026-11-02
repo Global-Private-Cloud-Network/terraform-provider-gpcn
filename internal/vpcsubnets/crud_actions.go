@@ -31,11 +31,12 @@ type ApiSubnet struct {
 	UpdatedAt        string  `json:"updatedAt"`
 }
 
+// createSubnetResponse reads the row under its own key. The job id, and the row
+// an answer carries as data.resource, come from client.JobStatusSingularResponse.
 type createSubnetResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Data    struct {
-		JobID  string    `json:"jobId"`
 		Subnet ApiSubnet `json:"subnet"`
 	} `json:"data"`
 }
@@ -117,18 +118,30 @@ func IssueCreateSubnet(gpcnClient *client.GpcnClient, ctx context.Context, model
 		return nil, err
 	}
 
+	var accepted client.JobStatusSingularResponse
+	if err := json.Unmarshal(body, &accepted); err != nil {
+		return nil, err
+	}
 	var created createSubnetResponse
 	if err := json.Unmarshal(body, &created); err != nil {
 		return nil, err
 	}
+	// The answer carries the row as data.resource or data.subnet.
+	subnet := created.Data.Subnet
+	if accepted.Data.Resource != nil {
+		subnet = ApiSubnet{}
+		if err := json.Unmarshal(accepted.Data.Resource, &subnet); err != nil {
+			return nil, err
+		}
+	}
 	// The ID is what Create writes to state before the poll. Without one the
 	// row exists and Terraform cannot name it, so the create stops here.
-	if created.Data.Subnet.ID == "" {
+	if subnet.ID == "" {
 		return nil, fmt.Errorf("%s", ErrDetailNoSubnetIDInCreate)
 	}
 	tflog.Info(ctx, LogIssuedCreateSubnetJob)
 
-	return &IssuedSubnet{JobID: created.Data.JobID, Subnet: created.Data.Subnet}, nil
+	return &IssuedSubnet{JobID: accepted.Data.JobID, Subnet: subnet}, nil
 }
 
 // PollCreateSubnet waits for the carve job. It stands apart from the issue so

@@ -632,3 +632,45 @@ func TestIssueCreateSubnetRejectsResponseWithoutIDUnit(t *testing.T) {
 		t.Errorf("error = %q, want %q", err.Error(), ErrDetailNoSubnetIDInCreate)
 	}
 }
+
+// The runtime 202 carries the job as data.job and the row as data.resource.
+func TestIssueCreateSubnetReadsAcceptedResource(t *testing.T) {
+	t.Parallel()
+
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost || r.URL.Path != subnetCollectionPath(unitTestVpcID) {
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"success":true,"data":{` +
+				`"job":{"id":"job-create","operation":"create","resourceId":"subnet-1","stage":"queued",` +
+				`"outcome":null,"progress":0,"message":null,"failureReason":null},` +
+				`"resource":{"id":"subnet-1","name":"subnet-a","description":null,"cidr":"10.50.1.0/24",` +
+				`"state":"creating","nsgId":"nsg-1","nsgName":"default","attachedNicCount":0,` +
+				`"failureReason":null,"createdAt":"2026-01-02T15:04:05Z","updatedAt":"2026-01-02T15:04:05Z"}}}`))
+		},
+	})
+
+	issued, err := IssueCreateSubnet(gpcnClient, context.Background(), ResourceModel{
+		VpcID:       types.StringValue(unitTestVpcID),
+		Name:        types.StringValue("subnet-a"),
+		Description: types.StringValue(""),
+	})
+	if err != nil {
+		t.Fatalf("IssueCreateSubnet: %v", err)
+	}
+	if issued.JobID != "job-create" {
+		t.Errorf("job ID = %q, want %q", issued.JobID, "job-create")
+	}
+	if issued.Subnet.ID != unitTestSubnetID {
+		t.Errorf("row ID = %q, want %q", issued.Subnet.ID, unitTestSubnetID)
+	}
+	if issued.Subnet.CIDR != "10.50.1.0/24" || issued.Subnet.NsgID != unitTestNsgID {
+		t.Errorf("row = %+v, want the cidr and security group the resource carries", issued.Subnet)
+	}
+}

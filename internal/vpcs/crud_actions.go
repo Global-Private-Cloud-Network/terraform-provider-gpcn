@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -45,21 +46,14 @@ type readVpcResponse struct {
 }
 
 // The create 202 carries the new row beside the job. The row exists already, so
-// its id reaches state before the poll starts.
+// its id reaches state before the poll starts. CreateVpc fills both fields from
+// either shape of the answer.
 type createVpcResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Data    struct {
 		JobID string     `json:"jobId"`
 		Vpc   vpcPayload `json:"vpc"`
-	} `json:"data"`
-}
-
-type deleteVpcResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Data    struct {
-		JobID string `json:"jobId"`
 	} `json:"data"`
 }
 
@@ -91,9 +85,28 @@ func CreateVpc(gpcnClient *client.GpcnClient, ctx context.Context, model Resourc
 		return nil, err
 	}
 
+	var accepted client.JobStatusSingularResponse
+	if err := json.Unmarshal(response, &accepted); err != nil {
+		return nil, err
+	}
 	var createdVpc createVpcResponse
 	if err := json.Unmarshal(response, &createdVpc); err != nil {
 		return nil, err
+	}
+	// The answer names the job as data.job.id or data.jobId, and carries the
+	// row as data.resource or data.vpc.
+	createdVpc.Data.JobID = accepted.Data.JobID
+	if accepted.Data.Resource != nil {
+		var row vpcPayload
+		if err := json.Unmarshal(accepted.Data.Resource, &row); err != nil {
+			return nil, err
+		}
+		createdVpc.Data.Vpc = row
+	}
+	// The ID is what Create writes to state before the poll. Without one the
+	// row exists and Terraform cannot name it, so the create stops here.
+	if createdVpc.Data.Vpc.ID == "" {
+		return nil, errors.New(ErrDetailNoVpcIDInCreate)
 	}
 	tflog.Info(ctx, LogIssuedCreateVpcJob)
 	return &createdVpc, nil
@@ -211,7 +224,7 @@ func issueVpcDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID st
 		return "", err
 	}
 
-	var deletedVpc deleteVpcResponse
+	var deletedVpc client.JobStatusSingularResponse
 	if err := json.Unmarshal(response, &deletedVpc); err != nil {
 		return "", err
 	}

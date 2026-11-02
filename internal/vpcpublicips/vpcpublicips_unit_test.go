@@ -639,3 +639,55 @@ func TestMapAttachedIdToAttachmentModelNullsEveryComputedAttributeUnit(t *testin
 		t.Errorf("expected virtual_machine_id to be null, got %q", model.VirtualMachineID.ValueString())
 	}
 }
+
+// The runtime 202 names the address in data.resource. A failed acquire job
+// still returns that id, so the caller records the address and releases it.
+func TestAcquirePublicIpReadsAcceptedResource(t *testing.T) {
+	t.Parallel()
+
+	accepted := `{"success":true,"data":{` +
+		`"job":{"id":"job-1","operation":"acquire","resourceId":null,"stage":"queued",` +
+		`"outcome":null,"progress":0,"message":null,"failureReason":null},` +
+		`"resource":{"id":"22222222-2222-2222-2222-222222222222","ipAddress":null,"state":"acquiring"}}}`
+	jobs := map[string]string{
+		"succeeded": `{"success":true,"data":{"jobs":[{"id":"job-1","operation":"acquire",` +
+			`"resourceId":null,"stage":"completed","outcome":"succeeded","progress":100,` +
+			`"message":null,"failureReason":null}],"notFound":[]}}`,
+		"failed": `{"success":true,"data":{"jobs":[{"id":"job-1","operation":"acquire",` +
+			`"resourceId":null,"stage":"failed","outcome":"failed","progress":40,` +
+			`"message":null,"failureReason":"no address left in the pool"}],"notFound":[]}}`,
+	}
+	for name, jobBody := range jobs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+				T: t,
+				Handler: func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					switch {
+					case r.Method == http.MethodPost && r.URL.Path == publicIpsURL(testVpcID):
+						w.WriteHeader(http.StatusAccepted)
+						_, _ = w.Write([]byte(accepted))
+					case r.Method == http.MethodPost && r.URL.Path == client.JOBS_BASE_URL_V1:
+						_, _ = w.Write([]byte(jobBody))
+					default:
+						t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+						w.WriteHeader(http.StatusNotFound)
+					}
+				},
+			})
+
+			publicIpID, err := AcquirePublicIp(gpcnClient, context.Background(), testVpcID)
+			if publicIpID != testPublicIpID {
+				t.Errorf("address ID = %q, want %q", publicIpID, testPublicIpID)
+			}
+			if name == "succeeded" && err != nil {
+				t.Errorf("AcquirePublicIp: %v", err)
+			}
+			if name == "failed" && (err == nil || !strings.Contains(err.Error(), "no address left in the pool")) {
+				t.Errorf("error = %v, want the job's failure reason", err)
+			}
+		})
+	}
+}

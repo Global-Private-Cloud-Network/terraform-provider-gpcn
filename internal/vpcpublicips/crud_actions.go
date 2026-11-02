@@ -64,19 +64,28 @@ func AcquirePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID s
 		return "", err
 	}
 
+	var accepted client.JobStatusSingularResponse
+	if err := json.Unmarshal(body, &accepted); err != nil {
+		return "", err
+	}
 	var acquireResponse acquirePublicIpResponse
 	if err := json.Unmarshal(body, &acquireResponse); err != nil {
 		return "", err
+	}
+	// The answer names the address in data.resource or as data.publicIpId.
+	publicIpID := accepted.Data.ResourceId
+	if publicIpID == "" {
+		publicIpID = acquireResponse.Data.PublicIpID
 	}
 
 	// The API inserts the row before it dispatches the job, so a failed job
 	// still leaves a real address. The caller records the id and releases it.
 	if err := pollJob(gpcnClient, ctx, ActionAcquirePublicIp, jobID); err != nil {
-		return acquireResponse.Data.PublicIpID, err
+		return publicIpID, err
 	}
 
-	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyAcquiredPublicIp, acquireResponse.Data.PublicIpID))
-	return acquireResponse.Data.PublicIpID, nil
+	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyAcquiredPublicIp, publicIpID))
+	return publicIpID, nil
 }
 
 // GetPublicIp returns one address out of its VPC's listing. An address that no

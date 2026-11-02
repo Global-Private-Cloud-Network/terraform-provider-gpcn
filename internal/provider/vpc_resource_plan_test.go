@@ -1443,3 +1443,127 @@ func TestVpcResourcePlanReplacementWithUnsetGroupJoinsDefault(t *testing.T) {
 		},
 	})
 }
+
+// vpcAcceptedPlanTestID differs from vpcPlanTestID, so the state can only hold
+// it when the create read the row from data.resource.
+const vpcAcceptedPlanTestID = "vpc-accepted-1"
+
+// startVpcAcceptedPlanMockServer answers in the runtime shapes: the 202 carries
+// data.job and data.resource, and the job read carries an outcome.
+func startVpcAcceptedPlanMockServer(t *testing.T) *httptest.Server {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	gone := false
+	vpcPath := "/v1/resource/vpcs/" + vpcAcceptedPlanTestID
+	row := func(status string) map[string]any {
+		return map[string]any{
+			"id":              vpcAcceptedPlanTestID,
+			"name":            name,
+			"description":     "",
+			"cidr":            vpcPlanTestCidr,
+			"datacenter":      map[string]any{"id": vpcPlanTestDatacenterID, "code": "kansas", "name": "Kansas"},
+			"status":          status,
+			"failureReason":   nil,
+			"egressIp":        nil,
+			"heldBy":          nil,
+			"resourceGroupId": vpcPlanTestDefaultGroup,
+			"createdAt":       vpcPlanTestTimestamp,
+			"updatedAt":       vpcPlanTestTimestamp,
+			"dnsNameservers":  []string{"8.8.8.8", "1.1.1.1"},
+		}
+	}
+	job := func(jobID, operation, outcome string) map[string]any {
+		return map[string]any{
+			"id":            jobID,
+			"operation":     operation,
+			"resourceId":    vpcAcceptedPlanTestID,
+			"stage":         "completed",
+			"outcome":       outcome,
+			"progress":      100,
+			"message":       nil,
+			"failureReason": nil,
+		}
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/vpcs/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			name, _ = body["name"].(string)
+			gone = false
+			created := row("creating")
+			mu.Unlock()
+			accepted := job(vpcPlanTestCreateJobID, "create", "")
+			accepted["stage"] = "queued"
+			accepted["outcome"] = nil
+			accepted["progress"] = 0
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			testutil.WriteJSONResponse(w, map[string]any{
+				"success": true,
+				"data":    map[string]any{"job": accepted, "resource": created},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			jobID := vpcPlanTestCreateJobID
+			if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
+				jobID, _ = ids[0].(string)
+			}
+			testutil.WriteJSONResponse(w, map[string]any{
+				"success": true,
+				"data":    map[string]any{"jobs": []map[string]any{job(jobID, "create", "succeeded")}, "notFound": []string{}},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == vpcPath:
+			mu.Lock()
+			isGone := gone
+			detail := row("active")
+			mu.Unlock()
+			if isGone {
+				writeVpcRefusal(w, http.StatusNotFound, vpcNotFoundBody)
+				return
+			}
+			detail["vpnCapable"] = true
+			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "", "meta": nil, "data": detail})
+		case r.Method == http.MethodDelete && r.URL.Path == vpcPath:
+			mu.Lock()
+			gone = true
+			mu.Unlock()
+			accepted := job(vpcPlanTestDeleteJobID, "delete", "")
+			accepted["stage"] = "queued"
+			accepted["outcome"] = nil
+			accepted["progress"] = 0
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{"job": accepted}})
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// A runtime 202 drives the create to a green apply, and the id in state is
+// the one data.resource carries.
+func TestVpcCreateReadsAcceptedResource(t *testing.T) {
+	t.Parallel()
+	server := startVpcAcceptedPlanMockServer(t)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vpcPlanTestConfig(server.URL, "vpc-accepted"),
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVpcTest, "id", vpcAcceptedPlanTestID),
+					resource.TestCheckResourceAttr(gpcnVpcTest, "status", "active"),
+					resource.TestCheckResourceAttr(gpcnVpcTest, "name", "vpc-accepted"),
+				),
+			},
+		},
+	})
+}
