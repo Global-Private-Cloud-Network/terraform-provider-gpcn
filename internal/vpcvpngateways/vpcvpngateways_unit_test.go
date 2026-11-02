@@ -274,17 +274,35 @@ func TestVpcVpnGatewayUnitWaitForVpnGatewayGoneStopsOnReadError(t *testing.T) {
 	}
 }
 
+// deleteServerOptions changes a deleteServer. resendStatus answers every DELETE
+// after the first, and deletes counts the DELETEs.
+type deleteServerOptions struct {
+	resendStatus int
+	deletes      *atomic.Int32
+}
+
 // deleteServer serves a delete. The DELETE answers deleteStatus, the job poll
 // reports a failed job, and the gateway reads follow the scripted answers.
-func deleteServer(t *testing.T, deleteStatus int, answers []string) (*client.GpcnClient, *atomic.Int32) {
+func deleteServer(t *testing.T, deleteStatus int, answers []string, options ...deleteServerOptions) (*client.GpcnClient, *atomic.Int32) {
 	t.Helper()
-	var reads atomic.Int32
+	var reads, deletes atomic.Int32
+	var option deleteServerOptions
+	if len(options) > 0 {
+		option = options[0]
+	}
+	if option.deletes == nil {
+		option.deletes = &deletes
+	}
 	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			path := "/v1/resource/vpcs/" + testVpcID + "/vpn-gateway"
+			status := deleteStatus
+			if r.Method == http.MethodDelete && r.URL.Path == path && option.deletes.Add(1) > 1 && option.resendStatus != 0 {
+				status = option.resendStatus
+			}
 			switch {
-			case r.Method == http.MethodDelete && r.URL.Path == path && deleteStatus == http.StatusConflict:
+			case r.Method == http.MethodDelete && r.URL.Path == path && status == http.StatusConflict:
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusConflict)
 				fmt.Fprint(w, `{"success":false,"message":"The VPN gateway is already being removed.","error":{"code":"VPN_GATEWAY_REMOVING","statusCode":409,"details":null}}`)
@@ -319,17 +337,21 @@ func deleteServer(t *testing.T, deleteStatus int, answers []string) (*client.Gpc
 
 func TestVpcVpnGatewayUnitWaitAfterFailedDeleteJob(t *testing.T) {
 	t.Parallel()
+	var deletes atomic.Int32
 	gpcnClient, reads := deleteServer(t, http.StatusAccepted, []string{
 		removingRow("The VPN gateway's removal failed; it is retried automatically."),
 		removingRow("The VPN gateway's removal failed; it is retried automatically."),
 		"gone",
-	})
+	}, deleteServerOptions{resendStatus: http.StatusConflict, deletes: &deletes})
 
 	if err := deleteVpnGateway(gpcnClient, context.Background(), testVpcID, time.Millisecond, time.Minute); err != nil {
 		t.Fatalf("Expected the failed job to fall through to the wait and end at the 404, got %v", err)
 	}
 	if got := reads.Load(); got != 3 {
 		t.Errorf("Expected 3 reads, got %d", got)
+	}
+	if got := deletes.Load(); got != 2 {
+		t.Errorf("Expected 2 DELETEs, got %d", got)
 	}
 }
 
@@ -567,6 +589,8 @@ func TestVpcVpnGatewayUnitDeleteTimeoutNamesTheConfiguredTotal(t *testing.T) {
 	}
 }
 
+const parkedGatewayReason = "The VPN gateway's removal failed."
+
 // busyGatewayBody is the 409 the API answers while job h1 holds the gateway.
 func busyGatewayBody(operation string) string {
 	return `{"success":false,"message":"VPN gateway is busy: ` + operation + ` in progress.",` +
@@ -713,6 +737,115 @@ func TestDeleteVpnGatewayBusyDeadlineNamesTheHolder(t *testing.T) {
 			}
 			if got := server.count(http.MethodDelete); got != 1 {
 				t.Errorf("Expected one DELETE, got %d", got)
+			}
+		})
+	}
+}
+
+func TestWaitForVpnGatewayGoneResendsParkedRemoval(t *testing.T) {
+	t.Parallel()
+	server := &scriptedGatewayServer{
+		answers: map[string][]gatewayAnswer{
+			http.MethodDelete: {{http.StatusAccepted, gatewayAcceptedBody("job-delete")}, {http.StatusAccepted, gatewayAcceptedBody("job-resend")}},
+			http.MethodGet:    {{http.StatusOK, removingRow(parkedGatewayReason)}, {http.StatusNotFound, goneGatewayBody}},
+		},
+		jobs: map[string]string{"job-delete": gatewayJobBody("job-delete", "failed"), "job-resend": gatewayJobBody("job-resend", "succeeded")},
+	}
+	gpcnClient := server.client(t)
+
+	if err := deleteVpnGateway(gpcnClient, context.Background(), testVpcID, time.Millisecond, time.Minute); err != nil {
+		t.Fatalf("Expected the resend to remove the gateway, got %v", err)
+	}
+	if got := server.count(http.MethodDelete); got != 2 {
+		t.Errorf("Expected 2 DELETEs, got %d", got)
+	}
+	if got := server.count("poll job-resend"); got != 1 {
+		t.Errorf("Expected one poll of the resend job, got %d", got)
+	}
+}
+
+func TestWaitForVpnGatewayGoneReportsSecondPark(t *testing.T) {
+	t.Parallel()
+	server := &scriptedGatewayServer{
+		answers: map[string][]gatewayAnswer{
+			http.MethodDelete: {{http.StatusAccepted, gatewayAcceptedBody("job-delete")}, {http.StatusAccepted, gatewayAcceptedBody("job-resend")}},
+			http.MethodGet:    {{http.StatusOK, removingRow(parkedGatewayReason)}},
+		},
+		jobs: map[string]string{"job-delete": gatewayJobBody("job-delete", "failed"), "job-resend": gatewayJobBody("job-resend", "failed")},
+	}
+	gpcnClient := server.client(t)
+
+	err := deleteVpnGateway(gpcnClient, context.Background(), testVpcID, time.Millisecond, time.Minute)
+	if want := fmt.Sprintf(ErrFmtRemovalParkedAgain, parkedGatewayReason, testVpcID); err == nil || err.Error() != want {
+		t.Fatalf("Expected %q, got %v", want, err)
+	}
+	if got := server.count(http.MethodDelete); got != 2 {
+		t.Errorf("Expected 2 DELETEs, got %d", got)
+	}
+}
+
+// The answer to the resend decides how the wait goes on. A 409 for a removal
+// that runs means the platform drives the removal again, so the wait keeps
+// reading at the interval and never reports a second park.
+func TestWaitForVpnGatewayGoneResendAnswers(t *testing.T) {
+	const interval = 30 * time.Millisecond
+	setRemovalPollInterval(t, interval)
+	const inUse = "Remove the VPC's VPN connections before removing its VPN gateway."
+	removing := gatewayAnswer{http.StatusConflict, `{"success":false,"message":"The VPN gateway is already being removed.",` +
+		`"error":{"code":"VPN_GATEWAY_REMOVING","statusCode":409,"details":null}}`}
+	parked := gatewayAnswer{http.StatusOK, removingRow(parkedGatewayReason)}
+	gone := gatewayAnswer{http.StatusNotFound, goneGatewayBody}
+	accepted := gatewayAnswer{http.StatusAccepted, gatewayAcceptedBody("job-delete")}
+
+	for name, test := range map[string]struct {
+		deletes []gatewayAnswer
+		reads   []gatewayAnswer
+		want    string
+	}{
+		"not found":                       {deletes: []gatewayAnswer{accepted, gone}, reads: []gatewayAnswer{parked}},
+		"removal runs, then gone":         {deletes: []gatewayAnswer{accepted, removing}, reads: []gatewayAnswer{parked, gone}},
+		"removal runs, parked, then gone": {deletes: []gatewayAnswer{accepted, removing}, reads: []gatewayAnswer{parked, parked, gone}},
+		"busy, then accepted": {
+			deletes: []gatewayAnswer{accepted, {http.StatusConflict, busyGatewayBody("delete")}, {http.StatusAccepted, gatewayAcceptedBody("job-resend")}},
+			reads:   []gatewayAnswer{parked, gone},
+		},
+		"refused": {
+			deletes: []gatewayAnswer{accepted, {http.StatusConflict, `{"success":false,"message":"` + inUse + `",` +
+				`"error":{"code":"VPN_GATEWAY_IN_USE","statusCode":409,"details":null}}`}},
+			reads: []gatewayAnswer{parked},
+			want:  fmt.Sprintf(ErrFmtRemovalResendRefused, parkedGatewayReason, testVpcID, inUse),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := &scriptedGatewayServer{
+				answers: map[string][]gatewayAnswer{http.MethodDelete: test.deletes, http.MethodGet: test.reads},
+				jobs: map[string]string{
+					"job-delete": gatewayJobBody("job-delete", "failed"),
+					"h1":         gatewayJobBody("h1", "succeeded"),
+					"job-resend": gatewayJobBody("job-resend", "succeeded"),
+				},
+			}
+			gpcnClient := server.client(t)
+
+			err := DeleteVpnGateway(gpcnClient, context.Background(), testVpcID)
+			if test.want == "" && err != nil {
+				t.Fatalf("Expected the gateway to go, got %v", err)
+			}
+			if test.want != "" && (err == nil || err.Error() != test.want) {
+				t.Fatalf("Expected %q, got %v", test.want, err)
+			}
+			if got := server.count(http.MethodDelete); got != len(test.deletes) {
+				t.Errorf("Expected %d DELETEs, got %d", len(test.deletes), got)
+			}
+			if got := server.count(http.MethodGet); got != len(test.reads) {
+				t.Errorf("Expected %d reads, got %d", len(test.reads), got)
+			}
+			server.mu.Lock()
+			defer server.mu.Unlock()
+			if test.deletes[1] == removing {
+				if gap := server.times[http.MethodGet][1].Sub(server.times[http.MethodDelete][1]); gap < interval {
+					t.Errorf("Expected a read at least %s after the resend, got %s", interval, gap)
+				}
 			}
 		})
 	}

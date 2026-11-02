@@ -85,6 +85,9 @@ type vpnGatewayPlanTestServerState struct {
 	getsAfterDel       int
 	createBodies       []map[string]any
 	deleteCount        int
+	// resendRemoving answers every DELETE after the first with a 409 for a
+	// gateway whose removal runs.
+	resendRemoving bool
 }
 
 func (s *vpnGatewayPlanTestServerState) row() map[string]any {
@@ -207,6 +210,11 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 		case r.Method == http.MethodDelete && r.URL.Path == gatewayPath:
 			state.mu.Lock()
 			state.deleteAttempts++
+			if state.resendRemoving && state.deleteAttempts > 1 {
+				state.mu.Unlock()
+				writeVpnGatewayPlanTestError(w, http.StatusConflict, vpcvpngateways.CodeGatewayRemoving, "The VPN gateway is already being removed.")
+				return
+			}
 			busyCreating := state.deleteBusyCreating
 			if busyCreating {
 				state.deleteBusyCreating = false
@@ -807,13 +815,20 @@ func TestVpcVpnGatewayResourceDeleteParkedRemovalWaits(t *testing.T) {
 			if state.getsAfterDel != 3 {
 				return fmt.Errorf("expected 3 reads after the DELETE (two parked, one 404), got %d", state.getsAfterDel)
 			}
+			if state.deleteAttempts != 2 {
+				return fmt.Errorf("expected 2 DELETE requests (the removal and the resend), got %d", state.deleteAttempts)
+			}
 			return nil
 		},
 		Steps: []resource.TestStep{
 			{
 				Config: config,
 				Check: func(*terraform.State) error {
-					state.set(func(s *vpnGatewayPlanTestServerState) { s.failDeleteJob = true; s.deleteHold = 2 })
+					state.set(func(s *vpnGatewayPlanTestServerState) {
+						s.failDeleteJob = true
+						s.deleteHold = 2
+						s.resendRemoving = true
+					})
 					return nil
 				},
 			},
