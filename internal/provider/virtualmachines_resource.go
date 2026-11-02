@@ -702,9 +702,9 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 		return
 	}
 
-	// A failed create can leave the machine in Error with a failure reason. The
-	// platform refuses a stop on that machine, so the delete skips the stop and
-	// the interface detach.
+	// The platform deletes a machine in Error without a stop, and a stop of such
+	// a machine can be refused with a 409 or a 502. The read decides whether the
+	// delete stops the machine first.
 	current, err := virtualmachines.GetVirtualMachine(r.client, ctx, state.ID.ValueString())
 	if client.IsNotFound(err) {
 		// Already deleted outside of Terraform
@@ -717,8 +717,11 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 		)
 		return
 	}
+	inError := strings.EqualFold(current.Data.Status, virtualmachines.VMStatusError.String())
 	failureReason := current.Data.FailureReason
-	if strings.EqualFold(current.Data.Status, virtualmachines.VMStatusError.String()) && failureReason != nil && *failureReason != "" {
+	// A failed create leaves the machine in Error with a failure reason. That
+	// machine skips the interface detach too.
+	if inError && failureReason != nil && *failureReason != "" {
 		// The delete releases the address only when this resource acquired one.
 		var parkedDeleteRequestBody io.Reader
 		if state.AllocatePublicIp.ValueBool() {
@@ -741,8 +744,11 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 		return
 	}
 
-	// Before proceeding with delete, stop the virtual machine
-	err = virtualmachines.StopVirtualMachine(r.client, ctx, state.ID.ValueString())
+	// Before proceeding with delete, stop the virtual machine. A machine in Error
+	// skips the stop, so err keeps the nil of the read above.
+	if !inError {
+		err = virtualmachines.StopVirtualMachine(r.client, ctx, state.ID.ValueString())
+	}
 	if client.IsNotFound(err) {
 		// Already deleted outside of Terraform
 		tflog.Info(ctx, virtualmachines.LogVirtualMachineAlreadyDeleted)

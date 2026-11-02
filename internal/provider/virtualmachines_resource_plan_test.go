@@ -4473,6 +4473,9 @@ type vmV3Mock struct {
 	// deleteJobFailureReason. The row stays parked after each one.
 	failDeleteJobs         int
 	deleteJobFailureReason string
+	// events records the machine read, the interface listing, the stop and
+	// the delete, in order.
+	events []string
 }
 
 // vmV3Read is a status and a failure reason as a read reports them. A nil
@@ -4579,11 +4582,13 @@ func startVirtualMachineV3MockServer(t *testing.T) *vmV3Mock {
 			mock.mu.Lock()
 			mock.stops++
 			mock.stopped = true
+			mock.events = append(mock.events, "stop")
 			mock.mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
 			mock.mu.Lock()
 			boundID := mock.boundID
+			mock.events = append(mock.events, "list-interfaces")
 			mock.mu.Unlock()
 			address := ""
 			if boundID != "" {
@@ -4594,6 +4599,7 @@ func startVirtualMachineV3MockServer(t *testing.T) *vmV3Mock {
 			mock.mu.Lock()
 			name, parked, gone, stopped := mock.name, mock.parked, mock.gone, mock.stopped
 			readAs := mock.readAs
+			mock.events = append(mock.events, "read")
 			mock.mu.Unlock()
 			if gone {
 				w.Header().Set("Content-Type", "application/json")
@@ -4621,6 +4627,7 @@ func startVirtualMachineV3MockServer(t *testing.T) *vmV3Mock {
 			raw, _ := io.ReadAll(r.Body)
 			mock.mu.Lock()
 			mock.deleteBodies = append(mock.deleteBodies, string(raw))
+			mock.events = append(mock.events, "delete")
 			mock.gone = true
 			mock.parked = false
 			mock.mu.Unlock()
@@ -4740,22 +4747,6 @@ func vmV3PlanTestDestroyWithRead(t *testing.T, mock *vmV3Mock, name string, read
 	})
 }
 
-// A machine in Error without a failure reason is not parked. The destroy takes
-// the stop before the delete.
-func TestVirtualMachineDeleteErrorWithoutReasonStops(t *testing.T) {
-	shortenVirtualMachinePolling(t)
-	mock := startVirtualMachineV3MockServer(t)
-	vmV3PlanTestDestroyWithRead(t, mock, "vm-v3-error-no-reason", vmV3Read{status: virtualmachines.VMStatusError.String(), failureReason: nil})
-
-	stops, deleteBodies := mock.recorded()
-	if stops != 1 {
-		t.Errorf("Expected one stop, got %d", stops)
-	}
-	if len(deleteBodies) != 1 {
-		t.Errorf("Expected one delete, got %d", len(deleteBodies))
-	}
-}
-
 // A running machine with a failure reason is not parked. The destroy takes the
 // stop before the delete.
 func TestVirtualMachineDeleteRunningWithReasonStops(t *testing.T) {
@@ -4799,4 +4790,41 @@ func TestVirtualMachineDeleteParkedReportsDeleteFailure(t *testing.T) {
 			},
 		},
 	})
+}
+
+// deletePhase returns the events from the read that Delete makes before it
+// sends the first DELETE, through that DELETE.
+func (m *vmV3Mock) deletePhase() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	deleteAt := slices.Index(m.events, "delete")
+	if deleteAt < 0 {
+		return nil
+	}
+	readAt := deleteAt
+	for readAt > 0 && m.events[readAt] != "read" {
+		readAt--
+	}
+	return slices.Clone(m.events[readAt : deleteAt+1])
+}
+
+// A machine in Error without a failure reason skips the stop, because the
+// platform deletes such a machine without one. The delete still lists and
+// detaches the interfaces.
+func TestVirtualMachineDeleteErrorWithoutReasonSkipsStop(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineV3MockServer(t)
+	vmV3PlanTestDestroyWithRead(t, mock, "vm-v3-error-no-reason", vmV3Read{status: virtualmachines.VMStatusError.String(), failureReason: nil})
+
+	stops, deleteBodies := mock.recorded()
+	if stops != 0 {
+		t.Errorf("Expected no stop, got %d", stops)
+	}
+	if len(deleteBodies) != 1 {
+		t.Errorf("Expected one delete, got %d", len(deleteBodies))
+	}
+	want := []string{"read", "list-interfaces", "delete"}
+	if got := mock.deletePhase(); !slices.Equal(got, want) {
+		t.Errorf("Expected the delete to read, list the interfaces once and delete, got %v", got)
+	}
 }
