@@ -928,8 +928,10 @@ func TestWaitForVpnGatewayGoneResendBusyChainStopsAtDeadline(t *testing.T) {
 		},
 	})
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	start := time.Now()
-	err := waitForVpnGatewayGone(gpcnClient, context.Background(), testVpcID, 10*time.Millisecond, start, timeout)
+	err := waitForVpnGatewayGone(gpcnClient, ctx, testVpcID, 10*time.Millisecond, start, timeout)
 	elapsed := time.Since(start)
 	if !errors.Is(err, client.ErrHolderStillRunning) {
 		t.Fatalf("Expected the holder deadline error, got %v", err)

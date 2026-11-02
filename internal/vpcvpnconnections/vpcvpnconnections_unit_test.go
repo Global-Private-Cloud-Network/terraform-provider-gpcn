@@ -1029,8 +1029,10 @@ func TestDeleteVpnConnectionBusyChainStopsAtDeadline(t *testing.T) {
 	setBusyChainInterval(t)
 	gpcnClient, busy := busyChainConnServer(t, http.MethodDelete)
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	start := time.Now()
-	err := deleteVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID, 10*time.Millisecond, busyChainTimeout)
+	err := deleteVpnConnection(gpcnClient, ctx, testVpcID, testConnID, 10*time.Millisecond, busyChainTimeout)
 	assertBusyChainStopped(t, err, time.Since(start), busy)
 }
 
@@ -1039,8 +1041,10 @@ func TestUpdateVpnConnectionBusyChainStopsAtDeadline(t *testing.T) {
 	gpcnClient, busy := busyChainConnServer(t, http.MethodPut)
 	gpcnClient.Config().PollingTimeout = busyChainTimeout
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	start := time.Now()
-	accepted, err := UpdateVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID, map[string]any{"dpd": false})
+	accepted, err := UpdateVpnConnection(gpcnClient, ctx, testVpcID, testConnID, map[string]any{"dpd": false})
 	assertBusyChainStopped(t, err, time.Since(start), busy)
 	if accepted {
 		t.Error("Expected a PUT that the API never took to read as not accepted")
@@ -1051,7 +1055,9 @@ func TestResendDeleteBusyChainStopsAtDeadline(t *testing.T) {
 	setBusyChainInterval(t)
 	gpcnClient, busy := busyChainConnServer(t, http.MethodDelete)
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	start := time.Now()
-	_, _, err := resendDelete(gpcnClient, context.Background(), testVpcID, testConnID, start, busyChainTimeout)
+	_, _, err := resendDelete(gpcnClient, ctx, testVpcID, testConnID, start, busyChainTimeout)
 	assertBusyChainStopped(t, err, time.Since(start), busy)
 }

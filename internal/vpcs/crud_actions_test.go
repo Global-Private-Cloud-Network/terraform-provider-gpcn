@@ -641,8 +641,10 @@ func TestDeleteVpcBusyChainStopsAtDeadline(t *testing.T) {
 		}
 	}, timeout)
 
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	start := time.Now()
-	err := DeleteVpc(gpcnClient, context.Background(), vpcUnitTestID)
+	err := DeleteVpc(gpcnClient, ctx, vpcUnitTestID)
 	elapsed := time.Since(start)
 	if !errors.Is(err, client.ErrHolderStillRunning) {
 		t.Fatalf("Expected the holder deadline error, got %v", err)
