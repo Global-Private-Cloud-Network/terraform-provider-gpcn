@@ -3,11 +3,13 @@ package vpcs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -603,5 +605,54 @@ func TestMapVpcPayloadReadsHeldBy(t *testing.T) {
 		if !model.ActiveJobId.Equal(test.want) {
 			t.Errorf("%s: active_job_id = %v, want %v", name, model.ActiveJobId, test.want)
 		}
+	}
+}
+
+// Each busy answer names a new holder that ends at once. The deadline is
+// shared, so the chain still stops at it. The test changes a package
+// variable, so it does not run in parallel.
+func TestDeleteVpcBusyChainStopsAtDeadline(t *testing.T) {
+	previous := BusyRetryInterval
+	BusyRetryInterval = 10 * time.Millisecond
+	t.Cleanup(func() { BusyRetryInterval = previous })
+
+	const timeout = 300 * time.Millisecond
+	var mutex sync.Mutex
+	busy := 0
+	gpcnClient := vpcClientWithPollingTimeout(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == BASE_URL_V1+vpcUnitTestID:
+			mutex.Lock()
+			busy++
+			holder := "h" + strconv.Itoa(busy)
+			mutex.Unlock()
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"success":false,"message":"VPC is busy: create in progress.",` +
+				`"error":{"code":"RESOURCE_BUSY","statusCode":409,"details":{"resourceType":"vpc",` +
+				`"resourceId":"` + vpcUnitTestID + `","heldBy":{"jobId":"` + holder + `","operation":"create","verb":"create"}}}}`))
+		case r.Method == http.MethodPost && r.URL.Path == client.JOBS_BASE_URL_V1:
+			ids, _ := testutil.ReadRequestBody(r)["jobIds"].([]any)
+			jobID, _ := ids[0].(string)
+			_, _ = w.Write([]byte(`{"success":true,"data":{"jobs":[{"id":"` + jobID + `","operation":"create","resourceId":"` + vpcUnitTestID + `",` +
+				`"stage":"completed","outcome":"succeeded","progress":100,"message":null,"failureReason":null}],"notFound":[]}}`))
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}, timeout)
+
+	start := time.Now()
+	err := DeleteVpc(gpcnClient, context.Background(), vpcUnitTestID)
+	elapsed := time.Since(start)
+	if !errors.Is(err, client.ErrHolderStillRunning) {
+		t.Fatalf("Expected the holder deadline error, got %v", err)
+	}
+	if elapsed >= 3*timeout {
+		t.Errorf("Expected the chain to stop near the %s deadline, took %s", timeout, elapsed)
+	}
+	mutex.Lock()
+	defer mutex.Unlock()
+	if busy < 2 {
+		t.Errorf("Expected a chain of holders, got %d busy answers", busy)
 	}
 }

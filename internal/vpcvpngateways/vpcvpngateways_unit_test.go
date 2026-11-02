@@ -729,9 +729,6 @@ func TestDeleteVpnGatewayBusyDeadlineNamesTheHolder(t *testing.T) {
 			if !errors.Is(err, client.ErrHolderStillRunning) {
 				t.Fatalf("Expected the holder deadline error, got %v", err)
 			}
-			if stillCreating := fmt.Sprintf("VPC %s: the VPN gateway was still being created", testVpcID); strings.HasPrefix(err.Error(), stillCreating) {
-				t.Errorf("Expected the holder sentence, got %q", err.Error())
-			}
 			if !strings.HasPrefix(err.Error(), "job h1 ") {
 				t.Errorf("Expected the error to name job h1, got %q", err.Error())
 			}
@@ -852,5 +849,51 @@ func TestWaitForVpnGatewayGoneResendAnswers(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Each busy answer to the resend names a new holder that ends at once. The
+// deadline is shared, so the chain still stops at it. The test changes
+// package variables, so it does not run in parallel.
+func TestWaitForVpnGatewayGoneResendBusyChainStopsAtDeadline(t *testing.T) {
+	setRemovalPollInterval(t, 10*time.Millisecond)
+	previous := ResendMinBudget
+	ResendMinBudget = 100 * time.Millisecond
+	t.Cleanup(func() { ResendMinBudget = previous })
+
+	const timeout = 300 * time.Millisecond
+	var busy atomic.Int32
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.URL.Path == client.JOBS_BASE_URL_V1:
+				ids, _ := testutil.ReadRequestBody(r)["jobIds"].([]any)
+				jobID, _ := ids[0].(string)
+				_, _ = w.Write([]byte(gatewayJobBody(jobID, "succeeded")))
+			case r.Method == http.MethodDelete:
+				holder := fmt.Sprintf("h%d", busy.Add(1))
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(strings.Replace(busyGatewayBody("delete"), `"jobId":"h1"`, `"jobId":"`+holder+`"`, 1)))
+			case r.Method == http.MethodGet:
+				_, _ = w.Write([]byte(removingRow(parkedGatewayReason)))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+
+	start := time.Now()
+	err := waitForVpnGatewayGone(gpcnClient, context.Background(), testVpcID, 10*time.Millisecond, start, timeout)
+	elapsed := time.Since(start)
+	if !errors.Is(err, client.ErrHolderStillRunning) {
+		t.Fatalf("Expected the holder deadline error, got %v", err)
+	}
+	if elapsed >= 3*timeout {
+		t.Errorf("Expected the chain to stop near the %s deadline, took %s", timeout, elapsed)
+	}
+	if got := busy.Load(); got < 2 {
+		t.Errorf("Expected a chain of holders, got %d busy answers", got)
 	}
 }

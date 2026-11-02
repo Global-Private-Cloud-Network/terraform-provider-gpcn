@@ -974,3 +974,84 @@ func TestUpdateVpnConnectionWaitsOutBusyHolder(t *testing.T) {
 		t.Errorf("Expected one poll of the update job, got %d", got)
 	}
 }
+
+// busyChainConnServer answers every request of the method with a 409
+// RESOURCE_BUSY that names a new holder, h1, h2 and so on. Every holder ends
+// on its first poll. The counter holds the busy answers.
+func busyChainConnServer(t *testing.T, method string) (*client.GpcnClient, *atomic.Int32) {
+	t.Helper()
+	var busy atomic.Int32
+	gpcnClient := apiServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == client.JOBS_BASE_URL_V1:
+			ids, _ := testutil.ReadRequestBody(r)["jobIds"].([]any)
+			jobID, _ := ids[0].(string)
+			_, _ = w.Write([]byte(connJobBody(jobID, "succeeded")))
+		case r.Method == method:
+			holder := fmt.Sprintf("h%d", busy.Add(1))
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(strings.Replace(busyConnBody, `"jobId":"h1"`, `"jobId":"`+holder+`"`, 1)))
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	})
+	return gpcnClient, &busy
+}
+
+// setBusyChainInterval changes a package variable, so a test that calls it
+// does not run in parallel.
+func setBusyChainInterval(t *testing.T) {
+	t.Helper()
+	previous := RemovalPollInterval
+	RemovalPollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { RemovalPollInterval = previous })
+}
+
+const busyChainTimeout = 300 * time.Millisecond
+
+func assertBusyChainStopped(t *testing.T, err error, elapsed time.Duration, busy *atomic.Int32) {
+	t.Helper()
+	if !errors.Is(err, client.ErrHolderStillRunning) {
+		t.Fatalf("Expected the holder deadline error, got %v", err)
+	}
+	if elapsed >= 3*busyChainTimeout {
+		t.Errorf("Expected the chain to stop near the %s deadline, took %s", busyChainTimeout, elapsed)
+	}
+	if got := busy.Load(); got < 2 {
+		t.Errorf("Expected a chain of holders, got %d busy answers", got)
+	}
+}
+
+// Each busy answer names a new holder that ends at once. The deadline is
+// shared, so the chain still stops at it.
+func TestDeleteVpnConnectionBusyChainStopsAtDeadline(t *testing.T) {
+	setBusyChainInterval(t)
+	gpcnClient, busy := busyChainConnServer(t, http.MethodDelete)
+
+	start := time.Now()
+	err := deleteVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID, 10*time.Millisecond, busyChainTimeout)
+	assertBusyChainStopped(t, err, time.Since(start), busy)
+}
+
+func TestUpdateVpnConnectionBusyChainStopsAtDeadline(t *testing.T) {
+	setBusyChainInterval(t)
+	gpcnClient, busy := busyChainConnServer(t, http.MethodPut)
+	gpcnClient.Config().PollingTimeout = busyChainTimeout
+
+	start := time.Now()
+	accepted, err := UpdateVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID, map[string]any{"dpd": false})
+	assertBusyChainStopped(t, err, time.Since(start), busy)
+	if accepted {
+		t.Error("Expected a PUT that the API never took to read as not accepted")
+	}
+}
+
+func TestResendDeleteBusyChainStopsAtDeadline(t *testing.T) {
+	setBusyChainInterval(t)
+	gpcnClient, busy := busyChainConnServer(t, http.MethodDelete)
+
+	start := time.Now()
+	_, _, err := resendDelete(gpcnClient, context.Background(), testVpcID, testConnID, start, busyChainTimeout)
+	assertBusyChainStopped(t, err, time.Since(start), busy)
+}
