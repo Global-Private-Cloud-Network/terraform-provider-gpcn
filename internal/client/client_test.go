@@ -213,3 +213,47 @@ func TestDoWithRetryUnwrapsURLError(t *testing.T) {
 		t.Fatalf("expected an *HTTPError, got %T", err)
 	}
 }
+
+func TestTransportSetsUserAgent(t *testing.T) {
+	tests := []struct {
+		name      string
+		userAgent string
+		want      string
+	}{
+		{name: "a configured product token", userAgent: "terraform-provider-gpcn/1.2.3", want: "terraform-provider-gpcn/1.2.3"},
+		{name: "no product token", userAgent: "", want: "Go-http-client/1.1"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := make(chan string, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				got <- r.Header.Get("User-Agent")
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"ok":true}`))
+			}))
+			defer server.Close()
+
+			cfg := client.DefaultConfig(server.URL, "test-key")
+			cfg.UserAgent = tt.userAgent
+			gpcnClient, err := client.NewGpcnClient(cfg)
+			if err != nil {
+				t.Fatalf("failed to create client: %v", err)
+			}
+
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/test", nil)
+			if err != nil {
+				t.Fatalf("failed to create request: %v", err)
+			}
+			resp, err := gpcnClient.DoWithRetry(req)
+			if err != nil {
+				t.Fatalf("DoWithRetry returned unexpected error: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if userAgent := <-got; userAgent != tt.want {
+				t.Errorf("User-Agent = %q, want %q", userAgent, tt.want)
+			}
+		})
+	}
+}

@@ -19,6 +19,8 @@ type Config struct {
 	InitialRetryDelay time.Duration
 	// MaxRetryDelay is the maximum delay between retries (default: 30s)
 	MaxRetryDelay time.Duration
+	// UserAgent is sent as the User-Agent header when set
+	UserAgent string
 }
 
 // DefaultConfig returns a Config with sensible defaults

@@ -23,6 +23,7 @@ type GpcnClient struct {
 type authTransport struct {
 	Host      string
 	apiKey    string
+	userAgent string
 	Transport http.RoundTripper
 }
 
@@ -30,6 +31,9 @@ func (t *authTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
 
 	req.Header.Set("x-api-key", t.apiKey)
+	if t.userAgent != "" {
+		req.Header.Set("User-Agent", t.userAgent)
+	}
 
 	// Add correlation ID to request headers if present
 	if correlationID := GetCorrelationID(req.Context()); correlationID != "" {
@@ -174,6 +178,7 @@ func NewGpcnClient(config *Config) (*GpcnClient, error) {
 		Transport: &authTransport{
 			Host:      config.Host,
 			apiKey:    config.APIKey,
+			userAgent: config.UserAgent,
 			Transport: http.DefaultTransport,
 		},
 	}

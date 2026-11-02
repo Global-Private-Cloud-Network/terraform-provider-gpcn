@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -240,4 +241,45 @@ func TestConfigurePreflightNamesHostOnRouteNotFound(t *testing.T) {
 			ExpectError: regexp.MustCompile(`Check GPCN_HOST`),
 		}},
 	})
+}
+
+func TestConfigureSendsVersionedUserAgent(t *testing.T) {
+	var (
+		mu         sync.Mutex
+		userAgents []string
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == preflightAuthCheckPath:
+			mu.Lock()
+			userAgents = append(userAgents, r.Header.Get("User-Agent"))
+			mu.Unlock()
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/":
+			testutil.WriteJSONResponse(w, preflightDatacenterBody())
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{{
+			Config: preflightConfig(server.URL),
+			Check: resource.TestCheckResourceAttr(
+				"data.gpcn_datacenters.test", "datacenters.0.name", "Kansas"),
+		}},
+	})
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(userAgents) == 0 {
+		t.Fatal("auth check calls = 0, want at least 1")
+	}
+	for _, userAgent := range userAgents {
+		if userAgent != "terraform-provider-gpcn/test" {
+			t.Errorf("User-Agent = %q, want %q", userAgent, "terraform-provider-gpcn/test")
+		}
+	}
 }

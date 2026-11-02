@@ -218,6 +218,7 @@ func (p *gpcnProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 
 	// Build client configuration with defaults
 	clientConfig := client.DefaultConfig(host, apiKey)
+	clientConfig.UserAgent = client.UserAgent(p.version)
 
 	// Override with user-provided values
 	if !config.RequestTimeout.IsNull() {
