@@ -1180,3 +1180,13 @@ func TestDeleteVpnConnectionSendsNothingAfterTheDeadline(t *testing.T) {
 	err := deleteVpnConnection(gpcnClient, ctx, testVpcID, testConnID, 10*time.Millisecond, passedDeadlineTimeout)
 	assertSentNothingAfterTheDeadline(t, ctx, err, sent)
 }
+
+func TestResendDeleteSendsNothingAfterTheDeadline(t *testing.T) {
+	setBusyChainInterval(t)
+	gpcnClient, sent := sharedDeadlineServer(t, http.MethodDelete, passedDeadlineHolderDelay, 0)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _, err := resendDelete(gpcnClient, ctx, testVpcID, testConnID, time.Now(), passedDeadlineTimeout)
+	assertSentNothingAfterTheDeadline(t, ctx, err, sent)
+}
