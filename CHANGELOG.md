@@ -10,7 +10,7 @@ ENHANCEMENTS:
 
 BUG FIXES:
 
-- **Virtual Machine**: destroying a machine in the Error state no longer stops it first. GPCN™ deletes such a machine directly, and a stop could be refused.
+- **Virtual Machine**: destroying a machine in the Error state no longer stops it first. GPCN™ deletes such a machine directly, and a stop could be refused. A machine that a failed create left behind also skips the network interface detach.
 
 ## 1.6.0 (October 27, 2026)
 
