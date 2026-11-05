@@ -700,15 +700,24 @@ func TestDeleteVpnGatewayWaitsOutBusyHolder(t *testing.T) {
 }
 
 // The deadline can pass inside the holder poll, or in the wait after the
-// holder ended. Both name the holder, never a create that still runs.
+// holder ended. Both name the holder, never a create that still runs. Only
+// the first says that the holder still runs.
 func TestDeleteVpnGatewayBusyDeadlineNamesTheHolder(t *testing.T) {
 	for name, test := range map[string]struct {
-		holder   string
-		interval time.Duration
-		timeout  time.Duration
+		holder       string
+		interval     time.Duration
+		timeout      time.Duration
+		stillRunning bool
+		prefix       string
 	}{
-		"the holder outlives the wait":              {holder: "", interval: time.Millisecond, timeout: 300 * time.Millisecond},
-		"the deadline passes after the holder ends": {holder: "succeeded", interval: 400 * time.Millisecond, timeout: 200 * time.Millisecond},
+		"the holder outlives the wait": {
+			holder: "", interval: time.Millisecond, timeout: 300 * time.Millisecond,
+			stillRunning: true, prefix: "job h1 ",
+		},
+		"the deadline passes after the holder ends": {
+			holder: "succeeded", interval: 400 * time.Millisecond, timeout: 200 * time.Millisecond,
+			prefix: "job h1 ended as the wait for it ran out after ",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			setRemovalPollInterval(t, test.interval)
@@ -719,11 +728,14 @@ func TestDeleteVpnGatewayBusyDeadlineNamesTheHolder(t *testing.T) {
 			gpcnClient := server.client(t)
 
 			err := deleteVpnGateway(gpcnClient, context.Background(), testVpcID, time.Millisecond, test.timeout)
-			if !errors.Is(err, client.ErrHolderStillRunning) {
-				t.Fatalf("Expected the holder deadline error, got %v", err)
+			if !errors.Is(err, client.ErrBusyWaitExhausted) {
+				t.Fatalf("Expected the busy wait error, got %v", err)
 			}
-			if !strings.HasPrefix(err.Error(), "job h1 ") {
-				t.Errorf("Expected the error to name job h1, got %q", err.Error())
+			if got := errors.Is(err, client.ErrHolderStillRunning); got != test.stillRunning {
+				t.Errorf("errors.Is(err, ErrHolderStillRunning) = %v, want %v", got, test.stillRunning)
+			}
+			if !strings.HasPrefix(err.Error(), test.prefix) {
+				t.Errorf("Expected the error to start with %q, got %q", test.prefix, err.Error())
 			}
 			if got := server.count(http.MethodDelete); got != 1 {
 				t.Errorf("Expected one DELETE, got %d", got)

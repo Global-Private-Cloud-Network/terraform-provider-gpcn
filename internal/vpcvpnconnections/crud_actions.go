@@ -292,10 +292,9 @@ func UpdateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 			return false, ctx.Err()
 		case <-time.After(RemovalPollInterval):
 		}
-		// No PUT goes out after the deadline. AwaitHolder reports the passed
-		// deadline as the holder error.
+		// No PUT goes out after the deadline.
 		if !time.Now().Before(deadline) {
-			return false, client.AwaitHolder(gpcnClient, ctx, holder, start, deadline)
+			return false, client.HolderEndedAtDeadline(holder, start)
 		}
 	}
 	tflog.Info(ctx, LogIssuedUpdateVpnConnectionJob)
@@ -342,7 +341,7 @@ func deleteVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 		}
 		// No DELETE goes out after the deadline.
 		if !time.Now().Before(deadline) {
-			return client.AwaitHolder(gpcnClient, ctx, holder, startTime, deadline)
+			return client.HolderEndedAtDeadline(holder, startTime)
 		}
 		jobID, err = sendDelete(gpcnClient, ctx, vpcID, connectionID)
 	}
@@ -468,7 +467,7 @@ func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, con
 		}
 		// No DELETE goes out after the deadline.
 		if !time.Now().Before(deadline) {
-			return resendNotSent, "", client.AwaitHolder(gpcnClient, ctx, holder, startTime, deadline)
+			return resendNotSent, "", client.HolderEndedAtDeadline(holder, startTime)
 		}
 		jobID, err = sendDelete(gpcnClient, ctx, vpcID, connectionID)
 	}

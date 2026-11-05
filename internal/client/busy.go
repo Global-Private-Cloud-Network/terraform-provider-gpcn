@@ -77,6 +77,12 @@ func AwaitHolder(gpcnClient *GpcnClient, ctx context.Context, jobID string, star
 	}
 }
 
+// HolderEndedAtDeadline reports a holder job that ended, but only after the
+// wait ran out, so the caller sent nothing.
+func HolderEndedAtDeadline(jobID string, start time.Time) error {
+	return &holderEndedAtDeadlineError{message: fmt.Sprintf(ErrFmtHolderEndedAtDeadline, jobID, time.Since(start).Round(time.Second))}
+}
+
 func newHolderStillRunningError(jobID string, elapsed time.Duration) error {
 	return &holderStillRunningError{message: fmt.Sprintf(ErrFmtHolderStillRunning, jobID, elapsed.Round(time.Second))}
 }

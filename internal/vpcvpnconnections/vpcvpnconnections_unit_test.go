@@ -1010,8 +1010,8 @@ const busyChainTimeout = 300 * time.Millisecond
 
 func assertBusyChainStopped(t *testing.T, err error, elapsed time.Duration, busy *atomic.Int32) {
 	t.Helper()
-	if !errors.Is(err, client.ErrHolderStillRunning) {
-		t.Fatalf("Expected the holder deadline error, got %v", err)
+	if !errors.Is(err, client.ErrBusyWaitExhausted) {
+		t.Fatalf("Expected the busy wait error, got %v", err)
 	}
 	if elapsed >= 3*busyChainTimeout {
 		t.Errorf("Expected the chain to stop near the %s deadline, took %s", busyChainTimeout, elapsed)
@@ -1146,8 +1146,14 @@ const (
 
 func assertSentNothingAfterTheDeadline(t *testing.T, ctx context.Context, err error, sent *atomic.Int32) {
 	t.Helper()
-	if !errors.Is(err, client.ErrHolderStillRunning) {
-		t.Fatalf("Expected the holder deadline error, got %v", err)
+	if !errors.Is(err, client.ErrBusyWaitExhausted) {
+		t.Fatalf("Expected the busy wait error, got %v", err)
+	}
+	if errors.Is(err, client.ErrHolderStillRunning) {
+		t.Errorf("Expected an error that does not say the holder still runs, got %v", err)
+	}
+	if want := "job h1 ended as the wait for it ran out after "; !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("Expected the error to start with %q, got %q", want, err.Error())
 	}
 	if got := sent.Load(); got != 1 {
 		t.Errorf("Expected one request, got %d", got)

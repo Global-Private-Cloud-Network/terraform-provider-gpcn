@@ -191,7 +191,7 @@ func deleteVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID 
 	for {
 		if time.Since(startTime) >= timeout {
 			if lastHolder != "" {
-				return client.AwaitHolder(gpcnClient, ctx, lastHolder, startTime, startTime.Add(timeout))
+				return client.HolderEndedAtDeadline(lastHolder, startTime)
 			}
 			return fmt.Errorf(ErrFmtStillCreating, vpcID, timeout)
 		}

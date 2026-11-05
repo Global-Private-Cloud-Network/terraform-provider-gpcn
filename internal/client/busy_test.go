@@ -288,3 +288,30 @@ func TestAwaitHolderReportsElapsedFromWaitStartMidPoll(t *testing.T) {
 		t.Errorf("poll calls = %d, want at least 2", got)
 	}
 }
+
+func TestHolderEndedAtDeadlineNamesTheEndedJob(t *testing.T) {
+	err := HolderEndedAtDeadline("h1", time.Now().Add(-90*time.Second))
+	want := "job h1 ended as the wait for it ran out after 1m30s, so the provider did not send the request; run the apply or destroy again"
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err.Error(), want)
+	}
+	if !errors.Is(err, ErrBusyWaitExhausted) {
+		t.Errorf("errors.Is(err, ErrBusyWaitExhausted) = false, want true")
+	}
+	if errors.Is(err, ErrHolderStillRunning) {
+		t.Errorf("errors.Is(err, ErrHolderStillRunning) = true, want false")
+	}
+}
+
+func TestHolderStillRunningIsABusyWaitExhaustion(t *testing.T) {
+	fastHolderPolling(t)
+	gpcnClient, _ := holderServer(t, http.StatusOK, holderJobsBody(`{"id":"h1","stage":"running","outcome":null}`))
+
+	err := AwaitHolder(gpcnClient, t.Context(), "h1", time.Now(), time.Now().Add(-time.Second))
+	if !errors.Is(err, ErrHolderStillRunning) {
+		t.Fatalf("AwaitHolder = %v, want ErrHolderStillRunning", err)
+	}
+	if !errors.Is(err, ErrBusyWaitExhausted) {
+		t.Errorf("errors.Is(err, ErrBusyWaitExhausted) = false, want true")
+	}
+}

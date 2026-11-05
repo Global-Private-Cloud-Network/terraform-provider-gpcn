@@ -521,7 +521,7 @@ func (r *vpcVpnConnectionResource) Update(ctx context.Context, req resource.Upda
 		// every time was not processed, so it carries no note.
 		failure := vpcvpngateways.ErrorDetail(err)
 		jobEnded := errors.Is(err, client.ErrJobFailed) || errors.Is(err, client.ErrJobCancelledByPlatform)
-		if (accepted && !jobEnded) || (!accepted && vpcvpngateways.RowMayExist(err) && !errors.Is(err, client.ErrHolderStillRunning)) {
+		if (accepted && !jobEnded) || (!accepted && vpcvpngateways.RowMayExist(err) && !errors.Is(err, client.ErrBusyWaitExhausted)) {
 			failure += "\n\n" + vpcvpnconnections.ErrDetailUpdateMayStillApply
 		}
 		resp.Diagnostics.AddError(vpcvpnconnections.ErrSummaryUnableToUpdateVpnConn, failure)
