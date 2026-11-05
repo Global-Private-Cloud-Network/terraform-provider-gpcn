@@ -110,6 +110,9 @@ type vpnConnPlanTestServerState struct {
 	// postHeldByJob is the job that holds the row made by the POST, named in
 	// heldBy.
 	postHeldByJob string
+	// putBusyHolder makes every PUT answer 409 RESOURCE_BUSY with heldBy naming
+	// this job. A job read of this job reports it still running.
+	putBusyHolder string
 }
 
 func (s *vpnConnPlanTestServerState) set(update func(*vpnConnPlanTestServerState)) {
@@ -284,6 +287,15 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			body := testutil.ReadRequestBody(r)
 			state.mu.Lock()
 			state.putBodies = append(state.putBodies, body)
+			if holder := state.putBusyHolder; holder != "" {
+				state.mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				fmt.Fprintf(w, `{"success":false,"message":"branch-office is busy: update in progress.","error":{"code":"RESOURCE_BUSY",`+
+					`"statusCode":409,"details":{"resourceType":"vpc_vpn_connection","resourceId":%q,`+
+					`"heldBy":{"jobId":%q,"operation":"update","verb":"update"}}}}`, vpnConnPlanTestConnID, holder)
+				return
+			}
 			putStatus := state.putStatus
 			if putStatus != 0 {
 				state.mu.Unlock()
@@ -360,6 +372,11 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			state.mu.Lock()
 			failJob := state.failJob
 			jobStatus, cancelJob := state.jobStatus, state.cancelJob
+			if holder := state.putBusyHolder; holder != "" && jobID == holder {
+				state.mu.Unlock()
+				testutil.HandleJobResponse(w, jobID, vpnConnPlanTestConnID, false)
+				return
+			}
 			if jobID == "job-delete" && state.failDeleteJob {
 				state.failDeleteJob = false
 				failJob = true
@@ -1867,4 +1884,56 @@ func TestVpcVpnConnectionCreateAdoptionPollsHeldByJob(t *testing.T) {
 			},
 		},
 	})
+}
+
+// A PUT the API answers busy every time was never processed. The update fails
+// with the holder sentence and carries no note that the change may still apply.
+func TestVpcVpnConnectionResourceUpdateBusyCarriesNoNote(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	state.set(func(s *vpnConnPlanTestServerState) {
+		s.exists = true
+		s.row = vpnConnPlanTestRowFromBody(map[string]any{
+			"name": "branch-office", "peerAddress": "203.0.113.10", "peerCidrs": []string{"192.168.10.0/24"},
+		}, "connected")
+		s.putBusyHolder = "job-holder"
+	})
+	r, empty := vpnConnDirectCall(t, server.URL)
+	r.client.Config().PollingTimeout = 300 * time.Millisecond
+
+	prior := empty
+	priorModel := vpnConnDirectModel(vpnConnPlanTestConnID)
+	if diags := prior.Set(context.Background(), &priorModel); diags.HasError() {
+		t.Fatalf("failed to build state: %v", diags)
+	}
+	plan := tfsdk.Plan{Schema: prior.Schema}
+	planModel := priorModel
+	planModel.Name = types.StringValue("branch-office-2")
+	if diags := plan.Set(context.Background(), &planModel); diags.HasError() {
+		t.Fatalf("failed to build plan: %v", diags)
+	}
+
+	resp := &fwresource.UpdateResponse{State: prior}
+	r.Update(context.Background(), fwresource.UpdateRequest{
+		Plan: plan, State: prior, Config: tfsdk.Config{Schema: prior.Schema, Raw: plan.Raw},
+	}, resp)
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("Expected the update to fail")
+	}
+	hasHolder, hasNote := false, false
+	for _, d := range resp.Diagnostics.Errors() {
+		if strings.Contains(d.Detail(), "job job-holder still holds this resource after ") {
+			hasHolder = true
+		}
+		if strings.Contains(d.Detail(), vpcvpnconnections.ErrDetailUpdateMayStillApply) {
+			hasNote = true
+		}
+	}
+	if !hasHolder {
+		t.Errorf("Expected the holder sentence; diagnostics: %v", resp.Diagnostics)
+	}
+	if hasNote {
+		t.Errorf("note present = true, want false; diagnostics: %v", resp.Diagnostics)
+	}
 }

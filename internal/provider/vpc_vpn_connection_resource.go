@@ -517,10 +517,11 @@ func (r *vpcVpnConnectionResource) Update(ctx context.Context, req resource.Upda
 	} else if accepted, err := vpcvpnconnections.UpdateVpnConnection(r.client, ctx, vpcID, connectionID, body); err != nil {
 		// The state stays as it was, so the failed job does not change it. The
 		// note fits a change that may still run: an accepted PUT whose job did
-		// not end, or a PUT with an unclear answer.
+		// not end, or a PUT with an unclear answer. A PUT the API answered busy
+		// every time was not processed, so it carries no note.
 		failure := vpcvpngateways.ErrorDetail(err)
 		jobEnded := errors.Is(err, client.ErrJobFailed) || errors.Is(err, client.ErrJobCancelledByPlatform)
-		if (accepted && !jobEnded) || (!accepted && vpcvpngateways.RowMayExist(err)) {
+		if (accepted && !jobEnded) || (!accepted && vpcvpngateways.RowMayExist(err) && !errors.Is(err, client.ErrHolderStillRunning)) {
 			failure += "\n\n" + vpcvpnconnections.ErrDetailUpdateMayStillApply
 		}
 		resp.Diagnostics.AddError(vpcvpnconnections.ErrSummaryUnableToUpdateVpnConn, failure)
