@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -646,8 +647,8 @@ func TestDeleteVpcBusyChainStopsAtDeadline(t *testing.T) {
 	start := time.Now()
 	err := DeleteVpc(gpcnClient, ctx, vpcUnitTestID)
 	elapsed := time.Since(start)
-	if !errors.Is(err, client.ErrHolderStillRunning) {
-		t.Fatalf("Expected the holder deadline error, got %v", err)
+	if !errors.Is(err, client.ErrBusyWaitExhausted) {
+		t.Fatalf("Expected the busy wait error, got %v", err)
 	}
 	if elapsed >= 3*timeout {
 		t.Errorf("Expected the chain to stop near the %s deadline, took %s", timeout, elapsed)
@@ -656,5 +657,96 @@ func TestDeleteVpcBusyChainStopsAtDeadline(t *testing.T) {
 	defer mutex.Unlock()
 	if busy < 2 {
 		t.Errorf("Expected a chain of holders, got %d busy answers", busy)
+	}
+}
+
+// vpcDeadlineServer answers the first DELETE with a 409 RESOURCE_BUSY whose
+// holder ends after holderDelay. The next DELETE gets a 202 after
+// acceptDelay, and its job never ends. The counter holds the DELETEs.
+func vpcDeadlineServer(t *testing.T, holderDelay, acceptDelay, timeout time.Duration) (*client.GpcnClient, *atomic.Int32) {
+	t.Helper()
+	previous := BusyRetryInterval
+	BusyRetryInterval = 10 * time.Millisecond
+	t.Cleanup(func() { BusyRetryInterval = previous })
+
+	var deletes atomic.Int32
+	gpcnClient := vpcClientWithPollingTimeout(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == BASE_URL_V1+vpcUnitTestID && deletes.Add(1) == 1:
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"success":false,"message":"VPC is busy: create in progress.",` +
+				`"error":{"code":"RESOURCE_BUSY","statusCode":409,"details":{"resourceType":"vpc",` +
+				`"resourceId":"` + vpcUnitTestID + `","heldBy":{"jobId":"h1","operation":"create","verb":"create"}}}}`))
+		case r.Method == http.MethodDelete && r.URL.Path == BASE_URL_V1+vpcUnitTestID:
+			time.Sleep(acceptDelay)
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"success":true,"data":{` +
+				`"job":{"id":"j-delete","operation":"delete","resourceId":"` + vpcUnitTestID + `","stage":"queued",` +
+				`"outcome":null,"progress":0,"message":null,"failureReason":null},` +
+				`"resource":{"id":"` + vpcUnitTestID + `","name":"vpc-a","status":"deleting"}}}`))
+		case r.Method == http.MethodPost && r.URL.Path == client.JOBS_BASE_URL_V1:
+			ids, _ := testutil.ReadRequestBody(r)["jobIds"].([]any)
+			jobID, _ := ids[0].(string)
+			stage, outcome := `"running"`, "null"
+			if jobID == "h1" {
+				time.Sleep(holderDelay)
+				stage, outcome = `"completed"`, `"succeeded"`
+			}
+			_, _ = w.Write([]byte(`{"success":true,"data":{"jobs":[{"id":"` + jobID + `","operation":"delete","resourceId":"` + vpcUnitTestID + `",` +
+				`"stage":` + stage + `,"outcome":` + outcome + `,"progress":50,"message":null,"failureReason":null}],"notFound":[]}}`))
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}, timeout)
+	return gpcnClient, &deletes
+}
+
+// The holder ends after the deadline, so the delete does not go out again. The
+// test changes a package variable, so it does not run in parallel.
+func TestDeleteVpcSendsNothingAfterTheDeadline(t *testing.T) {
+	gpcnClient, deletes := vpcDeadlineServer(t, 450*time.Millisecond, 0, 400*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := DeleteVpc(gpcnClient, ctx, vpcUnitTestID)
+	if !errors.Is(err, client.ErrBusyWaitExhausted) {
+		t.Fatalf("Expected the busy wait error, got %v", err)
+	}
+	if errors.Is(err, client.ErrHolderStillRunning) {
+		t.Errorf("Expected an error that does not say the holder still runs, got %v", err)
+	}
+	if want := "job h1 ended as the wait for it ran out after "; !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("Expected the error to start with %q, got %q", want, err.Error())
+	}
+	if got := deletes.Load(); got != 1 {
+		t.Errorf("DELETE count = %d, want 1", got)
+	}
+	if ctx.Err() != nil {
+		t.Errorf("Expected the call to end before the context deadline, got %v", ctx.Err())
+	}
+}
+
+// The holder ends before the deadline, and the deadline passes while the
+// second DELETE waits for its 202. The job poll then gets what is left of the
+// polling timeout. The test changes a package variable, so it does not run in
+// parallel.
+func TestDeleteVpcPollSharesTheDeadlineAfterABusyWait(t *testing.T) {
+	const timeout = 400 * time.Millisecond
+	gpcnClient, deletes := vpcDeadlineServer(t, 250*time.Millisecond, 200*time.Millisecond, timeout)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	err := DeleteVpc(gpcnClient, ctx, vpcUnitTestID)
+	elapsed := time.Since(start)
+	if !errors.Is(err, client.ErrLongPollingTimeout) {
+		t.Fatalf("Expected the polling timeout, got %v", err)
+	}
+	if elapsed >= 3*timeout {
+		t.Errorf("Expected the job poll to stop near the %s deadline, took %s", timeout, elapsed)
+	}
+	if got := deletes.Load(); got != 2 {
+		t.Errorf("DELETE count = %d, want 2", got)
 	}
 }

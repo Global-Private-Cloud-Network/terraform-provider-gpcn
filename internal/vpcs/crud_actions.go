@@ -181,7 +181,9 @@ func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string)
 	// A 409 RESOURCE_BUSY names the job that holds the VPC. The delete goes out
 	// again once that job ends, however it ends.
 	jobID, err := issueVpcDelete(gpcnClient, ctx, vpcID)
+	waitedBusy := false
 	for holder, busy := client.BusyHolder(err); busy; holder, busy = client.BusyHolder(err) {
+		waitedBusy = true
 		if err := client.AwaitHolder(gpcnClient, ctx, holder, start, deadline); err != nil {
 			return err
 		}
@@ -189,6 +191,10 @@ func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string)
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(BusyRetryInterval):
+		}
+		// No DELETE goes out after the deadline.
+		if !time.Now().Before(deadline) {
+			return client.HolderEndedAtDeadline(holder, start)
 		}
 		jobID, err = issueVpcDelete(gpcnClient, ctx, vpcID)
 	}
@@ -233,7 +239,14 @@ func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string)
 		}
 	}
 
-	if err := AwaitVpcJob(gpcnClient, ctx, ACTION_DELETE_VPC, jobID); err != nil {
+	// After a busy wait the job poll shares the deadline of that wait.
+	if waitedBusy {
+		pollConfig := client.DefaultPollingConfig()
+		pollConfig.Timeout = max(timeout-time.Since(start), 0)
+		if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, ACTION_DELETE_VPC, jobID, pollConfig); err != nil {
+			return fmt.Errorf("%s polling failed: %w", ACTION_DELETE_VPC, err)
+		}
+	} else if err := AwaitVpcJob(gpcnClient, ctx, ACTION_DELETE_VPC, jobID); err != nil {
 		return err
 	}
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyDeletedVpcID, vpcID))
