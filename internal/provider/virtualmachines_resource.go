@@ -713,7 +713,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	} else if err != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToDeleteVM,
-			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailStoppingVM, state.ID.ValueString()), err).Error(),
+			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailReadingVMBeforeDelete, state.ID.ValueString()), err).Error(),
 		)
 		return
 	}

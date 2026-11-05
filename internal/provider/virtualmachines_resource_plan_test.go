@@ -4479,6 +4479,10 @@ type vmUpdatedMock struct {
 	// segmentNics are L2 interfaces the listing reports after the primary
 	// one. A detach removes its interface and records "detach-interface".
 	segmentNics []vmSegmentNic
+	// failRead arms one machine read that answers 500 after readsBeforeFailure
+	// reads answer as usual.
+	failRead           bool
+	readsBeforeFailure int
 }
 
 // vmUpdatedRead is a status and a failure reason as a read reports them. A nil
@@ -4621,7 +4625,19 @@ func startVirtualMachineUpdatedMockServer(t *testing.T) *vmUpdatedMock {
 			name, parked, gone, stopped := mock.name, mock.parked, mock.gone, mock.stopped
 			readAs := mock.readAs
 			mock.events = append(mock.events, "read")
+			failRead := mock.failRead && mock.readsBeforeFailure == 0
+			if failRead {
+				mock.failRead = false
+			} else if mock.failRead {
+				mock.readsBeforeFailure--
+			}
 			mock.mu.Unlock()
+			if failRead {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"success":false,"message":"Internal server error","error":{"code":"INTERNAL_ERROR","statusCode":500,"details":null}}`))
+				return
+			}
 			if gone {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusNotFound)
@@ -4730,9 +4746,14 @@ func TestVirtualMachineDeleteParkedSkipsStop(t *testing.T) {
 		Steps: []resource.TestStep{
 			{Config: config},
 			{
-				PreConfig: func() { mock.set(func(m *vmUpdatedMock) { m.parked = true }) },
-				Config:    config,
-				Destroy:   true,
+				PreConfig: func() {
+					mock.set(func(m *vmUpdatedMock) {
+						m.parked = true
+						m.segmentNics = vmSegmentNicsFromIds([]string{vmPlanTestSegmentID})
+					})
+				},
+				Config:  config,
+				Destroy: true,
 			},
 		},
 	})
@@ -4746,6 +4767,10 @@ func TestVirtualMachineDeleteParkedSkipsStop(t *testing.T) {
 	}
 	if stops != 0 {
 		t.Errorf("Expected no stop of the parked machine, got %d", stops)
+	}
+	want := []string{"read", "delete"}
+	if got := mock.deletePhase(); !slices.Equal(got, want) {
+		t.Errorf("Expected the delete to read and delete, with no interface listing or detach, got %v", got)
 	}
 }
 
@@ -4899,4 +4924,31 @@ func TestVirtualMachineDeleteErrorWithoutReasonReleasesAcquiredAddress(t *testin
 	if deleteBodies[0] != `{"releasePublicIps":true}` {
 		t.Errorf("Expected the delete body '{\"releasePublicIps\":true}', got '%s'", deleteBodies[0])
 	}
+}
+
+// A failed read before the delete names the read, not a stop the delete never
+// sent.
+func TestVirtualMachineDeleteReadFailureNamesTheRead(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineUpdatedMockServer(t)
+	config := vmSizePlanTestConfig(mock.server.URL, "vm-updated-delete-read-fails", vmPlanTestSizeID)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				// The refresh reads the machine first, and the delete reads it next.
+				PreConfig: func() {
+					mock.set(func(m *vmUpdatedMock) {
+						m.failRead = true
+						m.readsBeforeFailure = 1
+					})
+				},
+				Config:      config,
+				Destroy:     true,
+				ExpectError: vmPlanTestSentencePattern(fmt.Sprintf(virtualmachines.ErrDetailReadingVMBeforeDelete, vmPlanTestID)),
+			},
+		},
+	})
 }
