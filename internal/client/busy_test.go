@@ -269,3 +269,22 @@ func TestAwaitHolderReportsElapsedFromWaitStart(t *testing.T) {
 		t.Errorf("poll calls = %d, want 0", got)
 	}
 }
+
+// The poll reaches the deadline while the holder still runs. The elapsed time
+// still counts from the start of the caller's wait.
+func TestAwaitHolderReportsElapsedFromWaitStartMidPoll(t *testing.T) {
+	fastHolderPolling(t)
+	gpcnClient, calls := holderServer(t, http.StatusOK, holderJobsBody(`{"id":"h1","stage":"running","outcome":null}`))
+
+	start := time.Now().Add(-90 * time.Second)
+	err := AwaitHolder(gpcnClient, t.Context(), "h1", start, time.Now().Add(50*time.Millisecond))
+	if !errors.Is(err, ErrHolderStillRunning) {
+		t.Fatalf("AwaitHolder = %v, want ErrHolderStillRunning", err)
+	}
+	if want := "after 1m30s"; !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), want)
+	}
+	if got := int(calls.Load()); got < 2 {
+		t.Errorf("poll calls = %d, want at least 2", got)
+	}
+}
