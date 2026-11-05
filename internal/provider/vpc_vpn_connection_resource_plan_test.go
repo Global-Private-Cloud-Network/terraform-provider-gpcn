@@ -113,6 +113,9 @@ type vpnConnPlanTestServerState struct {
 	// putBusyHolder makes every PUT answer 409 RESOURCE_BUSY with heldBy naming
 	// this job. A job read of this job reports it still running.
 	putBusyHolder string
+	// holderEndsAfter makes a read of the putBusyHolder job wait this long and
+	// then report the job succeeded.
+	holderEndsAfter time.Duration
 }
 
 func (s *vpnConnPlanTestServerState) set(update func(*vpnConnPlanTestServerState)) {
@@ -373,8 +376,12 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			failJob := state.failJob
 			jobStatus, cancelJob := state.jobStatus, state.cancelJob
 			if holder := state.putBusyHolder; holder != "" && jobID == holder {
+				endsAfter := state.holderEndsAfter
 				state.mu.Unlock()
-				testutil.HandleJobResponse(w, jobID, vpnConnPlanTestConnID, false)
+				if endsAfter > 0 {
+					time.Sleep(endsAfter)
+				}
+				testutil.HandleJobResponse(w, jobID, vpnConnPlanTestConnID, endsAfter > 0)
 				return
 			}
 			if jobID == "job-delete" && state.failDeleteJob {
@@ -1932,6 +1939,63 @@ func TestVpcVpnConnectionResourceUpdateBusyCarriesNoNote(t *testing.T) {
 	}
 	if !hasHolder {
 		t.Errorf("Expected the holder sentence; diagnostics: %v", resp.Diagnostics)
+	}
+	if hasNote {
+		t.Errorf("note present = true, want false; diagnostics: %v", resp.Diagnostics)
+	}
+}
+
+// A holder that ends only after the deadline leaves the PUT unsent. The update
+// fails with the ended sentence and carries no note that the change may still
+// apply. The test changes a package variable, so it does not run in parallel.
+func TestVpcVpnConnectionResourceUpdateEndedHolderCarriesNoNote(t *testing.T) {
+	previous := vpcvpnconnections.RemovalPollInterval
+	vpcvpnconnections.RemovalPollInterval = time.Millisecond
+	t.Cleanup(func() { vpcvpnconnections.RemovalPollInterval = previous })
+
+	server, state := startVpnConnPlanMockServer(t)
+	state.set(func(s *vpnConnPlanTestServerState) {
+		s.exists = true
+		s.row = vpnConnPlanTestRowFromBody(map[string]any{
+			"name": "branch-office", "peerAddress": "203.0.113.10", "peerCidrs": []string{"192.168.10.0/24"},
+		}, "connected")
+		s.putBusyHolder = "job-holder"
+		s.holderEndsAfter = 450 * time.Millisecond
+	})
+	r, empty := vpnConnDirectCall(t, server.URL)
+	r.client.Config().PollingTimeout = 400 * time.Millisecond
+
+	prior := empty
+	priorModel := vpnConnDirectModel(vpnConnPlanTestConnID)
+	if diags := prior.Set(context.Background(), &priorModel); diags.HasError() {
+		t.Fatalf("failed to build state: %v", diags)
+	}
+	plan := tfsdk.Plan{Schema: prior.Schema}
+	planModel := priorModel
+	planModel.Name = types.StringValue("branch-office-2")
+	if diags := plan.Set(context.Background(), &planModel); diags.HasError() {
+		t.Fatalf("failed to build plan: %v", diags)
+	}
+
+	resp := &fwresource.UpdateResponse{State: prior}
+	r.Update(context.Background(), fwresource.UpdateRequest{
+		Plan: plan, State: prior, Config: tfsdk.Config{Schema: prior.Schema, Raw: plan.Raw},
+	}, resp)
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("Expected the update to fail")
+	}
+	hasEnded, hasNote := false, false
+	for _, d := range resp.Diagnostics.Errors() {
+		if strings.Contains(d.Detail(), "job job-holder ended as the wait for it ran out after ") {
+			hasEnded = true
+		}
+		if strings.Contains(d.Detail(), vpcvpnconnections.ErrDetailUpdateMayStillApply) {
+			hasNote = true
+		}
+	}
+	if !hasEnded {
+		t.Errorf("Expected the ended sentence; diagnostics: %v", resp.Diagnostics)
 	}
 	if hasNote {
 		t.Errorf("note present = true, want false; diagnostics: %v", resp.Diagnostics)

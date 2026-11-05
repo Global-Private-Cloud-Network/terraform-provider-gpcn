@@ -952,7 +952,7 @@ func TestWaitForVpnGatewayGoneResendBusyChainStopsAtDeadline(t *testing.T) {
 // The removal parks, and its resend meets a holder that ends only after the
 // deadline. No DELETE goes out after that. The test changes package
 // variables, so it does not run in parallel.
-func TestWaitForVpnGatewayGoneResendSendsNothingAfterTheDeadline(t *testing.T) {
+func TestDeleteVpnGatewayResendSendsNothingAfterTheDeadline(t *testing.T) {
 	setRemovalPollInterval(t, 10*time.Millisecond)
 	previous := ResendMinBudget
 	ResendMinBudget = 100 * time.Millisecond
@@ -992,6 +992,12 @@ func TestWaitForVpnGatewayGoneResendSendsNothingAfterTheDeadline(t *testing.T) {
 	err := deleteVpnGateway(gpcnClient, ctx, testVpcID, 10*time.Millisecond, 400*time.Millisecond)
 	if !errors.Is(err, client.ErrBusyWaitExhausted) {
 		t.Fatalf("Expected the busy wait error, got %v", err)
+	}
+	if errors.Is(err, client.ErrHolderStillRunning) {
+		t.Errorf("Expected an error that does not say the holder still runs, got %v", err)
+	}
+	if want := "job h1 ended as the wait for it ran out after "; !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("Expected the error to start with %q, got %q", want, err.Error())
 	}
 	if got := deletes.Load(); got != 2 {
 		t.Errorf("Expected 2 DELETEs (the removal and the resend), got %d", got)
