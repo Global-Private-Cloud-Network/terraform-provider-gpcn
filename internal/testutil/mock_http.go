@@ -105,27 +105,6 @@ func HandleCreateJobResponse(w http.ResponseWriter, jobID string, message string
 		`"createdAt":"2026-11-02T00:00:00Z","startedAt":null,"lastProgressAt":null,"completedAt":null,"version":1}}}`)
 }
 
-// HandleLegacyJobResponse answers a job status read in the older form: the
-// job id under jobId and the state as booleans.
-func HandleLegacyJobResponse(w http.ResponseWriter, jobID, resourceID string, completed bool) {
-	isCompleted := "false"
-	if completed {
-		isCompleted = "true"
-	}
-	writeLiteralJSON(w, `{"success":true,"message":"Job status retrieved","data":{"jobs":[{`+
-		`"jobId":`+jsonString(jobID)+`,"stage":"","isCompleted":`+isCompleted+`,"isTerminal":false,"hasFailed":false,`+
-		`"progressPercentage":0,"message":"","errorMessage":"","resourceId":`+jsonString(resourceID)+`,`+
-		`"resourceName":"","resourceType":""}]}}`+"\n")
-}
-
-// HandleLegacyCreateJobResponse answers a request that starts a job in the
-// older form: the job id under data.jobId.
-func HandleLegacyCreateJobResponse(w http.ResponseWriter, jobID string, message string) {
-	writeLiteralJSON(w, `{"success":true,"message":`+jsonString(message)+`,"data":{`+
-		`"jobId":`+jsonString(jobID)+`,"stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,`+
-		`"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`+"\n")
-}
-
 // ReadRequestBody reads and unmarshals the request body into a map
 func ReadRequestBody(r *http.Request) map[string]any {
 	body, _ := io.ReadAll(r.Body)
