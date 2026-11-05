@@ -938,13 +938,65 @@ func TestWaitForVpnGatewayGoneResendBusyChainStopsAtDeadline(t *testing.T) {
 	start := time.Now()
 	err := waitForVpnGatewayGone(gpcnClient, ctx, testVpcID, 10*time.Millisecond, start, timeout)
 	elapsed := time.Since(start)
-	if !errors.Is(err, client.ErrHolderStillRunning) {
-		t.Fatalf("Expected the holder deadline error, got %v", err)
+	if !errors.Is(err, client.ErrBusyWaitExhausted) {
+		t.Fatalf("Expected the busy wait error, got %v", err)
 	}
 	if elapsed >= 3*timeout {
 		t.Errorf("Expected the chain to stop near the %s deadline, took %s", timeout, elapsed)
 	}
 	if got := busy.Load(); got < 2 {
 		t.Errorf("Expected a chain of holders, got %d busy answers", got)
+	}
+}
+
+// The removal parks, and its resend meets a holder that ends only after the
+// deadline. No DELETE goes out after that. The test changes package
+// variables, so it does not run in parallel.
+func TestWaitForVpnGatewayGoneResendSendsNothingAfterTheDeadline(t *testing.T) {
+	setRemovalPollInterval(t, 10*time.Millisecond)
+	previous := ResendMinBudget
+	ResendMinBudget = 100 * time.Millisecond
+	t.Cleanup(func() { ResendMinBudget = previous })
+
+	var deletes atomic.Int32
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.URL.Path == client.JOBS_BASE_URL_V1:
+				ids, _ := testutil.ReadRequestBody(r)["jobIds"].([]any)
+				jobID, _ := ids[0].(string)
+				if jobID == "h1" {
+					time.Sleep(450 * time.Millisecond)
+					_, _ = w.Write([]byte(gatewayJobBody(jobID, "succeeded")))
+					return
+				}
+				_, _ = w.Write([]byte(gatewayJobBody(jobID, "failed")))
+			case r.Method == http.MethodDelete && deletes.Add(1) == 1:
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(gatewayAcceptedBody("job-delete")))
+			case r.Method == http.MethodDelete:
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(busyGatewayBody("delete")))
+			case r.Method == http.MethodGet:
+				_, _ = w.Write([]byte(removingRow(parkedGatewayReason)))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := deleteVpnGateway(gpcnClient, ctx, testVpcID, 10*time.Millisecond, 400*time.Millisecond)
+	if !errors.Is(err, client.ErrBusyWaitExhausted) {
+		t.Fatalf("Expected the busy wait error, got %v", err)
+	}
+	if got := deletes.Load(); got != 2 {
+		t.Errorf("Expected 2 DELETEs (the removal and the resend), got %d", got)
+	}
+	if ctx.Err() != nil {
+		t.Errorf("Expected the call to end before the context deadline, got %v", ctx.Err())
 	}
 }

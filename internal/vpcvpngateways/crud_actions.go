@@ -378,6 +378,10 @@ func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, rea
 			return resendNotSent, false, nil, ctx.Err()
 		case <-time.After(RemovalPollInterval):
 		}
+		// No DELETE goes out after the deadline.
+		if !time.Now().Before(startTime.Add(timeout)) {
+			return resendNotSent, false, nil, client.HolderEndedAtDeadline(holder, startTime)
+		}
 	}
 
 	if client.IsNotFound(err) {
