@@ -292,6 +292,11 @@ func UpdateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 			return false, ctx.Err()
 		case <-time.After(RemovalPollInterval):
 		}
+		// No PUT goes out after the deadline. AwaitHolder reports the passed
+		// deadline as the holder error.
+		if !time.Now().Before(deadline) {
+			return false, client.AwaitHolder(gpcnClient, ctx, holder, start, deadline)
+		}
 	}
 	tflog.Info(ctx, LogIssuedUpdateVpnConnectionJob)
 
@@ -324,15 +329,20 @@ func deleteVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 	// A 409 RESOURCE_BUSY names the job that holds the connection. That job can
 	// belong to another resource of the VPC, so the DELETE goes out again once
 	// the job ends, however it ends.
+	deadline := startTime.Add(timeout)
 	jobID, err := sendDelete(gpcnClient, ctx, vpcID, connectionID)
 	for holder, busy := client.BusyHolder(err); busy; holder, busy = client.BusyHolder(err) {
-		if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime, startTime.Add(timeout)); err != nil {
+		if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime, deadline); err != nil {
 			return err
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(RemovalPollInterval):
+		}
+		// No DELETE goes out after the deadline.
+		if !time.Now().Before(deadline) {
+			return client.AwaitHolder(gpcnClient, ctx, holder, startTime, deadline)
 		}
 		jobID, err = sendDelete(gpcnClient, ctx, vpcID, connectionID)
 	}
@@ -445,15 +455,20 @@ func waitForVpnConnectionGone(gpcnClient *client.GpcnClient, ctx context.Context
 // started counts as sent, so the wait goes on. Any other 409 is a refusal, and
 // the second result then holds the API's message.
 func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, startTime time.Time, timeout time.Duration) (int, string, error) {
+	deadline := startTime.Add(timeout)
 	jobID, err := sendDelete(gpcnClient, ctx, vpcID, connectionID)
 	for holder, busy := client.BusyHolder(err); busy; holder, busy = client.BusyHolder(err) {
-		if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime, startTime.Add(timeout)); err != nil {
+		if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime, deadline); err != nil {
 			return resendNotSent, "", err
 		}
 		select {
 		case <-ctx.Done():
 			return resendNotSent, "", ctx.Err()
 		case <-time.After(RemovalPollInterval):
+		}
+		// No DELETE goes out after the deadline.
+		if !time.Now().Before(deadline) {
+			return resendNotSent, "", client.AwaitHolder(gpcnClient, ctx, holder, startTime, deadline)
 		}
 		jobID, err = sendDelete(gpcnClient, ctx, vpcID, connectionID)
 	}
