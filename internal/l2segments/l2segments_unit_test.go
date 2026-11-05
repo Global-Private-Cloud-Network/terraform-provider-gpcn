@@ -486,3 +486,48 @@ func TestCreateL2SegmentReturnsIDWhenJobFails(t *testing.T) {
 		t.Errorf("id = %q, want %q from the 202", id, unitTestSegmentID)
 	}
 }
+
+// A current-form 202 names no segment, and the completed job names it. A
+// failed read-back then still returns that ID, so the caller saves it and
+// Terraform taints the segment.
+func TestCreateL2SegmentReturnsIDWhenReadBackFails(t *testing.T) {
+	t.Parallel()
+
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.Method == http.MethodPost && r.URL.Path == BASE_URL_V1:
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(`{"success":true,"message":"L2 segment creation job started","data":{"jobId":"job-create",` +
+					`"stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"",` +
+					`"errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
+			case r.Method == http.MethodPost && r.URL.Path == client.JOBS_BASE_URL_V1:
+				_, _ = w.Write([]byte(`{"success":true,"message":"Job status retrieved","data":{"jobs":[{"jobId":"job-create",` +
+					`"stage":"completed","isCompleted":true,"isTerminal":true,"hasFailed":false,"progressPercentage":100,"message":"",` +
+					`"errorMessage":"","resourceId":"` + unitTestSegmentID + `","resourceName":"","resourceType":""}]}}`))
+			case r.Method == http.MethodGet && r.URL.Path == BASE_URL_V1+unitTestSegmentID:
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"success":false,"message":"Internal server error","error":{"code":"INTERNAL_ERROR","statusCode":500,"details":null}}`))
+			default:
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			}
+		},
+	})
+
+	response, id, err := CreateL2Segment(gpcnClient, context.Background(), ResourceModel{
+		Name:         types.StringValue("segment-a"),
+		DatacenterId: types.StringValue(unitTestDatacenterID),
+		Description:  types.StringValue(""),
+	})
+	if err == nil {
+		t.Fatal("expected the failed read-back to fail the create")
+	}
+	if response != nil {
+		t.Errorf("response = %+v, want none", response)
+	}
+	if id != unitTestSegmentID {
+		t.Errorf("id = %q, want %q from the completed job", id, unitTestSegmentID)
+	}
+}

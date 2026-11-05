@@ -1488,3 +1488,48 @@ func TestCreateGPUReturnsIDWhenJobFails(t *testing.T) {
 		t.Errorf("Expected ID %q from the 202, got %q", gpuID, id)
 	}
 }
+
+// A current-form 202 names no GPU, and the completed job names it. A failed
+// read-back then still returns that ID, so the caller saves it and Terraform
+// taints the GPU.
+func TestCreateGPUReturnsIDWhenReadBackFails(t *testing.T) {
+	const (
+		jobID = "job-current-gpu"
+		gpuID = "gpu-current-1"
+	)
+
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/gpu/"):
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(`{"success":true,"message":"GPU creation job started","data":{"jobs":[{"jobId":"` + jobID + `",` +
+					`"stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"",` +
+					`"errorMessage":"","resourceId":"","resourceName":"","resourceType":""}]}}`))
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				_, _ = w.Write([]byte(`{"success":true,"message":"Job status retrieved","data":{"jobs":[{"jobId":"` + jobID + `",` +
+					`"stage":"completed","isCompleted":true,"isTerminal":true,"hasFailed":false,"progressPercentage":100,"message":"",` +
+					`"errorMessage":"","resourceId":"` + gpuID + `","resourceName":"","resourceType":""}]}}`))
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/"+gpuID):
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"success":false,"message":"Internal server error","error":{"code":"INTERNAL_ERROR","statusCode":500,"details":null}}`))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+
+	model := createTestGPUModel("test-gpu", "", "nvidia-rtx_a6000-series", testImageName, 1)
+	response, id, err := CreateGPU(gpcnClient, context.Background(), "series-1", model)
+	if err == nil {
+		t.Fatal("Expected the failed read-back to fail the create")
+	}
+	if response != nil {
+		t.Errorf("Expected no response, got %+v", response)
+	}
+	if id != gpuID {
+		t.Errorf("Expected ID %q from the completed job, got %q", gpuID, id)
+	}
+}
