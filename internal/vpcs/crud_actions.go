@@ -182,7 +182,7 @@ func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string)
 	// again once that job ends, however it ends.
 	jobID, err := issueVpcDelete(gpcnClient, ctx, vpcID)
 	for holder, busy := client.BusyHolder(err); busy; holder, busy = client.BusyHolder(err) {
-		if err := client.AwaitHolder(gpcnClient, ctx, holder, deadline); err != nil {
+		if err := client.AwaitHolder(gpcnClient, ctx, holder, start, deadline); err != nil {
 			return err
 		}
 		select {

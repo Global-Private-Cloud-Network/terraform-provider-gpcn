@@ -284,7 +284,7 @@ func UpdateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 			}
 			break
 		}
-		if err := client.AwaitHolder(gpcnClient, ctx, holder, deadline); err != nil {
+		if err := client.AwaitHolder(gpcnClient, ctx, holder, start, deadline); err != nil {
 			return false, err
 		}
 		select {
@@ -295,7 +295,10 @@ func UpdateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 	}
 	tflog.Info(ctx, LogIssuedUpdateVpnConnectionJob)
 
-	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionUpdateVpnConnection, jobID); err != nil {
+	// The job poll shares the deadline of the busy waits before it.
+	pollConfig := client.DefaultPollingConfig()
+	pollConfig.Timeout = max(timeout-time.Since(start), 0)
+	if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, ActionUpdateVpnConnection, jobID, pollConfig); err != nil {
 		return true, fmt.Errorf(ErrFmtUpdatePollingFailed, err)
 	}
 	return true, nil
@@ -323,7 +326,7 @@ func deleteVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 	// the job ends, however it ends.
 	jobID, err := sendDelete(gpcnClient, ctx, vpcID, connectionID)
 	for holder, busy := client.BusyHolder(err); busy; holder, busy = client.BusyHolder(err) {
-		if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime.Add(timeout)); err != nil {
+		if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime, startTime.Add(timeout)); err != nil {
 			return err
 		}
 		select {
@@ -342,7 +345,10 @@ func deleteVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 	}
 	tflog.Info(ctx, LogIssuedDeleteVpnConnectionJob)
 
-	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionDeleteVpnConnection, jobID); err != nil {
+	// The job poll shares the deadline of the busy waits before it.
+	pollConfig := client.DefaultPollingConfig()
+	pollConfig.Timeout = max(timeout-time.Since(startTime), 0)
+	if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, ActionDeleteVpnConnection, jobID, pollConfig); err != nil {
 		if !errors.Is(err, client.ErrJobFailed) {
 			return fmt.Errorf(ErrFmtDeletePollingFailed, err)
 		}
@@ -441,7 +447,7 @@ func waitForVpnConnectionGone(gpcnClient *client.GpcnClient, ctx context.Context
 func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, startTime time.Time, timeout time.Duration) (int, string, error) {
 	jobID, err := sendDelete(gpcnClient, ctx, vpcID, connectionID)
 	for holder, busy := client.BusyHolder(err); busy; holder, busy = client.BusyHolder(err) {
-		if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime.Add(timeout)); err != nil {
+		if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime, startTime.Add(timeout)); err != nil {
 			return resendNotSent, "", err
 		}
 		select {

@@ -53,9 +53,9 @@ func BusyHolder(err error) (string, bool) {
 
 // AwaitHolder returns nil on every end of the holder job, because the caller
 // then sends its request again. Every error other than the deadline returns
-// unchanged.
-func AwaitHolder(gpcnClient *GpcnClient, ctx context.Context, jobID string, deadline time.Time) error {
-	start := time.Now()
+// unchanged. start is the start of the caller's wait, the time its deadline
+// counts from, so the deadline error reports how long the caller waited.
+func AwaitHolder(gpcnClient *GpcnClient, ctx context.Context, jobID string, start, deadline time.Time) error {
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
 		return newHolderStillRunningError(jobID, time.Since(start))

@@ -191,7 +191,7 @@ func deleteVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID 
 	for {
 		if time.Since(startTime) >= timeout {
 			if lastHolder != "" {
-				return client.AwaitHolder(gpcnClient, ctx, lastHolder, startTime.Add(timeout))
+				return client.AwaitHolder(gpcnClient, ctx, lastHolder, startTime, startTime.Add(timeout))
 			}
 			return fmt.Errorf(ErrFmtStillCreating, vpcID, timeout)
 		}
@@ -204,7 +204,7 @@ func deleteVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID 
 		holder, busy := client.BusyHolder(err)
 		lastHolder = holder
 		if busy {
-			if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime.Add(timeout)); err != nil {
+			if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime, startTime.Add(timeout)); err != nil {
 				return err
 			}
 			select {
@@ -370,7 +370,7 @@ func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, rea
 		if !busy {
 			break
 		}
-		if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime.Add(timeout)); err != nil {
+		if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime, startTime.Add(timeout)); err != nil {
 			return resendNotSent, false, nil, err
 		}
 		select {

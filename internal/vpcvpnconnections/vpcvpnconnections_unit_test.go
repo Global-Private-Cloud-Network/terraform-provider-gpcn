@@ -1059,3 +1059,72 @@ func TestResendDeleteBusyChainStopsAtDeadline(t *testing.T) {
 	_, _, err := resendDelete(gpcnClient, ctx, testVpcID, testConnID, start, busyChainTimeout)
 	assertBusyChainStopped(t, err, time.Since(start), busy)
 }
+
+const sharedDeadlineTimeout = 400 * time.Millisecond
+
+// sharedDeadlineServer answers the first request of the method with a 409
+// RESOURCE_BUSY whose holder ends after 450ms, past the deadline. The next
+// request gets a 202 whose job never ends.
+func sharedDeadlineServer(t *testing.T, method string) *client.GpcnClient {
+	t.Helper()
+	var sent atomic.Int32
+	return apiServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == client.JOBS_BASE_URL_V1:
+			ids, _ := testutil.ReadRequestBody(r)["jobIds"].([]any)
+			jobID, _ := ids[0].(string)
+			if jobID == "h1" {
+				time.Sleep(450 * time.Millisecond)
+				_, _ = w.Write([]byte(connJobBody(jobID, "succeeded")))
+				return
+			}
+			_, _ = w.Write([]byte(connJobBody(jobID, "")))
+		case r.Method == method && sent.Add(1) == 1:
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(busyConnBody))
+		case r.Method == method:
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(connAcceptedBody("job-live")))
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	})
+}
+
+func assertPollSharedTheDeadline(t *testing.T, err error, elapsed time.Duration) {
+	t.Helper()
+	if !errors.Is(err, client.ErrLongPollingTimeout) {
+		t.Fatalf("Expected the polling timeout, got %v", err)
+	}
+	if elapsed >= 3*sharedDeadlineTimeout {
+		t.Errorf("Expected the job poll to stop near the %s deadline, took %s", sharedDeadlineTimeout, elapsed)
+	}
+}
+
+// The job poll after a busy wait gets what is left of the polling timeout.
+func TestUpdateVpnConnectionPollSharesTheDeadline(t *testing.T) {
+	setBusyChainInterval(t)
+	gpcnClient := sharedDeadlineServer(t, http.MethodPut)
+	gpcnClient.Config().PollingTimeout = sharedDeadlineTimeout
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	accepted, err := UpdateVpnConnection(gpcnClient, ctx, testVpcID, testConnID, map[string]any{"dpd": false})
+	assertPollSharedTheDeadline(t, err, time.Since(start))
+	if !accepted {
+		t.Error("Expected the PUT that answered 202 to read as accepted")
+	}
+}
+
+func TestDeleteVpnConnectionPollSharesTheDeadline(t *testing.T) {
+	setBusyChainInterval(t)
+	gpcnClient := sharedDeadlineServer(t, http.MethodDelete)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	err := deleteVpnConnection(gpcnClient, ctx, testVpcID, testConnID, 10*time.Millisecond, sharedDeadlineTimeout)
+	assertPollSharedTheDeadline(t, err, time.Since(start))
+}

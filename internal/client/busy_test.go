@@ -191,7 +191,7 @@ func TestAwaitHolderReturnsNilOnTerminalAnswers(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			gpcnClient, calls := holderServer(t, http.StatusOK, tt.body)
 
-			if err := AwaitHolder(gpcnClient, t.Context(), "h1", time.Now().Add(5*time.Second)); err != nil {
+			if err := AwaitHolder(gpcnClient, t.Context(), "h1", time.Now(), time.Now().Add(5*time.Second)); err != nil {
 				t.Errorf("AwaitHolder = %v, want nil", err)
 			}
 			if got := int(calls.Load()); got != 1 {
@@ -207,7 +207,7 @@ func TestAwaitHolderStopsAtDeadline(t *testing.T) {
 	t.Run("the deadline has passed", func(t *testing.T) {
 		gpcnClient, calls := holderServer(t, http.StatusOK, holderJobsBody(`{"id":"h1","stage":"running","outcome":null}`))
 
-		err := AwaitHolder(gpcnClient, t.Context(), "h1", time.Now().Add(-time.Second))
+		err := AwaitHolder(gpcnClient, t.Context(), "h1", time.Now(), time.Now().Add(-time.Second))
 		if !errors.Is(err, ErrHolderStillRunning) {
 			t.Errorf("AwaitHolder = %v, want ErrHolderStillRunning", err)
 		}
@@ -219,7 +219,7 @@ func TestAwaitHolderStopsAtDeadline(t *testing.T) {
 	t.Run("the holder outlives the deadline", func(t *testing.T) {
 		gpcnClient, calls := holderServer(t, http.StatusOK, holderJobsBody(`{"id":"h1","stage":"running","outcome":null}`))
 
-		err := AwaitHolder(gpcnClient, t.Context(), "h1", time.Now().Add(50*time.Millisecond))
+		err := AwaitHolder(gpcnClient, t.Context(), "h1", time.Now(), time.Now().Add(50*time.Millisecond))
 		if !errors.Is(err, ErrHolderStillRunning) {
 			t.Fatalf("AwaitHolder = %v, want ErrHolderStillRunning", err)
 		}
@@ -238,7 +238,7 @@ func TestAwaitHolderReturnsOtherErrors(t *testing.T) {
 	gpcnClient, _ := holderServer(t, http.StatusBadRequest,
 		`{"success":false,"message":"jobIds must be uuids","error":{"code":"VALIDATION_ERROR","statusCode":400,"details":null}}`)
 
-	err := AwaitHolder(gpcnClient, t.Context(), "h1", time.Now().Add(5*time.Second))
+	err := AwaitHolder(gpcnClient, t.Context(), "h1", time.Now(), time.Now().Add(5*time.Second))
 	if err == nil {
 		t.Fatal("AwaitHolder = nil, want the read error")
 	}
@@ -248,5 +248,24 @@ func TestAwaitHolderReturnsOtherErrors(t *testing.T) {
 	var httpErr *HTTPError
 	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusBadRequest {
 		t.Errorf("AwaitHolder = %v, want the 400 from the read", err)
+	}
+}
+
+// The elapsed time in the deadline error counts from the start of the
+// caller's wait, not from the call to AwaitHolder.
+func TestAwaitHolderReportsElapsedFromWaitStart(t *testing.T) {
+	fastHolderPolling(t)
+	gpcnClient, calls := holderServer(t, http.StatusOK, holderJobsBody(`{"id":"h1","stage":"running","outcome":null}`))
+
+	start := time.Now().Add(-90 * time.Second)
+	err := AwaitHolder(gpcnClient, t.Context(), "h1", start, time.Now().Add(-time.Second))
+	if !errors.Is(err, ErrHolderStillRunning) {
+		t.Fatalf("AwaitHolder = %v, want ErrHolderStillRunning", err)
+	}
+	if want := "after 1m30s"; !strings.Contains(err.Error(), want) {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), want)
+	}
+	if got := int(calls.Load()); got != 0 {
+		t.Errorf("poll calls = %d, want 0", got)
 	}
 }
