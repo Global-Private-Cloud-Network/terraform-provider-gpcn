@@ -204,7 +204,7 @@ func vmPlanTestNetworkInterfacesBody(birthSubnetID string) map[string]any {
 // the configuration and leaves the refresh plan empty. The returned functions change the
 // stored name and SKU out of band, which is how a test creates drift.
 // The sizes arm reports no upgrade target, so a planned size change asks for a replacement.
-func startVirtualMachinePlanMockServer(t *testing.T) (*httptest.Server, func(string), func(string)) {
+func startVirtualMachinePlanMockServer(t *testing.T, networkHotplug ...any) (*httptest.Server, func(string), func(string)) {
 	t.Helper()
 
 	var mu sync.Mutex
@@ -246,7 +246,11 @@ func startVirtualMachinePlanMockServer(t *testing.T) (*httptest.Server, func(str
 			mu.Lock()
 			currentName, currentStatus, currentSku := name, status, skuId
 			mu.Unlock()
-			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, currentSku))
+			body := vmPlanTestReadBody(currentName, currentStatus, currentSku)
+			if len(networkHotplug) > 0 {
+				body["data"].(map[string]any)["networkHotplug"] = networkHotplug[0]
+			}
+			testutil.WriteJSONResponse(w, body)
 		case r.Method == http.MethodPut && r.URL.Path == vmPath:
 			body := testutil.ReadRequestBody(r)
 			mu.Lock()
@@ -4951,4 +4955,40 @@ func TestVirtualMachineDeleteReadFailureNamesTheRead(t *testing.T) {
 			},
 		},
 	})
+}
+
+// The updated API reports networkHotplug as a JSON boolean. The create, the refresh
+// and the plan after it each read the machine, so each must take that form.
+func TestVirtualMachineResourceReadsBooleanNetworkHotplug(t *testing.T) {
+	cases := []struct {
+		hotplug bool
+		want    string
+	}{
+		{hotplug: true, want: "true"},
+		{hotplug: false, want: "false"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.want, func(t *testing.T) {
+			shortenVirtualMachinePolling(t)
+			server, _, _ := startVirtualMachinePlanMockServer(t, tc.hotplug)
+
+			config := vmPlanTestConfig(server.URL, "vm-plan-hotplug-bool")
+			want := tc.want
+
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config: config,
+						Check:  resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_hotplug", want),
+					},
+					{
+						RefreshState: true,
+						Check:        resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_hotplug", want),
+					},
+				},
+			})
+		})
+	}
 }

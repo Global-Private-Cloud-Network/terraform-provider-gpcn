@@ -97,7 +97,7 @@ func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.Gp
 	var allDiags diag.Diagnostics
 
 	model.ID = types.StringValue(response.Data.ID)
-	model.NetworkHotplug = types.BoolValue(response.Data.NetworkHotplug == 1)
+	model.NetworkHotplug = types.BoolValue(bool(response.Data.NetworkHotplug))
 
 	if response.Data.ResourceGroupId != "" {
 		model.ResourceGroupId = types.StringValue(response.Data.ResourceGroupId)

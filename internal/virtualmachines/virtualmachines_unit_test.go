@@ -2538,3 +2538,44 @@ func TestCreateVirtualMachineReturnsIDWhenStatusWaitFails(t *testing.T) {
 		t.Errorf("Expected ID %q from the completed job, got %q", vmID, id)
 	}
 }
+
+// The updated API reports networkHotplug as a JSON boolean, and the current API as a
+// number. The body is literal JSON, so the decoder cannot make its fixture agree.
+func TestGetVirtualMachineReadsBooleanNetworkHotplug(t *testing.T) {
+	const vmID = "vm-hotplug-bool"
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+vmID+"/network-interfaces"):
+				testutil.WriteJSONResponse(w, emptyNetworkInterfacesResponse())
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+vmID):
+				_, _ = w.Write([]byte(`{"success":true,"message":"VM retrieved","data":{` +
+					`"id":"` + vmID + `","name":"test-vm","status":"Running",` +
+					`"createdAt":"2024-01-01T00:00:00Z","updatedAt":"2024-01-01T00:00:00Z",` +
+					`"configuration":{"id":1,"name":"G-Micro-1","code":"G-Micro-1","categoryCode":"general",` +
+					`"skuId":"sku-1","skuCode":"general-G-Micro-1","cpu":1,"ram":2,"disk":20},` +
+					`"image":"` + testVMImage + `","username":"admin","networkHotplug":true,` +
+					`"datacenter":{"id":"` + testDatacenterID + `","name":"Chicago","region":"Central",` +
+					`"countryAbbr":"US","country":"United States"}}}`))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	response, err := GetVirtualMachine(gpcnClient, context.Background(), vmID)
+	if err != nil {
+		t.Fatalf("GetVirtualMachine failed on a boolean networkHotplug: %v", err)
+	}
+
+	model, diags := MapVirtualMachineResponseToModel(context.Background(), gpcnClient, response, createTestVMModel("test-vm", testVMImage, false))
+	if diags.HasError() {
+		t.Fatalf("Unexpected error: %v", diags)
+	}
+	if !model.NetworkHotplug.ValueBool() {
+		t.Errorf("Expected network_hotplug true, got %s", model.NetworkHotplug)
+	}
+}

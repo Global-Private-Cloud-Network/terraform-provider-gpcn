@@ -11,6 +11,7 @@ ENHANCEMENTS:
 BUG FIXES:
 
 - **Virtual Machine**: destroying a machine in the Error state no longer stops it first. GPCN™ deletes such a machine directly, and a stop could be refused. A machine that a failed create left behind also skips the network interface detach.
+- **Virtual Machine**: reading a machine no longer fails when GPCN™ reports `networkHotplug` as `true` or `false` instead of `1` or `0`. Earlier releases cannot read a virtual machine from an API that does.
 
 ## 1.6.0 (October 27, 2026)
 
