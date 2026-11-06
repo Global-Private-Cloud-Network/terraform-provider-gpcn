@@ -58,37 +58,74 @@ func SetupMockServerWithGpcnClient(config MockServerConfig) (*httptest.Server, *
 	return server, gpcnClient
 }
 
-// HandleJobResponse is a helper function to handle job status polling requests
+// The job helpers below build the API's answers from map literals, never the
+// client's own types, so a change to the client's decoder cannot make its
+// fixtures agree with it.
+
+// HandleJobResponse answers a job status read with one job, as the API reports
+// it: an id, a stage and an outcome that stays null until the job ends.
 func HandleJobResponse(w http.ResponseWriter, jobID, resourceID string, completed bool) {
-	response := client.JobStatusMultiResponse{
-		Success: true,
-		Message: "Job status retrieved",
-		Data: client.JobStatusDataResponse{
-			Jobs: []client.JobResponse{
-				{
-					JobID:       jobID,
-					ResourceId:  resourceID,
-					IsCompleted: completed,
-					HasFailed:   false,
-				},
-			},
-		},
+	job := map[string]any{
+		"id":             jobID,
+		"resourceType":   "virtual_machine",
+		"operation":      "create",
+		"verb":           "Creating",
+		"resourceId":     nil,
+		"resourceName":   nil,
+		"stage":          "running",
+		"outcome":        nil,
+		"progress":       50,
+		"message":        nil,
+		"failureReason":  nil,
+		"retryable":      false,
+		"createdAt":      "2026-11-02T00:00:00Z",
+		"startedAt":      "2026-11-02T00:00:00Z",
+		"lastProgressAt": "2026-11-02T00:00:00Z",
+		"completedAt":    nil,
+		"version":        1,
 	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
+	if resourceID != "" {
+		job["resourceId"] = resourceID
+	}
+	if completed {
+		job["stage"] = "completed"
+		job["outcome"] = "succeeded"
+		job["progress"] = 100
+		job["completedAt"] = "2026-11-02T00:00:01Z"
+	}
+	WriteJSONResponse(w, map[string]any{
+		"success": true,
+		"message": "Job status retrieved",
+		"data":    map[string]any{"jobs": []any{job}, "notFound": []any{}},
+	})
 }
 
-// HandleCreateJobResponse is a helper function to handle responses that start a job
+// HandleCreateJobResponse answers a request that starts a job, as the API
+// accepts it: the job under data.job, queued.
 func HandleCreateJobResponse(w http.ResponseWriter, jobID string, message string) {
-	response := client.JobStatusSingularResponse{
-		Success: true,
-		Message: message,
-		Data: client.JobResponse{
-			JobID: jobID,
-		},
-	}
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(response)
+	WriteJSONResponse(w, map[string]any{
+		"success": true,
+		"message": message,
+		"data": map[string]any{"job": map[string]any{
+			"id":             jobID,
+			"resourceType":   "virtual_machine",
+			"operation":      "create",
+			"verb":           "Creating",
+			"resourceId":     nil,
+			"resourceName":   nil,
+			"stage":          "queued",
+			"outcome":        nil,
+			"progress":       0,
+			"message":        nil,
+			"failureReason":  nil,
+			"retryable":      false,
+			"createdAt":      "2026-11-02T00:00:00Z",
+			"startedAt":      nil,
+			"lastProgressAt": nil,
+			"completedAt":    nil,
+			"version":        1,
+		}},
+	})
 }
 
 // ReadRequestBody reads and unmarshals the request body into a map

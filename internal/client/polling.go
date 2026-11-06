@@ -32,6 +32,101 @@ type JobResponse struct {
 	ResourceId         string  `json:"resourceId"`
 	ResourceName       string  `json:"resourceName"`
 	ResourceType       string  `json:"resourceType"`
+
+	// The fields below have no legacy key, so an encoded JobResponse keeps
+	// the legacy keys only. UnmarshalJSON fills them.
+
+	// Outcome stays nil while the job runs. A terminal job sets it.
+	Outcome       *string `json:"-"`
+	FailureReason string  `json:"-"`
+	// Resource is the row an accepted answer carries beside its job.
+	Resource json.RawMessage `json:"-"`
+}
+
+// jobResponseFields has no methods, so a decode into it does not call
+// UnmarshalJSON again.
+type jobResponseFields JobResponse
+
+// A pointer tells an absent or null key from a zero value.
+type jobResponseKeys struct {
+	ID            *string  `json:"id"`
+	Outcome       *string  `json:"outcome"`
+	FailureReason *string  `json:"failureReason"`
+	Progress      *float64 `json:"progress"`
+}
+
+// UnmarshalJSON reads both job shapes the API sends. The id is "id" or
+// "jobId", and the progress is "progress" or "progressPercentage". An accepted
+// answer can wrap the job as {"job": <job>, "resource": <row>}. ResourceId
+// then falls back to the row's id.
+func (j *JobResponse) UnmarshalJSON(data []byte) error {
+	if isJSONNull(data) {
+		return nil
+	}
+
+	var keys map[string]json.RawMessage
+	if err := json.Unmarshal(data, &keys); err == nil {
+		if inner, ok := keys["job"]; ok && isJSONObject(inner) {
+			if err := j.decodeFlatJob(inner); err != nil {
+				return err
+			}
+			if resource, ok := keys["resource"]; ok && !isJSONNull(resource) {
+				j.Resource = resource
+			}
+			j.fillResourceIDFromResource()
+			return nil
+		}
+	}
+
+	if err := j.decodeFlatJob(data); err != nil {
+		return err
+	}
+	j.fillResourceIDFromResource()
+	return nil
+}
+
+// The keys "id" and "progress" win over "jobId" and "progressPercentage".
+func (j *JobResponse) decodeFlatJob(data []byte) error {
+	if err := json.Unmarshal(data, (*jobResponseFields)(j)); err != nil {
+		return err
+	}
+
+	var extra jobResponseKeys
+	if err := json.Unmarshal(data, &extra); err != nil {
+		return err
+	}
+	if extra.ID != nil && *extra.ID != "" {
+		j.JobID = *extra.ID
+	}
+	if extra.Progress != nil {
+		j.ProgressPercentage = *extra.Progress
+	}
+	j.Outcome = extra.Outcome
+	j.FailureReason = derefString(extra.FailureReason)
+	return nil
+}
+
+// The job's own resourceId wins. A row id that is not a string is ignored.
+func (j *JobResponse) fillResourceIDFromResource() {
+	if j.ResourceId != "" || j.Resource == nil {
+		return
+	}
+	var row map[string]any
+	if err := json.Unmarshal(j.Resource, &row); err != nil {
+		return
+	}
+	if id, ok := row["id"].(string); ok {
+		j.ResourceId = id
+	}
+}
+
+func isJSONNull(raw []byte) bool {
+	return bytes.Equal(bytes.TrimSpace(raw), []byte("null"))
+}
+
+func isJSONObject(raw []byte) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && trimmed[0] == '{'
 }
 
 // JobStageCancelled is the stage an operator cancel leaves a job in. It is
@@ -39,6 +134,14 @@ type JobResponse struct {
 //
 //nolint:misspell // The value is the byte the API sends, not prose.
 const JobStageCancelled = "cancelled"
+
+const (
+	jobOutcomeSucceeded = "succeeded"
+	jobOutcomeFailed    = "failed"
+	//nolint:misspell // The value is the byte the API sends, not prose.
+	jobOutcomeCancelled = "cancelled"
+	jobOutcomeAbandoned = "abandoned"
+)
 
 type JobStatusMultiResponse struct {
 	Success bool                  `json:"success"`
@@ -83,6 +186,10 @@ func PerformLongPollingWithConfig(gpcnClient *GpcnClient, ctx context.Context, a
 	tflog.Info(ctx, fmt.Sprintf(LogStartingPerformLongPollingWithAction, action),
 		map[string]any{"job_id": jobId})
 
+	if jobId == "" {
+		return nil, ErrNoJobID
+	}
+
 	startTime := time.Now()
 	interval := config.InitialInterval
 	iteration := 1
@@ -100,7 +207,7 @@ func PerformLongPollingWithConfig(gpcnClient *GpcnClient, ctx context.Context, a
 		// The API omits a job that does not exist or belongs to another tenant.
 		// An empty array is therefore permanent, and waiting cannot change it.
 		if len(jobResponse.Data.Jobs) == 0 {
-			return nil, fmt.Errorf(ErrJobNotVisible, jobId)
+			return nil, &jobNotVisibleError{message: fmt.Sprintf(ErrJobNotVisible, jobId)}
 		}
 
 		job := jobResponse.Data.Jobs[0]
@@ -113,6 +220,28 @@ func PerformLongPollingWithConfig(gpcnClient *GpcnClient, ctx context.Context, a
 				"progress_percentage": job.ProgressPercentage,
 				"message":             job.Message,
 			})
+
+		// The outcome alone says how such a job ended. Its stage can disagree,
+		// and it carries no booleans.
+		if job.Outcome != nil {
+			switch *job.Outcome {
+			case jobOutcomeSucceeded:
+				tflog.Info(ctx, fmt.Sprintf(LogLongPollingCompletedSuccessfully, action),
+					map[string]any{"job_id": jobId, "elapsed_seconds": int(elapsed.Seconds())})
+				return jobResponse, nil
+			case jobOutcomeFailed:
+				if detail := jobFailureDetail(job, jobResponse.Message); detail != "" {
+					return nil, fmt.Errorf("job %s for action %q: %w: %s", jobId, action, ErrJobFailed, detail)
+				}
+				return nil, fmt.Errorf("job %s for action %q: %w", jobId, action, ErrJobFailed)
+			case jobOutcomeCancelled:
+				return nil, &jobCancelledError{message: fmt.Sprintf(ErrJobCancelled, jobId, action)}
+			case jobOutcomeAbandoned:
+				return nil, &jobCancelledError{message: fmt.Sprintf(ErrJobAbandoned, jobId, action)}
+			default:
+				return nil, fmt.Errorf("job %s for action %q: %w: %s", jobId, action, ErrJobFailed, fmt.Sprintf(ErrDetailUnknownOutcome, *job.Outcome))
+			}
+		}
 
 		if job.HasFailed || (job.IsTerminal && !job.IsCompleted) {
 			if job.Stage == JobStageCancelled {
@@ -149,6 +278,9 @@ func PerformLongPollingWithConfig(gpcnClient *GpcnClient, ctx context.Context, a
 // The envelope message is the last resort, because the read path always sends
 // the same success sentence there.
 func jobFailureDetail(job JobResponse, envelopeMessage string) string {
+	if job.FailureReason != "" {
+		return job.FailureReason
+	}
 	if job.ErrorMessage != "" {
 		return job.ErrorMessage
 	}

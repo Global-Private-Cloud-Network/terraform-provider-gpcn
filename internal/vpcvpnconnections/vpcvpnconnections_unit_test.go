@@ -1,13 +1,17 @@
 package vpcvpnconnections
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -451,9 +455,7 @@ func TestVpcVpnConnectionUnitCreateVpnConnectionReturnsIDWhenTheJobFails(t *test
 				"jobId": "job-1", "vpnConnection": map[string]any{"id": testConnID},
 			}})
 		case r.URL.Path == "/v1/resource/jobs/":
-			testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{Success: true, Data: client.JobStatusDataResponse{
-				Jobs: []client.JobResponse{{JobID: "job-1", HasFailed: true, ErrorMessage: "boom"}},
-			}})
+			testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"job-1","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":true,"progressPercentage":0,"message":"","errorMessage":"boom","resourceId":"","resourceName":"","resourceType":""}]}}`))
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -724,4 +726,473 @@ func TestVpcVpnConnectionUnitDeleteParkedWithoutBudgetSendsNoResend(t *testing.T
 	if got := deletes.Load(); got != 1 {
 		t.Errorf("Expected only the first DELETE, got %d", got)
 	}
+}
+
+// The updated-wire 202 names the connection in data.resource. A failed create job
+// still returns that id, so the caller records the connection.
+func TestCreateVpnConnectionReadsAcceptedResource(t *testing.T) {
+	t.Parallel()
+
+	accepted := `{"success":true,"data":{` +
+		`"job":{"id":"job-1","operation":"create","resourceId":null,"stage":"queued",` +
+		`"outcome":null,"progress":0,"message":null,"failureReason":null},` +
+		`"resource":{"id":"` + testConnID + `","name":"x","state":"creating"}}}`
+	jobs := map[string]string{
+		"succeeded": `{"success":true,"data":{"jobs":[{"id":"job-1","operation":"create",` +
+			`"resourceId":"` + testConnID + `","stage":"completed","outcome":"succeeded","progress":100,` +
+			`"message":null,"failureReason":null}],"notFound":[]}}`,
+		"failed": `{"success":true,"data":{"jobs":[{"id":"job-1","operation":"create",` +
+			`"resourceId":"` + testConnID + `","stage":"failed","outcome":"failed","progress":30,` +
+			`"message":null,"failureReason":"the tunnel did not come up"}],"notFound":[]}}`,
+	}
+	for name, jobBody := range jobs {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			gpcnClient := apiServer(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/vpcs/"+testVpcID+"/vpn-connections":
+					w.WriteHeader(http.StatusAccepted)
+					_, _ = w.Write([]byte(accepted))
+				case r.URL.Path == "/v1/resource/jobs/":
+					_, _ = w.Write([]byte(jobBody))
+				default:
+					testutil.LogUnexpectedRequest(t, w, r)
+				}
+			})
+
+			id, rowMayExist, err := CreateVpnConnection(gpcnClient, context.Background(), testVpcID, map[string]any{"name": "x"})
+			if id != testConnID || !rowMayExist {
+				t.Errorf("Expected the connection ID %q and a row, got %q and %v", testConnID, id, rowMayExist)
+			}
+			if name == "succeeded" && err != nil {
+				t.Errorf("Expected no error, got %v", err)
+			}
+			if name == "failed" && !errors.Is(err, client.ErrJobFailed) {
+				t.Errorf("Expected a failed-job error, got %v", err)
+			}
+		})
+	}
+}
+
+// busyConnBody is the 409 the API answers while job h1 holds the connection.
+// A subnet job holds every connection of its VPC.
+const busyConnBody = `{"success":false,"message":"VPN connection is busy: create in progress.",` +
+	`"error":{"code":"RESOURCE_BUSY","statusCode":409,"details":{"resourceType":"vpnConnection",` +
+	`"resourceId":"` + testConnID + `","heldBy":{"jobId":"h1","operation":"create","verb":"create"}}}}`
+
+const goneConnBody = `{"success":false,"message":"VPN connection not found","error":{"code":"Resource Not Found","statusCode":404,"details":null}}`
+
+// connJobBody is a batch read of one job. An empty outcome is a live job.
+func connJobBody(jobID, outcome string) string {
+	if outcome == "" {
+		return `{"success":true,"data":{"jobs":[{"id":"` + jobID + `","operation":"create","resourceId":null,` +
+			`"stage":"running","outcome":null,"progress":10,"message":null,"failureReason":null}],"notFound":[]}}`
+	}
+	return `{"success":true,"data":{"jobs":[{"id":"` + jobID + `","operation":"delete","resourceId":"` + testConnID + `",` +
+		`"stage":"completed","outcome":"` + outcome + `","progress":100,"message":null,"failureReason":null}],"notFound":[]}}`
+}
+
+// connAcceptedBody is the 202 of a DELETE or a PUT that started jobID.
+func connAcceptedBody(jobID string) string {
+	return `{"success":true,"data":{"job":{"id":"` + jobID + `","operation":"delete","resourceId":"` + testConnID + `",` +
+		`"stage":"queued","outcome":null,"progress":0,"message":null,"failureReason":null},` +
+		`"resource":{"id":"` + testConnID + `","name":"x","state":"removing"}}}`
+}
+
+type connAnswer struct {
+	status int
+	body   string
+}
+
+// busyConnServer answers each request of a method with the next scripted
+// answer, and the last answer repeats. A job poll answers from jobs by job id.
+// The counts are per method, and per job id for the polls.
+type busyConnServer struct {
+	mu      sync.Mutex
+	answers map[string][]connAnswer
+	jobs    map[string]string
+	counts  map[string]int
+	bodies  [][]byte
+}
+
+func (s *busyConnServer) count(key string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.counts[key]
+}
+
+func (s *busyConnServer) client(t *testing.T) *client.GpcnClient {
+	t.Helper()
+	s.counts = map[string]int{}
+	return apiServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read the request body: %v", err)
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if r.URL.Path == client.JOBS_BASE_URL_V1 {
+			var request struct {
+				JobIDs []string `json:"jobIds"`
+			}
+			if err := json.Unmarshal(body, &request); err != nil || len(request.JobIDs) != 1 {
+				t.Errorf("unexpected job poll %s", body)
+				return
+			}
+			s.counts["poll "+request.JobIDs[0]]++
+			_, _ = w.Write([]byte(s.jobs[request.JobIDs[0]]))
+			return
+		}
+		if r.Method == http.MethodPut {
+			s.bodies = append(s.bodies, body)
+		}
+		answers := s.answers[r.Method]
+		if len(answers) == 0 {
+			testutil.LogUnexpectedRequest(t, w, r)
+			return
+		}
+		index := min(s.counts[r.Method], len(answers)-1)
+		s.counts[r.Method]++
+		w.WriteHeader(answers[index].status)
+		_, _ = w.Write([]byte(answers[index].body))
+	})
+}
+
+// shortenRemovalPollInterval changes a package variable, so a test that calls
+// it does not run in parallel.
+func shortenRemovalPollInterval(t *testing.T) {
+	t.Helper()
+	previous := RemovalPollInterval
+	RemovalPollInterval = time.Millisecond
+	t.Cleanup(func() { RemovalPollInterval = previous })
+}
+
+func TestDeleteVpnConnectionWaitsOutBusyHolder(t *testing.T) {
+	shortenRemovalPollInterval(t)
+	server := &busyConnServer{
+		answers: map[string][]connAnswer{http.MethodDelete: {
+			{http.StatusConflict, busyConnBody},
+			{http.StatusAccepted, connAcceptedBody("job-delete")},
+		}},
+		jobs: map[string]string{"h1": connJobBody("h1", "succeeded"), "job-delete": connJobBody("job-delete", "succeeded")},
+	}
+	gpcnClient := server.client(t)
+
+	if err := deleteVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID, time.Millisecond, time.Minute); err != nil {
+		t.Fatalf("Expected the DELETE after the holder to succeed, got %v", err)
+	}
+	if got := server.count(http.MethodDelete); got != 2 {
+		t.Errorf("Expected 2 DELETEs, got %d", got)
+	}
+	if got := server.count("poll h1"); got != 1 {
+		t.Errorf("Expected one poll of the holder, got %d", got)
+	}
+}
+
+func TestDeleteVpnConnectionReturnsHolderDeadline(t *testing.T) {
+	shortenRemovalPollInterval(t)
+	server := &busyConnServer{
+		answers: map[string][]connAnswer{http.MethodDelete: {{http.StatusConflict, busyConnBody}}},
+		jobs:    map[string]string{"h1": connJobBody("h1", "")},
+	}
+	gpcnClient := server.client(t)
+
+	err := deleteVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID, time.Millisecond, 300*time.Millisecond)
+	if !errors.Is(err, client.ErrHolderStillRunning) {
+		t.Fatalf("Expected the holder deadline error, got %v", err)
+	}
+	if got := server.count(http.MethodDelete); got != 1 {
+		t.Errorf("Expected one DELETE, got %d", got)
+	}
+}
+
+// The busy answer to the resend waits out the holder. The DELETE after it is
+// still the one resend, so a row that then goes reads as removed.
+func TestResendDeleteWaitsOutBusyHolder(t *testing.T) {
+	shortenRemovalPollInterval(t)
+	const reason = "The tunnel is stuck."
+	parked := fmt.Sprintf(`{"success":true,"data":{"id":%q,"name":"x","state":"removing","failureReason":%q}}`, testConnID, reason)
+	failed := `{"success":true,"data":{"jobs":[{"id":"job-delete","operation":"delete","resourceId":"` + testConnID + `",` +
+		`"stage":"failed","outcome":"failed","progress":40,"message":null,"failureReason":"` + reason + `"}],"notFound":[]}}`
+	server := &busyConnServer{
+		answers: map[string][]connAnswer{
+			http.MethodDelete: {
+				{http.StatusAccepted, connAcceptedBody("job-delete")},
+				{http.StatusConflict, busyConnBody},
+				{http.StatusAccepted, connAcceptedBody("job-resend")},
+			},
+			http.MethodGet: {{http.StatusOK, parked}, {http.StatusNotFound, goneConnBody}},
+		},
+		jobs: map[string]string{
+			"job-delete": failed,
+			"h1":         connJobBody("h1", "succeeded"),
+			"job-resend": connJobBody("job-resend", "succeeded"),
+		},
+	}
+	gpcnClient := server.client(t)
+
+	if err := deleteVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID, time.Millisecond, time.Minute); err != nil {
+		t.Fatalf("Expected the resend after the holder to remove the connection, got %v", err)
+	}
+	if got := server.count(http.MethodDelete); got != 3 {
+		t.Errorf("Expected 3 DELETEs (the removal, the busy resend, the resend), got %d", got)
+	}
+	if got := server.count("poll job-resend"); got != 1 {
+		t.Errorf("Expected one poll of the resend job, got %d", got)
+	}
+}
+
+func TestUpdateVpnConnectionWaitsOutBusyHolder(t *testing.T) {
+	shortenRemovalPollInterval(t)
+	server := &busyConnServer{
+		answers: map[string][]connAnswer{http.MethodPut: {
+			{http.StatusConflict, busyConnBody},
+			{http.StatusAccepted, connAcceptedBody("job-update")},
+		}},
+		jobs: map[string]string{"h1": connJobBody("h1", "succeeded"), "job-update": connJobBody("job-update", "succeeded")},
+	}
+	gpcnClient := server.client(t)
+
+	accepted, err := UpdateVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID,
+		map[string]any{"description": "edge", "dpd": false})
+	if err != nil || !accepted {
+		t.Fatalf("accepted = %v, err = %v; want true, nil", accepted, err)
+	}
+	server.mu.Lock()
+	defer server.mu.Unlock()
+	if len(server.bodies) != 2 {
+		t.Fatalf("Expected 2 PUTs, got %d", len(server.bodies))
+	}
+	if len(server.bodies[0]) == 0 || !bytes.Equal(server.bodies[0], server.bodies[1]) {
+		t.Errorf("Expected the same body twice, got %s and %s", server.bodies[0], server.bodies[1])
+	}
+	if got := server.counts["poll job-update"]; got != 1 {
+		t.Errorf("Expected one poll of the update job, got %d", got)
+	}
+}
+
+// busyChainConnServer answers every request of the method with a 409
+// RESOURCE_BUSY that names a new holder, h1, h2 and so on. Every holder ends
+// on its first poll. The counter holds the busy answers.
+func busyChainConnServer(t *testing.T, method string) (*client.GpcnClient, *atomic.Int32) {
+	t.Helper()
+	var busy atomic.Int32
+	gpcnClient := apiServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == client.JOBS_BASE_URL_V1:
+			ids, _ := testutil.ReadRequestBody(r)["jobIds"].([]any)
+			jobID, _ := ids[0].(string)
+			_, _ = w.Write([]byte(connJobBody(jobID, "succeeded")))
+		case r.Method == method:
+			holder := fmt.Sprintf("h%d", busy.Add(1))
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(strings.Replace(busyConnBody, `"jobId":"h1"`, `"jobId":"`+holder+`"`, 1)))
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	})
+	return gpcnClient, &busy
+}
+
+// setBusyChainInterval changes a package variable, so a test that calls it
+// does not run in parallel.
+func setBusyChainInterval(t *testing.T) {
+	t.Helper()
+	previous := RemovalPollInterval
+	RemovalPollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { RemovalPollInterval = previous })
+}
+
+const busyChainTimeout = 300 * time.Millisecond
+
+func assertBusyChainStopped(t *testing.T, err error, elapsed time.Duration, busy *atomic.Int32) {
+	t.Helper()
+	if !errors.Is(err, client.ErrBusyWaitExhausted) {
+		t.Fatalf("Expected the busy wait error, got %v", err)
+	}
+	if elapsed >= 3*busyChainTimeout {
+		t.Errorf("Expected the chain to stop near the %s deadline, took %s", busyChainTimeout, elapsed)
+	}
+	if got := busy.Load(); got < 2 {
+		t.Errorf("Expected a chain of holders, got %d busy answers", got)
+	}
+}
+
+// Each busy answer names a new holder that ends at once. The deadline is
+// shared, so the chain still stops at it.
+func TestDeleteVpnConnectionBusyChainStopsAtDeadline(t *testing.T) {
+	setBusyChainInterval(t)
+	gpcnClient, busy := busyChainConnServer(t, http.MethodDelete)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	err := deleteVpnConnection(gpcnClient, ctx, testVpcID, testConnID, 10*time.Millisecond, busyChainTimeout)
+	assertBusyChainStopped(t, err, time.Since(start), busy)
+}
+
+func TestUpdateVpnConnectionBusyChainStopsAtDeadline(t *testing.T) {
+	setBusyChainInterval(t)
+	gpcnClient, busy := busyChainConnServer(t, http.MethodPut)
+	gpcnClient.Config().PollingTimeout = busyChainTimeout
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	accepted, err := UpdateVpnConnection(gpcnClient, ctx, testVpcID, testConnID, map[string]any{"dpd": false})
+	assertBusyChainStopped(t, err, time.Since(start), busy)
+	if accepted {
+		t.Error("Expected a PUT that the API never took to read as not accepted")
+	}
+}
+
+func TestResendDeleteBusyChainStopsAtDeadline(t *testing.T) {
+	setBusyChainInterval(t)
+	gpcnClient, busy := busyChainConnServer(t, http.MethodDelete)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	_, _, err := resendDelete(gpcnClient, ctx, testVpcID, testConnID, start, busyChainTimeout)
+	assertBusyChainStopped(t, err, time.Since(start), busy)
+}
+
+// sharedDeadlineServer answers the first request of the method with a 409
+// RESOURCE_BUSY whose holder ends after holderDelay. The next request gets a
+// 202 after acceptDelay, and its job never ends. The counter holds the
+// requests of the method.
+func sharedDeadlineServer(t *testing.T, method string, holderDelay, acceptDelay time.Duration) (*client.GpcnClient, *atomic.Int32) {
+	t.Helper()
+	var sent atomic.Int32
+	gpcnClient := apiServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == client.JOBS_BASE_URL_V1:
+			ids, _ := testutil.ReadRequestBody(r)["jobIds"].([]any)
+			jobID, _ := ids[0].(string)
+			if jobID == "h1" {
+				time.Sleep(holderDelay)
+				_, _ = w.Write([]byte(connJobBody(jobID, "succeeded")))
+				return
+			}
+			_, _ = w.Write([]byte(connJobBody(jobID, "")))
+		case r.Method == method && sent.Add(1) == 1:
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(busyConnBody))
+		case r.Method == method:
+			time.Sleep(acceptDelay)
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(connAcceptedBody("job-live")))
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	})
+	return gpcnClient, &sent
+}
+
+// The holder ends before the deadline, so the second request goes out. The
+// deadline passes while that request waits for its 202.
+const (
+	sharedDeadlineTimeout     = 400 * time.Millisecond
+	sharedDeadlineHolderDelay = 250 * time.Millisecond
+	sharedDeadlineAcceptDelay = 200 * time.Millisecond
+)
+
+func assertPollSharedTheDeadline(t *testing.T, err error, elapsed time.Duration) {
+	t.Helper()
+	if !errors.Is(err, client.ErrLongPollingTimeout) {
+		t.Fatalf("Expected the polling timeout, got %v", err)
+	}
+	if elapsed >= 3*sharedDeadlineTimeout {
+		t.Errorf("Expected the job poll to stop near the %s deadline, took %s", sharedDeadlineTimeout, elapsed)
+	}
+}
+
+// The job poll after a busy wait gets what is left of the polling timeout.
+func TestUpdateVpnConnectionPollSharesTheDeadline(t *testing.T) {
+	setBusyChainInterval(t)
+	gpcnClient, _ := sharedDeadlineServer(t, http.MethodPut, sharedDeadlineHolderDelay, sharedDeadlineAcceptDelay)
+	gpcnClient.Config().PollingTimeout = sharedDeadlineTimeout
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	accepted, err := UpdateVpnConnection(gpcnClient, ctx, testVpcID, testConnID, map[string]any{"dpd": false})
+	assertPollSharedTheDeadline(t, err, time.Since(start))
+	if !accepted {
+		t.Error("Expected the PUT that answered 202 to read as accepted")
+	}
+}
+
+func TestDeleteVpnConnectionPollSharesTheDeadline(t *testing.T) {
+	setBusyChainInterval(t)
+	gpcnClient, _ := sharedDeadlineServer(t, http.MethodDelete, sharedDeadlineHolderDelay, sharedDeadlineAcceptDelay)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	err := deleteVpnConnection(gpcnClient, ctx, testVpcID, testConnID, 10*time.Millisecond, sharedDeadlineTimeout)
+	assertPollSharedTheDeadline(t, err, time.Since(start))
+}
+
+// The holder ends after the deadline, so the request does not go out again.
+const (
+	passedDeadlineTimeout     = 400 * time.Millisecond
+	passedDeadlineHolderDelay = 450 * time.Millisecond
+)
+
+func assertSentNothingAfterTheDeadline(t *testing.T, ctx context.Context, err error, sent *atomic.Int32) {
+	t.Helper()
+	if !errors.Is(err, client.ErrBusyWaitExhausted) {
+		t.Fatalf("Expected the busy wait error, got %v", err)
+	}
+	if errors.Is(err, client.ErrHolderStillRunning) {
+		t.Errorf("Expected an error that does not say the holder still runs, got %v", err)
+	}
+	if want := "job h1 ended as the wait for it ran out after "; !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("Expected the error to start with %q, got %q", want, err.Error())
+	}
+	if got := sent.Load(); got != 1 {
+		t.Errorf("Expected one request, got %d", got)
+	}
+	if ctx.Err() != nil {
+		t.Errorf("Expected the call to end before the context deadline, got %v", ctx.Err())
+	}
+}
+
+func TestUpdateVpnConnectionSendsNothingAfterTheDeadline(t *testing.T) {
+	setBusyChainInterval(t)
+	gpcnClient, sent := sharedDeadlineServer(t, http.MethodPut, passedDeadlineHolderDelay, 0)
+	gpcnClient.Config().PollingTimeout = passedDeadlineTimeout
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	accepted, err := UpdateVpnConnection(gpcnClient, ctx, testVpcID, testConnID, map[string]any{"dpd": false})
+	assertSentNothingAfterTheDeadline(t, ctx, err, sent)
+	if accepted {
+		t.Error("Expected a PUT that the API never took to read as not accepted")
+	}
+}
+
+func TestDeleteVpnConnectionSendsNothingAfterTheDeadline(t *testing.T) {
+	setBusyChainInterval(t)
+	gpcnClient, sent := sharedDeadlineServer(t, http.MethodDelete, passedDeadlineHolderDelay, 0)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := deleteVpnConnection(gpcnClient, ctx, testVpcID, testConnID, 10*time.Millisecond, passedDeadlineTimeout)
+	assertSentNothingAfterTheDeadline(t, ctx, err, sent)
+}
+
+func TestResendDeleteSendsNothingAfterTheDeadline(t *testing.T) {
+	setBusyChainInterval(t)
+	gpcnClient, sent := sharedDeadlineServer(t, http.MethodDelete, passedDeadlineHolderDelay, 0)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _, err := resendDelete(gpcnClient, ctx, testVpcID, testConnID, time.Now(), passedDeadlineTimeout)
+	assertSentNothingAfterTheDeadline(t, ctx, err, sent)
 }

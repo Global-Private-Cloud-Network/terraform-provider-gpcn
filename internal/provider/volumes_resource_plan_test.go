@@ -1248,3 +1248,105 @@ func TestVolumeResourcePlanUnsupportedGrowDoesNotMove(t *testing.T) {
 		t.Errorf("expected no move and no resize, saw %d move(s) and %d resize(s)", len(moveBodies), resizeCount)
 	}
 }
+
+const volUpdatedPlanTestFailureReason = "the storage pool is full"
+
+// A create job that fails on the updated wire leaves the volume behind. The
+// 202 named it, so the create saves its ID, Terraform taints it, and the next
+// apply replaces it.
+func TestVolumeCreateJobFailedIsReplaced(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	failCreateJob := true
+	deletes := 0
+	volumePath := "/v1/resource/volumes/" + volPlanTestID
+	job := func(jobID, operation, stage string, outcome, failureReason any) map[string]any {
+		return map[string]any{
+			"id":            jobID,
+			"operation":     operation,
+			"resourceId":    volPlanTestID,
+			"stage":         stage,
+			"outcome":       outcome,
+			"progress":      0,
+			"message":       nil,
+			"failureReason": failureReason,
+		}
+	}
+	accepted := func(w http.ResponseWriter, data map[string]any) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": data})
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+volPlanTestDatacenterID+"/volume-sizes":
+			testutil.WriteJSONResponse(w, volPlanTestSizesBody())
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/volumes/":
+			accepted(w, map[string]any{
+				"job":      job("job-create", "create", "queued", nil, nil),
+				"resource": map[string]any{"id": volPlanTestID, "name": volPlanTestName, "sizeGb": volPlanTestSizeGb},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			jobID := "job-create"
+			if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
+				jobID, _ = ids[0].(string)
+			}
+			mu.Lock()
+			failing := jobID == "job-create" && failCreateJob
+			mu.Unlock()
+			answer := job(jobID, "create", "completed", "succeeded", nil)
+			if failing {
+				answer = job(jobID, "create", "failed", "failed", volUpdatedPlanTestFailureReason)
+			}
+			testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{
+				"jobs": []map[string]any{answer}, "notFound": []string{},
+			}})
+		case r.Method == http.MethodGet && r.URL.Path == volumePath:
+			testutil.WriteJSONResponse(w, volPlanTestReadBody(volPlanTestName, volPlanTestSizeGb, volPlanTestDefaultGroup))
+		case r.Method == http.MethodDelete && r.URL.Path == volumePath:
+			mu.Lock()
+			deletes++
+			mu.Unlock()
+			accepted(w, map[string]any{"job": job("job-delete", "delete", "queued", nil, nil)})
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	config := volPlanTestConfig(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexp.MustCompile(`the\s+storage\s+pool\s+is\s+full`),
+			},
+			{
+				PreConfig: func() {
+					mu.Lock()
+					failCreateJob = false
+					mu.Unlock()
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVolumeTest, plancheck.ResourceActionReplace),
+					},
+				},
+				Check: func(*terraform.State) error {
+					mu.Lock()
+					defer mu.Unlock()
+					if deletes != 1 {
+						return fmt.Errorf("expected the replacement to delete the failed volume once, got %d", deletes)
+					}
+					return nil
+				},
+			},
+		},
+	})
+}

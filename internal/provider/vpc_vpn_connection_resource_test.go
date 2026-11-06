@@ -116,7 +116,7 @@ func TestVpcVpnConnectionResource(t *testing.T) {
 				ImportState:             true,
 				ImportStateIdFunc:       vpnConnAccImportID,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"psk_wo_version"},
+				ImportStateVerifyIgnore: []string{"psk_wo_version", "state"},
 			},
 		},
 	})

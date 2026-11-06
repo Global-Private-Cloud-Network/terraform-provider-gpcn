@@ -36,6 +36,36 @@ func (o ResourceModelInitialAuth) AttrTypes() map[string]attr.Type {
 	}
 }
 
+// ModelFromPlanWithID returns the planned model with the GPU ID, for a create
+// that failed after the row existed. State cannot hold an unknown, so every
+// computed attribute the plan left unknown becomes null. The next refresh fills
+// them.
+func ModelFromPlanWithID(plan ResourceModel, id string) ResourceModel {
+	plan.ID = types.StringValue(id)
+	if plan.SeriesName.IsUnknown() {
+		plan.SeriesName = types.StringNull()
+	}
+	if plan.SeriesCode.IsUnknown() {
+		plan.SeriesCode = types.StringNull()
+	}
+	if plan.SkuCode.IsUnknown() {
+		plan.SkuCode = types.StringNull()
+	}
+	if plan.CreatedTime.IsUnknown() {
+		plan.CreatedTime = types.StringNull()
+	}
+	if plan.LastUpdated.IsUnknown() {
+		plan.LastUpdated = types.StringNull()
+	}
+	if plan.Location.IsUnknown() {
+		plan.Location = types.MapNull(types.StringType)
+	}
+	if plan.ResourceGroupId.IsUnknown() {
+		plan.ResourceGroupId = types.StringNull()
+	}
+	return plan
+}
+
 // Update the plan or state with new values from the GET response
 func MapGPUResponseToModel(ctx context.Context, response *readGPUResponse, model ResourceModel) ResourceModel {
 	model.ID = types.StringValue(response.Data.ID)

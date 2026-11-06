@@ -862,3 +862,37 @@ func TestReplaceNsgRulesMergeWarningsFollowAcceptanceUnit(t *testing.T) {
 		})
 	}
 }
+
+// The updated-wire 202 names the group in data.resource and the job as data.job.
+func TestIssueCreateNsgReadsAcceptedResource(t *testing.T) {
+	t.Parallel()
+
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != http.MethodPost || r.URL.Path != nsgCollectionPath(unitTestVpcID) {
+				t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte(`{"success":true,"data":{` +
+				`"job":{"id":"job-create","operation":"create","resourceId":null,"stage":"queued",` +
+				`"outcome":null,"progress":0,"message":null,"failureReason":null},` +
+				`"resource":{"id":"nsg-1","name":"web","description":"","rules":[],` +
+				`"createdAt":"2026-01-02T15:04:05Z","updatedAt":"2026-01-02T15:04:05Z"}}}`))
+		},
+	})
+
+	issued, err := IssueCreateNsg(gpcnClient, context.Background(), unitTestVpcID, "web", "", nil)
+	if err != nil {
+		t.Fatalf("IssueCreateNsg: %v", err)
+	}
+	if issued.JobID != "job-create" {
+		t.Errorf("job ID = %q, want %q", issued.JobID, "job-create")
+	}
+	if issued.NsgID != unitTestNsgID {
+		t.Errorf("group ID = %q, want %q", issued.NsgID, unitTestNsgID)
+	}
+}

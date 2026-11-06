@@ -178,8 +178,13 @@ func (r *volumesResource) Create(ctx context.Context, req resource.CreateRequest
 		return
 	}
 
-	getVolumeResponse, err := volumes.CreateVolume(r.client, ctx, plan)
+	getVolumeResponse, volumeID, err := volumes.CreateVolume(r.client, ctx, plan)
 	if err != nil {
+		// A volume the create left behind goes to state with the error, so
+		// Terraform taints it and the next apply replaces it.
+		if volumeID != "" {
+			resp.Diagnostics.Append(resp.State.Set(ctx, volumes.ModelFromPlanWithID(plan, volumeID))...)
+		}
 		resp.Diagnostics.AddError(
 			volumes.ErrSummaryUnableToCreateVolume,
 			err.Error(),

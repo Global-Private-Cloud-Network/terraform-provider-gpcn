@@ -350,7 +350,7 @@ func (r *vpcVpnConnectionResource) Create(ctx context.Context, req resource.Crea
 			}
 			tflog.Info(ctx, vpcvpnconnections.LogAdoptedVpnConnectionByName)
 			connectionID = adopted.ID
-			vpcvpngateways.PollAdoptedJob(r.client, ctx, vpcvpnconnections.ActionCreateVpnConnection, adopted.ActiveJobID, requestStart)
+			vpcvpngateways.PollAdoptedJob(r.client, ctx, vpcvpnconnections.ActionCreateVpnConnection, client.ActiveJobID(adopted.HeldBy, adopted.ActiveJobID), requestStart)
 		}
 	}
 	if connectionID == "" {
@@ -463,7 +463,7 @@ func (r *vpcVpnConnectionResource) Read(ctx context.Context, req resource.ReadRe
 	}
 
 	updateRefused := detail.State == vpcvpnconnections.StateFailed && !slices.Contains(detail.AcceptedVerbs, vpcvpnconnections.VerbUpdate)
-	jobActive := detail.ActiveJobID != nil
+	jobActive := client.ActiveJobID(detail.HeldBy, detail.ActiveJobID) != nil
 	if resp.Private != nil {
 		resp.Diagnostics.Append(resp.Private.SetKey(ctx, vpcvpnconnections.PrivateKeyUpdateRefused, privateFlag(updateRefused))...)
 		resp.Diagnostics.Append(resp.Private.SetKey(ctx, vpcvpnconnections.PrivateKeyJobActive, privateFlag(jobActive))...)
@@ -517,10 +517,11 @@ func (r *vpcVpnConnectionResource) Update(ctx context.Context, req resource.Upda
 	} else if accepted, err := vpcvpnconnections.UpdateVpnConnection(r.client, ctx, vpcID, connectionID, body); err != nil {
 		// The state stays as it was, so the failed job does not change it. The
 		// note fits a change that may still run: an accepted PUT whose job did
-		// not end, or a PUT with an unclear answer.
+		// not end, or a PUT with an unclear answer. A PUT the API answered busy
+		// every time was not processed, so it carries no note.
 		failure := vpcvpngateways.ErrorDetail(err)
 		jobEnded := errors.Is(err, client.ErrJobFailed) || errors.Is(err, client.ErrJobCancelledByPlatform)
-		if (accepted && !jobEnded) || (!accepted && vpcvpngateways.RowMayExist(err)) {
+		if (accepted && !jobEnded) || (!accepted && vpcvpngateways.RowMayExist(err) && !errors.Is(err, client.ErrBusyWaitExhausted)) {
 			failure += "\n\n" + vpcvpnconnections.ErrDetailUpdateMayStillApply
 		}
 		resp.Diagnostics.AddError(vpcvpnconnections.ErrSummaryUnableToUpdateVpnConn, failure)

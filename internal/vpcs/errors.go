@@ -44,6 +44,8 @@ const (
 	// A teardown another caller started owns the row. The provider waits for
 	// the row to go, and this sentence reports the wait running out.
 	ErrDetailVpcTeardownTimeout = "a teardown was already running, and the VPC was still present after %s"
+	// A row the answer cannot name cannot reach state.
+	ErrDetailNoVpcIDInCreate = "the create response carried no VPC ID"
 )
 
 // The messages GPCN's own super-CIDR refinement raises, byte for byte. A refused

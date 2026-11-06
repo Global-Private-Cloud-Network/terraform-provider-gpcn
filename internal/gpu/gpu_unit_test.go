@@ -473,13 +473,7 @@ func TestCreateGPUWithSkuCodeMockHTTP(t *testing.T) {
 				if int64(req["gpuCount"].(float64)) != 2 {
 					t.Errorf("Expected gpuCount 2, got '%v'", req["gpuCount"])
 				}
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Success: true,
-					Message: "GPU creation job started",
-					Data: client.JobStatusDataResponse{
-						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: gpuID}},
-					},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"GPU creation job started","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+gpuID+`","resourceName":"","resourceType":""}]}}`))
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, gpuID, true)
@@ -497,7 +491,7 @@ func TestCreateGPUWithSkuCodeMockHTTP(t *testing.T) {
 	model := createTestGPUModel("test-gpu", "", "nvidia-rtx_a6000-series", testImageName, 2)
 	model.SkuCode = types.StringValue(skuCode)
 
-	response, err := CreateGPU(gpcnClient, context.Background(), seriesID, model)
+	response, _, err := CreateGPU(gpcnClient, context.Background(), seriesID, model)
 	if err != nil {
 		t.Fatalf("CreateGPU failed: %v", err)
 	}
@@ -640,13 +634,7 @@ func TestCreateGPUMockHTTP(t *testing.T) {
 					t.Errorf("Expected sshKeyId '%s', got '%v'", testSSHKeyID, req["sshKeyId"])
 				}
 
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Success: true,
-					Message: "GPU creation job started",
-					Data: client.JobStatusDataResponse{
-						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: gpuID}},
-					},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"GPU creation job started","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+gpuID+`","resourceName":"","resourceType":""}]}}`))
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -665,7 +653,7 @@ func TestCreateGPUMockHTTP(t *testing.T) {
 
 	model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100-series", testImageName, 2)
 
-	response, err := CreateGPU(gpcnClient, context.Background(), seriesID, model)
+	response, _, err := CreateGPU(gpcnClient, context.Background(), seriesID, model)
 	if err != nil {
 		t.Fatalf("CreateGPU failed: %v", err)
 	}
@@ -771,11 +759,7 @@ func TestDeleteGPUMockHTTP(t *testing.T) {
 			switch {
 			case r.Method == "DELETE" && strings.Contains(r.URL.Path, "/gpu/"+gpuID):
 				deleteCalled = true
-				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
-					Success: true,
-					Message: "GPU deletion job started",
-					Data:    client.JobResponse{JobID: jobID, ResourceId: gpuID},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"GPU deletion job started","data":{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+gpuID+`","resourceName":"","resourceType":""}}`))
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -1332,12 +1316,7 @@ func gpuUnitCreateKeys(t *testing.T, group types.String) map[string]any {
 			switch {
 			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/gpu/"):
 				got = testutil.ReadRequestBody(r)
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Success: true,
-					Data: client.JobStatusDataResponse{
-						Jobs: []client.JobResponse{{JobID: jobID, ResourceId: gpuID}},
-					},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+gpuID+`","resourceName":"","resourceType":""}]}}`))
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, gpuID, true)
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/"+gpuID):
@@ -1351,7 +1330,7 @@ func gpuUnitCreateKeys(t *testing.T, group types.String) map[string]any {
 
 	model := createTestGPUModel("test-gpu", "", "nvidia-rtx_a6000-series", testImageName, 2)
 	model.ResourceGroupId = group
-	if _, err := CreateGPU(gpcnClient, context.Background(), seriesID, model); err != nil {
+	if _, _, err := CreateGPU(gpcnClient, context.Background(), seriesID, model); err != nil {
 		t.Fatalf("CreateGPU failed: %v", err)
 	}
 	return got
@@ -1461,5 +1440,96 @@ func TestMapGPUResponseToModelResourceGroupUnit(t *testing.T) {
 	result := MapGPUResponseToModel(context.Background(), response, model)
 	if !result.ResourceGroupId.IsNull() {
 		t.Errorf("Expected an empty group to map to null, got %v", result.ResourceGroupId)
+	}
+}
+
+// An updated-wire 202 names the GPU before the job ends. A failed job then still
+// returns that ID, so the caller saves it and Terraform taints the GPU.
+func TestCreateGPUReturnsIDWhenJobFails(t *testing.T) {
+	const (
+		jobID = "job-updated-gpu"
+		gpuID = "gpu-updated-1"
+	)
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/gpu/"):
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(`{"success":true,"data":{"jobs":[{` +
+					`"job":{"id":"` + jobID + `","operation":"create","resourceId":"` + gpuID + `","stage":"queued",` +
+					`"outcome":null,"progress":0,"message":null,"failureReason":null},` +
+					`"resource":{"id":"` + gpuID + `","name":"test-gpu","status":"Building"}}]}}`))
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				_, _ = w.Write([]byte(`{"success":true,"data":{"jobs":[{"id":"` + jobID + `","operation":"create",` +
+					`"resourceId":"` + gpuID + `","stage":"failed","outcome":"failed","progress":50,` +
+					`"message":null,"failureReason":"no GPU host had capacity"}],"notFound":[]}}`))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	model := createTestGPUModel("test-gpu", "", "nvidia-rtx_a6000-series", testImageName, 1)
+	response, id, err := CreateGPU(gpcnClient, context.Background(), "series-1", model)
+	if err == nil {
+		t.Fatal("Expected the failed job to fail the create")
+	}
+	if !strings.Contains(err.Error(), "no GPU host had capacity") {
+		t.Errorf("Expected the job's failure reason in %q", err.Error())
+	}
+	if response != nil {
+		t.Errorf("Expected no response, got %+v", response)
+	}
+	if id != gpuID {
+		t.Errorf("Expected ID %q from the 202, got %q", gpuID, id)
+	}
+}
+
+// A current-form 202 names no GPU, and the completed job names it. A failed
+// read-back then still returns that ID, so the caller saves it and Terraform
+// taints the GPU.
+func TestCreateGPUReturnsIDWhenReadBackFails(t *testing.T) {
+	const (
+		jobID = "job-current-gpu"
+		gpuID = "gpu-current-1"
+	)
+
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/gpu/"):
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(`{"success":true,"message":"GPU creation job started","data":{"jobs":[{"jobId":"` + jobID + `",` +
+					`"stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"",` +
+					`"errorMessage":"","resourceId":"","resourceName":"","resourceType":""}]}}`))
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				_, _ = w.Write([]byte(`{"success":true,"message":"Job status retrieved","data":{"jobs":[{"jobId":"` + jobID + `",` +
+					`"stage":"completed","isCompleted":true,"isTerminal":true,"hasFailed":false,"progressPercentage":100,"message":"",` +
+					`"errorMessage":"","resourceId":"` + gpuID + `","resourceName":"","resourceType":""}]}}`))
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/"+gpuID):
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"success":false,"message":"Internal server error","error":{"code":"INTERNAL_ERROR","statusCode":500,"details":null}}`))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+
+	model := createTestGPUModel("test-gpu", "", "nvidia-rtx_a6000-series", testImageName, 1)
+	response, id, err := CreateGPU(gpcnClient, context.Background(), "series-1", model)
+	if err == nil {
+		t.Fatal("Expected the failed read-back to fail the create")
+	}
+	if response != nil {
+		t.Errorf("Expected no response, got %+v", response)
+	}
+	if id != gpuID {
+		t.Errorf("Expected ID %q from the completed job, got %q", gpuID, id)
 	}
 }

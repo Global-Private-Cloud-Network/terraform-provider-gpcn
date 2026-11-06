@@ -1,3 +1,18 @@
+## 1.7.0 (Unreleased)
+
+ENHANCEMENTS:
+
+- **Provider**: works with the GPCN™ API both before and after its update to how it reports jobs. The provider reads both forms of the API's job and accepted answers, so install this release before that API update ships.
+- **Provider**: every request sends the User-Agent `terraform-provider-gpcn/<version>`.
+- **Virtual Machine, GPU, Volume, L2 Segment**: a create that fails once GPCN™ has made the resource now saves it in state, and Terraform marks it tainted, so the next apply deletes it and creates it again. Before the API update this covers a failure after the create job completes; after it, a failed create job too. VPCs, subnets, security groups, elastic IPs and the VPN resources already did this.
+- **VPC, VPN Connection, VPN Gateway**: a destroy, or a VPN connection update, that finds the resource held by another job waits for that job to end and sends the request again, within `polling_timeout`.
+- **VPN Gateway**: a removal that stops with a failure reason is sent once more when at least 30 seconds of `polling_timeout` remain. If that removal also stops, the error names its reason.
+
+BUG FIXES:
+
+- **Virtual Machine**: destroying a machine in the Error state no longer stops it first. GPCN™ deletes such a machine directly, and a stop could be refused. A machine that a failed create left behind also skips the network interface detach.
+- **Virtual Machine**: reading a machine no longer fails when GPCN™ reports `networkHotplug` as `true` or `false` instead of `1` or `0`. Earlier releases cannot read a virtual machine from an API that does.
+
 ## 1.6.0 (October 27, 2026)
 
 FEATURES:

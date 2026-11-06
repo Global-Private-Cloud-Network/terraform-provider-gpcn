@@ -44,8 +44,9 @@ type ReadVirtualMachinesResponse struct {
 		Username        string                `json:"username"`
 		SshKeyId        string                `json:"sshKeyId"`
 		SshKeyName      string                `json:"sshKeyName"`
-		NetworkHotplug  int                   `json:"networkHotplug"`
+		NetworkHotplug  flexBool              `json:"networkHotplug"`
 		ResourceGroupId string                `json:"resourceGroupId"`
+		FailureReason   *string               `json:"failureReason"`
 		Datacenter      struct {
 			ID          string `json:"id"`
 			Name        string `json:"name"`
@@ -56,14 +57,17 @@ type ReadVirtualMachinesResponse struct {
 	} `json:"data"`
 }
 
-func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, imageId string, skuId string, model ResourceModel) (*ReadVirtualMachinesResponse, error) {
+// CreateVirtualMachine also returns the machine ID it knows when it fails: the
+// ID the completed job names, else the ID the 202 carried. A row can outlive a
+// failed create, so the caller records that ID and Terraform taints the machine.
+func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, imageId string, skuId string, model ResourceModel) (*ReadVirtualMachinesResponse, string, error) {
 	tflog.Info(ctx, LogStartingCreateVirtualMachine)
 
 	// Extract auth configuration and set authMethod fields
 	var auth ResourceModelInitialAuth
 	authDiags := model.InitialAuth.As(ctx, &auth, basetypes.ObjectAsOptions{})
 	if authDiags.HasError() {
-		return nil, fmt.Errorf("failed to read auth configuration")
+		return nil, "", fmt.Errorf("failed to read auth configuration")
 	}
 
 	var authMethod string
@@ -109,20 +113,20 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 
 	jsonCreateVMRequestBody, err := json.Marshal(createVMRequestBody)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	// Create API request
 	request, err := http.NewRequestWithContext(ctx, "POST", BASE_URL_V1, bytes.NewBuffer(jsonCreateVMRequestBody))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	tflog.Info(ctx, LogConstructedCreateVMRequest)
 
 	// Perform API request
 	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	tflog.Info(ctx, LogIssuedCreateVMJob)
 
@@ -130,25 +134,30 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	var createVirtualMachineResponse client.JobStatusMultiResponse
 	err = json.Unmarshal(body, &createVirtualMachineResponse)
 
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	// Extract job ID with bounds checking
 	jobID, err := client.GetJobID(&createVirtualMachineResponse)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get job ID from create VM response: %w", err)
+		return nil, "", fmt.Errorf("failed to get job ID from create VM response: %w", err)
+	}
+	// The ID the 202 names, if any. The completed job names it again.
+	virtualMachineID, err := client.GetJobResourceID(&createVirtualMachineResponse)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get job ID from create VM response: %w", err)
 	}
 
 	jobResp, err := client.PerformLongPolling(gpcnClient, ctx, "Create GPCN Virtual Machine", jobID)
 	if err != nil {
-		return nil, fmt.Errorf("create VM polling failed: %w", err)
+		return nil, virtualMachineID, fmt.Errorf("create VM polling failed: %w", err)
 	}
 
 	tflog.Info(ctx, LogLongPollingCompletedCreateVM)
@@ -156,17 +165,20 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 	// Extract resource ID with bounds checking
 	resourceID, err := client.GetJobResourceID(jobResp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get resource ID from create VM job response: %w", err)
+		return nil, virtualMachineID, fmt.Errorf("failed to get resource ID from create VM job response: %w", err)
+	}
+	if resourceID != "" {
+		virtualMachineID = resourceID
 	}
 
 	// Wait for the VM to actually be spun up before doing anything more
 	getVirtualMachineResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, resourceID, []string{VMStatusRunning.String(), VMStatusShutoff.String(), VMStatusStopped.String()}, DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS, DEFAULT_INITIAL_POLL_DELAY_SECONDS)
 	if err != nil {
-		return nil, err
+		return nil, virtualMachineID, err
 	}
 
 	tflog.Info(ctx, LogSuccessfullyProcessedVMCreate)
-	return getVirtualMachineResponse, nil
+	return getVirtualMachineResponse, virtualMachineID, nil
 }
 
 // Gets a Virtual Machine by its ID

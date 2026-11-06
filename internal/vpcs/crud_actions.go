@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,15 +28,16 @@ type vpcPayload struct {
 		Code *string `json:"code"`
 		Name string  `json:"name"`
 	} `json:"datacenter"`
-	Status          string   `json:"status"`
-	FailureReason   *string  `json:"failureReason"`
-	EgressIp        *string  `json:"egressIp"`
-	ActiveJobId     *string  `json:"activeJobId"`
-	CreatedAt       string   `json:"createdAt"`
-	UpdatedAt       string   `json:"updatedAt"`
-	DnsNameservers  []string `json:"dnsNameservers"`
-	ResourceGroupID string   `json:"resourceGroupId"`
-	VpnCapable      *bool    `json:"vpnCapable"`
+	Status          string         `json:"status"`
+	FailureReason   *string        `json:"failureReason"`
+	EgressIp        *string        `json:"egressIp"`
+	ActiveJobId     *string        `json:"activeJobId"`
+	HeldBy          *client.HeldBy `json:"heldBy"`
+	CreatedAt       string         `json:"createdAt"`
+	UpdatedAt       string         `json:"updatedAt"`
+	DnsNameservers  []string       `json:"dnsNameservers"`
+	ResourceGroupID string         `json:"resourceGroupId"`
+	VpnCapable      *bool          `json:"vpnCapable"`
 }
 
 type readVpcResponse struct {
@@ -45,21 +47,14 @@ type readVpcResponse struct {
 }
 
 // The create 202 carries the new row beside the job. The row exists already, so
-// its id reaches state before the poll starts.
+// its id reaches state before the poll starts. CreateVpc fills both fields from
+// either shape of the answer.
 type createVpcResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 	Data    struct {
 		JobID string     `json:"jobId"`
 		Vpc   vpcPayload `json:"vpc"`
-	} `json:"data"`
-}
-
-type deleteVpcResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Data    struct {
-		JobID string `json:"jobId"`
 	} `json:"data"`
 }
 
@@ -91,9 +86,28 @@ func CreateVpc(gpcnClient *client.GpcnClient, ctx context.Context, model Resourc
 		return nil, err
 	}
 
+	var accepted client.JobStatusSingularResponse
+	if err := json.Unmarshal(response, &accepted); err != nil {
+		return nil, err
+	}
 	var createdVpc createVpcResponse
 	if err := json.Unmarshal(response, &createdVpc); err != nil {
 		return nil, err
+	}
+	// The answer names the job as data.job.id or data.jobId, and carries the
+	// row as data.resource or data.vpc.
+	createdVpc.Data.JobID = accepted.Data.JobID
+	if accepted.Data.Resource != nil {
+		var row vpcPayload
+		if err := json.Unmarshal(accepted.Data.Resource, &row); err != nil {
+			return nil, err
+		}
+		createdVpc.Data.Vpc = row
+	}
+	// The ID is what Create writes to state before the poll. Without one the
+	// row exists and Terraform cannot name it, so the create stops here.
+	if createdVpc.Data.Vpc.ID == "" {
+		return nil, errors.New(ErrDetailNoVpcIDInCreate)
 	}
 	tflog.Info(ctx, LogIssuedCreateVpcJob)
 	return &createdVpc, nil
@@ -157,7 +171,33 @@ func UpdateVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string,
 func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteVpcWithID, vpcID))
 
+	start := time.Now()
+	timeout := client.DefaultPollingConfig().Timeout
+	if config := gpcnClient.Config(); config != nil && config.PollingTimeout > 0 {
+		timeout = config.PollingTimeout
+	}
+	deadline := start.Add(timeout)
+
+	// A 409 RESOURCE_BUSY names the job that holds the VPC. The delete goes out
+	// again once that job ends, however it ends.
 	jobID, err := issueVpcDelete(gpcnClient, ctx, vpcID)
+	waitedBusy := false
+	for holder, busy := client.BusyHolder(err); busy; holder, busy = client.BusyHolder(err) {
+		waitedBusy = true
+		if err := client.AwaitHolder(gpcnClient, ctx, holder, start, deadline); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(BusyRetryInterval):
+		}
+		// No DELETE goes out after the deadline.
+		if !time.Now().Before(deadline) {
+			return client.HolderEndedAtDeadline(holder, start)
+		}
+		jobID, err = issueVpcDelete(gpcnClient, ctx, vpcID)
+	}
 	if err != nil {
 		if !client.HasErrorCode(err, ERROR_CODE_VPC_NOT_ACTIVE) {
 			return err
@@ -174,6 +214,7 @@ func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string)
 		if readErr != nil {
 			return readErr
 		}
+		activeJobIDRef := client.ActiveJobID(vpcResponse.Data.HeldBy, vpcResponse.Data.ActiveJobId)
 		switch {
 		// A teardown that parked writes a failure reason, and no job then
 		// drives the row. The platform re-admits a delete on it, so a wait
@@ -183,8 +224,8 @@ func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string)
 			return awaitVpcGone(gpcnClient, ctx, vpcID)
 		case vpcResponse.Data.Status == VPC_STATUS_DELETING:
 			tflog.Info(ctx, fmt.Sprintf(LogReclaimingParkedVpcTeardown, vpcID, *vpcResponse.Data.FailureReason))
-		case vpcResponse.Data.Status == VPC_STATUS_CREATING && vpcResponse.Data.ActiveJobId != nil:
-			activeJobID := *vpcResponse.Data.ActiveJobId
+		case vpcResponse.Data.Status == VPC_STATUS_CREATING && activeJobIDRef != nil:
+			activeJobID := *activeJobIDRef
 			tflog.Info(ctx, fmt.Sprintf(LogWaitingForVpcActiveJob, vpcID, activeJobID))
 			if pollErr := AwaitVpcJob(gpcnClient, ctx, ACTION_CREATE_VPC, activeJobID); pollErr != nil {
 				tflog.Warn(ctx, fmt.Sprintf(LogVpcActiveJobPollFailed, vpcID, pollErr.Error()))
@@ -198,7 +239,14 @@ func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string)
 		}
 	}
 
-	if err := AwaitVpcJob(gpcnClient, ctx, ACTION_DELETE_VPC, jobID); err != nil {
+	// After a busy wait the job poll shares the deadline of that wait.
+	if waitedBusy {
+		pollConfig := client.DefaultPollingConfig()
+		pollConfig.Timeout = max(timeout-time.Since(start), 0)
+		if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, ACTION_DELETE_VPC, jobID, pollConfig); err != nil {
+			return fmt.Errorf("%s polling failed: %w", ACTION_DELETE_VPC, err)
+		}
+	} else if err := AwaitVpcJob(gpcnClient, ctx, ACTION_DELETE_VPC, jobID); err != nil {
 		return err
 	}
 	tflog.Info(ctx, fmt.Sprintf(LogSuccessfullyDeletedVpcID, vpcID))
@@ -211,7 +259,7 @@ func issueVpcDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID st
 		return "", err
 	}
 
-	var deletedVpc deleteVpcResponse
+	var deletedVpc client.JobStatusSingularResponse
 	if err := json.Unmarshal(response, &deletedVpc); err != nil {
 		return "", err
 	}

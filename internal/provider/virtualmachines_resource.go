@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"slices"
+	"strings"
 
 	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/networks"
@@ -356,8 +357,13 @@ func (r *virtualMachinesResource) Create(ctx context.Context, req resource.Creat
 		return
 	}
 
-	getVirtualMachineResponse, err := virtualmachines.CreateVirtualMachine(r.client, ctx, plan.ImageId.ValueString(), plan.SizeId.ValueString(), plan)
+	getVirtualMachineResponse, virtualMachineID, err := virtualmachines.CreateVirtualMachine(r.client, ctx, plan.ImageId.ValueString(), plan.SizeId.ValueString(), plan)
 	if err != nil {
+		// A machine the create left behind goes to state with the error, so
+		// Terraform taints it and the next apply replaces it.
+		if virtualMachineID != "" {
+			resp.Diagnostics.Append(resp.State.Set(ctx, virtualmachines.ModelFromPlanWithID(plan, virtualMachineID))...)
+		}
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToCreateVM,
 			err.Error(),
@@ -696,8 +702,57 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 		return
 	}
 
-	// Before proceeding with delete, stop the virtual machine
-	err := virtualmachines.StopVirtualMachine(r.client, ctx, state.ID.ValueString())
+	// The platform deletes a machine in Error without a stop, and a stop of such
+	// a machine can be refused with a 409 or a 502. The read decides whether the
+	// delete stops the machine first.
+	current, err := virtualmachines.GetVirtualMachine(r.client, ctx, state.ID.ValueString())
+	if client.IsNotFound(err) {
+		// Already deleted outside of Terraform
+		tflog.Info(ctx, virtualmachines.LogVirtualMachineAlreadyDeleted)
+		return
+	} else if err != nil {
+		resp.Diagnostics.AddError(
+			virtualmachines.ErrSummaryUnableToDeleteVM,
+			fmt.Errorf("%s: %w", fmt.Sprintf(virtualmachines.ErrDetailReadingVMBeforeDelete, state.ID.ValueString()), err).Error(),
+		)
+		return
+	}
+	inError := strings.EqualFold(current.Data.Status, virtualmachines.VMStatusError.String())
+	failureReason := current.Data.FailureReason
+	// A failed create leaves the machine in Error with a failure reason. That
+	// machine skips the interface detach too.
+	if inError && failureReason != nil && *failureReason != "" {
+		// Deleting a machine a failed create left behind also releases the
+		// address that create acquired. The body asks only for addresses still
+		// bound to the machine's interfaces, so the decision needs no interface
+		// listing.
+		// The delete releases the address only when this resource acquired one.
+		var parkedDeleteRequestBody io.Reader
+		if state.AllocatePublicIp.ValueBool() {
+			jsonDeleteRequestBody, err := json.Marshal(map[string]any{"releasePublicIps": true})
+			if err != nil {
+				resp.Diagnostics.AddError(
+					virtualmachines.ErrSummaryUnableToCreateDeleteRequest,
+					err.Error(),
+				)
+				return
+			}
+			parkedDeleteRequestBody = bytes.NewBuffer(jsonDeleteRequestBody)
+		}
+		r.sendDeleteAndPoll(ctx, state, parkedDeleteRequestBody, resp, func(err error) diag.Diagnostic {
+			return diag.NewErrorDiagnostic(
+				virtualmachines.ErrSummaryUnableToDeleteVM,
+				fmt.Sprintf(virtualmachines.ErrDetailParkedDeleteFailed, state.ID.ValueString(), err.Error()),
+			)
+		})
+		return
+	}
+
+	// Before proceeding with delete, stop the virtual machine. A machine in Error
+	// skips the stop, so err keeps the nil of the read above.
+	if !inError {
+		err = virtualmachines.StopVirtualMachine(r.client, ctx, state.ID.ValueString())
+	}
 	if client.IsNotFound(err) {
 		// Already deleted outside of Terraform
 		tflog.Info(ctx, virtualmachines.LogVirtualMachineAlreadyDeleted)
@@ -759,6 +814,17 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 		deleteRequestBody = bytes.NewBuffer(jsonDeleteRequestBody)
 	}
 
+	r.sendDeleteAndPoll(ctx, state, deleteRequestBody, resp, func(err error) diag.Diagnostic {
+		return diag.NewErrorDiagnostic(
+			virtualmachines.ErrSummaryEncounteredErrorGettingJobInfo,
+			fmt.Errorf("%s: %w", virtualmachines.ErrDetailJobInfoCheckDashboard, err).Error(),
+		)
+	})
+}
+
+// sendDeleteAndPoll sends the DELETE and waits for its job. The caller chooses
+// how a failed job reads.
+func (r *virtualMachinesResource) sendDeleteAndPoll(ctx context.Context, state virtualmachines.ResourceModel, deleteRequestBody io.Reader, resp *resource.DeleteResponse, pollFailure func(error) diag.Diagnostic) {
 	request, err := http.NewRequestWithContext(ctx, "DELETE", virtualmachines.BASE_URL_V1+state.ID.ValueString(), deleteRequestBody)
 	if err != nil {
 		resp.Diagnostics.AddError(
@@ -808,10 +874,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	_, err = client.PerformLongPolling(r.client, ctx, "Delete GPCN Virtual Machine", deleteVirtualMachineResponse.Data.JobID)
 
 	if err != nil {
-		resp.Diagnostics.AddError(
-			virtualmachines.ErrSummaryEncounteredErrorGettingJobInfo,
-			fmt.Errorf("%s: %w", virtualmachines.ErrDetailJobInfoCheckDashboard, err).Error(),
-		)
+		resp.Diagnostics.Append(pollFailure(err))
 		return
 	}
 

@@ -19,29 +19,30 @@ import (
 // ApiVpnConnection is the VpnConnection projection. The nullable fields are
 // pointers.
 type ApiVpnConnection struct {
-	ID                   string   `json:"id"`
-	Name                 string   `json:"name"`
-	Description          *string  `json:"description"`
-	State                string   `json:"state"`
-	ProviderState        *string  `json:"providerState"`
-	FailureReason        *string  `json:"failureReason"`
-	GatewayKind          string   `json:"gatewayKind"`
-	LocalEndpointAddress *string  `json:"localEndpointAddress"`
-	PeerAddress          string   `json:"peerAddress"`
-	PeerCidrs            []string `json:"peerCidrs"`
-	IkeVersion           string   `json:"ikeVersion"`
-	Encryption           string   `json:"encryption"`
-	Integrity            string   `json:"integrity"`
-	DhGroup              int64    `json:"dhGroup"`
-	PfsGroup             int64    `json:"pfsGroup"`
-	IkeLifetimeSeconds   int64    `json:"ikeLifetimeSeconds"`
-	IpsecLifetimeSeconds int64    `json:"ipsecLifetimeSeconds"`
-	Dpd                  bool     `json:"dpd"`
-	DesiredApplied       bool     `json:"desiredApplied"`
-	ActiveJobID          *string  `json:"activeJobId"`
-	AcceptedVerbs        []string `json:"acceptedVerbs"`
-	CreatedAt            string   `json:"createdAt"`
-	UpdatedAt            string   `json:"updatedAt"`
+	ID                   string         `json:"id"`
+	Name                 string         `json:"name"`
+	Description          *string        `json:"description"`
+	State                string         `json:"state"`
+	ProviderState        *string        `json:"providerState"`
+	FailureReason        *string        `json:"failureReason"`
+	GatewayKind          string         `json:"gatewayKind"`
+	LocalEndpointAddress *string        `json:"localEndpointAddress"`
+	PeerAddress          string         `json:"peerAddress"`
+	PeerCidrs            []string       `json:"peerCidrs"`
+	IkeVersion           string         `json:"ikeVersion"`
+	Encryption           string         `json:"encryption"`
+	Integrity            string         `json:"integrity"`
+	DhGroup              int64          `json:"dhGroup"`
+	PfsGroup             int64          `json:"pfsGroup"`
+	IkeLifetimeSeconds   int64          `json:"ikeLifetimeSeconds"`
+	IpsecLifetimeSeconds int64          `json:"ipsecLifetimeSeconds"`
+	Dpd                  bool           `json:"dpd"`
+	DesiredApplied       bool           `json:"desiredApplied"`
+	ActiveJobID          *string        `json:"activeJobId"`
+	HeldBy               *client.HeldBy `json:"heldBy"`
+	AcceptedVerbs        []string       `json:"acceptedVerbs"`
+	CreatedAt            string         `json:"createdAt"`
+	UpdatedAt            string         `json:"updatedAt"`
 }
 
 // ApiParameterSheet is the part of the detail's parameter sheet that the
@@ -62,9 +63,11 @@ type getVpnConnectionResponse struct {
 	Data    ApiVpnConnectionDetail `json:"data"`
 }
 
+// createVpnConnectionResponse reads the connection id under its own key. The job
+// id, and the id an answer carries in data.resource, come from
+// client.JobStatusSingularResponse.
 type createVpnConnectionResponse struct {
 	Data struct {
-		JobID         string `json:"jobId"`
 		VpnConnection struct {
 			ID string `json:"id"`
 		} `json:"vpnConnection"`
@@ -109,11 +112,19 @@ func CreateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 	if err != nil {
 		return "", vpcvpngateways.RowMayExist(err), err
 	}
-	var accepted createVpnConnectionResponse
+	var accepted client.JobStatusSingularResponse
 	if err := json.Unmarshal(raw, &accepted); err != nil {
 		return "", true, err
 	}
-	connectionID := accepted.Data.VpnConnection.ID
+	var created createVpnConnectionResponse
+	if err := json.Unmarshal(raw, &created); err != nil {
+		return "", true, err
+	}
+	// The answer names the connection in data.resource or in data.vpnConnection.
+	connectionID := accepted.Data.ResourceId
+	if connectionID == "" {
+		connectionID = created.Data.VpnConnection.ID
+	}
 	if accepted.Data.JobID == "" {
 		return connectionID, true, errors.New(ErrDetailNoJobIDInResponse)
 	}
@@ -243,24 +254,55 @@ func GetVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpcID,
 func UpdateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, body map[string]any) (bool, error) {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingUpdateVpnConnection, connectionID))
 
-	reader, err := marshalBody(body)
-	if err != nil {
-		return false, err
+	start := time.Now()
+	timeout := client.DefaultPollingConfig().Timeout
+	if config := gpcnClient.Config(); config != nil && config.PollingTimeout > 0 {
+		timeout = config.PollingTimeout
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPut, connectionPath(vpcID, connectionID), reader)
-	if err != nil {
-		return false, err
-	}
+	deadline := start.Add(timeout)
 
-	// The PUT goes out once, because a second PUT starts a second job, or meets
-	// a 409 VPN_STATE_CONFLICT while the first one runs.
-	jobID, err := issueJob(gpcnClient.DoOnce, request)
-	if err != nil {
-		return false, err
+	var jobID string
+	for {
+		reader, err := marshalBody(body)
+		if err != nil {
+			return false, err
+		}
+		request, err := http.NewRequestWithContext(ctx, http.MethodPut, connectionPath(vpcID, connectionID), reader)
+		if err != nil {
+			return false, err
+		}
+
+		// Each PUT goes out once, because a second PUT starts a second job, or
+		// meets a 409 VPN_STATE_CONFLICT while the first one runs. A 409
+		// RESOURCE_BUSY means the API did not take the PUT, so the PUT goes out
+		// again after the job that holds the connection ends.
+		jobID, err = issueJob(gpcnClient.DoOnce, request)
+		holder, busy := client.BusyHolder(err)
+		if !busy {
+			if err != nil {
+				return false, err
+			}
+			break
+		}
+		if err := client.AwaitHolder(gpcnClient, ctx, holder, start, deadline); err != nil {
+			return false, err
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(RemovalPollInterval):
+		}
+		// No PUT goes out after the deadline.
+		if !time.Now().Before(deadline) {
+			return false, client.HolderEndedAtDeadline(holder, start)
+		}
 	}
 	tflog.Info(ctx, LogIssuedUpdateVpnConnectionJob)
 
-	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionUpdateVpnConnection, jobID); err != nil {
+	// The job poll shares the deadline of the busy waits before it.
+	pollConfig := client.DefaultPollingConfig()
+	pollConfig.Timeout = max(timeout-time.Since(start), 0)
+	if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, ActionUpdateVpnConnection, jobID, pollConfig); err != nil {
 		return true, fmt.Errorf(ErrFmtUpdatePollingFailed, err)
 	}
 	return true, nil
@@ -283,7 +325,26 @@ func deleteVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteVpnConnection, connectionID))
 	startTime := time.Now()
 
+	// A 409 RESOURCE_BUSY names the job that holds the connection. That job can
+	// belong to another resource of the VPC, so the DELETE goes out again once
+	// the job ends, however it ends.
+	deadline := startTime.Add(timeout)
 	jobID, err := sendDelete(gpcnClient, ctx, vpcID, connectionID)
+	for holder, busy := client.BusyHolder(err); busy; holder, busy = client.BusyHolder(err) {
+		if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime, deadline); err != nil {
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(RemovalPollInterval):
+		}
+		// No DELETE goes out after the deadline.
+		if !time.Now().Before(deadline) {
+			return client.HolderEndedAtDeadline(holder, startTime)
+		}
+		jobID, err = sendDelete(gpcnClient, ctx, vpcID, connectionID)
+	}
 	if removalAlreadyRunning(err) {
 		tflog.Info(ctx, LogRemovalAlreadyRunning)
 		return waitForVpnConnectionGone(gpcnClient, ctx, vpcID, connectionID, interval, startTime, timeout)
@@ -293,7 +354,10 @@ func deleteVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 	}
 	tflog.Info(ctx, LogIssuedDeleteVpnConnectionJob)
 
-	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionDeleteVpnConnection, jobID); err != nil {
+	// The job poll shares the deadline of the busy waits before it.
+	pollConfig := client.DefaultPollingConfig()
+	pollConfig.Timeout = max(timeout-time.Since(startTime), 0)
+	if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, ActionDeleteVpnConnection, jobID, pollConfig); err != nil {
 		if !errors.Is(err, client.ErrJobFailed) {
 			return fmt.Errorf(ErrFmtDeletePollingFailed, err)
 		}
@@ -382,13 +446,31 @@ func waitForVpnConnectionGone(gpcnClient *client.GpcnClient, ctx context.Context
 	}
 }
 
-// resendDelete sends the DELETE again for a parked removal. A 202 gets its job
-// polled inside the shared deadline, and a failed job is not an error, because
-// the next read shows the row. A 409 for a removal that another caller started
-// counts as sent, so the wait goes on. Any other 409 is a refusal, and the
-// second result then holds the API's message.
+// resendDelete sends the DELETE again for a parked removal. A 409
+// RESOURCE_BUSY waits for the job that holds the connection and sends the
+// DELETE again, and those sends together are the one resend. A 202 gets its
+// job polled inside the shared deadline, and a failed job is not an error,
+// because the next read shows the row. A 409 for a removal that another caller
+// started counts as sent, so the wait goes on. Any other 409 is a refusal, and
+// the second result then holds the API's message.
 func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, startTime time.Time, timeout time.Duration) (int, string, error) {
+	deadline := startTime.Add(timeout)
 	jobID, err := sendDelete(gpcnClient, ctx, vpcID, connectionID)
+	for holder, busy := client.BusyHolder(err); busy; holder, busy = client.BusyHolder(err) {
+		if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime, deadline); err != nil {
+			return resendNotSent, "", err
+		}
+		select {
+		case <-ctx.Done():
+			return resendNotSent, "", ctx.Err()
+		case <-time.After(RemovalPollInterval):
+		}
+		// No DELETE goes out after the deadline.
+		if !time.Now().Before(deadline) {
+			return resendNotSent, "", client.HolderEndedAtDeadline(holder, startTime)
+		}
+		jobID, err = sendDelete(gpcnClient, ctx, vpcID, connectionID)
+	}
 	if removalAlreadyRunning(err) {
 		return resendJob, "", nil
 	}

@@ -68,50 +68,58 @@ func updateRequestBody(plan, state ResourceModel) map[string]any {
 	return body
 }
 
-// CreateL2Segment orders a segment and reads it back. The 202 names a job and
-// nothing else, and the job names the segment only once it completes.
-func CreateL2Segment(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*readL2SegmentResponse, error) {
+// CreateL2Segment orders a segment and reads it back.
+// CreateL2Segment also returns the segment ID it knows when it fails: the ID
+// the completed job names, else the ID the 202 carried. A row can outlive a
+// failed create, so the caller records that ID and Terraform taints the segment.
+func CreateL2Segment(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*readL2SegmentResponse, string, error) {
 	tflog.Info(ctx, LogStartingCreateL2Segment)
 
 	jsonCreateRequestBody, err := json.Marshal(createRequestBody(model))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	tflog.Info(ctx, LogConstructedCreateL2SegmentRequestBody)
 
 	request, err := http.NewRequestWithContext(ctx, "POST", BASE_URL_V1, bytes.NewBuffer(jsonCreateRequestBody))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	tflog.Info(ctx, LogConstructedCreateL2SegmentRequest)
 
 	createResponse, err := issueJob(gpcnClient, ctx, request)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	tflog.Info(ctx, LogIssuedCreateL2SegmentJob)
 
+	// The ID the 202 names, if any. The completed job names it again.
+	segmentID := createResponse.Data.ResourceId
+
 	jobResponse, err := client.PerformLongPolling(gpcnClient, ctx, ActionCreateL2Segment, createResponse.Data.JobID)
 	if err != nil {
-		return nil, err
+		return nil, segmentID, err
 	}
 	tflog.Info(ctx, LogLongPollingCompletedCreateL2Segment)
 
-	segmentID, err := client.GetJobResourceID(jobResponse)
+	jobSegmentID, err := client.GetJobResourceID(jobResponse)
 	if err != nil {
-		return nil, err
+		return nil, segmentID, err
+	}
+	if jobSegmentID != "" {
+		segmentID = jobSegmentID
 	}
 	if segmentID == "" {
-		return nil, fmt.Errorf("%s", ErrDetailNoSegmentIDInJob)
+		return nil, "", fmt.Errorf("%s", ErrDetailNoSegmentIDInJob)
 	}
 
 	getResponse, err := GetL2Segment(gpcnClient, ctx, segmentID)
 	if err != nil {
-		return nil, err
+		return nil, segmentID, err
 	}
 
 	tflog.Info(ctx, LogSuccessfullyRetrievedL2SegmentCreate)
-	return getResponse, nil
+	return getResponse, segmentID, nil
 }
 
 // GetL2Segment reads one segment. Read, Create and Update all end here.

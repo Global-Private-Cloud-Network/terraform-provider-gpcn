@@ -27,5 +27,8 @@ const (
 	ErrFmtCreatePollingFailed     = "create VPN gateway polling failed: %w"
 	ErrFmtDeletePollingFailed     = "delete VPN gateway polling failed: %w"
 	ErrFmtWaitForRemovalFailed    = "wait for VPN gateway removal failed: %w"
+	ErrFmtRemovalParkedAgain      = "%s\n\nThe provider asked GPCN™ to remove the VPN gateway of VPC %s a second time, and that removal failed too"
+	ErrFmtResendFailedInTransit   = "The provider asked GPCN™ to remove the VPN gateway a second time, and that request failed: %s"
+	ErrFmtRemovalResendRefused    = "%s\n\nGPCN™ refused a second removal of the VPN gateway of VPC %s:\n\n%s\n\nRun the destroy or apply again to retry it"
 	removalTimeoutNoReason        = "none"
 )

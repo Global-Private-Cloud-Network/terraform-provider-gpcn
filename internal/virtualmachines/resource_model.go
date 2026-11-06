@@ -52,13 +52,52 @@ func (o ResourceModelInitialAuth) AttrTypes() map[string]attr.Type {
 	}
 }
 
+// ModelFromPlanWithID returns the planned model with the machine ID, for a
+// create that failed after the row existed. State cannot hold an unknown, so
+// every computed attribute the plan left unknown becomes null. The next refresh
+// fills them.
+func ModelFromPlanWithID(plan ResourceModel, id string) ResourceModel {
+	plan.ID = types.StringValue(id)
+	if plan.CreatedTime.IsUnknown() {
+		plan.CreatedTime = types.StringNull()
+	}
+	if plan.LastUpdated.IsUnknown() {
+		plan.LastUpdated = types.StringNull()
+	}
+	if plan.Location.IsUnknown() {
+		plan.Location = types.MapNull(types.StringType)
+	}
+	if plan.Configuration.IsUnknown() {
+		plan.Configuration = types.MapNull(types.StringType)
+	}
+	if plan.AllocatePublicIp.IsUnknown() {
+		plan.AllocatePublicIp = types.BoolNull()
+	}
+	if plan.PublicIp.IsUnknown() {
+		plan.PublicIp = types.StringNull()
+	}
+	if plan.L2SegmentIds.IsUnknown() {
+		plan.L2SegmentIds = types.ListNull(types.StringType)
+	}
+	if plan.NetworkHotplug.IsUnknown() {
+		plan.NetworkHotplug = types.BoolNull()
+	}
+	if plan.NetworkInterfaces.IsUnknown() {
+		plan.NetworkInterfaces = types.ListNull(types.ObjectType{AttrTypes: networks.ReadVirtualMachineNetworkDataResponseTF{}.AttrTypes()})
+	}
+	if plan.ResourceGroupId.IsUnknown() {
+		plan.ResourceGroupId = types.StringNull()
+	}
+	return plan
+}
+
 // MapVirtualMachineResponseToModel updates the plan or state with new values from the GET response.
 // Returns the updated model and any diagnostics encountered during mapping.
 func MapVirtualMachineResponseToModel(ctx context.Context, gpcnClient *client.GpcnClient, response *ReadVirtualMachinesResponse, model ResourceModel) (ResourceModel, diag.Diagnostics) {
 	var allDiags diag.Diagnostics
 
 	model.ID = types.StringValue(response.Data.ID)
-	model.NetworkHotplug = types.BoolValue(response.Data.NetworkHotplug == 1)
+	model.NetworkHotplug = types.BoolValue(bool(response.Data.NetworkHotplug))
 
 	if response.Data.ResourceGroupId != "" {
 		model.ResourceGroupId = types.StringValue(response.Data.ResourceGroupId)

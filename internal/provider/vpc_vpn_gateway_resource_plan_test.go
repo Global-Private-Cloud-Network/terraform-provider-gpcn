@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -85,6 +86,12 @@ type vpnGatewayPlanTestServerState struct {
 	getsAfterDel       int
 	createBodies       []map[string]any
 	deleteCount        int
+	// resendRemoving answers every DELETE after the first with a 409 for a
+	// gateway whose removal runs.
+	resendRemoving bool
+	// heldByJobID is the job the row names in heldBy. The job poll for it
+	// settles the row to ready.
+	heldByJobID string
 }
 
 func (s *vpnGatewayPlanTestServerState) row() map[string]any {
@@ -105,7 +112,7 @@ func (s *vpnGatewayPlanTestServerState) row() map[string]any {
 	if s.rowState != "creating" {
 		address = vpnGatewayPlanTestAddress
 	}
-	return map[string]any{
+	row := map[string]any{
 		"id":            vpnGatewayPlanTestID,
 		"vpcId":         vpnGatewayPlanTestVpcID,
 		"kind":          s.kind,
@@ -117,6 +124,10 @@ func (s *vpnGatewayPlanTestServerState) row() map[string]any {
 		"createdAt":     createdAt,
 		"updatedAt":     vpnGatewayPlanTestTimestamp,
 	}
+	if s.heldByJobID != "" {
+		row["heldBy"] = map[string]any{"jobId": s.heldByJobID, "operation": "create", "verb": "create"}
+	}
+	return row
 }
 
 func writeVpnGatewayPlanTestError(w http.ResponseWriter, status int, code, message string) {
@@ -207,6 +218,11 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 		case r.Method == http.MethodDelete && r.URL.Path == gatewayPath:
 			state.mu.Lock()
 			state.deleteAttempts++
+			if state.resendRemoving && state.deleteAttempts > 1 {
+				state.mu.Unlock()
+				writeVpnGatewayPlanTestError(w, http.StatusConflict, vpcvpngateways.CodeGatewayRemoving, "The VPN gateway is already being removed.")
+				return
+			}
 			busyCreating := state.deleteBusyCreating
 			if busyCreating {
 				state.deleteBusyCreating = false
@@ -261,24 +277,18 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 				state.activeJobID = ""
 				state.rowState = "ready"
 			}
+			if state.heldByJobID != "" && jobID == state.heldByJobID {
+				state.heldByJobID = ""
+				state.rowState = "ready"
+			}
 			cancelJob := state.cancelJob
 			state.mu.Unlock()
 			if cancelJob {
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Success: true,
-					Data: client.JobStatusDataResponse{Jobs: []client.JobResponse{{
-						JobID: jobID, ResourceId: vpnGatewayPlanTestID, Stage: client.JobStageCancelled, IsTerminal: true,
-					}}},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"`+jobID+`","stage":"`+client.JobStageCancelled+`","isCompleted":false,"isTerminal":true,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+vpnGatewayPlanTestID+`","resourceName":"","resourceType":""}]}}`))
 				return
 			}
 			if failJob {
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Success: true,
-					Data: client.JobStatusDataResponse{Jobs: []client.JobResponse{{
-						JobID: jobID, ResourceId: vpnGatewayPlanTestID, HasFailed: true, ErrorMessage: vpnGatewayPlanTestJobFail,
-					}}},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":true,"progressPercentage":0,"message":"","errorMessage":"`+vpnGatewayPlanTestJobFail+`","resourceId":"`+vpnGatewayPlanTestID+`","resourceName":"","resourceType":""}]}}`))
 				return
 			}
 			testutil.HandleJobResponse(w, jobID, vpnGatewayPlanTestID, true)
@@ -792,8 +802,8 @@ func TestVpcVpnGatewayResourceCreate5xxPollsAdoptedJob(t *testing.T) {
 	})
 }
 
-// A delete job that fails leaves the removal to the sweeper. The destroy keeps
-// reading until the API answers 404.
+// A delete job that fails can leave the removal parked while the platform still
+// removes it. The destroy keeps reading until the API answers 404.
 func TestVpcVpnGatewayResourceDeleteParkedRemovalWaits(t *testing.T) {
 	t.Parallel()
 	server, state := startVpnGatewayPlanMockServer(t)
@@ -807,13 +817,20 @@ func TestVpcVpnGatewayResourceDeleteParkedRemovalWaits(t *testing.T) {
 			if state.getsAfterDel != 3 {
 				return fmt.Errorf("expected 3 reads after the DELETE (two parked, one 404), got %d", state.getsAfterDel)
 			}
+			if state.deleteAttempts != 2 {
+				return fmt.Errorf("expected 2 DELETE requests (the removal and the resend), got %d", state.deleteAttempts)
+			}
 			return nil
 		},
 		Steps: []resource.TestStep{
 			{
 				Config: config,
 				Check: func(*terraform.State) error {
-					state.set(func(s *vpnGatewayPlanTestServerState) { s.failDeleteJob = true; s.deleteHold = 2 })
+					state.set(func(s *vpnGatewayPlanTestServerState) {
+						s.failDeleteJob = true
+						s.deleteHold = 2
+						s.resendRemoving = true
+					})
 					return nil
 				},
 			},
@@ -876,6 +893,43 @@ func TestVpcVpnGatewayResourceDeleteWhileCreatingWaits(t *testing.T) {
 				Check: func(*terraform.State) error {
 					state.set(func(s *vpnGatewayPlanTestServerState) { s.deleteBusyCreating = true; s.creatingReads = 2 })
 					return nil
+				},
+			},
+		},
+	})
+}
+
+// An adopted row whose heldBy names a running job is read again once the job
+// ends, so the state holds the settled row.
+func TestVpcVpnGatewayCreateAdoptionPollsHeldByJob(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnGatewayPlanMockServer(t)
+	state.set(func(s *vpnGatewayPlanTestServerState) {
+		s.createStatus = http.StatusBadGateway
+		s.createdState = "creating"
+		s.heldByJobID = "job-live"
+	})
+	config := vpnGatewayPlanTestConfig(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config, ExpectError: vpnGatewayRefusal(vpnGatewayPlanTestBadGateway)},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					if state.heldByJobID != "" {
+						t.Errorf("Expected the create to poll the job of the adopted row, which is still held by %q", state.heldByJobID)
+					}
+					state.createStatus = 0
+					state.createdState = "ready"
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcVpnGatewayTest, plancheck.ResourceActionReplace),
+					},
 				},
 			},
 		},

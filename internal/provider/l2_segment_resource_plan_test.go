@@ -1100,3 +1100,117 @@ func TestL2SegmentResourcePlanGroupDescriptionBytes(t *testing.T) {
 		t.Errorf("resource_group_id Description = %q, want %q", got, want)
 	}
 }
+
+const l2UpdatedPlanTestFailureReason = "the segment could not be provisioned"
+
+// A create job that fails on the updated wire leaves the segment behind. The
+// 202 named it, so the create saves its ID, Terraform taints it, and the next
+// apply replaces it.
+func TestL2SegmentCreateJobFailedIsReplaced(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	failCreateJob := true
+	deletes := 0
+	segmentState := "ready"
+	var failureReason any
+	segmentPath := "/v1/resource/l2-segments/" + l2PlanTestSegmentID
+	job := func(jobID, operation, stage string, outcome, reason any) map[string]any {
+		return map[string]any{
+			"id":            jobID,
+			"operation":     operation,
+			"resourceId":    l2PlanTestSegmentID,
+			"stage":         stage,
+			"outcome":       outcome,
+			"progress":      0,
+			"message":       nil,
+			"failureReason": reason,
+		}
+	}
+	accepted := func(w http.ResponseWriter, data map[string]any) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": data})
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/l2-segments/":
+			mu.Lock()
+			segmentState, failureReason = "creating", nil
+			mu.Unlock()
+			accepted(w, map[string]any{
+				"job":      job("job-create", "create", "queued", nil, nil),
+				"resource": map[string]any{"id": l2PlanTestSegmentID, "name": l2PlanTestName, "state": "creating"},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			jobID := "job-create"
+			if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
+				jobID, _ = ids[0].(string)
+			}
+			mu.Lock()
+			failing := jobID == "job-create" && failCreateJob
+			if jobID == "job-create" {
+				segmentState, failureReason = "ready", nil
+				if failing {
+					segmentState, failureReason = l2PlanTestFailedState, l2UpdatedPlanTestFailureReason
+				}
+			}
+			mu.Unlock()
+			answer := job(jobID, "create", "completed", "succeeded", nil)
+			if failing {
+				answer = job(jobID, "create", "failed", "failed", l2UpdatedPlanTestFailureReason)
+			}
+			testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{
+				"jobs": []map[string]any{answer}, "notFound": []string{},
+			}})
+		case r.Method == http.MethodGet && r.URL.Path == segmentPath:
+			mu.Lock()
+			currentState, currentReason := segmentState, failureReason
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, l2PlanTestDetailBodyInState(l2PlanTestName, nil, currentState, currentReason, 0, l2PlanTestDefaultGroup))
+		case r.Method == http.MethodDelete && r.URL.Path == segmentPath:
+			mu.Lock()
+			deletes++
+			mu.Unlock()
+			accepted(w, map[string]any{"job": job("job-delete", "delete", "queued", nil, nil)})
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	config := l2PlanTestConfig(server.URL, l2PlanTestName)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexp.MustCompile(`the\s+segment\s+could\s+not\s+be\s+provisioned`),
+			},
+			{
+				PreConfig: func() {
+					mu.Lock()
+					failCreateJob = false
+					mu.Unlock()
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnL2SegmentTest, plancheck.ResourceActionReplace),
+					},
+				},
+				Check: func(*terraform.State) error {
+					mu.Lock()
+					defer mu.Unlock()
+					if deletes != 1 {
+						return fmt.Errorf("expected the replacement to delete the failed segment once, got %d", deletes)
+					}
+					return nil
+				},
+			},
+		},
+	})
+}

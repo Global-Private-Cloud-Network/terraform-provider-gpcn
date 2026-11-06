@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/networks"
 	"terraform-provider-gpcn/internal/testutil"
 	"terraform-provider-gpcn/internal/virtualmachines"
@@ -203,7 +204,7 @@ func vmPlanTestNetworkInterfacesBody(birthSubnetID string) map[string]any {
 // the configuration and leaves the refresh plan empty. The returned functions change the
 // stored name and SKU out of band, which is how a test creates drift.
 // The sizes arm reports no upgrade target, so a planned size change asks for a replacement.
-func startVirtualMachinePlanMockServer(t *testing.T) (*httptest.Server, func(string), func(string)) {
+func startVirtualMachinePlanMockServer(t *testing.T, networkHotplug ...any) (*httptest.Server, func(string), func(string)) {
 	t.Helper()
 
 	var mu sync.Mutex
@@ -245,7 +246,11 @@ func startVirtualMachinePlanMockServer(t *testing.T) (*httptest.Server, func(str
 			mu.Lock()
 			currentName, currentStatus, currentSku := name, status, skuId
 			mu.Unlock()
-			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, currentSku))
+			body := vmPlanTestReadBody(currentName, currentStatus, currentSku)
+			if len(networkHotplug) > 0 {
+				body["data"].(map[string]any)["networkHotplug"] = networkHotplug[0]
+			}
+			testutil.WriteJSONResponse(w, body)
 		case r.Method == http.MethodPut && r.URL.Path == vmPath:
 			body := testutil.ReadRequestBody(r)
 			mu.Lock()
@@ -4441,4 +4446,549 @@ func TestVirtualMachineResourcePlanCreateKeepsPlannedGroup(t *testing.T) {
 			},
 		},
 	})
+}
+
+const (
+	vmUpdatedPlanTestCreateJobID   = "job-updated-create"
+	vmUpdatedPlanTestDeleteJobID   = "job-updated-delete"
+	vmUpdatedPlanTestFailureReason = "the hypervisor refused the machine"
+)
+
+// vmUpdatedMock serves the machine in the updated-wire shapes: a batch 202 whose element
+// carries the job and the row, and job reads that carry an outcome. A failed
+// create job parks the row in Error with a failure reason, as the platform does.
+type vmUpdatedMock struct {
+	server *httptest.Server
+
+	mu            sync.Mutex
+	failCreateJob bool
+	parked        bool
+	gone          bool
+	stopped       bool
+	name          string
+	boundID       string
+	stops         int
+	deleteBodies  []string
+
+	// readAs replaces the status and the failure reason a read reports while
+	// the machine is not stopped.
+	readAs *vmUpdatedRead
+	// failDeleteJobs counts the delete jobs that answer a failed outcome with
+	// deleteJobFailureReason. The row stays parked after each one.
+	failDeleteJobs         int
+	deleteJobFailureReason string
+	// events records the machine read, the interface listing, the stop and
+	// the delete, in order.
+	events []string
+	// segmentNics are L2 interfaces the listing reports after the primary
+	// one. A detach removes its interface and records "detach-interface".
+	segmentNics []vmSegmentNic
+	// failRead arms one machine read that answers 500 after readsBeforeFailure
+	// reads answer as usual.
+	failRead           bool
+	readsBeforeFailure int
+}
+
+// vmUpdatedRead is a status and a failure reason as a read reports them. A nil
+// failure reason reads as JSON null.
+type vmUpdatedRead struct {
+	status        string
+	failureReason any
+}
+
+func startVirtualMachineUpdatedMockServer(t *testing.T) *vmUpdatedMock {
+	t.Helper()
+	mock := &vmUpdatedMock{}
+
+	jobBody := func(jobID, operation, outcome, failureReason string) map[string]any {
+		var reason any
+		stage := "completed"
+		if failureReason != "" {
+			reason = failureReason
+			stage = "failed"
+		}
+		return map[string]any{
+			"success": true,
+			"data": map[string]any{
+				"jobs": []map[string]any{{
+					"id":            jobID,
+					"operation":     operation,
+					"resourceId":    vmPlanTestID,
+					"stage":         stage,
+					"outcome":       outcome,
+					"progress":      100,
+					"message":       nil,
+					"failureReason": reason,
+				}},
+				"notFound": []string{},
+			},
+		}
+	}
+	accepted := func(w http.ResponseWriter, data map[string]any) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusAccepted)
+		testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": data})
+	}
+	queuedJob := func(jobID, operation string) map[string]any {
+		return map[string]any{
+			"id":            jobID,
+			"operation":     operation,
+			"resourceId":    vmPlanTestID,
+			"stage":         "queued",
+			"outcome":       nil,
+			"progress":      0,
+			"message":       nil,
+			"failureReason": nil,
+		}
+	}
+
+	mock.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mock.mu.Lock()
+			mock.name, _ = body["name"].(string)
+			name := mock.name
+			mock.gone = false
+			mock.stopped = false
+			mock.boundID = ""
+			if acquire, ok := body["acquirePublicIp"].(bool); ok && acquire {
+				mock.boundID = vmPlanTestAcquiredIpID
+			}
+			mock.mu.Unlock()
+			accepted(w, map[string]any{"jobs": []map[string]any{{
+				"job":      queuedJob(vmUpdatedPlanTestCreateJobID, "create"),
+				"resource": map[string]any{"id": vmPlanTestID, "name": name, "status": "Building"},
+			}}})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			jobID := vmUpdatedPlanTestCreateJobID
+			if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
+				jobID, _ = ids[0].(string)
+			}
+			mock.mu.Lock()
+			failing := jobID == vmUpdatedPlanTestCreateJobID && mock.failCreateJob
+			if failing {
+				mock.parked = true
+			}
+			deleteFailing := jobID == vmUpdatedPlanTestDeleteJobID && mock.failDeleteJobs > 0
+			deleteFailureReason := mock.deleteJobFailureReason
+			if deleteFailing {
+				mock.failDeleteJobs--
+				mock.gone = false
+				mock.parked = true
+			}
+			mock.mu.Unlock()
+			if deleteFailing {
+				testutil.WriteJSONResponse(w, jobBody(jobID, "delete", "failed", deleteFailureReason))
+				return
+			}
+			if failing {
+				testutil.WriteJSONResponse(w, jobBody(jobID, "create", "failed", vmUpdatedPlanTestFailureReason))
+				return
+			}
+			testutil.WriteJSONResponse(w, jobBody(jobID, "create", "succeeded", ""))
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mock.mu.Lock()
+			mock.stops++
+			mock.stopped = true
+			mock.events = append(mock.events, "stop")
+			mock.mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mock.mu.Lock()
+			boundID := mock.boundID
+			segmentNics := slices.Clone(mock.segmentNics)
+			mock.events = append(mock.events, "list-interfaces")
+			mock.mu.Unlock()
+			address := ""
+			if boundID != "" {
+				address = vmPlanTestAcquiredIpAddress
+			}
+			if len(segmentNics) > 0 {
+				body := vmSegmentPlanTestNetworkInterfacesBody(vmPlanTestSubnetID, segmentNics)
+				if boundID != "" {
+					primary := body["data"].([]map[string]any)[0]
+					primary["publicIp"] = address
+					primary["publicIpId"] = boundID
+				}
+				testutil.WriteJSONResponse(w, body)
+				return
+			}
+			testutil.WriteJSONResponse(w, vmPublicIpPlanTestInterfacesBody(boundID, address))
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/"):
+			nicID := strings.TrimPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/")
+			mock.mu.Lock()
+			mock.events = append(mock.events, "detach-interface")
+			mock.segmentNics = slices.DeleteFunc(mock.segmentNics, func(nic vmSegmentNic) bool { return nic.nicID == nicID })
+			mock.mu.Unlock()
+			accepted(w, map[string]any{"job": queuedJob("job-updated-detach", "detach")})
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mock.mu.Lock()
+			name, parked, gone, stopped := mock.name, mock.parked, mock.gone, mock.stopped
+			readAs := mock.readAs
+			mock.events = append(mock.events, "read")
+			failRead := mock.failRead && mock.readsBeforeFailure == 0
+			if failRead {
+				mock.failRead = false
+			} else if mock.failRead {
+				mock.readsBeforeFailure--
+			}
+			mock.mu.Unlock()
+			if failRead {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"success":false,"message":"Internal server error","error":{"code":"INTERNAL_ERROR","statusCode":500,"details":null}}`))
+				return
+			}
+			if gone {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"success":false,"message":"Virtual machine not found","error":{"code":"Resource Not Found","statusCode":404,"details":null}}`))
+				return
+			}
+			status := virtualmachines.VMStatusRunning.String()
+			if stopped {
+				status = virtualmachines.VMStatusShutoff.String()
+			}
+			body := vmPlanTestReadBody(name, status, vmPlanTestSizeID)
+			if parked {
+				data := body["data"].(map[string]any)
+				data["status"] = virtualmachines.VMStatusError.String()
+				data["failureReason"] = vmUpdatedPlanTestFailureReason
+			}
+			if readAs != nil && !stopped {
+				data := body["data"].(map[string]any)
+				data["status"] = readAs.status
+				data["failureReason"] = readAs.failureReason
+			}
+			testutil.WriteJSONResponse(w, body)
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			raw, _ := io.ReadAll(r.Body)
+			mock.mu.Lock()
+			mock.deleteBodies = append(mock.deleteBodies, string(raw))
+			mock.events = append(mock.events, "delete")
+			mock.gone = true
+			mock.parked = false
+			mock.mu.Unlock()
+			accepted(w, map[string]any{"job": queuedJob(vmUpdatedPlanTestDeleteJobID, "delete")})
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(mock.server.Close)
+	return mock
+}
+
+func (m *vmUpdatedMock) set(change func(*vmUpdatedMock)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	change(m)
+}
+
+// recorded returns the stop count and the body of every delete.
+func (m *vmUpdatedMock) recorded() (int, []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.stops, slices.Clone(m.deleteBodies)
+}
+
+// A create job that fails on the updated wire leaves a parked machine. The
+// create saves its ID, so Terraform taints it, and the next apply replaces it.
+// The replacement deletes the parked machine without a stop, which the
+// platform refuses on such a machine.
+func TestVirtualMachineCreateJobFailedIsReplaced(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineUpdatedMockServer(t)
+	mock.set(func(m *vmUpdatedMock) { m.failCreateJob = true })
+	config := vmPlanTestConfig(mock.server.URL, "vm-updated-failed-create")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:      config,
+				ExpectError: regexp.MustCompile(`the\s+hypervisor\s+refused\s+the\s+machine`),
+			},
+			{
+				PreConfig: func() { mock.set(func(m *vmUpdatedMock) { m.failCreateJob = false }) },
+				Config:    config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionReplace),
+					},
+				},
+				Check: func(*terraform.State) error {
+					stops, deleteBodies := mock.recorded()
+					if len(deleteBodies) != 1 {
+						return fmt.Errorf("expected one delete of the parked machine, got %d", len(deleteBodies))
+					}
+					if deleteBodies[0] != "" {
+						return fmt.Errorf("expected a delete with no body, got %q", deleteBodies[0])
+					}
+					if stops != 0 {
+						return fmt.Errorf("expected no stop of the parked machine, got %d", stops)
+					}
+					return nil
+				},
+			},
+		},
+	})
+}
+
+// A machine that reads Error with a failure reason is parked. The destroy skips
+// the stop the platform refuses on it, sends the delete, and releases the
+// address the machine acquired.
+func TestVirtualMachineDeleteParkedSkipsStop(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineUpdatedMockServer(t)
+	config := vmPublicIpPlanTestConfig(mock.server.URL, "vm-updated-parked-delete", true, "")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() {
+					mock.set(func(m *vmUpdatedMock) {
+						m.parked = true
+						m.segmentNics = vmSegmentNicsFromIds([]string{vmPlanTestSegmentID})
+					})
+				},
+				Config:  config,
+				Destroy: true,
+			},
+		},
+	})
+
+	stops, deleteBodies := mock.recorded()
+	if len(deleteBodies) != 1 {
+		t.Fatalf("Expected one delete, got %d", len(deleteBodies))
+	}
+	if deleteBodies[0] != `{"releasePublicIps":true}` {
+		t.Errorf("Expected the delete body '{\"releasePublicIps\":true}', got '%s'", deleteBodies[0])
+	}
+	if stops != 0 {
+		t.Errorf("Expected no stop of the parked machine, got %d", stops)
+	}
+	want := []string{"read", "delete"}
+	if got := mock.deletePhase(); !slices.Equal(got, want) {
+		t.Errorf("Expected the delete to read and delete, with no interface listing or detach, got %v", got)
+	}
+}
+
+// vmUpdatedPlanTestDestroyWithRead creates the machine, then destroys it while reads report the
+// given status and failure reason.
+func vmUpdatedPlanTestDestroyWithRead(t *testing.T, mock *vmUpdatedMock, name string, read vmUpdatedRead) {
+	t.Helper()
+	config := vmPlanTestConfig(mock.server.URL, name)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() { mock.set(func(m *vmUpdatedMock) { m.readAs = &read }) },
+				Config:    config,
+				Destroy:   true,
+			},
+		},
+	})
+}
+
+// A running machine with a failure reason is not parked. The destroy takes the
+// stop before the delete.
+func TestVirtualMachineDeleteRunningWithReasonStops(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineUpdatedMockServer(t)
+	vmUpdatedPlanTestDestroyWithRead(t, mock, "vm-updated-running-reason", vmUpdatedRead{status: virtualmachines.VMStatusRunning.String(), failureReason: "x"})
+
+	stops, deleteBodies := mock.recorded()
+	if stops != 1 {
+		t.Errorf("Expected one stop, got %d", stops)
+	}
+	if len(deleteBodies) != 1 {
+		t.Errorf("Expected one delete, got %d", len(deleteBodies))
+	}
+}
+
+// A failed delete job on a parked machine reports the parked sentence with the
+// machine ID and the job error.
+func TestVirtualMachineDeleteParkedReportsDeleteFailure(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineUpdatedMockServer(t)
+	config := vmPlanTestConfig(mock.server.URL, "vm-updated-parked-delete-fails")
+	jobError := fmt.Sprintf("job %s for action %q: %s: %s",
+		vmUpdatedPlanTestDeleteJobID, "Delete GPCN Virtual Machine", client.ErrJobFailed.Error(), "hypervisor gone")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() {
+					mock.set(func(m *vmUpdatedMock) {
+						m.parked = true
+						m.failDeleteJobs = 1
+						m.deleteJobFailureReason = "hypervisor gone"
+					})
+				},
+				Config:      config,
+				Destroy:     true,
+				ExpectError: vmPlanTestSentencePattern(fmt.Sprintf(virtualmachines.ErrDetailParkedDeleteFailed, vmPlanTestID, jobError)),
+			},
+		},
+	})
+}
+
+// deletePhase returns the events from the last read before the first DELETE
+// through that DELETE.
+func (m *vmUpdatedMock) deletePhase() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	deleteAt := slices.Index(m.events, "delete")
+	if deleteAt < 0 {
+		return nil
+	}
+	readAt := deleteAt
+	for readAt > 0 && m.events[readAt] != "read" {
+		readAt--
+	}
+	return slices.Clone(m.events[readAt : deleteAt+1])
+}
+
+// A machine in Error without a failure reason skips the stop, because the
+// platform deletes such a machine without one. The delete still lists and
+// detaches the interfaces.
+func TestVirtualMachineDeleteErrorWithoutReasonSkipsStop(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineUpdatedMockServer(t)
+	config := vmPlanTestConfig(mock.server.URL, "vm-updated-error-no-reason")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() {
+					mock.set(func(m *vmUpdatedMock) {
+						m.readAs = &vmUpdatedRead{status: virtualmachines.VMStatusError.String(), failureReason: nil}
+						m.segmentNics = vmSegmentNicsFromIds([]string{vmPlanTestSegmentID})
+					})
+				},
+				Config:  config,
+				Destroy: true,
+			},
+		},
+	})
+
+	stops, deleteBodies := mock.recorded()
+	if stops != 0 {
+		t.Errorf("Expected no stop, got %d", stops)
+	}
+	if len(deleteBodies) != 1 {
+		t.Errorf("Expected one delete, got %d", len(deleteBodies))
+	}
+	want := []string{"read", "list-interfaces", "detach-interface", "delete"}
+	if got := mock.deletePhase(); !slices.Equal(got, want) {
+		t.Errorf("Expected the delete to read, list the interfaces, detach the segment interface and delete, got %v", got)
+	}
+}
+
+// A machine in Error without a failure reason skips the stop, and the delete
+// still releases the address this resource acquired. The status match ignores
+// case.
+func TestVirtualMachineDeleteErrorWithoutReasonReleasesAcquiredAddress(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineUpdatedMockServer(t)
+	config := vmPublicIpPlanTestConfig(mock.server.URL, "vm-updated-error-release", true, "")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() {
+					mock.set(func(m *vmUpdatedMock) { m.readAs = &vmUpdatedRead{status: "error", failureReason: nil} })
+				},
+				Config:  config,
+				Destroy: true,
+			},
+		},
+	})
+
+	stops, deleteBodies := mock.recorded()
+	if stops != 0 {
+		t.Errorf("Expected no stop, got %d", stops)
+	}
+	if len(deleteBodies) != 1 {
+		t.Fatalf("Expected one delete, got %d", len(deleteBodies))
+	}
+	if deleteBodies[0] != `{"releasePublicIps":true}` {
+		t.Errorf("Expected the delete body '{\"releasePublicIps\":true}', got '%s'", deleteBodies[0])
+	}
+}
+
+// A failed read before the delete names the read, not a stop the delete never
+// sent.
+func TestVirtualMachineDeleteReadFailureNamesTheRead(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineUpdatedMockServer(t)
+	config := vmSizePlanTestConfig(mock.server.URL, "vm-updated-delete-read-fails", vmPlanTestSizeID)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				// The refresh reads the machine first, and the delete reads it next.
+				PreConfig: func() {
+					mock.set(func(m *vmUpdatedMock) {
+						m.failRead = true
+						m.readsBeforeFailure = 1
+					})
+				},
+				Config:      config,
+				Destroy:     true,
+				ExpectError: vmPlanTestSentencePattern(fmt.Sprintf(virtualmachines.ErrDetailReadingVMBeforeDelete, vmPlanTestID)),
+			},
+		},
+	})
+}
+
+// The updated API reports networkHotplug as a JSON boolean. The create, the refresh
+// and the plan after it each read the machine, so each must take that form.
+func TestVirtualMachineResourceReadsBooleanNetworkHotplug(t *testing.T) {
+	cases := []struct {
+		hotplug bool
+		want    string
+	}{
+		{hotplug: true, want: "true"},
+		{hotplug: false, want: "false"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.want, func(t *testing.T) {
+			shortenVirtualMachinePolling(t)
+			server, _, _ := startVirtualMachinePlanMockServer(t, tc.hotplug)
+
+			config := vmPlanTestConfig(server.URL, "vm-plan-hotplug-bool")
+			want := tc.want
+
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config: config,
+						Check:  resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_hotplug", want),
+					},
+					{
+						RefreshState: true,
+						Check:        resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "network_hotplug", want),
+					},
+				},
+			})
+		})
+	}
 }

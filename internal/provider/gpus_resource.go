@@ -233,8 +233,13 @@ func (r *gpuResource) Create(ctx context.Context, req resource.CreateRequest, re
 	// Every SKU for the series shares the series ID the create call needs.
 	seriesId := inventory[0].SeriesID
 
-	getGPUResponse, err := gpu.CreateGPU(r.client, ctx, seriesId, plan)
+	getGPUResponse, gpuID, err := gpu.CreateGPU(r.client, ctx, seriesId, plan)
 	if err != nil {
+		// A GPU the create left behind goes to state with the error, so
+		// Terraform taints it and the next apply replaces it.
+		if gpuID != "" {
+			resp.Diagnostics.Append(resp.State.Set(ctx, gpu.ModelFromPlanWithID(plan, gpuID))...)
+		}
 		resp.Diagnostics.AddError(
 			gpu.ErrSummaryUnableToCreateGPU,
 			err.Error(),

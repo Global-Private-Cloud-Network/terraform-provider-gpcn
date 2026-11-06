@@ -107,6 +107,15 @@ type vpnConnPlanTestServerState struct {
 	postRaw            []string
 	putBodies          []map[string]any
 	deleteCount        int
+	// postHeldByJob is the job that holds the row made by the POST, named in
+	// heldBy.
+	postHeldByJob string
+	// putBusyHolder makes every PUT answer 409 RESOURCE_BUSY with heldBy naming
+	// this job. A job read of this job reports it still running.
+	putBusyHolder string
+	// holderEndsAfter makes a read of the putBusyHolder job wait this long and
+	// then report the job succeeded.
+	holderEndsAfter time.Duration
 }
 
 func (s *vpnConnPlanTestServerState) set(update func(*vpnConnPlanTestServerState)) {
@@ -224,6 +233,9 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				if state.postActiveJob != "" {
 					state.row["activeJobId"] = state.postActiveJob
 				}
+				if state.postHeldByJob != "" {
+					state.row["heldBy"] = map[string]any{"jobId": state.postHeldByJob, "operation": "create", "verb": "create"}
+				}
 				state.desiredApplied = true
 			}
 			postStatus := state.postStatus
@@ -278,6 +290,15 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			body := testutil.ReadRequestBody(r)
 			state.mu.Lock()
 			state.putBodies = append(state.putBodies, body)
+			if holder := state.putBusyHolder; holder != "" {
+				state.mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				fmt.Fprintf(w, `{"success":false,"message":"branch-office is busy: update in progress.","error":{"code":"RESOURCE_BUSY",`+
+					`"statusCode":409,"details":{"resourceType":"vpc_vpn_connection","resourceId":%q,`+
+					`"heldBy":{"jobId":%q,"operation":"update","verb":"update"}}}}`, vpnConnPlanTestConnID, holder)
+				return
+			}
 			putStatus := state.putStatus
 			if putStatus != 0 {
 				state.mu.Unlock()
@@ -354,6 +375,15 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			state.mu.Lock()
 			failJob := state.failJob
 			jobStatus, cancelJob := state.jobStatus, state.cancelJob
+			if holder := state.putBusyHolder; holder != "" && jobID == holder {
+				endsAfter := state.holderEndsAfter
+				state.mu.Unlock()
+				if endsAfter > 0 {
+					time.Sleep(endsAfter)
+				}
+				testutil.HandleJobResponse(w, jobID, vpnConnPlanTestConnID, endsAfter > 0)
+				return
+			}
 			if jobID == "job-delete" && state.failDeleteJob {
 				state.failDeleteJob = false
 				failJob = true
@@ -362,27 +392,21 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				state.row["activeJobId"] = nil
 				state.row["state"] = "connecting"
 			}
+			if heldBy, _ := state.row["heldBy"].(map[string]any); heldBy != nil && heldBy["jobId"] == jobID {
+				state.row["heldBy"] = nil
+				state.row["state"] = "connecting"
+			}
 			state.mu.Unlock()
 			if jobStatus != 0 {
 				writeVpnConnPlanTestError(w, jobStatus, "Forbidden", "forbidden")
 				return
 			}
 			if cancelJob {
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Success: true,
-					Data: client.JobStatusDataResponse{Jobs: []client.JobResponse{{
-						JobID: jobID, ResourceId: vpnConnPlanTestConnID, Stage: client.JobStageCancelled, IsTerminal: true,
-					}}},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"`+jobID+`","stage":"`+client.JobStageCancelled+`","isCompleted":false,"isTerminal":true,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+vpnConnPlanTestConnID+`","resourceName":"","resourceType":""}]}}`))
 				return
 			}
 			if failJob {
-				testutil.WriteJSONResponse(w, client.JobStatusMultiResponse{
-					Success: true,
-					Data: client.JobStatusDataResponse{Jobs: []client.JobResponse{{
-						JobID: jobID, ResourceId: vpnConnPlanTestConnID, HasFailed: true, ErrorMessage: vpnConnPlanTestJobFailText,
-					}}},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":true,"progressPercentage":0,"message":"","errorMessage":"`+vpnConnPlanTestJobFailText+`","resourceId":"`+vpnConnPlanTestConnID+`","resourceName":"","resourceType":""}]}}`))
 				return
 			}
 			testutil.HandleJobResponse(w, jobID, vpnConnPlanTestConnID, true)
@@ -1802,4 +1826,178 @@ func TestVpcVpnConnectionResourceUpdateSendsOnce(t *testing.T) {
 			},
 		},
 	})
+}
+
+// An updated-wire read names a running job in heldBy and carries no activeJobId.
+// Saved settings that do not run then call for no update.
+func TestVpcVpnConnectionHeldByWithholdsResend(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	config := newVpnConnPlanTestConfig().render(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() {
+					state.set(func(s *vpnConnPlanTestServerState) {
+						s.desiredApplied = false
+						s.row["state"] = "connected"
+						s.row["activeJobId"] = nil
+						s.row["heldBy"] = map[string]any{"jobId": "job-live", "operation": "update", "verb": "update"}
+					})
+				},
+				Config:   config,
+				PlanOnly: true,
+			},
+		},
+	})
+}
+
+// An adopted row whose heldBy names a running job is read again once the job
+// ends.
+func TestVpcVpnConnectionCreateAdoptionPollsHeldByJob(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	state.set(func(s *vpnConnPlanTestServerState) {
+		s.postStatus = http.StatusBadGateway
+		s.createdState = "creating"
+		s.postHeldByJob = "job-live"
+	})
+	config := newVpnConnPlanTestConfig().render(server.URL)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config, ExpectError: vpnConnRefusal(vpnConnPlanTestBadGateway)},
+			{
+				PreConfig: func() {
+					state.mu.Lock()
+					defer state.mu.Unlock()
+					if state.row["heldBy"] != nil {
+						t.Errorf("Expected the create to poll the job of the adopted row, which is still held by %v", state.row["heldBy"])
+					}
+					state.postStatus = 0
+					state.postHeldByJob = ""
+					state.createdState = "connecting"
+				},
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVpcVpnConnectionTest, plancheck.ResourceActionReplace),
+					},
+				},
+			},
+		},
+	})
+}
+
+// A PUT the API answers busy every time was never processed. The update fails
+// with the holder sentence and carries no note that the change may still apply.
+func TestVpcVpnConnectionResourceUpdateBusyCarriesNoNote(t *testing.T) {
+	t.Parallel()
+	server, state := startVpnConnPlanMockServer(t)
+	state.set(func(s *vpnConnPlanTestServerState) {
+		s.exists = true
+		s.row = vpnConnPlanTestRowFromBody(map[string]any{
+			"name": "branch-office", "peerAddress": "203.0.113.10", "peerCidrs": []string{"192.168.10.0/24"},
+		}, "connected")
+		s.putBusyHolder = "job-holder"
+	})
+	r, empty := vpnConnDirectCall(t, server.URL)
+	r.client.Config().PollingTimeout = 300 * time.Millisecond
+
+	prior := empty
+	priorModel := vpnConnDirectModel(vpnConnPlanTestConnID)
+	if diags := prior.Set(context.Background(), &priorModel); diags.HasError() {
+		t.Fatalf("failed to build state: %v", diags)
+	}
+	plan := tfsdk.Plan{Schema: prior.Schema}
+	planModel := priorModel
+	planModel.Name = types.StringValue("branch-office-2")
+	if diags := plan.Set(context.Background(), &planModel); diags.HasError() {
+		t.Fatalf("failed to build plan: %v", diags)
+	}
+
+	resp := &fwresource.UpdateResponse{State: prior}
+	r.Update(context.Background(), fwresource.UpdateRequest{
+		Plan: plan, State: prior, Config: tfsdk.Config{Schema: prior.Schema, Raw: plan.Raw},
+	}, resp)
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("Expected the update to fail")
+	}
+	hasHolder, hasNote := false, false
+	for _, d := range resp.Diagnostics.Errors() {
+		if strings.Contains(d.Detail(), "job job-holder still holds this resource after ") {
+			hasHolder = true
+		}
+		if strings.Contains(d.Detail(), vpcvpnconnections.ErrDetailUpdateMayStillApply) {
+			hasNote = true
+		}
+	}
+	if !hasHolder {
+		t.Errorf("Expected the holder sentence; diagnostics: %v", resp.Diagnostics)
+	}
+	if hasNote {
+		t.Errorf("note present = true, want false; diagnostics: %v", resp.Diagnostics)
+	}
+}
+
+// A holder that ends only after the deadline leaves the PUT unsent. The update
+// fails with the ended sentence and carries no note that the change may still
+// apply. The test changes a package variable, so it does not run in parallel.
+func TestVpcVpnConnectionResourceUpdateEndedHolderCarriesNoNote(t *testing.T) {
+	previous := vpcvpnconnections.RemovalPollInterval
+	vpcvpnconnections.RemovalPollInterval = time.Millisecond
+	t.Cleanup(func() { vpcvpnconnections.RemovalPollInterval = previous })
+
+	server, state := startVpnConnPlanMockServer(t)
+	state.set(func(s *vpnConnPlanTestServerState) {
+		s.exists = true
+		s.row = vpnConnPlanTestRowFromBody(map[string]any{
+			"name": "branch-office", "peerAddress": "203.0.113.10", "peerCidrs": []string{"192.168.10.0/24"},
+		}, "connected")
+		s.putBusyHolder = "job-holder"
+		s.holderEndsAfter = 450 * time.Millisecond
+	})
+	r, empty := vpnConnDirectCall(t, server.URL)
+	r.client.Config().PollingTimeout = 400 * time.Millisecond
+
+	prior := empty
+	priorModel := vpnConnDirectModel(vpnConnPlanTestConnID)
+	if diags := prior.Set(context.Background(), &priorModel); diags.HasError() {
+		t.Fatalf("failed to build state: %v", diags)
+	}
+	plan := tfsdk.Plan{Schema: prior.Schema}
+	planModel := priorModel
+	planModel.Name = types.StringValue("branch-office-2")
+	if diags := plan.Set(context.Background(), &planModel); diags.HasError() {
+		t.Fatalf("failed to build plan: %v", diags)
+	}
+
+	resp := &fwresource.UpdateResponse{State: prior}
+	r.Update(context.Background(), fwresource.UpdateRequest{
+		Plan: plan, State: prior, Config: tfsdk.Config{Schema: prior.Schema, Raw: plan.Raw},
+	}, resp)
+
+	if !resp.Diagnostics.HasError() {
+		t.Fatal("Expected the update to fail")
+	}
+	hasEnded, hasNote := false, false
+	for _, d := range resp.Diagnostics.Errors() {
+		if strings.Contains(d.Detail(), "job job-holder ended as the wait for it ran out after ") {
+			hasEnded = true
+		}
+		if strings.Contains(d.Detail(), vpcvpnconnections.ErrDetailUpdateMayStillApply) {
+			hasNote = true
+		}
+	}
+	if !hasEnded {
+		t.Errorf("Expected the ended sentence; diagnostics: %v", resp.Diagnostics)
+	}
+	if hasNote {
+		t.Errorf("note present = true, want false; diagnostics: %v", resp.Diagnostics)
+	}
 }

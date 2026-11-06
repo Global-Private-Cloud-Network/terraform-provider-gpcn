@@ -1,5 +1,7 @@
 package vpcs
 
+import "time"
+
 var BASE_URL_V1 string = "/v1/resource/vpcs/"
 
 // VPC states, as the API defines them
@@ -16,3 +18,7 @@ var ERROR_CODE_VPC_NOT_ACTIVE = "VPC_NOT_ACTIVE"
 // Job actions, used in polling log lines and in the failure sentence
 var ACTION_CREATE_VPC = "Create GPCN VPC"
 var ACTION_DELETE_VPC = "Delete GPCN VPC"
+
+// BusyRetryInterval is the wait before a delete goes out again after the job
+// that held the VPC ended. It is a variable so that tests can shorten it.
+var BusyRetryInterval = 5 * time.Second

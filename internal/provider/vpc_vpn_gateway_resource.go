@@ -105,7 +105,7 @@ func (r *vpcVpnGatewayResource) Configure(_ context.Context, req resource.Config
 	r.client = gpcnClient
 }
 
-// ModifyPlan replaces a failed gateway. The API has no retry for it.
+// ModifyPlan replaces a failed gateway rather than retrying it.
 func (r *vpcVpnGatewayResource) ModifyPlan(ctx context.Context, req resource.ModifyPlanRequest, resp *resource.ModifyPlanResponse) {
 	if req.State.Raw.IsNull() || req.Plan.Raw.IsNull() {
 		return
@@ -161,8 +161,8 @@ func (r *vpcVpnGatewayResource) Create(ctx context.Context, req resource.CreateR
 			resp.Diagnostics.AddError(vpcvpngateways.ErrSummaryUnableToCreateVpnGW, fmt.Sprintf(vpcvpngateways.ErrFmtNotOwnRow, vpcID))
 			return
 		}
-		if getErr == nil && gateway.ActiveJobID != nil {
-			vpcvpngateways.PollAdoptedJob(r.client, ctx, vpcvpngateways.ActionCreateVpnGateway, gateway.ActiveJobID, requestStart)
+		if getErr == nil && client.ActiveJobID(gateway.HeldBy, gateway.ActiveJobID) != nil {
+			vpcvpngateways.PollAdoptedJob(r.client, ctx, vpcvpngateways.ActionCreateVpnGateway, client.ActiveJobID(gateway.HeldBy, gateway.ActiveJobID), requestStart)
 			if settled, settledErr := vpcvpngateways.ReadAfterFailure(r.client, ctx, vpcID); settledErr == nil {
 				gateway = settled
 			}

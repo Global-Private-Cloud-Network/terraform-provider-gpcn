@@ -45,14 +45,17 @@ type readGPUResponse struct {
 	} `json:"data"`
 }
 
-func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId string, plan ResourceModel) (*readGPUResponse, error) {
+// CreateGPU also returns the GPU ID it knows when it fails: the ID the
+// completed job names, else the ID the 202 carried. A row can outlive a failed
+// create, so the caller records that ID and Terraform taints the GPU.
+func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId string, plan ResourceModel) (*readGPUResponse, string, error) {
 	tflog.Info(ctx, LogStartingCreateGPU)
 
 	// Extract auth configuration
 	var auth ResourceModelInitialAuth
 	authDiags := plan.InitialAuth.As(ctx, &auth, basetypes.ObjectAsOptions{})
 	if authDiags.HasError() {
-		return nil, fmt.Errorf("failed to read auth configuration")
+		return nil, "", fmt.Errorf("failed to read auth configuration")
 	}
 
 	// Create a new request from the model
@@ -76,19 +79,19 @@ func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId stri
 
 	jsonCreateGPURequestBody, err := json.Marshal(createGPURequestBody)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	// Create API request
 	request, err := http.NewRequestWithContext(ctx, "POST", BASE_URL_V1, bytes.NewBuffer(jsonCreateGPURequestBody))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	// Perform API request
 	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	tflog.Info(ctx, LogIssuedCreateGPUJob)
 
@@ -96,25 +99,30 @@ func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId stri
 	defer response.Body.Close()
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	var createGPUResponse client.JobStatusMultiResponse
 	err = json.Unmarshal(body, &createGPUResponse)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	// Extract job ID with bounds checking
 	jobID, err := client.GetJobID(&createGPUResponse)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get job ID from create GPU response: %w", err)
+		return nil, "", fmt.Errorf("failed to get job ID from create GPU response: %w", err)
+	}
+	// The ID the 202 names, if any. The completed job names it again.
+	gpuID, err := client.GetJobResourceID(&createGPUResponse)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get job ID from create GPU response: %w", err)
 	}
 
 	// Perform long polling to wait for job completion
 	jobResp, err := client.PerformLongPolling(gpcnClient, ctx, "Create GPCN GPU", jobID)
 	if err != nil {
-		return nil, fmt.Errorf("create GPU polling failed: %w", err)
+		return nil, gpuID, fmt.Errorf("create GPU polling failed: %w", err)
 	}
 
 	tflog.Info(ctx, LogLongPollingCompletedCreateGPU)
@@ -122,17 +130,20 @@ func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId stri
 	// Extract resource ID with bounds checking
 	resourceID, err := client.GetJobResourceID(jobResp)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get resource ID from create GPU job response: %w", err)
+		return nil, gpuID, fmt.Errorf("failed to get resource ID from create GPU job response: %w", err)
+	}
+	if resourceID != "" {
+		gpuID = resourceID
 	}
 
 	// Get the GPU details after creation
 	getGPUResponse, err := GetGPU(gpcnClient, ctx, resourceID)
 	if err != nil {
-		return nil, err
+		return nil, gpuID, err
 	}
 
 	tflog.Info(ctx, LogSuccessfullyFinishedCreateGPU)
-	return getGPUResponse, nil
+	return getGPUResponse, gpuID, nil
 }
 
 func GetGPU(gpcnClient *client.GpcnClient, ctx context.Context, id string) (*readGPUResponse, error) {

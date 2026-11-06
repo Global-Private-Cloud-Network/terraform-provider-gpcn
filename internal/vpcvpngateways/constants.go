@@ -41,3 +41,7 @@ const (
 	ActionCreateVpnGateway = "Create GPCN VPN Gateway"
 	ActionDeleteVpnGateway = "Delete GPCN VPN Gateway"
 )
+
+// ResendMinBudget is the least time a destroy needs left to send a parked
+// removal again. It is a variable so that tests can shorten it.
+var ResendMinBudget = 30 * time.Second

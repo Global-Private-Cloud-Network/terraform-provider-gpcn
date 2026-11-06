@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -161,11 +160,7 @@ func TestCreateVolumeMockHTTP(t *testing.T) {
 					t.Error("Request body should not contain volumeSizeId")
 				}
 
-				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
-					Success: true,
-					Message: "Volume creation job started",
-					Data:    client.JobResponse{JobID: jobID},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"Volume creation job started","data":{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -182,7 +177,7 @@ func TestCreateVolumeMockHTTP(t *testing.T) {
 	})
 	defer server.Close()
 
-	response, err := CreateVolume(gpcnClient, context.Background(), createTestVolumeModel("test-volume", "SSD", 256))
+	response, _, err := CreateVolume(gpcnClient, context.Background(), createTestVolumeModel("test-volume", "SSD", 256))
 	if err != nil {
 		t.Fatalf("CreateVolume failed: %v", err)
 	}
@@ -266,11 +261,7 @@ func TestUpdateVolumeMockHTTP(t *testing.T) {
 				if _, hasSkuId := req["skuId"]; hasSkuId {
 					t.Error("Request body should not contain skuId")
 				}
-				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
-					Success: true,
-					Message: "Volume resize job started",
-					Data:    client.JobResponse{JobID: "job-456"},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"Volume resize job started","data":{"jobId":"job-456","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -342,11 +333,7 @@ func TestUpdateVolumeLooksUpSkuByComponentCodeMockHTTP(t *testing.T) {
 
 			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+volumeID+"/resize"):
 				updateCalled = true
-				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
-					Success: true,
-					Message: "Volume resize job started",
-					Data:    client.JobResponse{JobID: "job-ultra"},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"Volume resize job started","data":{"jobId":"job-ultra","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, "job-ultra", volumeID, true)
@@ -408,11 +395,7 @@ func TestUpdateVolumeRefusesUnresolvableTypeMockHTTP(t *testing.T) {
 
 			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+volumeID+"/resize"):
 				resizeCalled = true
-				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
-					Success: true,
-					Message: "Volume resize job started",
-					Data:    client.JobResponse{JobID: "job-unknown"},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"Volume resize job started","data":{"jobId":"job-unknown","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
 
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
@@ -712,10 +695,7 @@ func createVolumeBodyFor(t *testing.T, model ResourceModel) map[string]any {
 				}))
 			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/volumes/"):
 				created = testutil.ReadRequestBody(r)
-				testutil.WriteJSONResponse(w, client.JobStatusSingularResponse{
-					Success: true,
-					Data:    client.JobResponse{JobID: jobID},
-				})
+				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, volumeID, true)
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID):
@@ -727,7 +707,7 @@ func createVolumeBodyFor(t *testing.T, model ResourceModel) map[string]any {
 	})
 	defer server.Close()
 
-	if _, err := CreateVolume(gpcnClient, context.Background(), model); err != nil {
+	if _, _, err := CreateVolume(gpcnClient, context.Background(), model); err != nil {
 		t.Fatalf("CreateVolume failed: %v", err)
 	}
 	return created
@@ -786,5 +766,107 @@ func TestMoveVolumeMockHTTP(t *testing.T) {
 	}
 	if !called {
 		t.Error("expected the move endpoint to be called")
+	}
+}
+
+// An updated-wire 202 names the volume before the job ends. A failed job then still
+// returns that ID, so the caller saves it and Terraform taints the volume.
+func TestCreateVolumeReturnsIDWhenJobFails(t *testing.T) {
+	const (
+		jobID    = "job-updated-volume"
+		volumeID = "volume-updated-1"
+		skuId    = "sku-uuid-10"
+	)
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/volume-sizes"):
+				testutil.WriteJSONResponse(w, newVolumeSizesResponse(testDatacenterID, []volumeSizesDataVolumeTypesAvailableSizesResponse{
+					{SkuId: skuId, SizeGb: 256},
+				}))
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/volumes/"):
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(`{"success":true,"data":{` +
+					`"job":{"id":"` + jobID + `","operation":"create","resourceId":"` + volumeID + `","stage":"queued",` +
+					`"outcome":null,"progress":0,"message":null,"failureReason":null},` +
+					`"resource":{"id":"` + volumeID + `","name":"test-volume","status":"Creating"}}}`))
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"success":true,"data":{"jobs":[{"id":"` + jobID + `","operation":"create",` +
+					`"resourceId":"` + volumeID + `","stage":"failed","outcome":"failed","progress":20,` +
+					`"message":null,"failureReason":"the storage pool is full"}],"notFound":[]}}`))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	response, id, err := CreateVolume(gpcnClient, context.Background(), createTestVolumeModel("test-volume", "SSD", 256))
+	if err == nil {
+		t.Fatal("Expected the failed job to fail the create")
+	}
+	if !strings.Contains(err.Error(), "the storage pool is full") {
+		t.Errorf("Expected the job's failure reason in %q", err.Error())
+	}
+	if response != nil {
+		t.Errorf("Expected no response, got %+v", response)
+	}
+	if id != volumeID {
+		t.Errorf("Expected ID %q from the 202, got %q", volumeID, id)
+	}
+}
+
+// A current-form 202 names no volume, and the completed job names it. A failed
+// read-back then still returns that ID, so the caller saves it and Terraform
+// taints the volume.
+func TestCreateVolumeReturnsIDWhenReadBackFails(t *testing.T) {
+	const (
+		jobID    = "job-current-volume"
+		volumeID = "volume-current-1"
+		skuId    = "sku-uuid-10"
+	)
+
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/volume-sizes"):
+				testutil.WriteJSONResponse(w, newVolumeSizesResponse(testDatacenterID, []volumeSizesDataVolumeTypesAvailableSizesResponse{
+					{SkuId: skuId, SizeGb: 256},
+				}))
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/volumes/"):
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusAccepted)
+				_, _ = w.Write([]byte(`{"success":true,"message":"Volume creation job started","data":{"jobId":"` + jobID + `",` +
+					`"stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"",` +
+					`"errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"success":true,"message":"Job status retrieved","data":{"jobs":[{"jobId":"` + jobID + `",` +
+					`"stage":"completed","isCompleted":true,"isTerminal":true,"hasFailed":false,"progressPercentage":100,"message":"",` +
+					`"errorMessage":"","resourceId":"` + volumeID + `","resourceName":"","resourceType":""}]}}`))
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/"+volumeID):
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"success":false,"message":"Internal server error","error":{"code":"INTERNAL_ERROR","statusCode":500,"details":null}}`))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+
+	response, id, err := CreateVolume(gpcnClient, context.Background(), createTestVolumeModel("test-volume", "SSD", 256))
+	if err == nil {
+		t.Fatal("Expected the failed read-back to fail the create")
+	}
+	if response != nil {
+		t.Errorf("Expected no response, got %+v", response)
+	}
+	if id != volumeID {
+		t.Errorf("Expected ID %q from the completed job, got %q", volumeID, id)
 	}
 }
