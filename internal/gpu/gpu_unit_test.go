@@ -473,7 +473,7 @@ func TestCreateGPUWithSkuCodeMockHTTP(t *testing.T) {
 				if int64(req["gpuCount"].(float64)) != 2 {
 					t.Errorf("Expected gpuCount 2, got '%v'", req["gpuCount"])
 				}
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"GPU creation job started","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+gpuID+`","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleJobResponse(w, jobID, gpuID, false)
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, gpuID, true)
@@ -634,7 +634,7 @@ func TestCreateGPUMockHTTP(t *testing.T) {
 					t.Errorf("Expected sshKeyId '%s', got '%v'", testSSHKeyID, req["sshKeyId"])
 				}
 
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"GPU creation job started","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+gpuID+`","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleJobResponse(w, jobID, gpuID, false)
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -759,7 +759,7 @@ func TestDeleteGPUMockHTTP(t *testing.T) {
 			switch {
 			case r.Method == "DELETE" && strings.Contains(r.URL.Path, "/gpu/"+gpuID):
 				deleteCalled = true
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"GPU deletion job started","data":{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+gpuID+`","resourceName":"","resourceType":""}}`))
+				testutil.HandleCreateJobResponse(w, jobID, "GPU deletion job started")
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -1316,7 +1316,7 @@ func gpuUnitCreateKeys(t *testing.T, group types.String) map[string]any {
 			switch {
 			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/gpu/"):
 				got = testutil.ReadRequestBody(r)
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+gpuID+`","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleJobResponse(w, jobID, gpuID, false)
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, gpuID, true)
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/"+gpuID):
@@ -1489,9 +1489,7 @@ func TestCreateGPUReturnsIDWhenJobFails(t *testing.T) {
 	}
 }
 
-// A current-form 202 names no GPU, and the completed job names it. A failed
-// read-back then still returns that ID, so the caller saves it and Terraform
-// taints the GPU.
+// The 202 in this test names no resource, so the ID comes from the completed job.
 func TestCreateGPUReturnsIDWhenReadBackFails(t *testing.T) {
 	const (
 		jobID = "job-current-gpu"
@@ -1505,13 +1503,9 @@ func TestCreateGPUReturnsIDWhenReadBackFails(t *testing.T) {
 			switch {
 			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/gpu/"):
 				w.WriteHeader(http.StatusAccepted)
-				_, _ = w.Write([]byte(`{"success":true,"message":"GPU creation job started","data":{"jobs":[{"jobId":"` + jobID + `",` +
-					`"stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"",` +
-					`"errorMessage":"","resourceId":"","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleJobResponse(w, jobID, "", false)
 			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
-				_, _ = w.Write([]byte(`{"success":true,"message":"Job status retrieved","data":{"jobs":[{"jobId":"` + jobID + `",` +
-					`"stage":"completed","isCompleted":true,"isTerminal":true,"hasFailed":false,"progressPercentage":100,"message":"",` +
-					`"errorMessage":"","resourceId":"` + gpuID + `","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleJobResponse(w, jobID, gpuID, true)
 			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/"+gpuID):
 				w.WriteHeader(http.StatusInternalServerError)
 				_, _ = w.Write([]byte(`{"success":false,"message":"Internal server error","error":{"code":"INTERNAL_ERROR","statusCode":500,"details":null}}`))
