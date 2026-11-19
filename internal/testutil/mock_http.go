@@ -162,6 +162,19 @@ func HandleCreateJobResponseWithResource(w http.ResponseWriter, jobID string, re
 	})
 }
 
+// HandleBatchCreateJobResponse answers a create that the API accepts as a
+// batch of one, as the GPU and VM creates do.
+func HandleBatchCreateJobResponse(w http.ResponseWriter, jobID string, resource map[string]any) {
+	var row any
+	if resource != nil {
+		row = resource
+	}
+	WriteJSONResponse(w, map[string]any{
+		"success": true,
+		"data":    map[string]any{"jobs": []any{map[string]any{"job": queuedJob(jobID), "resource": row}}},
+	})
+}
+
 func queuedJob(jobID string) map[string]any {
 	return map[string]any{
 		"id":             jobID,
