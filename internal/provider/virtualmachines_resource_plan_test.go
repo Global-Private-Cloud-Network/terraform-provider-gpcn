@@ -4450,7 +4450,7 @@ const (
 	vmUpdatedPlanTestFailureReason = "the hypervisor refused the machine"
 )
 
-// vmUpdatedMock serves the machine in the updated-wire shapes: a batch 202 whose element
+// vmUpdatedMock serves the machine: a batch 202 whose element
 // carries the job and the row, and job reads that carry an outcome. A failed
 // create job parks the row in Error with a failure reason, as the platform does.
 type vmUpdatedMock struct {
@@ -4690,7 +4690,7 @@ func (m *vmUpdatedMock) recorded() (int, []string) {
 	return m.stops, slices.Clone(m.deleteBodies)
 }
 
-// A create job that fails on the updated wire leaves a parked machine. The
+// A create job that fails leaves a parked machine. The
 // create saves its ID, so Terraform taints it, and the next apply replaces it.
 // The replacement deletes the parked machine without a stop, which the
 // platform refuses on such a machine.

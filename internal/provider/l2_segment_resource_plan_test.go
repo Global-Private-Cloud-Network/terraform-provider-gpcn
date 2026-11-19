@@ -1103,7 +1103,7 @@ func TestL2SegmentResourcePlanGroupDescriptionBytes(t *testing.T) {
 
 const l2UpdatedPlanTestFailureReason = "the segment could not be provisioned"
 
-// A create job that fails on the updated wire leaves the segment behind. The
+// A create job that fails leaves the segment behind. The
 // 202 named it, so the create saves its ID, Terraform taints it, and the next
 // apply replaces it.
 func TestL2SegmentCreateJobFailedIsReplaced(t *testing.T) {

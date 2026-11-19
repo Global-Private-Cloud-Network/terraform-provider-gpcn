@@ -1251,7 +1251,7 @@ func TestVolumeResourcePlanUnsupportedGrowDoesNotMove(t *testing.T) {
 
 const volUpdatedPlanTestFailureReason = "the storage pool is full"
 
-// A create job that fails on the updated wire leaves the volume behind. The
+// A create job that fails leaves the volume behind. The
 // 202 named it, so the create saves its ID, Terraform taints it, and the next
 // apply replaces it.
 func TestVolumeCreateJobFailedIsReplaced(t *testing.T) {

@@ -442,7 +442,7 @@ func TestCreateL2SegmentRejectsJobWithoutSegmentIDUnit(t *testing.T) {
 	}
 }
 
-// An updated-wire 202 names the segment before the job ends. A failed job then still
+// The 202 names the segment before the job ends. A failed job then still
 // returns that ID, so the caller saves it and Terraform taints the segment.
 func TestCreateL2SegmentReturnsIDWhenJobFails(t *testing.T) {
 	t.Parallel()

@@ -769,7 +769,7 @@ func TestMoveVolumeMockHTTP(t *testing.T) {
 	}
 }
 
-// An updated-wire 202 names the volume before the job ends. A failed job then still
+// The 202 names the volume before the job ends. A failed job then still
 // returns that ID, so the caller saves it and Terraform taints the volume.
 func TestCreateVolumeReturnsIDWhenJobFails(t *testing.T) {
 	const (

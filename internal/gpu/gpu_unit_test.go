@@ -1443,7 +1443,7 @@ func TestMapGPUResponseToModelResourceGroupUnit(t *testing.T) {
 	}
 }
 
-// An updated-wire 202 names the GPU before the job ends. A failed job then still
+// The 202 names the GPU before the job ends. A failed job then still
 // returns that ID, so the caller saves it and Terraform taints the GPU.
 func TestCreateGPUReturnsIDWhenJobFails(t *testing.T) {
 	const (

@@ -2438,7 +2438,7 @@ func TestPrimaryInterfaceCarriesAForeignAddressDetailBytes(t *testing.T) {
 	}
 }
 
-// An updated-wire 202 names the machine before the job ends. A failed job then still
+// The 202 names the machine before the job ends. A failed job then still
 // returns that ID, so the caller saves it and Terraform taints the machine.
 func TestCreateVirtualMachineReturnsIDWhenJobFails(t *testing.T) {
 	useFastVMStatusPollInterval(t)

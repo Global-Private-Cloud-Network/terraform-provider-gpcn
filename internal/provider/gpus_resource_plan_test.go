@@ -897,7 +897,7 @@ func TestGPUResourcePlanGroupDescriptionBytes(t *testing.T) {
 
 const gpuUpdatedPlanTestFailureReason = "no GPU host had capacity"
 
-// A create job that fails on the updated wire leaves the GPU behind. The 202
+// A create job that fails leaves the GPU behind. The 202
 // named it, so the create saves its ID, Terraform taints it, and the next
 // apply replaces it.
 func TestGpuCreateJobFailedIsReplaced(t *testing.T) {
