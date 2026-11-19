@@ -182,7 +182,6 @@ func (s *nsgPlanTestServerState) detail() map[string]any {
 			"failureReason": failureReason,
 			"ruleCount":     len(s.rules),
 			"subnetCount":   s.subnetCount,
-			"activeJobId":   nil,
 			"createdAt":     nsgPlanTestTimestamp,
 			"updatedAt":     nsgPlanTestTimestamp,
 		},
@@ -210,11 +209,7 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 			state.storeRules(body)
 			state.deleted = false
 			state.mu.Unlock()
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true,
-				"message": "Operation initiated successfully",
-				"data":    map[string]any{"nsgId": nsgPlanTestID, "jobId": "job-create"},
-			})
+			testutil.HandleCreateJobResponseWithResource(w, "job-create", map[string]any{"id": nsgPlanTestID})
 		case r.Method == http.MethodGet && r.URL.Path == groupPath:
 			state.mu.Lock()
 			state.reads++
@@ -320,17 +315,7 @@ func nsgPlanTestHandleJob(w http.ResponseWriter, r *http.Request, state *nsgPlan
 	state.mu.Unlock()
 
 	if jobID == "job-create" && failCreate {
-		testutil.WriteJSONResponse(w, map[string]any{
-			"success": true,
-			"message": "Job status retrieved",
-			"data": map[string]any{"jobs": []map[string]any{{
-				"jobId":        jobID,
-				"isCompleted":  false,
-				"isTerminal":   true,
-				"hasFailed":    true,
-				"errorMessage": nsgPlanTestFailedReason,
-			}}},
-		})
+		testutil.HandleJobOutcomeResponse(w, jobID, "", "failed", nsgPlanTestFailedReason)
 		return
 	}
 
