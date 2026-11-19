@@ -155,7 +155,7 @@ func vpnConnPlanTestRowFromBody(body map[string]any, state string) map[string]an
 		"peerAddress": body["peerAddress"], "peerCidrs": body["peerCidrs"],
 		"ikeVersion": "v2", "encryption": "aes256", "integrity": "sha256", "dhGroup": 14, "pfsGroup": 14,
 		"ikeLifetimeSeconds": 28800, "ipsecLifetimeSeconds": 3600, "dpd": true,
-		"desiredApplied": true, "activeJobId": nil, "acceptedVerbs": []string{"update", "reset", "delete"},
+		"desiredApplied": true, "acceptedVerbs": []string{"update", "reset", "delete"},
 		"createdAt": time.Now().UTC().Format(time.RFC3339Nano), "updatedAt": vpnConnPlanTestTimestamp,
 	}
 	for _, key := range []string{"description", "ikeVersion", "encryption", "integrity", "dhGroup", "pfsGroup", "ikeLifetimeSeconds", "ipsecLifetimeSeconds", "dpd"} {
@@ -216,7 +216,7 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			}
 			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "", "meta": nil, "data": map[string]any{
 				"id": vpnConnPlanTestGatewayID, "vpcId": vpnConnPlanTestVpcID, "kind": "router", "state": "ready",
-				"address": vpnConnPlanTestLocalEnd, "reservedBlock": nil, "failureReason": nil, "activeJobId": nil,
+				"address": vpnConnPlanTestLocalEnd, "reservedBlock": nil, "failureReason": nil,
 				"createdAt": vpnConnPlanTestTimestamp, "updatedAt": vpnConnPlanTestTimestamp,
 			}})
 		case r.Method == http.MethodPost && r.URL.Path == collection:
@@ -244,10 +244,7 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				writeVpnConnPlanTestError(w, postStatus, "Internal Server Error", vpnConnPlanTestBadGateway)
 				return
 			}
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true, "message": "Operation initiated successfully", "meta": nil,
-				"data": map[string]any{"jobId": "job-create", "vpnConnection": map[string]any{"id": vpnConnPlanTestConnID, "state": "creating"}},
-			})
+			testutil.HandleCreateJobResponseWithResource(w, "job-create", map[string]any{"id": vpnConnPlanTestConnID, "state": "creating"})
 		case r.Method == http.MethodGet && r.URL.Path == collection:
 			state.mu.Lock()
 			rows := []map[string]any{}
@@ -316,10 +313,7 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				state.row["failureReason"] = nil
 			}
 			state.mu.Unlock()
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true, "message": "Operation initiated successfully", "meta": nil,
-				"data": map[string]any{"jobId": "job-update"},
-			})
+			testutil.HandleCreateJobResponse(w, "job-update", "Operation initiated successfully")
 		case r.Method == http.MethodDelete && r.URL.Path == item:
 			state.mu.Lock()
 			conflict := state.deleteConflict
@@ -363,10 +357,7 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				writeVpnConnPlanTestError(w, http.StatusConflict, "VPN_STATE_CONFLICT", conflict)
 				return
 			}
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true, "message": "Operation initiated successfully", "meta": nil,
-				"data": map[string]any{"jobId": "job-delete"},
-			})
+			testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			jobID := "job-1"
 			if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
@@ -406,7 +397,7 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				return
 			}
 			if failJob {
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":true,"progressPercentage":0,"message":"","errorMessage":"`+vpnConnPlanTestJobFailText+`","resourceId":"`+vpnConnPlanTestConnID+`","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleJobOutcomeResponse(w, jobID, vpnConnPlanTestConnID, "failed", vpnConnPlanTestJobFailText)
 				return
 			}
 			testutil.HandleJobResponse(w, jobID, vpnConnPlanTestConnID, true)
@@ -1569,13 +1560,15 @@ func TestVpcVpnConnectionResourceDesiredAppliedWarning(t *testing.T) {
 		t.Errorf("Expected the W1 bytes %q, got %q", w1, warnings[0].Detail())
 	}
 
-	state.set(func(s *vpnConnPlanTestServerState) { s.row["activeJobId"] = "job-live" })
+	state.set(func(s *vpnConnPlanTestServerState) {
+		s.row["heldBy"] = map[string]any{"jobId": "job-live", "operation": "update", "verb": "update"}
+	})
 	if warnings := read().Diagnostics.Warnings(); len(warnings) != 0 {
 		t.Errorf("Expected no warning while a job is active, got %v", warnings)
 	}
 
 	for _, busy := range []string{"creating", "removing"} {
-		state.set(func(s *vpnConnPlanTestServerState) { s.row["activeJobId"] = nil; s.row["state"] = busy })
+		state.set(func(s *vpnConnPlanTestServerState) { s.row["heldBy"] = nil; s.row["state"] = busy })
 		if warnings := read().Diagnostics.Warnings(); len(warnings) != 0 {
 			t.Errorf("Expected no warning while the state is %s, got %v", busy, warnings)
 		}
@@ -1828,8 +1821,8 @@ func TestVpcVpnConnectionResourceUpdateSendsOnce(t *testing.T) {
 	})
 }
 
-// An updated-wire read names a running job in heldBy and carries no activeJobId.
-// Saved settings that do not run then call for no update.
+// A read names a running job in heldBy. Saved settings that do not run then
+// call for no update.
 func TestVpcVpnConnectionHeldByWithholdsResend(t *testing.T) {
 	t.Parallel()
 	server, state := startVpnConnPlanMockServer(t)
@@ -1844,7 +1837,6 @@ func TestVpcVpnConnectionHeldByWithholdsResend(t *testing.T) {
 					state.set(func(s *vpnConnPlanTestServerState) {
 						s.desiredApplied = false
 						s.row["state"] = "connected"
-						s.row["activeJobId"] = nil
 						s.row["heldBy"] = map[string]any{"jobId": "job-live", "operation": "update", "verb": "update"}
 					})
 				},
