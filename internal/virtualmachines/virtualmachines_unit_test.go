@@ -2490,8 +2490,8 @@ func TestCreateVirtualMachineReturnsIDWhenStatusWaitFails(t *testing.T) {
 	useFastVMStatusPollInterval(t)
 	useNoInitialPollDelay(t)
 	const (
-		jobID = "job-legacy-create"
-		vmID  = "vm-legacy-1"
+		jobID = "job-readback-create"
+		vmID  = "vm-readback-1"
 	)
 
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
