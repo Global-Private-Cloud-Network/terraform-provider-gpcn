@@ -118,9 +118,8 @@ func TestPollReportsJobErrorMessage(t *testing.T) {
 
 	t.Run("falls back to the job message", func(t *testing.T) {
 		gpcnClient, _ := jobsServer(t, `{"success":true,"message":"Job progress retrieved successfully",`+
-			`"data":{"jobs":[{"jobId":"job-1","stage":"failed","progressPercentage":60,`+
-			`"message":"Provider refused the request",`+
-			`"isCompleted":false,"isTerminal":true,"hasFailed":true}]}}`)
+			`"data":{"jobs":[{"id":"job-1","stage":"failed","outcome":"failed","progress":60,`+
+			`"message":"Provider refused the request","failureReason":null}],"notFound":[]}}`)
 
 		_, err := client.PerformLongPollingWithConfig(gpcnClient, t.Context(), pollTestAction, pollTestJobID, fastPollingConfig())
 		if err == nil {
@@ -133,8 +132,8 @@ func TestPollReportsJobErrorMessage(t *testing.T) {
 
 	t.Run("falls back to the envelope message", func(t *testing.T) {
 		gpcnClient, _ := jobsServer(t, `{"success":true,"message":"Job progress retrieved successfully",`+
-			`"data":{"jobs":[{"jobId":"job-1","stage":"failed","isCompleted":false,`+
-			`"isTerminal":true,"hasFailed":true}]}}`)
+			`"data":{"jobs":[{"id":"job-1","stage":"failed","outcome":"failed",`+
+			`"message":null,"failureReason":null}],"notFound":[]}}`)
 
 		_, err := client.PerformLongPollingWithConfig(gpcnClient, t.Context(), pollTestAction, pollTestJobID, fastPollingConfig())
 		if err == nil {
@@ -188,8 +187,8 @@ func TestPollFailsFastOnInvisibleJob(t *testing.T) {
 // on a job that is healthy.
 func TestPollDecodesFractionalProgress(t *testing.T) {
 	gpcnClient, _ := jobsServer(t, `{"success":true,"message":"Job progress retrieved successfully",`+
-		`"data":{"jobs":[{"jobId":"job-1","stage":"completed","progressPercentage":12.5,`+
-		`"message":"Working","isCompleted":true,"isTerminal":true,"hasFailed":false}]}}`)
+		`"data":{"jobs":[{"id":"job-1","stage":"completed","outcome":"succeeded","progress":12.5,`+
+		`"message":"Working","failureReason":null}],"notFound":[]}}`)
 
 	response, err := client.PerformLongPollingWithConfig(gpcnClient, t.Context(), pollTestAction, pollTestJobID, fastPollingConfig())
 	if err != nil {
@@ -363,8 +362,8 @@ func TestJobResponseDecodesUpdatedDispatchElement(t *testing.T) {
 		body string
 	}{
 		{name: "a null resource", body: `{"job":{"id":"j1"},"resource":null}`},
-		{name: "a null job reads as a flat job", body: `{"jobId":"j1","job":null}`},
-		{name: "a string job reads as a flat job", body: `{"jobId":"j1","job":"str"}`},
+		{name: "a null job reads as a flat job", body: `{"id":"j1","job":null}`},
+		{name: "a string job reads as a flat job", body: `{"id":"j1","job":"str"}`},
 	}
 
 	for _, tt := range edges {
