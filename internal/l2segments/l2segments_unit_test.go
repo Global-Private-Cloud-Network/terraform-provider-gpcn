@@ -487,9 +487,7 @@ func TestCreateL2SegmentReturnsIDWhenJobFails(t *testing.T) {
 	}
 }
 
-// A current-form 202 names no segment, and the completed job names it. A
-// failed read-back then still returns that ID, so the caller saves it and
-// Terraform taints the segment.
+// The 202 in this test names no resource, so the ID comes from the completed job.
 func TestCreateL2SegmentReturnsIDWhenReadBackFails(t *testing.T) {
 	t.Parallel()
 
@@ -500,13 +498,9 @@ func TestCreateL2SegmentReturnsIDWhenReadBackFails(t *testing.T) {
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == BASE_URL_V1:
 				w.WriteHeader(http.StatusAccepted)
-				_, _ = w.Write([]byte(`{"success":true,"message":"L2 segment creation job started","data":{"jobId":"job-create",` +
-					`"stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"",` +
-					`"errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
+				testutil.HandleCreateJobResponse(w, "job-create", "L2 segment creation job started")
 			case r.Method == http.MethodPost && r.URL.Path == client.JOBS_BASE_URL_V1:
-				_, _ = w.Write([]byte(`{"success":true,"message":"Job status retrieved","data":{"jobs":[{"jobId":"job-create",` +
-					`"stage":"completed","isCompleted":true,"isTerminal":true,"hasFailed":false,"progressPercentage":100,"message":"",` +
-					`"errorMessage":"","resourceId":"` + unitTestSegmentID + `","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleJobResponse(w, "job-create", unitTestSegmentID, true)
 			case r.Method == http.MethodGet && r.URL.Path == BASE_URL_V1+unitTestSegmentID:
 				w.WriteHeader(http.StatusInternalServerError)
 				_, _ = w.Write([]byte(`{"success":false,"message":"Internal server error","error":{"code":"INTERNAL_ERROR","statusCode":500,"details":null}}`))
