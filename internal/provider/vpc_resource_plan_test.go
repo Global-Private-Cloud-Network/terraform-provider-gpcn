@@ -208,13 +208,7 @@ func (m *vpcMock) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	created := m.vpcBody()
 	created["status"] = "creating"
-	created["activeJobId"] = vpcPlanTestCreateJobID
-	testutil.WriteJSONResponse(w, map[string]any{
-		"success": true,
-		"message": "Operation initiated successfully",
-		"meta":    nil,
-		"data":    map[string]any{"jobId": vpcPlanTestCreateJobID, "vpc": created},
-	})
+	testutil.HandleCreateJobResponseWithResource(w, vpcPlanTestCreateJobID, created)
 }
 
 func (m *vpcMock) handleGet(w http.ResponseWriter) {
@@ -312,12 +306,7 @@ func (m *vpcMock) handleDelete(w http.ResponseWriter) {
 		return
 	}
 
-	testutil.WriteJSONResponse(w, map[string]any{
-		"success": true,
-		"message": "Operation initiated successfully",
-		"meta":    nil,
-		"data":    map[string]any{"jobId": vpcPlanTestDeleteJobID},
-	})
+	testutil.HandleCreateJobResponse(w, vpcPlanTestDeleteJobID, "Operation initiated successfully")
 }
 
 // handleJob answers the poll for the job the request names. A teardown job the
@@ -376,7 +365,6 @@ func (m *vpcMock) vpcBody() map[string]any {
 		"status":          m.status,
 		"failureReason":   m.failureReason,
 		"egressIp":        nil,
-		"activeJobId":     nil,
 		"resourceGroupId": m.reportedGroup(),
 		"createdAt":       vpcPlanTestTimestamp,
 		"updatedAt":       vpcPlanTestTimestamp,

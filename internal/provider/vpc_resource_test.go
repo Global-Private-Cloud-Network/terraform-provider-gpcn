@@ -2,7 +2,6 @@ package provider
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -243,30 +242,22 @@ func TestVpcResourceCreateWritesIdBeforePolling(t *testing.T) {
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/vpcs/":
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"message": "Operation initiated successfully",
-					"data": map[string]any{
-						"jobId": vpcPlanTestCreateJobID,
-						"vpc": map[string]any{
-							"id":              vpcPlanTestID,
-							"resourceGroupId": vpcPlanTestDefaultGroup,
-							"name":            "vpc-orphan",
-							"description":     "",
-							"cidr":            vpcPlanTestCidr,
-							"datacenter":      map[string]any{"id": vpcPlanTestDatacenterID, "code": "kansas", "name": "Kansas"},
-							"status":          "creating",
-							"failureReason":   nil,
-							"egressIp":        nil,
-							"activeJobId":     vpcPlanTestCreateJobID,
-							"createdAt":       vpcPlanTestTimestamp,
-							"updatedAt":       vpcPlanTestTimestamp,
-							"dnsNameservers":  []string{"8.8.8.8"},
-						},
-					},
+				testutil.HandleCreateJobResponseWithResource(w, vpcPlanTestCreateJobID, map[string]any{
+					"id":              vpcPlanTestID,
+					"resourceGroupId": vpcPlanTestDefaultGroup,
+					"name":            "vpc-orphan",
+					"description":     "",
+					"cidr":            vpcPlanTestCidr,
+					"datacenter":      map[string]any{"id": vpcPlanTestDatacenterID, "code": "kansas", "name": "Kansas"},
+					"status":          "creating",
+					"failureReason":   nil,
+					"egressIp":        nil,
+					"createdAt":       vpcPlanTestTimestamp,
+					"updatedAt":       vpcPlanTestTimestamp,
+					"dnsNameservers":  []string{"8.8.8.8"},
 				})
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":false,"message":"","data":{"jobs":[{"jobId":"`+vpcPlanTestCreateJobID+`","stage":"","isCompleted":false,"isTerminal":true,"hasFailed":true,"progressPercentage":0,"message":"","errorMessage":"the anchor router never came up","resourceId":"","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleJobOutcomeResponse(w, vpcPlanTestCreateJobID, "", "failed", "the anchor router never came up")
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
 			}
@@ -331,7 +322,6 @@ func TestVpcResourceReadWarnsWhenVpcFailed(t *testing.T) {
 						"status":          status,
 						"failureReason":   failureReason,
 						"egressIp":        nil,
-						"activeJobId":     nil,
 						"createdAt":       vpcPlanTestTimestamp,
 						"updatedAt":       vpcPlanTestTimestamp,
 						"dnsNameservers":  []string{"8.8.8.8"},
