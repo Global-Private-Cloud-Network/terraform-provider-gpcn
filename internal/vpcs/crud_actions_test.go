@@ -462,7 +462,6 @@ func vpcAcceptedTestModel() ResourceModel {
 	}
 }
 
-// The 202 carries the job as data.job and the row as data.resource.
 func TestCreateVpcReadsAcceptedResource(t *testing.T) {
 	t.Parallel()
 
