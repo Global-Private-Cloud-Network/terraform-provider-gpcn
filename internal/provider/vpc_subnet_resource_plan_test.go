@@ -97,7 +97,6 @@ func (s *subnetPlanTestServerState) row() map[string]any {
 		"nsgName":          s.nsgName,
 		"attachedNicCount": s.nicCount,
 		"failureReason":    failureReason,
-		"activeJobId":      nil,
 		"createdAt":        subnetPlanTestTimestamp,
 		"updatedAt":        subnetPlanTestTimestamp,
 	}
@@ -128,11 +127,7 @@ func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestS
 			state.deleted = false
 			row := state.row()
 			state.mu.Unlock()
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true,
-				"message": "Operation initiated successfully",
-				"data":    map[string]any{"jobId": "job-create", "subnet": row},
-			})
+			testutil.HandleCreateJobResponseWithResource(w, "job-create", row)
 		case r.Method == http.MethodGet && r.URL.Path == collection:
 			state.mu.Lock()
 			failRead := state.failNextRead
@@ -238,17 +233,7 @@ func subnetPlanTestHandleJob(w http.ResponseWriter, r *http.Request, state *subn
 	state.mu.Unlock()
 
 	if jobID == "job-create" && failCreate {
-		testutil.WriteJSONResponse(w, map[string]any{
-			"success": true,
-			"message": "Job status retrieved",
-			"data": map[string]any{"jobs": []map[string]any{{
-				"jobId":        jobID,
-				"isCompleted":  false,
-				"isTerminal":   true,
-				"hasFailed":    true,
-				"errorMessage": subnetPlanTestFailedReason,
-			}}},
-		})
+		testutil.HandleJobOutcomeResponse(w, jobID, "", "failed", subnetPlanTestFailedReason)
 		return
 	}
 
@@ -1074,23 +1059,9 @@ func TestVpcSubnetCreateKeepsTheConfiguredPrefixWhenTheCarveFailsUnit(t *testing
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"message": "Job status retrieved",
-					"data": map[string]any{"jobs": []map[string]any{{
-						"jobId":        "job-create",
-						"isCompleted":  false,
-						"isTerminal":   true,
-						"hasFailed":    true,
-						"errorMessage": subnetPlanTestFailedReason,
-					}}},
-				})
+				testutil.HandleJobOutcomeResponse(w, "job-create", "", "failed", subnetPlanTestFailedReason)
 			case r.Method == http.MethodPost:
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"message": "Operation initiated successfully",
-					"data":    map[string]any{"jobId": "job-create", "subnet": row.row()},
-				})
+				testutil.HandleCreateJobResponseWithResource(w, "job-create", row.row())
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
 			}
