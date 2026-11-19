@@ -591,8 +591,8 @@ func TestMapAttachedIdToAttachmentModelNullsEveryComputedAttributeUnit(t *testin
 	}
 }
 
-// The updated-wire 202 names the address in data.resource. A failed acquire job
-// still returns that id, so the caller records the address and releases it.
+// The 202 names the address in data.resource. A failed acquire job still
+// returns that id, so the caller records the address and releases it.
 func TestAcquirePublicIpReadsAcceptedResource(t *testing.T) {
 	t.Parallel()
 

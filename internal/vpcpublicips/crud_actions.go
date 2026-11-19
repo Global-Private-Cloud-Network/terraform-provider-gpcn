@@ -24,17 +24,8 @@ type PublicIp struct {
 	FailureReason      *string `json:"failureReason"`
 	VirtualMachineId   *string `json:"virtualMachineId"`
 	VirtualMachineName *string `json:"virtualMachineName"`
-	ActiveJobId        *string `json:"activeJobId"`
 	CreatedAt          string  `json:"createdAt"`
 	UpdatedAt          string  `json:"updatedAt"`
-}
-
-// acquirePublicIpResponse names the sibling the acquire 202 carries beside the
-// job id. The API inserts the row before it dispatches the job.
-type acquirePublicIpResponse struct {
-	Data struct {
-		PublicIpID string `json:"publicIpId"`
-	} `json:"data"`
 }
 
 type listPublicIpsResponse struct {
@@ -68,15 +59,7 @@ func AcquirePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID s
 	if err := json.Unmarshal(body, &accepted); err != nil {
 		return "", err
 	}
-	var acquireResponse acquirePublicIpResponse
-	if err := json.Unmarshal(body, &acquireResponse); err != nil {
-		return "", err
-	}
-	// The answer names the address in data.resource or as data.publicIpId.
 	publicIpID := accepted.Data.ResourceId
-	if publicIpID == "" {
-		publicIpID = acquireResponse.Data.PublicIpID
-	}
 
 	// The API inserts the row before it dispatches the job, so a failed job
 	// still leaves a real address. The caller records the id and releases it.
@@ -227,7 +210,7 @@ func ReleasePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 }
 
 // issueJob sends a request whose 202 carries a job id. It returns that id with
-// the raw body, because the acquire 202 names a sibling field as well.
+// the raw body, because the acquire 202 names the address as well.
 func issueJob(gpcnClient *client.GpcnClient, ctx context.Context, request *http.Request, issuedMessage string) (string, []byte, error) {
 	response, err := gpcnClient.DoWithRetry(request)
 	if err != nil {
