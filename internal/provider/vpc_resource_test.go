@@ -252,6 +252,7 @@ func TestVpcResourceCreateWritesIdBeforePolling(t *testing.T) {
 					"status":          "creating",
 					"failureReason":   nil,
 					"egressIp":        nil,
+					"heldBy":          map[string]any{"jobId": vpcPlanTestCreateJobID, "operation": "create", "verb": "create"},
 					"createdAt":       vpcPlanTestTimestamp,
 					"updatedAt":       vpcPlanTestTimestamp,
 					"dnsNameservers":  []string{"8.8.8.8"},

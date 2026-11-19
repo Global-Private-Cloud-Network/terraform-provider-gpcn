@@ -208,6 +208,7 @@ func (m *vpcMock) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	created := m.vpcBody()
 	created["status"] = "creating"
+	created["heldBy"] = map[string]any{"jobId": vpcPlanTestCreateJobID, "operation": "create", "verb": "create"}
 	testutil.HandleCreateJobResponseWithResource(w, vpcPlanTestCreateJobID, created)
 }
 
