@@ -95,7 +95,6 @@ func (row *publicIpPlanTestRow) body() map[string]any {
 		"virtualMachineId":   row.machineID,
 		"virtualMachineName": nil,
 		"held":               row.machineID == nil,
-		"activeJobId":        nil,
 		"createdAt":          vpcPublicIpPlanTestTimestamp,
 		"updatedAt":          vpcPublicIpPlanTestTimestamp,
 	}
@@ -221,11 +220,7 @@ func startVPCPublicIpPlanMockServer(t *testing.T) (*httptest.Server, *publicIpPl
 			publicIpPlanTestHandleJob(w, r, row)
 		case r.Method == http.MethodPost && r.URL.Path == listPath:
 			row.reacquire()
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true,
-				"message": "Operation initiated successfully",
-				"data":    map[string]any{"publicIpId": vpcPublicIpPlanTestID, "jobId": vpcPublicIpPlanTestAcquireJob},
-			})
+			testutil.HandleCreateJobResponseWithResource(w, vpcPublicIpPlanTestAcquireJob, map[string]any{"id": vpcPublicIpPlanTestID})
 		case r.Method == http.MethodGet && r.URL.Path == listPath && row.listingFails():
 			publicIpPlanTestServerError(w)
 		case r.Method == http.MethodGet && r.URL.Path == listPath:
@@ -261,17 +256,7 @@ func publicIpPlanTestHandleJob(w http.ResponseWriter, r *http.Request, row *publ
 	}
 
 	if jobID == vpcPublicIpPlanTestAcquireJob && row.acquireJobFails() {
-		testutil.WriteJSONResponse(w, map[string]any{
-			"success": true,
-			"message": "Job status retrieved",
-			"data": map[string]any{"jobs": []map[string]any{{
-				"jobId":        jobID,
-				"isCompleted":  false,
-				"isTerminal":   true,
-				"hasFailed":    true,
-				"errorMessage": "No addresses are free in this region",
-			}}},
-		})
+		testutil.HandleJobOutcomeResponse(w, jobID, "", "failed", "No addresses are free in this region")
 		return
 	}
 
@@ -334,11 +319,7 @@ func publicIpPlanTestServerError(w http.ResponseWriter) {
 }
 
 func publicIpPlanTestAcceptJob(w http.ResponseWriter) {
-	testutil.WriteJSONResponse(w, map[string]any{
-		"success": true,
-		"message": "Operation initiated successfully",
-		"data":    map[string]any{"jobId": "job-1"},
-	})
+	testutil.HandleCreateJobResponse(w, "job-1", "Operation initiated successfully")
 }
 
 func publicIpPlanTestListBody(rows []map[string]any) map[string]any {
@@ -561,7 +542,6 @@ func TestVpcPublicIpReadWarnsOnFailedAddressUnit(t *testing.T) {
 					"virtualMachineId":   nil,
 					"virtualMachineName": nil,
 					"held":               true,
-					"activeJobId":        nil,
 					"createdAt":          vpcPublicIpPlanTestTimestamp,
 					"updatedAt":          vpcPublicIpPlanTestTimestamp,
 				}}))
