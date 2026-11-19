@@ -160,7 +160,7 @@ func TestCreateVolumeMockHTTP(t *testing.T) {
 					t.Error("Request body should not contain volumeSizeId")
 				}
 
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"Volume creation job started","data":{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
+				testutil.HandleCreateJobResponse(w, jobID, "Volume creation job started")
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -261,7 +261,7 @@ func TestUpdateVolumeMockHTTP(t *testing.T) {
 				if _, hasSkuId := req["skuId"]; hasSkuId {
 					t.Error("Request body should not contain skuId")
 				}
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"Volume resize job started","data":{"jobId":"job-456","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
+				testutil.HandleCreateJobResponse(w, "job-456", "Volume resize job started")
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -333,7 +333,7 @@ func TestUpdateVolumeLooksUpSkuByComponentCodeMockHTTP(t *testing.T) {
 
 			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+volumeID+"/resize"):
 				updateCalled = true
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"Volume resize job started","data":{"jobId":"job-ultra","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
+				testutil.HandleCreateJobResponse(w, "job-ultra", "Volume resize job started")
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, "job-ultra", volumeID, true)
@@ -395,7 +395,7 @@ func TestUpdateVolumeRefusesUnresolvableTypeMockHTTP(t *testing.T) {
 
 			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+volumeID+"/resize"):
 				resizeCalled = true
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"Volume resize job started","data":{"jobId":"job-unknown","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
+				testutil.HandleCreateJobResponse(w, "job-unknown", "Volume resize job started")
 
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
@@ -695,7 +695,7 @@ func createVolumeBodyFor(t *testing.T, model ResourceModel) map[string]any {
 				}))
 			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/volumes/"):
 				created = testutil.ReadRequestBody(r)
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
+				testutil.HandleCreateJobResponse(w, jobID, "")
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, volumeID, true)
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID):
@@ -820,9 +820,7 @@ func TestCreateVolumeReturnsIDWhenJobFails(t *testing.T) {
 	}
 }
 
-// A current-form 202 names no volume, and the completed job names it. A failed
-// read-back then still returns that ID, so the caller saves it and Terraform
-// taints the volume.
+// The 202 in this test names no resource, so the ID comes from the completed job.
 func TestCreateVolumeReturnsIDWhenReadBackFails(t *testing.T) {
 	const (
 		jobID    = "job-current-volume"
@@ -841,14 +839,9 @@ func TestCreateVolumeReturnsIDWhenReadBackFails(t *testing.T) {
 			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/volumes/"):
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusAccepted)
-				_, _ = w.Write([]byte(`{"success":true,"message":"Volume creation job started","data":{"jobId":"` + jobID + `",` +
-					`"stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"",` +
-					`"errorMessage":"","resourceId":"","resourceName":"","resourceType":""}}`))
+				testutil.HandleCreateJobResponse(w, jobID, "Volume creation job started")
 			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
-				w.Header().Set("Content-Type", "application/json")
-				_, _ = w.Write([]byte(`{"success":true,"message":"Job status retrieved","data":{"jobs":[{"jobId":"` + jobID + `",` +
-					`"stage":"completed","isCompleted":true,"isTerminal":true,"hasFailed":false,"progressPercentage":100,"message":"",` +
-					`"errorMessage":"","resourceId":"` + volumeID + `","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleJobResponse(w, jobID, volumeID, true)
 			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/"+volumeID):
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusInternalServerError)
