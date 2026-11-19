@@ -79,7 +79,6 @@ func publicIpRow(id string, ipAddress, virtualMachineID *string) map[string]any 
 		"virtualMachineId":   virtualMachineID,
 		"virtualMachineName": nil,
 		"held":               virtualMachineID == nil,
-		"activeJobId":        nil,
 		"createdAt":          "2026-01-02T15:04:05Z",
 		"updatedAt":          "2026-01-02T15:04:05Z",
 	}
@@ -112,11 +111,7 @@ func TestAcquirePublicIpReturnsIdAndPollsMockHTTP(t *testing.T) {
 			rec.record(r)
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/vpcs/"+testVpcID+"/public-ips":
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"message": "Operation initiated successfully",
-					"data":    map[string]any{"publicIpId": testPublicIpID, "jobId": testJobID},
-				})
+				testutil.HandleCreateJobResponseWithResource(w, testJobID, map[string]any{"id": testPublicIpID})
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 				testutil.HandleJobResponse(w, testJobID, "", true)
 			default:
@@ -154,11 +149,7 @@ func TestAttachPublicIpSendsNicIdMockHTTP(t *testing.T) {
 			rec.record(r)
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == attachPath:
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"message": "Operation initiated successfully",
-					"data":    map[string]any{"jobId": testJobID},
-				})
+				testutil.HandleCreateJobResponse(w, testJobID, "Operation initiated successfully")
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 				testutil.HandleJobResponse(w, testJobID, "", true)
 			default:
@@ -202,11 +193,7 @@ func TestDetachPublicIpSendsEmptyBodyMockHTTP(t *testing.T) {
 			rec.record(r)
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == detachPath:
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"message": "Operation initiated successfully",
-					"data":    map[string]any{"jobId": testJobID},
-				})
+				testutil.HandleCreateJobResponse(w, testJobID, "Operation initiated successfully")
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 				testutil.HandleJobResponse(w, testJobID, "", true)
 			default:
@@ -241,11 +228,7 @@ func TestReleasePublicIpPollsMockHTTP(t *testing.T) {
 			rec.record(r)
 			switch {
 			case r.Method == http.MethodDelete && r.URL.Path == releasePath:
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"message": "Operation initiated successfully",
-					"data":    map[string]any{"jobId": testJobID},
-				})
+				testutil.HandleCreateJobResponse(w, testJobID, "Operation initiated successfully")
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 				testutil.HandleJobResponse(w, testJobID, "", true)
 			default:
@@ -345,23 +328,9 @@ func TestAcquirePublicIpFramesPollingFailureWithTheActionMockHTTP(t *testing.T) 
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/vpcs/"+testVpcID+"/public-ips":
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"message": "Operation initiated successfully",
-					"data":    map[string]any{"publicIpId": testPublicIpID, "jobId": testJobID},
-				})
+				testutil.HandleCreateJobResponseWithResource(w, testJobID, map[string]any{"id": testPublicIpID})
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"message": "Job status retrieved",
-					"data": map[string]any{"jobs": []map[string]any{{
-						"jobId":        testJobID,
-						"isCompleted":  false,
-						"isTerminal":   true,
-						"hasFailed":    true,
-						"errorMessage": "No addresses are free in this region",
-					}}},
-				})
+				testutil.HandleJobOutcomeResponse(w, testJobID, "", "failed", "No addresses are free in this region")
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
 			}
@@ -474,11 +443,7 @@ func TestReleasePublicIpReportsNotFoundFromTheJobPollMockHTTP(t *testing.T) {
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodDelete && r.URL.Path == releasePath {
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"message": "Operation initiated successfully",
-					"data":    map[string]any{"jobId": testJobID},
-				})
+				testutil.HandleCreateJobResponse(w, testJobID, "Operation initiated successfully")
 				return
 			}
 			w.WriteHeader(http.StatusNotFound)
@@ -533,23 +498,9 @@ func TestAcquirePublicIpReturnsTheIdWhenTheJobFailsMockHTTP(t *testing.T) {
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/vpcs/"+testVpcID+"/public-ips":
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"message": "Operation initiated successfully",
-					"data":    map[string]any{"publicIpId": testPublicIpID, "jobId": testJobID},
-				})
+				testutil.HandleCreateJobResponseWithResource(w, testJobID, map[string]any{"id": testPublicIpID})
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true,
-					"message": "Job status retrieved",
-					"data": map[string]any{"jobs": []map[string]any{{
-						"jobId":        testJobID,
-						"isCompleted":  false,
-						"isTerminal":   true,
-						"hasFailed":    true,
-						"errorMessage": "No addresses are free in this region",
-					}}},
-				})
+				testutil.HandleJobOutcomeResponse(w, testJobID, "", "failed", "No addresses are free in this region")
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
 			}
