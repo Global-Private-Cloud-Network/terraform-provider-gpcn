@@ -181,7 +181,7 @@ func startGPUPlanMockServer(t *testing.T) (*httptest.Server, *gpuPlanTestMock) {
 				mock.group = group
 			}
 			mock.mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", gpuPlanTestID, true)
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": gpuPlanTestID})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			mock.mu.Lock()
 			if mock.movedOnJob != "" {

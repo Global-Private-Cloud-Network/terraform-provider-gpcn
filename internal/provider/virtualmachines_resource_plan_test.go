@@ -225,7 +225,7 @@ func startVirtualMachinePlanMockServer(t *testing.T, networkHotplug ...any) (*ht
 			name, _ = body["name"].(string)
 			birthSubnetID, _ = body["subnetId"].(string)
 			mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": vmPlanTestID})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodPost && r.URL.Path == vmPath+"/stop":
@@ -403,7 +403,7 @@ func startVirtualMachineSizeMockServer(t *testing.T, hotplug int) (*httptest.Ser
 			name, _ = body["name"].(string)
 			birthSubnetID, _ = body["subnetId"].(string)
 			mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": vmPlanTestID})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodPut && r.URL.Path == vmPlanTestPath+"/size":
@@ -612,7 +612,7 @@ func startVirtualMachineDestroyMockServer(t *testing.T) (*httptest.Server, func(
 			name, _ = body["name"].(string)
 			birthSubnetID, _ = body["subnetId"].(string)
 			mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": vmPlanTestID})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodGet && r.URL.Path == vmPath+"/network-interfaces":
@@ -990,7 +990,7 @@ func startVirtualMachineSegmentAttachMockServer(t *testing.T) (*httptest.Server,
 			attached = nil
 			status = virtualmachines.VMStatusRunning.String()
 			mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": vmPlanTestID})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/network-interfaces":
@@ -1122,7 +1122,7 @@ func startVirtualMachineSegmentHotplugMockServer(t *testing.T, hotplug int, star
 			birthSubnetID, _ = body["subnetId"].(string)
 			status = virtualmachines.VMStatusRunning.String()
 			mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": vmPlanTestID})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/network-interfaces":
@@ -1278,7 +1278,7 @@ func startVirtualMachineSegmentUpdateMockServer(t *testing.T, hotplug int) (*htt
 			birthSubnetID, _ = body["subnetId"].(string)
 			status = virtualmachines.VMStatusRunning.String()
 			mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": vmPlanTestID})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/network-interfaces":
@@ -1672,7 +1672,7 @@ func startVirtualMachineUnresolvedSkuMockServer(t *testing.T) (*httptest.Server,
 			birthSubnetID, _ = body["subnetId"].(string)
 			status = virtualmachines.VMStatusRunning.String()
 			mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": vmPlanTestID})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
@@ -1782,7 +1782,7 @@ func startVirtualMachineSegmentRefusedMockServer(t *testing.T, startSucceeds boo
 			birthSubnetID, _ = body["subnetId"].(string)
 			status = virtualmachines.VMStatusRunning.String()
 			mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": vmPlanTestID})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/network-interfaces":
@@ -2048,7 +2048,7 @@ func startVirtualMachineHoistedReadMockServer(t *testing.T, refuseInterfaces boo
 			birthSubnetID, _ = body["subnetId"].(string)
 			status = virtualmachines.VMStatusRunning.String()
 			mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": vmPlanTestID})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/network-interfaces":
@@ -2264,7 +2264,7 @@ func startVirtualMachinePublicIpMockServer(t *testing.T, arms vmPublicIpMockArms
 				boundID, boundAddress = held, vmPlanTestHeldIpAddress
 			}
 			mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": vmPlanTestID})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-images":
@@ -3100,7 +3100,7 @@ func startVirtualMachineCreateOnSubnetMockServer(t *testing.T) (*httptest.Server
 				boundID = vmPlanTestAcquiredIpID
 			}
 			mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": vmPlanTestID})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/network-interfaces":
@@ -3213,7 +3213,7 @@ func startVirtualMachineCarriedAddressMockServer(t *testing.T) (*httptest.Server
 			name, _ = body["name"].(string)
 			status = virtualmachines.VMStatusRunning.String()
 			mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": vmPlanTestID})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case strings.HasPrefix(r.URL.Path, addressesPath):
@@ -3344,7 +3344,7 @@ func startVirtualMachineDestroyBodyMockServer(t *testing.T, arm vmDestroyBodyMoc
 				boundID, boundAddress = held, vmPlanTestHeldIpAddress
 			}
 			mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": vmPlanTestID})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case strings.HasPrefix(r.URL.Path, addressesPath):
@@ -3520,7 +3520,7 @@ func startVirtualMachineLateMacMockServer(t *testing.T) *httptest.Server {
 			name, _ = body["name"].(string)
 			status = virtualmachines.VMStatusRunning.String()
 			mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": vmPlanTestID})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
@@ -3629,7 +3629,7 @@ func startVirtualMachineMovedAddressMockServer(t *testing.T) *httptest.Server {
 			name, _ = body["name"].(string)
 			status = virtualmachines.VMStatusRunning.String()
 			mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": vmPlanTestID})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
@@ -3833,7 +3833,7 @@ func startVirtualMachineGroupMockServer(t *testing.T, defaultGroup string) *vmGr
 				mock.group = group
 			}
 			mock.mu.Unlock()
-			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": vmPlanTestID})
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case r.Method == http.MethodGet && r.URL.Path == vmPath+"/network-interfaces":
