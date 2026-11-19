@@ -843,7 +843,6 @@ func TestReplaceNsgRulesMergeWarningsFollowAcceptanceUnit(t *testing.T) {
 	}
 }
 
-// The updated-wire 202 names the group in data.resource and the job as data.job.
 func TestIssueCreateNsgReadsAcceptedResource(t *testing.T) {
 	t.Parallel()
 
