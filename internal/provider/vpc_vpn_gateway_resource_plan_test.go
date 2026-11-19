@@ -203,18 +203,7 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 				writeVpnGatewayPlanTestError(w, createStatus, "Internal Server Error", vpnGatewayPlanTestBadGateway)
 				return
 			}
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true,
-				"message": "Operation initiated successfully",
-				"data": map[string]any{
-					"jobId": "job-create",
-					"vpnGateway": map[string]any{
-						"id": vpnGatewayPlanTestID, "vpcId": vpnGatewayPlanTestVpcID, "kind": "router",
-						"state": "creating", "address": nil, "reservedBlock": nil, "failureReason": nil,
-					},
-				},
-				"meta": nil,
-			})
+			testutil.HandleCreateJobResponse(w, "job-create", "Operation initiated successfully")
 		case r.Method == http.MethodDelete && r.URL.Path == gatewayPath:
 			state.mu.Lock()
 			state.deleteAttempts++
@@ -260,12 +249,7 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 				writeVpnGatewayPlanTestError(w, http.StatusConflict, "VPN_GATEWAY_IN_USE", refusal)
 				return
 			}
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true,
-				"message": "Operation initiated successfully",
-				"data":    map[string]any{"jobId": "job-delete", "vpnGateway": map[string]any{"id": vpnGatewayPlanTestID, "state": "removing"}},
-				"meta":    nil,
-			})
+			testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			jobID := "job-1"
 			if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
@@ -288,7 +272,7 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 				return
 			}
 			if failJob {
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":true,"progressPercentage":0,"message":"","errorMessage":"`+vpnGatewayPlanTestJobFail+`","resourceId":"`+vpnGatewayPlanTestID+`","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleJobOutcomeResponse(w, jobID, vpnGatewayPlanTestID, "failed", vpnGatewayPlanTestJobFail)
 				return
 			}
 			testutil.HandleJobResponse(w, jobID, vpnGatewayPlanTestID, true)
