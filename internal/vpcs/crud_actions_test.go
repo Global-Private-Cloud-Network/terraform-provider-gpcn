@@ -325,7 +325,7 @@ func (m *vpcBodyMock) handler(t *testing.T) http.HandlerFunc {
 			m.mutex.Lock()
 			m.posts = append(m.posts, testutil.ReadRequestBody(r))
 			m.mutex.Unlock()
-			testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{"jobId": "job-create", "vpc": row}})
+			testutil.HandleCreateJobResponseWithResource(w, "job-create", row)
 		case http.MethodPut:
 			m.mutex.Lock()
 			m.puts = append(m.puts, testutil.ReadRequestBody(r))
@@ -462,7 +462,7 @@ func vpcAcceptedTestModel() ResourceModel {
 	}
 }
 
-// The updated-wire 202 carries the job as data.job and the row as data.resource.
+// The 202 carries the job as data.job and the row as data.resource.
 func TestCreateVpcReadsAcceptedResource(t *testing.T) {
 	t.Parallel()
 
@@ -471,7 +471,7 @@ func TestCreateVpcReadsAcceptedResource(t *testing.T) {
 		`"outcome":null,"progress":0,"message":null,"failureReason":null},`+
 		`"resource":{"id":"v1","name":"vpc-a","description":null,"cidr":"10.50.0.0/16",`+
 		`"datacenter":{"id":"dc-1","code":null,"name":"Kansas"},"status":"creating","failureReason":null,`+
-		`"egressIp":null,"activeJobId":"j1","createdAt":"2026-01-02T15:04:05Z","updatedAt":"2026-01-02T15:04:05Z",`+
+		`"egressIp":null,"createdAt":"2026-01-02T15:04:05Z","updatedAt":"2026-01-02T15:04:05Z",`+
 		`"dnsNameservers":[],"resourceGroupId":"rg-api"}}}`)
 
 	created, err := CreateVpc(gpcnClient, context.Background(), vpcAcceptedTestModel())
