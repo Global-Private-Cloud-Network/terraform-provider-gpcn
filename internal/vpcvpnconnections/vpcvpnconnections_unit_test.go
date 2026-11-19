@@ -654,9 +654,35 @@ func removingConflictServer(t *testing.T, details string, rows []string) (*clien
 
 const removingConnRow = `{"success":true,"data":{"id":"` + testConnID + `","name":"x","state":"removing"}}`
 
-func TestVpcVpnConnectionUnitDeleteRemoving409WaitsForTheRow(t *testing.T) {
+// failedRemovalServer accepts the DELETE, and its job ends failed. The reads
+// answer rows in order, and a 404 after them.
+func failedRemovalServer(t *testing.T, rows []string) (*client.GpcnClient, *atomic.Int32) {
+	t.Helper()
+	var reads atomic.Int32
+	gpcnClient := apiServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodDelete:
+			w.WriteHeader(http.StatusAccepted)
+			fmt.Fprint(w, connAcceptedBody("job-delete"))
+		case r.URL.Path == client.JOBS_BASE_URL_V1:
+			fmt.Fprint(w, connJobBody("job-delete", "failed"))
+		default:
+			index := int(reads.Add(1)) - 1
+			if index >= len(rows) {
+				w.WriteHeader(http.StatusNotFound)
+				fmt.Fprint(w, goneConnBody)
+				return
+			}
+			fmt.Fprint(w, rows[index])
+		}
+	})
+	return gpcnClient, &reads
+}
+
+func TestVpcVpnConnectionUnitDeleteFailedJobWaitsForTheRow(t *testing.T) {
 	t.Parallel()
-	gpcnClient, reads := removingConflictServer(t, `{"state":"removing","verb":"delete","failureReason":null}`, []string{removingConnRow, removingConnRow})
+	gpcnClient, reads := failedRemovalServer(t, []string{removingConnRow, removingConnRow})
 
 	if err := deleteVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID, time.Millisecond, time.Minute); err != nil {
 		t.Fatalf("Expected the delete to wait for the 404, got %v", err)
@@ -666,10 +692,9 @@ func TestVpcVpnConnectionUnitDeleteRemoving409WaitsForTheRow(t *testing.T) {
 	}
 }
 
-func TestVpcVpnConnectionUnitDeleteRemoving409TimesOut(t *testing.T) {
+func TestVpcVpnConnectionUnitDeleteFailedJobWaitTimesOut(t *testing.T) {
 	t.Parallel()
-	gpcnClient, _ := removingConflictServer(t, `{"state":"removing","verb":"delete","failureReason":null}`,
-		slices.Repeat([]string{removingConnRow}, 1000))
+	gpcnClient, _ := failedRemovalServer(t, slices.Repeat([]string{removingConnRow}, 1000))
 
 	err := deleteVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID, time.Millisecond, 20*time.Millisecond)
 	if !errors.Is(err, ErrRemovalTimeout) {
@@ -677,13 +702,11 @@ func TestVpcVpnConnectionUnitDeleteRemoving409TimesOut(t *testing.T) {
 	}
 }
 
-// A removal that failed, or a connection in another state, is a refusal.
+// A 409 other than RESOURCE_BUSY is a refusal.
 func TestVpcVpnConnectionUnitDeleteOtherConflictsAreRefusals(t *testing.T) {
 	t.Parallel()
 	for name, details := range map[string]string{
-		"removing with a failure": `{"state":"removing","verb":"delete","failureReason":"The tunnel is stuck."}`,
-		"creating":                `{"state":"creating","verb":"delete","failureReason":null}`,
-		"no details":              `null`,
+		"creating": `{"state":"creating","verb":"delete","failureReason":null}`,
 	} {
 		gpcnClient, reads := removingConflictServer(t, details, nil)
 		err := deleteVpnConnection(gpcnClient, context.Background(), testVpcID, testConnID, time.Millisecond, time.Minute)
@@ -710,8 +733,12 @@ func TestVpcVpnConnectionUnitDeleteParkedWithoutBudgetSendsNoResend(t *testing.T
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodDelete {
 			deletes.Add(1)
-			w.WriteHeader(http.StatusConflict)
-			fmt.Fprint(w, `{"success":false,"message":"busy","error":{"code":"VPN_STATE_CONFLICT","statusCode":409,"details":{"state":"removing","verb":"delete","failureReason":null}}}`)
+			w.WriteHeader(http.StatusAccepted)
+			fmt.Fprint(w, connAcceptedBody("job-delete"))
+			return
+		}
+		if r.URL.Path == client.JOBS_BASE_URL_V1 {
+			fmt.Fprint(w, connJobBody("job-delete", "failed"))
 			return
 		}
 		fmt.Fprintf(w, `{"success":true,"data":{"id":%q,"name":"x","state":"removing","failureReason":%q}}`, testConnID, reason)
@@ -726,8 +753,8 @@ func TestVpcVpnConnectionUnitDeleteParkedWithoutBudgetSendsNoResend(t *testing.T
 	}
 }
 
-// The updated-wire 202 names the connection in data.resource. A failed create job
-// still returns that id, so the caller records the connection.
+// The 202 names the connection in data.resource. A failed create job still
+// returns that id, so the caller records the connection.
 func TestCreateVpnConnectionReadsAcceptedResource(t *testing.T) {
 	t.Parallel()
 

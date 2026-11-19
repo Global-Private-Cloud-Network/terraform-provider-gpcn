@@ -38,7 +38,6 @@ type ApiVpnConnection struct {
 	IpsecLifetimeSeconds int64          `json:"ipsecLifetimeSeconds"`
 	Dpd                  bool           `json:"dpd"`
 	DesiredApplied       bool           `json:"desiredApplied"`
-	ActiveJobID          *string        `json:"activeJobId"`
 	HeldBy               *client.HeldBy `json:"heldBy"`
 	AcceptedVerbs        []string       `json:"acceptedVerbs"`
 	CreatedAt            string         `json:"createdAt"`
@@ -61,17 +60,6 @@ type getVpnConnectionResponse struct {
 	Success bool                   `json:"success"`
 	Message string                 `json:"message"`
 	Data    ApiVpnConnectionDetail `json:"data"`
-}
-
-// createVpnConnectionResponse reads the connection id under its own key. The job
-// id, and the id an answer carries in data.resource, come from
-// client.JobStatusSingularResponse.
-type createVpnConnectionResponse struct {
-	Data struct {
-		VpnConnection struct {
-			ID string `json:"id"`
-		} `json:"vpnConnection"`
-	} `json:"data"`
 }
 
 func collectionPath(vpcID string) string {
@@ -116,15 +104,7 @@ func CreateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 	if err := json.Unmarshal(raw, &accepted); err != nil {
 		return "", true, err
 	}
-	var created createVpnConnectionResponse
-	if err := json.Unmarshal(raw, &created); err != nil {
-		return "", true, err
-	}
-	// The answer names the connection in data.resource or in data.vpnConnection.
 	connectionID := accepted.Data.ResourceId
-	if connectionID == "" {
-		connectionID = created.Data.VpnConnection.ID
-	}
 	if accepted.Data.JobID == "" {
 		return connectionID, true, errors.New(ErrDetailNoJobIDInResponse)
 	}
@@ -272,8 +252,7 @@ func UpdateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 			return false, err
 		}
 
-		// Each PUT goes out once, because a second PUT starts a second job, or
-		// meets a 409 VPN_STATE_CONFLICT while the first one runs. A 409
+		// Each PUT goes out once, because a second PUT starts a second job. A 409
 		// RESOURCE_BUSY means the API did not take the PUT, so the PUT goes out
 		// again after the job that holds the connection ends.
 		jobID, err = issueJob(gpcnClient.DoOnce, request)
@@ -308,11 +287,10 @@ func UpdateVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 	return true, nil
 }
 
-// DeleteVpnConnection issues the removal and polls its job. A 409 that says the
-// removal already runs goes on to the wait for the 404, and so does a job that
-// failed. A removal that parks with a failure reason is sent once more. Any
-// other 409 reaches the caller as the API error, and a 404 as an error that
-// client.IsNotFound reads.
+// DeleteVpnConnection issues the removal and polls its job. A job that failed
+// goes on to the wait for the 404. A removal that parks with a failure reason
+// is sent once more. A 409 other than RESOURCE_BUSY reaches the caller as the
+// API error, and a 404 as an error that client.IsNotFound reads.
 func DeleteVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string) error {
 	timeout := client.DefaultPollingConfig().Timeout
 	if config := gpcnClient.Config(); config != nil && config.PollingTimeout > 0 {
@@ -345,10 +323,6 @@ func deleteVpnConnection(gpcnClient *client.GpcnClient, ctx context.Context, vpc
 		}
 		jobID, err = sendDelete(gpcnClient, ctx, vpcID, connectionID)
 	}
-	if removalAlreadyRunning(err) {
-		tflog.Info(ctx, LogRemovalAlreadyRunning)
-		return waitForVpnConnectionGone(gpcnClient, ctx, vpcID, connectionID, interval, startTime, timeout)
-	}
 	if err != nil {
 		return err
 	}
@@ -373,16 +347,6 @@ func sendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, conne
 		return "", err
 	}
 	return issueJob(gpcnClient.DoWithRetry, request)
-}
-
-// removalAlreadyRunning reports a 409 for a connection that is being removed
-// and has no failure to show. A removal that failed is not under way.
-func removalAlreadyRunning(err error) bool {
-	var httpErr *client.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict || httpErr.Code != CodeStateConflict {
-		return false
-	}
-	return httpErr.Details["state"] == StateRemoving && httpErr.Details["failureReason"] == nil
 }
 
 // The states of the removal resend during the wait.
@@ -450,9 +414,8 @@ func waitForVpnConnectionGone(gpcnClient *client.GpcnClient, ctx context.Context
 // RESOURCE_BUSY waits for the job that holds the connection and sends the
 // DELETE again, and those sends together are the one resend. A 202 gets its
 // job polled inside the shared deadline, and a failed job is not an error,
-// because the next read shows the row. A 409 for a removal that another caller
-// started counts as sent, so the wait goes on. Any other 409 is a refusal, and
-// the second result then holds the API's message.
+// because the next read shows the row. Any other 409 is a refusal, and the
+// second result then holds the API's message.
 func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, startTime time.Time, timeout time.Duration) (int, string, error) {
 	deadline := startTime.Add(timeout)
 	jobID, err := sendDelete(gpcnClient, ctx, vpcID, connectionID)
@@ -470,9 +433,6 @@ func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, con
 			return resendNotSent, "", client.HolderEndedAtDeadline(holder, startTime)
 		}
 		jobID, err = sendDelete(gpcnClient, ctx, vpcID, connectionID)
-	}
-	if removalAlreadyRunning(err) {
-		return resendJob, "", nil
 	}
 	if client.IsConflict(err) {
 		return resendConflict, vpcvpngateways.ErrorDetail(err), nil
