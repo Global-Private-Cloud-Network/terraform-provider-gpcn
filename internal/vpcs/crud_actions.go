@@ -214,7 +214,7 @@ func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string)
 		if readErr != nil {
 			return readErr
 		}
-		activeJobIDRef := client.ActiveJobID(vpcResponse.Data.HeldBy, vpcResponse.Data.ActiveJobId)
+		activeJobIDRef := client.ActiveJobID(vpcResponse.Data.HeldBy)
 		switch {
 		// A teardown that parked writes a failure reason, and no job then
 		// drives the row. The platform re-admits a delete on it, so a wait

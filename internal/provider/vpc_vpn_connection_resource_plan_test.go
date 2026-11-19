@@ -81,8 +81,6 @@ type vpnConnPlanTestServerState struct {
 	itemStatus int
 	// keepRow makes the POST leave the stored row as the test planted it.
 	keepRow bool
-	// postActiveJob is the job the row made by the POST still runs.
-	postActiveJob string
 	// listStatus makes the list GET answer with this status.
 	listStatus int
 	// deleteRemoving answers the next DELETE with a 409 for a connection that
@@ -230,9 +228,6 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			if !state.keepRow {
 				state.exists = true
 				state.row = vpnConnPlanTestRowFromBody(body, state.createdState)
-				if state.postActiveJob != "" {
-					state.row["activeJobId"] = state.postActiveJob
-				}
 				if state.postHeldByJob != "" {
 					state.row["heldBy"] = map[string]any{"jobId": state.postHeldByJob, "operation": "create", "verb": "create"}
 				}
@@ -379,10 +374,6 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				state.failDeleteJob = false
 				failJob = true
 			}
-			if active, _ := state.row["activeJobId"].(string); active != "" && jobID == active {
-				state.row["activeJobId"] = nil
-				state.row["state"] = "connecting"
-			}
 			if heldBy, _ := state.row["heldBy"].(map[string]any); heldBy != nil && heldBy["jobId"] == jobID {
 				state.row["heldBy"] = nil
 				state.row["state"] = "connecting"
@@ -393,7 +384,8 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				return
 			}
 			if cancelJob {
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"`+jobID+`","stage":"`+client.JobStageCancelled+`","isCompleted":false,"isTerminal":true,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+vpnConnPlanTestConnID+`","resourceName":"","resourceType":""}]}}`))
+				//nolint:misspell // The value is the byte the API sends, not prose.
+				testutil.HandleJobOutcomeResponse(w, jobID, vpnConnPlanTestConnID, "cancelled", "")
 				return
 			}
 			if failJob {
@@ -765,43 +757,6 @@ func TestVpcVpnConnectionResourceCreate5xxNoRowNamesTheImport(t *testing.T) {
 	})
 }
 
-// An adopted row that still runs a job is read again once the job ends.
-func TestVpcVpnConnectionResourceCreate5xxPollsAdoptedJob(t *testing.T) {
-	t.Parallel()
-	server, state := startVpnConnPlanMockServer(t)
-	state.set(func(s *vpnConnPlanTestServerState) {
-		s.postStatus = http.StatusBadGateway
-		s.createdState = "creating"
-		s.postActiveJob = "job-live"
-	})
-	config := newVpnConnPlanTestConfig().render(server.URL)
-
-	resource.UnitTest(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{Config: config, ExpectError: vpnConnRefusal(vpnConnPlanTestBadGateway)},
-			{
-				PreConfig: func() {
-					state.mu.Lock()
-					defer state.mu.Unlock()
-					if state.row["activeJobId"] != nil {
-						t.Errorf("Expected the create to poll the job of the adopted row, which still runs %v", state.row["activeJobId"])
-					}
-					state.postStatus = 0
-					state.postActiveJob = ""
-					state.createdState = "connecting"
-				},
-				Config: config,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(gpcnVpcVpnConnectionTest, plancheck.ResourceActionReplace),
-					},
-				},
-			},
-		},
-	})
-}
-
 // A job that ended, followed by a detail read that fails, still leaves a row.
 // The create saves the planned values and the ID with the error, so Terraform
 // taints the resource.
@@ -919,14 +874,12 @@ func TestVpcVpnConnectionResourceParkedFailedRetrySettles(t *testing.T) {
 }
 
 // Saved settings that do not run call for an update only when the connection
-// is idle. While it is being created or removed, or while a job runs, the plan
-// stays empty.
+// is idle. While it is being created or removed, the plan stays empty.
 func TestVpcVpnConnectionResourceUnappliedWhileBusyPlansNoUpdate(t *testing.T) {
 	t.Parallel()
 	for name, busy := range map[string]func(*vpnConnPlanTestServerState){
-		"creating":       func(s *vpnConnPlanTestServerState) { s.row["state"] = "creating" },
-		"removing":       func(s *vpnConnPlanTestServerState) { s.row["state"] = "removing" },
-		"job is running": func(s *vpnConnPlanTestServerState) { s.row["state"] = "connected"; s.row["activeJobId"] = "job-live" },
+		"creating": func(s *vpnConnPlanTestServerState) { s.row["state"] = "creating" },
+		"removing": func(s *vpnConnPlanTestServerState) { s.row["state"] = "removing" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

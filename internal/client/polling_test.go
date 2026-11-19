@@ -20,15 +20,6 @@ const (
 	pollTestAction = "Create GPCN Network"
 )
 
-// The API and the provider both spell the stage the British way. The fixture
-// and the expected sentence quote those bytes.
-//
-//nolint:misspell // Byte-exact quotes of the wire value and of ErrJobCancelled.
-const (
-	pollTestCancelStageJob   = `{"jobId":"job-1","stage":"cancelled","progressPercentage":40,` + `"message":"Stopped by an administrator","isCompleted":false,"isTerminal":true,"hasFailed":false}`
-	pollTestCancelStageError = `job job-1 for action "Create GPCN Network" was cancelled by the platform`
-)
-
 // jobsServer answers every poll with the given body, and it counts the calls.
 // A test can then prove the poller stopped instead of looping to its timeout.
 func jobsServer(t *testing.T, body string) (*client.GpcnClient, *atomic.Int32) {
@@ -67,55 +58,11 @@ func fastPollingConfig() *client.PollingConfig {
 	}
 }
 
-// TestPollStopsOnCancelledStage proves an operator cancel ends the poll. Such a
-// job reports isCompleted false and hasFailed false. A poller that waits for
-// either sits until its timeout, and it hides the cancel.
-func TestPollStopsOnCancelledStage(t *testing.T) {
-	gpcnClient, calls := jobsServer(t, `{"success":true,"message":"Job progress retrieved successfully",`+
-		`"data":{"jobs":[`+pollTestCancelStageJob+`]}}`)
-
-	_, err := client.PerformLongPollingWithConfig(gpcnClient, t.Context(), pollTestAction, pollTestJobID, fastPollingConfig())
-	if err == nil {
-		t.Fatal("expected a job in the cancel stage to fail the poll, got nil")
-	}
-
-	if err.Error() != pollTestCancelStageError {
-		t.Errorf("error = %q, want %q", err.Error(), pollTestCancelStageError)
-	}
-	if !errors.Is(err, client.ErrJobCancelledByPlatform) {
-		t.Errorf("errors.Is(err, ErrJobCancelledByPlatform) = false, want true")
-	}
-	if errors.Is(err, client.ErrJobFailed) {
-		t.Errorf("a platform-stopped job must not match ErrJobFailed")
-	}
-	if got := int(calls.Load()); got != 1 {
-		t.Errorf("poll calls = %d, want exactly 1", got)
-	}
-}
-
 // TestPollReportsJobErrorMessage proves the failure text comes from the job.
 // The envelope message on the read path is always the same success sentence.
 // A poller that reports it tells every user their job failed because progress
 // was retrieved.
 func TestPollReportsJobErrorMessage(t *testing.T) {
-	t.Run("prefers the job errorMessage", func(t *testing.T) {
-		gpcnClient, _ := jobsServer(t, `{"success":true,"message":"Job progress retrieved successfully",`+
-			`"data":{"jobs":[{"jobId":"job-1","stage":"failed","progressPercentage":60,`+
-			`"message":"Rolling back","errorMessage":"Quota exceeded",`+
-			`"isCompleted":false,"isTerminal":true,"hasFailed":true}]}}`)
-
-		_, err := client.PerformLongPollingWithConfig(gpcnClient, t.Context(), pollTestAction, pollTestJobID, fastPollingConfig())
-		if err == nil {
-			t.Fatal("expected a failed job to fail the poll, got nil")
-		}
-		if !strings.Contains(err.Error(), "Quota exceeded") {
-			t.Errorf("error = %q, want it to carry the job errorMessage", err.Error())
-		}
-		if strings.Contains(err.Error(), "Job progress retrieved successfully") {
-			t.Errorf("error = %q, want the envelope message kept out of it", err.Error())
-		}
-	})
-
 	t.Run("falls back to the job message", func(t *testing.T) {
 		gpcnClient, _ := jobsServer(t, `{"success":true,"message":"Job progress retrieved successfully",`+
 			`"data":{"jobs":[{"id":"job-1","stage":"failed","outcome":"failed","progress":60,`+
@@ -141,23 +88,6 @@ func TestPollReportsJobErrorMessage(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "Job progress retrieved successfully") {
 			t.Errorf("error = %q, want the envelope message as the last resort", err.Error())
-		}
-	})
-
-	t.Run("stops on a terminal job that never reported a failure", func(t *testing.T) {
-		gpcnClient, calls := jobsServer(t, `{"success":true,"message":"Job progress retrieved successfully",`+
-			`"data":{"jobs":[{"jobId":"job-1","stage":"failed","errorMessage":"Image not available",`+
-			`"isCompleted":false,"isTerminal":true,"hasFailed":false}]}}`)
-
-		_, err := client.PerformLongPollingWithConfig(gpcnClient, t.Context(), pollTestAction, pollTestJobID, fastPollingConfig())
-		if err == nil {
-			t.Fatal("expected a terminal job to fail the poll, got nil")
-		}
-		if !strings.Contains(err.Error(), "Image not available") {
-			t.Errorf("error = %q, want it to carry the job errorMessage", err.Error())
-		}
-		if got := int(calls.Load()); got != 1 {
-			t.Errorf("poll calls = %d, want exactly 1", got)
 		}
 	})
 }
@@ -194,8 +124,8 @@ func TestPollDecodesFractionalProgress(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected a fractional progress to decode, got: %v", err)
 	}
-	if got := response.Data.Jobs[0].ProgressPercentage; got != 12.5 {
-		t.Errorf("ProgressPercentage = %v, want 12.5", got)
+	if got := response.Data.Jobs[0].Progress; got != 12.5 {
+		t.Errorf("Progress = %v, want 12.5", got)
 	}
 }
 
@@ -252,24 +182,6 @@ func decodeJob(t *testing.T, body string) client.JobResponse {
 
 func stringPointer(value string) *string { return &value }
 
-func TestJobResponseDecodesLegacyFlatJob(t *testing.T) {
-	job := decodeJob(t, `{"jobId":"job-1","stage":"in_progress","isCompleted":false,"isTerminal":false,`+
-		`"hasFailed":false,"progressPercentage":40,"message":"Creating the machine",`+
-		`"errorMessage":"Retrying a step","resourceId":"vm-1"}`)
-
-	want := client.JobResponse{
-		JobID:              "job-1",
-		Stage:              "in_progress",
-		ProgressPercentage: 40,
-		Message:            "Creating the machine",
-		ErrorMessage:       "Retrying a step",
-		ResourceId:         "vm-1",
-	}
-	if !reflect.DeepEqual(job, want) {
-		t.Errorf("decoded job = %+v, want %+v", job, want)
-	}
-}
-
 func TestJobResponseDecodesUpdatedFlatJob(t *testing.T) {
 	tests := []struct {
 		name string
@@ -281,11 +193,11 @@ func TestJobResponseDecodesUpdatedFlatJob(t *testing.T) {
 			body: `{"id":"job-1","stage":"running","outcome":null,"progress":40,"message":"Creating the machine",` +
 				`"failureReason":null,"resourceId":"vm-1"}`,
 			want: client.JobResponse{
-				JobID:              "job-1",
-				Stage:              "running",
-				ProgressPercentage: 40,
-				Message:            "Creating the machine",
-				ResourceId:         "vm-1",
+				JobID:      "job-1",
+				Stage:      "running",
+				Progress:   40,
+				Message:    "Creating the machine",
+				ResourceId: "vm-1",
 			},
 		},
 		{
@@ -293,29 +205,14 @@ func TestJobResponseDecodesUpdatedFlatJob(t *testing.T) {
 			body: `{"id":"job-1","stage":"failed","outcome":"failed","progress":60,"message":"Rolling back",` +
 				`"failureReason":"capacity","resourceId":"vm-1"}`,
 			want: client.JobResponse{
-				JobID:              "job-1",
-				Stage:              "failed",
-				ProgressPercentage: 60,
-				Message:            "Rolling back",
-				ResourceId:         "vm-1",
-				Outcome:            stringPointer("failed"),
-				FailureReason:      "capacity",
+				JobID:         "job-1",
+				Stage:         "failed",
+				Progress:      60,
+				Message:       "Rolling back",
+				ResourceId:    "vm-1",
+				Outcome:       stringPointer("failed"),
+				FailureReason: "capacity",
 			},
-		},
-		{
-			name: "an empty id falls back to jobId",
-			body: `{"jobId":"j1","id":""}`,
-			want: client.JobResponse{JobID: "j1"},
-		},
-		{
-			name: "progress wins over progressPercentage",
-			body: `{"jobId":"j1","progress":40,"progressPercentage":10}`,
-			want: client.JobResponse{JobID: "j1", ProgressPercentage: 40},
-		},
-		{
-			name: "a null progress falls back to progressPercentage",
-			body: `{"jobId":"j1","progress":null,"progressPercentage":10}`,
-			want: client.JobResponse{JobID: "j1", ProgressPercentage: 10},
 		},
 	}
 
@@ -376,16 +273,12 @@ func TestJobResponseDecodesUpdatedDispatchElement(t *testing.T) {
 	}
 }
 
-func TestSingularResponseReadsBothDispatchShapes(t *testing.T) {
+func TestSingularResponseReadsTheDispatchShape(t *testing.T) {
 	tests := []struct {
 		name           string
 		body           string
 		wantResourceID string
 	}{
-		{
-			name: "legacy",
-			body: `{"success":true,"data":{"jobId":"j1"}}`,
-		},
 		{
 			name: "updated",
 			body: `{"success":true,"data":{"job":{"id":"j1","stage":"queued","outcome":null,"progress":0,` +
@@ -410,16 +303,12 @@ func TestSingularResponseReadsBothDispatchShapes(t *testing.T) {
 	}
 }
 
-func TestBatchDispatchReadsBothShapes(t *testing.T) {
+func TestBatchDispatchReadsJobElements(t *testing.T) {
 	tests := []struct {
 		name           string
 		body           string
 		wantResourceID string
 	}{
-		{
-			name: "legacy",
-			body: `{"data":{"jobs":[{"jobId":"j1"}]}}`,
-		},
 		{
 			name:           "updated",
 			body:           `{"data":{"jobs":[{"job":{"id":"j1","resourceId":"r1"},"resource":{"id":"r1"}}]}}`,
@@ -556,6 +445,9 @@ func TestPollUpdatedOutcomes(t *testing.T) {
 			if !errors.Is(err, tt.wantIs) {
 				t.Errorf("errors.Is(%v, %v) = false, want true", err, tt.wantIs)
 			}
+			if errors.Is(tt.wantIs, client.ErrJobCancelledByPlatform) && errors.Is(err, client.ErrJobFailed) {
+				t.Errorf("a platform-stopped job must not match ErrJobFailed")
+			}
 			if tt.wantText != "" && err.Error() != tt.wantText {
 				t.Errorf("error = %q, want %q", err.Error(), tt.wantText)
 			}
@@ -576,17 +468,10 @@ func TestPollFailureDetailPrefersFailureReason(t *testing.T) {
 		wantDetail string
 	}{
 		{
-			name: "an updated-wire job",
+			name: "a failed job",
 			body: updatedJobsBody(`{"id":"job-1","stage":"failed","outcome":"failed","message":"C",` +
-				`"failureReason":"A","errorMessage":"B"}`),
+				`"failureReason":"A"}`),
 			wantDetail: "A",
-		},
-		{
-			name: "a legacy job",
-			body: `{"success":true,"message":"Job progress retrieved successfully","data":{"jobs":[` +
-				`{"jobId":"job-1","stage":"failed","message":"C","errorMessage":"B",` +
-				`"isCompleted":false,"isTerminal":true,"hasFailed":true}]}}`,
-			wantDetail: "B",
 		},
 	}
 

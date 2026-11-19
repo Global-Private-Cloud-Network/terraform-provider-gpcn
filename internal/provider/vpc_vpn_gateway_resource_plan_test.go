@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
 	"terraform-provider-gpcn/internal/vpcvpngateways"
 
@@ -71,9 +69,6 @@ type vpnGatewayPlanTestServerState struct {
 	createdAt string
 	// createdAtOverride replaces the creation time the POST sets.
 	createdAtOverride string
-	// activeJobID is the job the row still runs. The job poll for it settles the
-	// row to ready.
-	activeJobID string
 	// deleteBusyCreating answers the next DELETE with a 409 for a gateway whose
 	// create still runs. The gateway then reads creating for creatingReads reads
 	// and ready after that.
@@ -95,13 +90,10 @@ type vpnGatewayPlanTestServerState struct {
 }
 
 func (s *vpnGatewayPlanTestServerState) row() map[string]any {
-	var failureReason, reservedBlock, address, activeJobID any
+	var failureReason, reservedBlock, address any
 	createdAt := vpnGatewayPlanTestTimestamp
 	if s.createdAt != "" {
 		createdAt = s.createdAt
-	}
-	if s.activeJobID != "" {
-		activeJobID = s.activeJobID
 	}
 	if s.failureReason != "" {
 		failureReason = s.failureReason
@@ -120,7 +112,6 @@ func (s *vpnGatewayPlanTestServerState) row() map[string]any {
 		"address":       address,
 		"reservedBlock": reservedBlock,
 		"failureReason": failureReason,
-		"activeJobId":   activeJobID,
 		"createdAt":     createdAt,
 		"updatedAt":     vpnGatewayPlanTestTimestamp,
 	}
@@ -257,10 +248,6 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 			}
 			state.mu.Lock()
 			failJob := state.failJob || (state.failDeleteJob && jobID == "job-delete")
-			if state.activeJobID != "" && jobID == state.activeJobID {
-				state.activeJobID = ""
-				state.rowState = "ready"
-			}
 			if state.heldByJobID != "" && jobID == state.heldByJobID {
 				state.heldByJobID = ""
 				state.rowState = "ready"
@@ -268,7 +255,8 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 			cancelJob := state.cancelJob
 			state.mu.Unlock()
 			if cancelJob {
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"`+jobID+`","stage":"`+client.JobStageCancelled+`","isCompleted":false,"isTerminal":true,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+vpnGatewayPlanTestID+`","resourceName":"","resourceType":""}]}}`))
+				//nolint:misspell // The value is the byte the API sends, not prose.
+				testutil.HandleJobOutcomeResponse(w, jobID, vpnGatewayPlanTestID, "cancelled", "")
 				return
 			}
 			if failJob {
@@ -737,43 +725,6 @@ func TestVpcVpnGatewayResourceCreateAcceptedIgnoresClockSkew(t *testing.T) {
 						s.rowState = "ready"
 						s.failureReason = ""
 					})
-				},
-				Config: config,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(gpcnVpcVpnGatewayTest, plancheck.ResourceActionReplace),
-					},
-				},
-			},
-		},
-	})
-}
-
-// An adopted row that still runs a job is read again once the job ends, so the
-// state holds the settled row.
-func TestVpcVpnGatewayResourceCreate5xxPollsAdoptedJob(t *testing.T) {
-	t.Parallel()
-	server, state := startVpnGatewayPlanMockServer(t)
-	state.set(func(s *vpnGatewayPlanTestServerState) {
-		s.createStatus = http.StatusBadGateway
-		s.createdState = "creating"
-		s.activeJobID = "job-live"
-	})
-	config := vpnGatewayPlanTestConfig(server.URL)
-
-	resource.UnitTest(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{Config: config, ExpectError: vpnGatewayRefusal(vpnGatewayPlanTestBadGateway)},
-			{
-				PreConfig: func() {
-					state.mu.Lock()
-					defer state.mu.Unlock()
-					if state.activeJobID != "" {
-						t.Errorf("Expected the create to poll the job of the adopted row, which still runs %q", state.activeJobID)
-					}
-					state.createStatus = 0
-					state.createdState = "ready"
 				},
 				Config: config,
 				ConfigPlanChecks: resource.ConfigPlanChecks{

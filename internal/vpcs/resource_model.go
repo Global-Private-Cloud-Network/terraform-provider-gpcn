@@ -54,7 +54,7 @@ func mapVpcPayloadToModel(_ context.Context, payload vpcPayload, model ResourceM
 	model.Status = types.StringValue(payload.Status)
 	model.EgressIp = nullableString(payload.EgressIp)
 	model.FailureReason = nullableString(payload.FailureReason)
-	model.ActiveJobId = nullableString(client.ActiveJobID(payload.HeldBy, payload.ActiveJobId))
+	model.ActiveJobId = nullableString(client.ActiveJobID(payload.HeldBy))
 	model.CreatedTime = rfc850Timestamp(payload.CreatedAt)
 	model.LastUpdated = rfc850Timestamp(payload.UpdatedAt)
 	model.ResourceGroupId = emptyAsNull(payload.ResourceGroupID)

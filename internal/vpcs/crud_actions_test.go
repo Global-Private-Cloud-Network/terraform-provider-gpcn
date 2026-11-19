@@ -124,23 +124,6 @@ func (m *vpcDeleteMock) handler(t *testing.T) func(http.ResponseWriter, *http.Re
 	}
 }
 
-// The refusal carries no status of its own, so the row has to answer for
-// itself. A VPC that is still being created clears the refusal as soon as its
-// create job ends.
-func TestVpcDeleteWaitsForTheCreateJobAndRetriesOnce(t *testing.T) {
-	t.Parallel()
-
-	mock := &vpcDeleteMock{refusals: 1, status: VPC_STATUS_CREATING, activeJobID: "job-create"}
-	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{T: t, Handler: mock.handler(t)})
-
-	if err := DeleteVpc(gpcnClient, context.Background(), vpcUnitTestID); err != nil {
-		t.Fatalf("Expected the retried delete to succeed, got %v", err)
-	}
-	if count := mock.deleteCount(); count != 2 {
-		t.Errorf("DELETE count = %d, want 2", count)
-	}
-}
-
 // Nothing the provider can wait for clears a refusal on an active VPC, so the
 // refusal reaches the reader.
 func TestVpcDeleteDoesNotRetryWhenNoJobOwnsTheVpc(t *testing.T) {
@@ -158,27 +141,6 @@ func TestVpcDeleteDoesNotRetryWhenNoJobOwnsTheVpc(t *testing.T) {
 	}
 	if count := mock.deleteCount(); count != 1 {
 		t.Errorf("DELETE count = %d, want 1", count)
-	}
-}
-
-// The retry exists for one race: the create job ends between the refusal and
-// the second DELETE. A refusal that survives it is the platform's answer, and
-// a loop around it hides a VPC nothing will free.
-func TestVpcDeleteSurfacesASecondRefusal(t *testing.T) {
-	t.Parallel()
-
-	mock := &vpcDeleteMock{refusals: 2, status: VPC_STATUS_CREATING, activeJobID: "job-create"}
-	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{T: t, Handler: mock.handler(t)})
-
-	err := DeleteVpc(gpcnClient, context.Background(), vpcUnitTestID)
-	if err == nil {
-		t.Fatalf("Expected the second refusal to reach the caller")
-	}
-	if !client.HasErrorCode(err, ERROR_CODE_VPC_NOT_ACTIVE) {
-		t.Errorf("Expected a VPC_NOT_ACTIVE error, got %v", err)
-	}
-	if count := mock.deleteCount(); count != 2 {
-		t.Errorf("DELETE count = %d, want 2", count)
 	}
 }
 
@@ -593,7 +555,6 @@ func TestMapVpcPayloadReadsHeldBy(t *testing.T) {
 		want types.String
 	}{
 		"held by a job":   {keys: `"heldBy":{"jobId":"j9","operation":"delete","verb":"delete"}`, want: types.StringValue("j9")},
-		"an active job":   {keys: `"activeJobId":"j8"`, want: types.StringValue("j8")},
 		"held by nothing": {keys: `"heldBy":null`, want: types.StringNull()},
 	} {
 		var payload vpcPayload
