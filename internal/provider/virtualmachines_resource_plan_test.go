@@ -2273,11 +2273,7 @@ func startVirtualMachinePublicIpMockServer(t *testing.T, arms vmPublicIpMockArms
 			mu.Lock()
 			events = append(events, "acquire")
 			mu.Unlock()
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true,
-				"message": "Operation initiated successfully",
-				"data":    map[string]any{"publicIpId": vmPlanTestAcquiredIpID, "jobId": "job-ip"},
-			})
+			testutil.HandleCreateJobResponseWithResource(w, "job-ip", map[string]any{"id": vmPlanTestAcquiredIpID})
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/attach") && strings.HasPrefix(r.URL.Path, addressesPath+"/"):
 			addressID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, addressesPath+"/"), "/attach")
 			nicID, _ := testutil.ReadRequestBody(r)["nicId"].(string)
