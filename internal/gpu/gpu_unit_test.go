@@ -473,7 +473,7 @@ func TestCreateGPUWithSkuCodeMockHTTP(t *testing.T) {
 				if int64(req["gpuCount"].(float64)) != 2 {
 					t.Errorf("Expected gpuCount 2, got '%v'", req["gpuCount"])
 				}
-				testutil.HandleJobResponse(w, jobID, gpuID, false)
+				testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": gpuID})
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, gpuID, true)
@@ -634,7 +634,7 @@ func TestCreateGPUMockHTTP(t *testing.T) {
 					t.Errorf("Expected sshKeyId '%s', got '%v'", testSSHKeyID, req["sshKeyId"])
 				}
 
-				testutil.HandleJobResponse(w, jobID, gpuID, false)
+				testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": gpuID})
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -1316,7 +1316,7 @@ func gpuUnitCreateKeys(t *testing.T, group types.String) map[string]any {
 			switch {
 			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/gpu/"):
 				got = testutil.ReadRequestBody(r)
-				testutil.HandleJobResponse(w, jobID, gpuID, false)
+				testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": gpuID})
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, gpuID, true)
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/gpu/"+gpuID):
@@ -1503,7 +1503,7 @@ func TestCreateGPUReturnsIDWhenReadBackFails(t *testing.T) {
 			switch {
 			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/gpu/"):
 				w.WriteHeader(http.StatusAccepted)
-				testutil.HandleJobResponse(w, jobID, "", false)
+				testutil.HandleBatchCreateJobResponse(w, jobID, nil)
 			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, gpuID, true)
 			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/"+gpuID):
