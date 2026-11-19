@@ -2,7 +2,6 @@ package vpcvpngateways
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -185,10 +184,7 @@ func TestVpcVpnGatewayUnitCreateVpnGatewaySendsEmptyObjectBody(t *testing.T) {
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/vpcs/"+testVpcID+"/vpn-gateway":
 				createBody.Store(testutil.ReadRequestBody(r))
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true, "message": "Operation initiated successfully",
-					"data": map[string]any{"jobId": "job-create", "vpnGateway": map[string]any{"id": testGatewayID, "state": "creating"}},
-				})
+				testutil.HandleCreateJobResponse(w, "job-create", "Operation initiated successfully")
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 				testutil.HandleJobResponse(w, "job-create", testGatewayID, true)
 			default:
@@ -242,7 +238,7 @@ func removingRow(reason string) string {
 	}
 	return `{"success":true,"message":"","data":{"id":"` + testGatewayID + `","vpcId":"` + testVpcID +
 		`","kind":"router","state":"removing","address":"198.51.100.7","reservedBlock":null,"failureReason":` + failure +
-		`,"activeJobId":null,"createdAt":"2026-01-02T15:04:05Z","updatedAt":"2026-01-02T15:04:05Z"}}`
+		`,"createdAt":"2026-01-02T15:04:05Z","updatedAt":"2026-01-02T15:04:05Z"}}`
 }
 
 func TestVpcVpnGatewayUnitWaitForVpnGatewayGoneTimeoutNamesLastStateAndFailureReason(t *testing.T) {
@@ -308,12 +304,9 @@ func deleteServer(t *testing.T, deleteStatus int, answers []string, options ...d
 				w.WriteHeader(http.StatusConflict)
 				fmt.Fprint(w, `{"success":false,"message":"The VPN gateway is already being removed.","error":{"code":"VPN_GATEWAY_REMOVING","statusCode":409,"details":null}}`)
 			case r.Method == http.MethodDelete && r.URL.Path == path:
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true, "message": "Operation initiated successfully",
-					"data": map[string]any{"jobId": "job-delete"},
-				})
+				testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"job-delete","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":true,"progressPercentage":0,"message":"","errorMessage":"removal failed","resourceId":"","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleJobOutcomeResponse(w, "job-delete", "", "failed", "removal failed")
 			case r.Method == http.MethodGet && r.URL.Path == path:
 				index := min(int(reads.Add(1))-1, len(answers)-1)
 				w.Header().Set("Content-Type", "application/json")
@@ -435,7 +428,7 @@ func pollCountServer(t *testing.T) (*client.GpcnClient, *atomic.Int32) {
 				return
 			}
 			polls.Add(1)
-			testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"job-live","stage":"running","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}]}}`))
+			testutil.HandleJobResponse(w, "job-live", "", false)
 		},
 	})
 	return gpcnClient, &polls
