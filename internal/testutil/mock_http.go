@@ -69,7 +69,7 @@ func HandleJobResponse(w http.ResponseWriter, jobID, resourceID string, complete
 		"id":             jobID,
 		"resourceType":   "virtual_machine",
 		"operation":      "create",
-		"verb":           "Creating",
+		"datacenterId":   "dc-1",
 		"resourceId":     nil,
 		"resourceName":   nil,
 		"stage":          "running",
@@ -95,7 +95,7 @@ func HandleJobResponse(w http.ResponseWriter, jobID, resourceID string, complete
 	}
 	WriteJSONResponse(w, map[string]any{
 		"success": true,
-		"message": "Job status retrieved",
+		"message": "Job progress retrieved successfully",
 		"data":    map[string]any{"jobs": []any{job}, "notFound": []any{}},
 	})
 }
@@ -114,7 +114,7 @@ func HandleJobOutcomeResponse(w http.ResponseWriter, jobID, resourceID, outcome,
 		"id":             jobID,
 		"resourceType":   "virtual_machine",
 		"operation":      "create",
-		"verb":           "Creating",
+		"datacenterId":   "dc-1",
 		"resourceId":     nil,
 		"resourceName":   nil,
 		"stage":          stage,
@@ -137,7 +137,7 @@ func HandleJobOutcomeResponse(w http.ResponseWriter, jobID, resourceID, outcome,
 	}
 	WriteJSONResponse(w, map[string]any{
 		"success": true,
-		"message": "Job status retrieved",
+		"message": "Job progress retrieved successfully",
 		"data":    map[string]any{"jobs": []any{job}, "notFound": []any{}},
 	})
 }
@@ -180,7 +180,7 @@ func queuedJob(jobID string) map[string]any {
 		"id":             jobID,
 		"resourceType":   "virtual_machine",
 		"operation":      "create",
-		"verb":           "Creating",
+		"datacenterId":   "dc-1",
 		"resourceId":     nil,
 		"resourceName":   nil,
 		"stage":          "queued",
