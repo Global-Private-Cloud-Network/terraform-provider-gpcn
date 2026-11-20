@@ -281,7 +281,7 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				state.row["failureReason"] = nil
 			}
 			state.mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-update", "Operation initiated successfully")
+			testutil.HandleCreateJobResponse(w, "job-update")
 		case r.Method == http.MethodDelete && r.URL.Path == item:
 			state.mu.Lock()
 			conflict := state.deleteConflict
@@ -311,7 +311,7 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				writeVpnConnPlanTestError(w, http.StatusConflict, "VPN_STATE_CONFLICT", conflict)
 				return
 			}
-			testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
+			testutil.HandleCreateJobResponse(w, "job-delete")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			jobID := "job-1"
 			if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {

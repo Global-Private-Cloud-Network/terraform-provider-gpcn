@@ -181,7 +181,7 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 				writeVpnGatewayPlanTestError(w, createStatus, "Internal Server Error", vpnGatewayPlanTestBadGateway)
 				return
 			}
-			testutil.HandleCreateJobResponse(w, "job-create", "Operation initiated successfully")
+			testutil.HandleCreateJobResponse(w, "job-create")
 		case r.Method == http.MethodDelete && r.URL.Path == gatewayPath:
 			state.mu.Lock()
 			state.deleteAttempts++
@@ -217,7 +217,7 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 				writeVpnGatewayPlanTestError(w, http.StatusConflict, "VPN_GATEWAY_IN_USE", refusal)
 				return
 			}
-			testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
+			testutil.HandleCreateJobResponse(w, "job-delete")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			jobID := "job-1"
 			if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {

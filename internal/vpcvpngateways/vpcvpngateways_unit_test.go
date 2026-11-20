@@ -184,7 +184,7 @@ func TestVpcVpnGatewayUnitCreateVpnGatewaySendsEmptyObjectBody(t *testing.T) {
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/vpcs/"+testVpcID+"/vpn-gateway":
 				createBody.Store(testutil.ReadRequestBody(r))
-				testutil.HandleCreateJobResponse(w, "job-create", "Operation initiated successfully")
+				testutil.HandleCreateJobResponse(w, "job-create")
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 				testutil.HandleJobResponse(w, "job-create", testGatewayID, true)
 			default:
@@ -303,7 +303,7 @@ func deleteServer(t *testing.T, deleteStatus int, answers []string, options ...d
 				w.WriteHeader(http.StatusBadGateway)
 				fmt.Fprint(w, "Bad Gateway")
 			case r.Method == http.MethodDelete && r.URL.Path == path:
-				testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
+				testutil.HandleCreateJobResponse(w, "job-delete")
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 				testutil.HandleJobOutcomeResponse(w, "job-delete", "", "failed", "removal failed")
 			case r.Method == http.MethodGet && r.URL.Path == path:

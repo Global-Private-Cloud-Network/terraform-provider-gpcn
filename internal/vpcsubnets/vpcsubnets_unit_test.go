@@ -500,7 +500,7 @@ func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
 			handlerMu.Lock()
 			rebindID = r.Header.Get("x-Correlation-ID")
 			handlerMu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-rebind", "Operation initiated successfully")
+			testutil.HandleCreateJobResponse(w, "job-rebind")
 		},
 	})
 
@@ -564,7 +564,7 @@ func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
 			handlerMu.Lock()
 			deleteID = r.Header.Get("x-Correlation-ID")
 			handlerMu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
+			testutil.HandleCreateJobResponse(w, "job-delete")
 		},
 	})
 

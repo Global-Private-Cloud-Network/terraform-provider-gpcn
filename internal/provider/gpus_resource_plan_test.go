@@ -222,7 +222,7 @@ func startGPUPlanMockServer(t *testing.T) (*httptest.Server, *gpuPlanTestMock) {
 			mock.mu.Unlock()
 			testutil.WriteJSONResponse(w, gpuCatalogTestReadBody(t, name, group))
 		case r.Method == http.MethodDelete && r.URL.Path == gpuPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}

@@ -319,7 +319,7 @@ func publicIpPlanTestServerError(w http.ResponseWriter) {
 }
 
 func publicIpPlanTestAcceptJob(w http.ResponseWriter) {
-	testutil.HandleCreateJobResponse(w, "job-1", "Operation initiated successfully")
+	testutil.HandleCreateJobResponse(w, "job-1")
 }
 
 func publicIpPlanTestListBody(rows []map[string]any) map[string]any {

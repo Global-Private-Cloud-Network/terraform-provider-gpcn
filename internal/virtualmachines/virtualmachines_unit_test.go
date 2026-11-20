@@ -1208,7 +1208,7 @@ func segmentUpdateMockServer(t *testing.T, vmID string) (*httptest.Server, *clie
 				body := testutil.ReadRequestBody(r)
 				segmentId, _ := body["l2SegmentId"].(string)
 				attached = append(attached, segmentId)
-				testutil.HandleCreateJobResponse(w, "job-1", "attach issued")
+				testutil.HandleCreateJobResponse(w, "job-1")
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 				testutil.HandleJobResponse(w, "job-1", "", true)
 			default:
@@ -2022,7 +2022,7 @@ func publicIpMockServer(t *testing.T, carriedID, acquiredID string, failedJobs .
 			case r.Method == http.MethodPost && r.URL.Path == addressesPath:
 				verbs = append(verbs, "acquire")
 				if acquiredID == "" {
-					testutil.HandleCreateJobResponse(w, testPublicIpJobAcquire, "Operation initiated successfully")
+					testutil.HandleCreateJobResponse(w, testPublicIpJobAcquire)
 					return
 				}
 				testutil.HandleCreateJobResponseWithResource(w, testPublicIpJobAcquire, map[string]any{"id": acquiredID})
@@ -2033,13 +2033,13 @@ func publicIpMockServer(t *testing.T, carriedID, acquiredID string, failedJobs .
 				if target != acquiredID {
 					attachJob = testPublicIpJobHeldAttach
 				}
-				testutil.HandleCreateJobResponse(w, attachJob, "attach issued")
+				testutil.HandleCreateJobResponse(w, attachJob)
 			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/detach"):
 				verbs = append(verbs, "detach "+publicIpVerbTarget(r.URL.Path, addressesPath, "/detach"))
-				testutil.HandleCreateJobResponse(w, testPublicIpJobDetach, "detach issued")
+				testutil.HandleCreateJobResponse(w, testPublicIpJobDetach)
 			case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, addressesPath+"/"):
 				verbs = append(verbs, "release "+strings.TrimPrefix(r.URL.Path, addressesPath+"/"))
-				testutil.HandleCreateJobResponse(w, testPublicIpJobRelease, "release issued")
+				testutil.HandleCreateJobResponse(w, testPublicIpJobRelease)
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 				writePublicIpJobStatus(w, r, failedJobs)
 			default:

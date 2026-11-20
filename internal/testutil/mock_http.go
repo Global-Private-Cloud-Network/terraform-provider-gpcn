@@ -144,10 +144,9 @@ func HandleJobOutcomeResponse(w http.ResponseWriter, jobID, resourceID, outcome,
 
 // HandleCreateJobResponse answers a request that starts a job, as the API
 // accepts it: the job under data.job, queued.
-func HandleCreateJobResponse(w http.ResponseWriter, jobID string, message string) {
+func HandleCreateJobResponse(w http.ResponseWriter, jobID string) {
 	WriteJSONResponse(w, map[string]any{
 		"success": true,
-		"message": message,
 		"data":    map[string]any{"job": queuedJob(jobID)},
 	})
 }
@@ -157,7 +156,6 @@ func HandleCreateJobResponse(w http.ResponseWriter, jobID string, message string
 func HandleCreateJobResponseWithResource(w http.ResponseWriter, jobID string, resource map[string]any) {
 	WriteJSONResponse(w, map[string]any{
 		"success": true,
-		"message": "Request accepted",
 		"data":    map[string]any{"job": queuedJob(jobID), "resource": resource},
 	})
 }
@@ -165,13 +163,13 @@ func HandleCreateJobResponseWithResource(w http.ResponseWriter, jobID string, re
 // HandleBatchCreateJobResponse answers a create that the API accepts as a
 // batch of one, as the GPU and VM creates do.
 func HandleBatchCreateJobResponse(w http.ResponseWriter, jobID string, resource map[string]any) {
-	var row any
+	entry := map[string]any{"job": queuedJob(jobID)}
 	if resource != nil {
-		row = resource
+		entry["resource"] = resource
 	}
 	WriteJSONResponse(w, map[string]any{
 		"success": true,
-		"data":    map[string]any{"jobs": []any{map[string]any{"job": queuedJob(jobID), "resource": row}}},
+		"data":    map[string]any{"jobs": []any{entry}},
 	})
 }
 

@@ -260,7 +260,7 @@ func startVirtualMachinePlanMockServer(t *testing.T, networkHotplug ...any) (*ht
 			mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodDelete && r.URL.Path == vmPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -414,7 +414,7 @@ func startVirtualMachineSizeMockServer(t *testing.T, hotplug int) (*httptest.Ser
 				skuId = requested
 			}
 			mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-5", "resize issued")
+			testutil.HandleCreateJobResponse(w, "job-5")
 		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
 			mu.Lock()
 			events = append(events, "stop")
@@ -451,7 +451,7 @@ func startVirtualMachineSizeMockServer(t *testing.T, hotplug int) (*httptest.Ser
 			mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -631,7 +631,7 @@ func startVirtualMachineDestroyMockServer(t *testing.T) (*httptest.Server, func(
 			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, vmPlanTestSizeID))
 		case r.Method == http.MethodDelete && r.URL.Path == vmPath:
 			t.Error("Expected no delete call for a machine the platform already removed")
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -1007,7 +1007,7 @@ func startVirtualMachineSegmentAttachMockServer(t *testing.T) (*httptest.Server,
 				testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "attach refused"})
 				return
 			}
-			testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+			testutil.HandleCreateJobResponse(w, "job-3")
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
 			mu.Lock()
 			currentSubnet := birthSubnetID
@@ -1018,7 +1018,7 @@ func startVirtualMachineSegmentAttachMockServer(t *testing.T) (*httptest.Server,
 			mu.Lock()
 			attached = nil
 			mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-4", "detach issued")
+			testutil.HandleCreateJobResponse(w, "job-4")
 		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
 			mu.Lock()
 			status = virtualmachines.VMStatusShutoff.String()
@@ -1032,7 +1032,7 @@ func startVirtualMachineSegmentAttachMockServer(t *testing.T) (*httptest.Server,
 			mu.Unlock()
 			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, vmPlanTestSizeID))
 		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -1131,7 +1131,7 @@ func startVirtualMachineSegmentHotplugMockServer(t *testing.T, hotplug int, star
 			mu.Lock()
 			attached = append(attached, segmentID)
 			mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+			testutil.HandleCreateJobResponse(w, "job-3")
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
 			mu.Lock()
 			currentSubnet := birthSubnetID
@@ -1142,7 +1142,7 @@ func startVirtualMachineSegmentHotplugMockServer(t *testing.T, hotplug int, star
 			mu.Lock()
 			attached = nil
 			mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-4", "detach issued")
+			testutil.HandleCreateJobResponse(w, "job-4")
 		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
 			mu.Lock()
 			status = virtualmachines.VMStatusShutoff.String()
@@ -1166,7 +1166,7 @@ func startVirtualMachineSegmentHotplugMockServer(t *testing.T, hotplug int, star
 			mu.Unlock()
 			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, vmPlanTestSizeID, hotplug))
 		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -1289,14 +1289,14 @@ func startVirtualMachineSegmentUpdateMockServer(t *testing.T, hotplug int) (*htt
 			attached = append(attached, vmSegmentNic{nicID: fmt.Sprintf("nic-%d", nextNic), segmentID: segmentID})
 			nextNic++
 			mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+			testutil.HandleCreateJobResponse(w, "job-3")
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/"):
 			nicID := strings.TrimPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/")
 			mu.Lock()
 			events = append(events, "detach "+nicID)
 			attached = slices.DeleteFunc(attached, func(nic vmSegmentNic) bool { return nic.nicID == nicID })
 			mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-4", "detach issued")
+			testutil.HandleCreateJobResponse(w, "job-4")
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
 			mu.Lock()
 			currentSubnet := birthSubnetID
@@ -1331,7 +1331,7 @@ func startVirtualMachineSegmentUpdateMockServer(t *testing.T, hotplug int) (*htt
 			mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -1708,7 +1708,7 @@ func startVirtualMachineUnresolvedSkuMockServer(t *testing.T) (*httptest.Server,
 			mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -1790,7 +1790,7 @@ func startVirtualMachineSegmentRefusedMockServer(t *testing.T, startSucceeds boo
 				mu.Lock()
 				attachDone = true
 				mu.Unlock()
-				testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+				testutil.HandleCreateJobResponse(w, "job-3")
 				return
 			}
 			w.WriteHeader(http.StatusInternalServerError)
@@ -1833,7 +1833,7 @@ func startVirtualMachineSegmentRefusedMockServer(t *testing.T, startSucceeds boo
 			}
 			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, vmPlanTestSizeID, hotplug))
 		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -2057,7 +2057,7 @@ func startVirtualMachineHoistedReadMockServer(t *testing.T, refuseInterfaces boo
 			mu.Lock()
 			events = append(events, "attach "+segmentID)
 			mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+			testutil.HandleCreateJobResponse(w, "job-3")
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
 			mu.Lock()
 			currentSubnet := birthSubnetID
@@ -2093,7 +2093,7 @@ func startVirtualMachineHoistedReadMockServer(t *testing.T, refuseInterfaces boo
 			}
 			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, vmPlanTestSizeID, 0))
 		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -2286,7 +2286,7 @@ func startVirtualMachinePublicIpMockServer(t *testing.T, arms vmPublicIpMockArms
 			}
 			refuseNextRead = arms.refuseReadAfterChange
 			mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-ip", "attach issued")
+			testutil.HandleCreateJobResponse(w, "job-ip")
 		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/detach") && strings.HasPrefix(r.URL.Path, addressesPath+"/"):
 			addressID := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, addressesPath+"/"), "/detach")
 			mu.Lock()
@@ -2294,7 +2294,7 @@ func startVirtualMachinePublicIpMockServer(t *testing.T, arms vmPublicIpMockArms
 			boundID = ""
 			boundAddress = ""
 			mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-ip", "detach issued")
+			testutil.HandleCreateJobResponse(w, "job-ip")
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, addressesPath+"/"):
 			mu.Lock()
 			events = append(events, "release "+strings.TrimPrefix(r.URL.Path, addressesPath+"/"))
@@ -2310,13 +2310,13 @@ func startVirtualMachinePublicIpMockServer(t *testing.T, arms vmPublicIpMockArms
 				testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "release refused"})
 				return
 			}
-			testutil.HandleCreateJobResponse(w, "job-ip", "release issued")
+			testutil.HandleCreateJobResponse(w, "job-ip")
 		case strings.HasSuffix(r.URL.Path, "/public-ip") && strings.HasPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/"):
 			mu.Lock()
 			events = append(events, "legacy "+r.Method)
 			mu.Unlock()
 			t.Errorf("Expected no legacy per-interface public IP call, got %s %s", r.Method, r.URL.Path)
-			testutil.HandleCreateJobResponse(w, "job-legacy", "legacy issued")
+			testutil.HandleCreateJobResponse(w, "job-legacy")
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
 			mu.Lock()
 			currentID, currentAddress := boundID, boundAddress
@@ -2366,7 +2366,7 @@ func startVirtualMachinePublicIpMockServer(t *testing.T, arms vmPublicIpMockArms
 				testutil.WriteJSONResponse(w, map[string]any{"success": false, "message": "resize refused"})
 				return
 			}
-			testutil.HandleCreateJobResponse(w, "job-5", "resize issued")
+			testutil.HandleCreateJobResponse(w, "job-5")
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
 			mu.Lock()
 			currentName, currentStatus, currentSku := name, status, skuId
@@ -2397,7 +2397,7 @@ func startVirtualMachinePublicIpMockServer(t *testing.T, arms vmPublicIpMockArms
 			}
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -3108,11 +3108,11 @@ func startVirtualMachineCreateOnSubnetMockServer(t *testing.T) (*httptest.Server
 			mu.Lock()
 			attached = append(attached, segmentID)
 			mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-3", "attach issued")
+			testutil.HandleCreateJobResponse(w, "job-3")
 		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, vmPlanTestPath+"/network-interfaces/"):
-			testutil.HandleCreateJobResponse(w, "job-4", "detach issued")
+			testutil.HandleCreateJobResponse(w, "job-4")
 		case strings.HasPrefix(r.URL.Path, addressesPath):
-			testutil.HandleCreateJobResponse(w, "job-ip", "address issued")
+			testutil.HandleCreateJobResponse(w, "job-ip")
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
 			mu.Lock()
 			currentSubnet, currentAddress := birthSubnetID, boundID
@@ -3132,7 +3132,7 @@ func startVirtualMachineCreateOnSubnetMockServer(t *testing.T) (*httptest.Server
 			mu.Unlock()
 			testutil.WriteJSONResponse(w, vmPlanTestReadBodyWithHotplug(currentName, currentStatus, vmPlanTestSizeID, 1))
 		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -3220,7 +3220,7 @@ func startVirtualMachineCarriedAddressMockServer(t *testing.T) (*httptest.Server
 			mu.Lock()
 			events = append(events, r.Method+" "+r.URL.Path)
 			mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-ip", "address issued")
+			testutil.HandleCreateJobResponse(w, "job-ip")
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
 			testutil.WriteJSONResponse(w, vmPublicIpPlanTestInterfacesBody(vmPlanTestAcquiredIpID, vmPlanTestAcquiredIpAddress))
 		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
@@ -3236,7 +3236,7 @@ func startVirtualMachineCarriedAddressMockServer(t *testing.T) (*httptest.Server
 			mu.Unlock()
 			testutil.WriteJSONResponse(w, vmPlanTestReadBody(currentName, currentStatus, vmPlanTestSizeID))
 		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -3349,7 +3349,7 @@ func startVirtualMachineDestroyBodyMockServer(t *testing.T, arm vmDestroyBodyMoc
 			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
 		case strings.HasPrefix(r.URL.Path, addressesPath):
 			t.Errorf("Expected no address verb during the destroy, got %s %s", r.Method, r.URL.Path)
-			testutil.HandleCreateJobResponse(w, "job-ip", "address issued")
+			testutil.HandleCreateJobResponse(w, "job-ip")
 		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
 			mu.Lock()
 			currentID, currentAddress, currentStatus := boundID, boundAddress, status
@@ -3383,7 +3383,7 @@ func startVirtualMachineDestroyBodyMockServer(t *testing.T, arm vmDestroyBodyMoc
 			deleteBody = string(raw)
 			deleted = true
 			mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -3550,7 +3550,7 @@ func startVirtualMachineLateMacMockServer(t *testing.T) *httptest.Server {
 			mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -3662,7 +3662,7 @@ func startVirtualMachineMovedAddressMockServer(t *testing.T) *httptest.Server {
 			mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -3868,7 +3868,7 @@ func startVirtualMachineGroupMockServer(t *testing.T, defaultGroup string) *vmGr
 				mock.sku = requested
 			}
 			mock.mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-5", "resize issued")
+			testutil.HandleCreateJobResponse(w, "job-5")
 		case r.Method == http.MethodGet && r.URL.Path == vmPath:
 			mock.mu.Lock()
 			name, group, status, sku, hotplug := mock.name, mock.group, virtualmachines.VMStatusRunning.String(), mock.sku, mock.hotplug
@@ -3915,7 +3915,7 @@ func startVirtualMachineGroupMockServer(t *testing.T, defaultGroup string) *vmGr
 			mock.mu.Unlock()
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodDelete && r.URL.Path == vmPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}

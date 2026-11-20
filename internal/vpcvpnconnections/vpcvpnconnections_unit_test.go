@@ -493,7 +493,7 @@ func TestVpcVpnConnectionUnitUpdateVpnConnectionSendsOnlyTheBodyItGets(t *testin
 		switch {
 		case r.Method == http.MethodPut && r.URL.Path == "/v1/resource/vpcs/"+testVpcID+"/vpn-connections/"+testConnID:
 			putBody = testutil.ReadRequestBody(r)
-			testutil.HandleCreateJobResponse(w, "job-1", "")
+			testutil.HandleCreateJobResponse(w, "job-1")
 		case r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", testConnID, true)
 		default:

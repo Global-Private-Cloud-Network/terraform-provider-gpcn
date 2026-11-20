@@ -238,7 +238,7 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 			state.rulesPuts++
 			state.storeRules(body)
 			state.mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-rules", "Operation initiated successfully")
+			testutil.HandleCreateJobResponse(w, "job-rules")
 		case r.Method == http.MethodPut && r.URL.Path == groupPath:
 			body := testutil.ReadRequestBody(r)
 			state.mu.Lock()
@@ -274,7 +274,7 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 				fmt.Fprint(w, `{"success":false,"message":"The VPC's default security group cannot be deleted while it is the default","error":{"code":"Duplicate Resource","statusCode":409,"details":null}}`)
 				return
 			}
-			testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
+			testutil.HandleCreateJobResponse(w, "job-delete")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			nsgPlanTestHandleJob(w, r, state)
 		default:

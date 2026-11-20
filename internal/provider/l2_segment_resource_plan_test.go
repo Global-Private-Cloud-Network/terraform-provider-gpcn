@@ -223,7 +223,7 @@ func startL2SegmentPlanMockServer(t *testing.T) (*httptest.Server, *l2PlanTestSe
 				state.description = description
 			}
 			state.mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-create", "Operation initiated successfully")
+			testutil.HandleCreateJobResponse(w, "job-create")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			state.mu.Lock()
 			if state.movedOnJob != "" {
@@ -286,7 +286,7 @@ func startL2SegmentPlanMockServer(t *testing.T) (*httptest.Server, *l2PlanTestSe
 				testutil.WriteJSONResponse(w, l2PlanTestInUseBody())
 				return
 			}
-			testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
+			testutil.HandleCreateJobResponse(w, "job-delete")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}

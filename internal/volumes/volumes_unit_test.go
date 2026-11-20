@@ -160,7 +160,7 @@ func TestCreateVolumeMockHTTP(t *testing.T) {
 					t.Error("Request body should not contain volumeSizeId")
 				}
 
-				testutil.HandleCreateJobResponse(w, jobID, "Volume creation job started")
+				testutil.HandleCreateJobResponse(w, jobID)
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -261,7 +261,7 @@ func TestUpdateVolumeMockHTTP(t *testing.T) {
 				if _, hasSkuId := req["skuId"]; hasSkuId {
 					t.Error("Request body should not contain skuId")
 				}
-				testutil.HandleCreateJobResponse(w, "job-456", "Volume resize job started")
+				testutil.HandleCreateJobResponse(w, "job-456")
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -333,7 +333,7 @@ func TestUpdateVolumeLooksUpSkuByComponentCodeMockHTTP(t *testing.T) {
 
 			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+volumeID+"/resize"):
 				updateCalled = true
-				testutil.HandleCreateJobResponse(w, "job-ultra", "Volume resize job started")
+				testutil.HandleCreateJobResponse(w, "job-ultra")
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, "job-ultra", volumeID, true)
@@ -395,7 +395,7 @@ func TestUpdateVolumeRefusesUnresolvableTypeMockHTTP(t *testing.T) {
 
 			case r.Method == "PUT" && strings.Contains(r.URL.Path, "/volumes/"+volumeID+"/resize"):
 				resizeCalled = true
-				testutil.HandleCreateJobResponse(w, "job-unknown", "Volume resize job started")
+				testutil.HandleCreateJobResponse(w, "job-unknown")
 
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
@@ -695,7 +695,7 @@ func createVolumeBodyFor(t *testing.T, model ResourceModel) map[string]any {
 				}))
 			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/volumes/"):
 				created = testutil.ReadRequestBody(r)
-				testutil.HandleCreateJobResponse(w, jobID, "")
+				testutil.HandleCreateJobResponse(w, jobID)
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, volumeID, true)
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID):
@@ -839,7 +839,7 @@ func TestCreateVolumeReturnsIDWhenReadBackFails(t *testing.T) {
 			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/volumes/"):
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusAccepted)
-				testutil.HandleCreateJobResponse(w, jobID, "Volume creation job started")
+				testutil.HandleCreateJobResponse(w, jobID)
 			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, volumeID, true)
 			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/"+volumeID):

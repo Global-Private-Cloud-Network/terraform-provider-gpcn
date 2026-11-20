@@ -255,7 +255,7 @@ func (m *vpcMock) handleDelete(w http.ResponseWriter) {
 		return
 	}
 
-	testutil.HandleCreateJobResponse(w, vpcPlanTestDeleteJobID, "Operation initiated successfully")
+	testutil.HandleCreateJobResponse(w, vpcPlanTestDeleteJobID)
 }
 
 // handleJob answers the poll for the job the request names. A delete job the

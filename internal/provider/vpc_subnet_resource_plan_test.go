@@ -167,7 +167,7 @@ func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestS
 			state.nsgID, _ = body["nsgId"].(string)
 			state.nsgName = "chosen"
 			state.mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-rebind", "Operation initiated successfully")
+			testutil.HandleCreateJobResponse(w, "job-rebind")
 		case r.Method == http.MethodDelete && r.URL.Path == subnetPath:
 			state.mu.Lock()
 			missing := state.missingOnDelete
@@ -192,7 +192,7 @@ func startSubnetPlanMockServer(t *testing.T) (*httptest.Server, *subnetPlanTestS
 				fmt.Fprintf(w, `{"success":false,"message":"Cannot delete a subnet with %d attached network interface(s). Detach or delete the VMs first.","error":{"code":"Duplicate Resource","statusCode":409,"details":null}}`, count)
 				return
 			}
-			testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
+			testutil.HandleCreateJobResponse(w, "job-delete")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			subnetPlanTestHandleJob(w, r, state)
 		default:

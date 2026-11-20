@@ -419,7 +419,7 @@ func TestCreateL2SegmentRejectsJobWithoutSegmentIDUnit(t *testing.T) {
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == BASE_URL_V1:
-				testutil.HandleCreateJobResponse(w, "job-create", "Operation initiated successfully")
+				testutil.HandleCreateJobResponse(w, "job-create")
 			case r.Method == http.MethodPost && r.URL.Path == client.JOBS_BASE_URL_V1:
 				testutil.HandleJobResponse(w, "job-create", "", true)
 			default:
@@ -498,7 +498,7 @@ func TestCreateL2SegmentReturnsIDWhenReadBackFails(t *testing.T) {
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == BASE_URL_V1:
 				w.WriteHeader(http.StatusAccepted)
-				testutil.HandleCreateJobResponse(w, "job-create", "L2 segment creation job started")
+				testutil.HandleCreateJobResponse(w, "job-create")
 			case r.Method == http.MethodPost && r.URL.Path == client.JOBS_BASE_URL_V1:
 				testutil.HandleJobResponse(w, "job-create", unitTestSegmentID, true)
 			case r.Method == http.MethodGet && r.URL.Path == BASE_URL_V1+unitTestSegmentID:

@@ -155,7 +155,7 @@ func TestCreateNetworkMockHTTP(t *testing.T) {
 			switch {
 			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/networks/"):
 				createCalled = true
-				testutil.HandleCreateJobResponse(w, jobID, "Network creation job started")
+				testutil.HandleCreateJobResponse(w, jobID)
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -456,7 +456,7 @@ func TestCreateNetworkDefaultRoute(t *testing.T) {
 						body := testutil.ReadRequestBody(r)
 						gotDefaultRoute = body["defaultRoute"]
 						gotEnabled = body["defaultRouteEnabled"]
-						testutil.HandleCreateJobResponse(w, jobID, "Network creation job started")
+						testutil.HandleCreateJobResponse(w, jobID)
 					case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 						testutil.HandleJobResponse(w, jobID, networkID, true)
 					case r.Method == "GET" && strings.Contains(r.URL.Path, "/networks/"+networkID):
@@ -668,7 +668,7 @@ func TestAddL2SegmentInterfaceSendsSegmentIdMockHTTP(t *testing.T) {
 			if r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/"+vmID+"/network-interfaces" {
 				capturedPath = r.URL.Path
 				capturedBody = testutil.ReadRequestBody(r)
-				testutil.HandleCreateJobResponse(w, "job-1", "attach issued")
+				testutil.HandleCreateJobResponse(w, "job-1")
 				return
 			}
 			testutil.HandleJobResponse(w, "job-1", "", true)

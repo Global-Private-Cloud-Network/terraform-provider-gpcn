@@ -230,7 +230,7 @@ func TestReplaceNsgRulesSendsCompleteSetUnit(t *testing.T) {
 				sentPath = r.URL.Path
 				sentBody = testutil.ReadRequestBody(r)
 				handlerMu.Unlock()
-				testutil.HandleCreateJobResponse(w, "job-rules", "Operation initiated successfully")
+				testutil.HandleCreateJobResponse(w, "job-rules")
 				return
 			}
 			testutil.HandleJobResponse(w, "job-rules", unitTestNsgID, true)
@@ -475,7 +475,7 @@ func TestCreateNsgCarriesOneCorrelationIDUnit(t *testing.T) {
 			handlerMu.Lock()
 			replaceID = r.Header.Get("x-Correlation-ID")
 			handlerMu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-rules", "Operation initiated successfully")
+			testutil.HandleCreateJobResponse(w, "job-rules")
 		},
 	})
 
@@ -539,7 +539,7 @@ func TestCreateNsgCarriesOneCorrelationIDUnit(t *testing.T) {
 			handlerMu.Lock()
 			deleteID = r.Header.Get("x-Correlation-ID")
 			handlerMu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
+			testutil.HandleCreateJobResponse(w, "job-delete")
 		},
 	})
 
@@ -569,7 +569,7 @@ func TestIssueCreateNsgRejectsResponseWithoutIDUnit(t *testing.T) {
 	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, _ *http.Request) {
-			testutil.HandleCreateJobResponse(w, "job-create", "Operation initiated successfully")
+			testutil.HandleCreateJobResponse(w, "job-create")
 		},
 	})
 
@@ -810,7 +810,7 @@ func TestReplaceNsgRulesMergeWarningsFollowAcceptanceUnit(t *testing.T) {
 						w.WriteHeader(putStatus)
 						_, _ = w.Write([]byte(`{"success":false,"message":"refused","error":{"code":"Bad Request","statusCode":400,"details":null}}`))
 					case r.Method == http.MethodPut:
-						testutil.HandleCreateJobResponse(w, "job-rules", "")
+						testutil.HandleCreateJobResponse(w, "job-rules")
 					default:
 						testutil.HandleJobResponse(w, "job-rules", unitTestNsgID, true)
 					}

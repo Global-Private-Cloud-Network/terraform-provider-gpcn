@@ -759,7 +759,7 @@ func TestDeleteGPUMockHTTP(t *testing.T) {
 			switch {
 			case r.Method == "DELETE" && strings.Contains(r.URL.Path, "/gpu/"+gpuID):
 				deleteCalled = true
-				testutil.HandleCreateJobResponse(w, jobID, "GPU deletion job started")
+				testutil.HandleCreateJobResponse(w, jobID)
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true

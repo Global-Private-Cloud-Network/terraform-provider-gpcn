@@ -149,7 +149,7 @@ func TestAttachPublicIpSendsNicIdMockHTTP(t *testing.T) {
 			rec.record(r)
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == attachPath:
-				testutil.HandleCreateJobResponse(w, testJobID, "Operation initiated successfully")
+				testutil.HandleCreateJobResponse(w, testJobID)
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 				testutil.HandleJobResponse(w, testJobID, "", true)
 			default:
@@ -193,7 +193,7 @@ func TestDetachPublicIpSendsEmptyBodyMockHTTP(t *testing.T) {
 			rec.record(r)
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == detachPath:
-				testutil.HandleCreateJobResponse(w, testJobID, "Operation initiated successfully")
+				testutil.HandleCreateJobResponse(w, testJobID)
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 				testutil.HandleJobResponse(w, testJobID, "", true)
 			default:
@@ -228,7 +228,7 @@ func TestReleasePublicIpPollsMockHTTP(t *testing.T) {
 			rec.record(r)
 			switch {
 			case r.Method == http.MethodDelete && r.URL.Path == releasePath:
-				testutil.HandleCreateJobResponse(w, testJobID, "Operation initiated successfully")
+				testutil.HandleCreateJobResponse(w, testJobID)
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 				testutil.HandleJobResponse(w, testJobID, "", true)
 			default:
@@ -443,7 +443,7 @@ func TestReleasePublicIpReportsNotFoundFromTheJobPollMockHTTP(t *testing.T) {
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodDelete && r.URL.Path == releasePath {
-				testutil.HandleCreateJobResponse(w, testJobID, "Operation initiated successfully")
+				testutil.HandleCreateJobResponse(w, testJobID)
 				return
 			}
 			w.WriteHeader(http.StatusNotFound)
