@@ -48,12 +48,12 @@ type readVpcResponse struct {
 // The create 202 carries the new row beside the job. The row exists already, so
 // its id reaches state before the poll starts.
 type createVpcResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
+	Success bool
+	Message string
 	Data    struct {
 		JobID string
 		Vpc   vpcPayload
-	} `json:"data"`
+	}
 }
 
 func CreateVpc(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*createVpcResponse, error) {
