@@ -285,10 +285,10 @@ func TestVpcDeleteFailureDiagnosticRendersEmptyBlockers(t *testing.T) {
 func TestVpcDeleteFailureDiagnosticForwardsOtherRefusals(t *testing.T) {
 	t.Parallel()
 
-	err := httpErrorFromBody(t, 409, "VPC_NOT_ACTIVE",
-		`The VPC is not active (status: deleting); this operation needs an active VPC.`, `{}`)
+	err := httpErrorFromBody(t, 409, "Duplicate Resource",
+		`The VPC changed while the request was being processed — retry`, `{}`)
 
-	want := `Unable to delete GPCN VPC with ID 'vpc-1': HTTP 409 (VPC_NOT_ACTIVE): The VPC is not active (status: deleting); this operation needs an active VPC.`
+	want := `Unable to delete GPCN VPC with ID 'vpc-1': HTTP 409 (Duplicate Resource): The VPC changed while the request was being processed — retry`
 	if got := DeleteFailureDiagnostic(vpcUnitTestID, err).Detail(); got != want {
 		t.Errorf("Detail = %q, want %q", got, want)
 	}
