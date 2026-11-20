@@ -275,6 +275,7 @@ func (m *vpcMock) handleJob(w http.ResponseWriter, r *http.Request) {
 	if failing {
 		m.deleteJobFailures--
 		m.failureReason = vpcPlanTestAbandonedJobError
+		m.status = "deleting"
 	}
 	m.mutex.Unlock()
 
