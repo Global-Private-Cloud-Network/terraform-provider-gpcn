@@ -193,7 +193,7 @@ func TestCreateVirtualMachineMockHTTP(t *testing.T) {
 					t.Error("Expected networkId to be absent when the model names no network")
 				}
 
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"VM creation job started","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+vmID+`","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": vmID})
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				jobStatusCalled = true
@@ -1045,7 +1045,7 @@ func TestCreateVirtualMachineAcceptsStoppedStatus(t *testing.T) {
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			switch {
 			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"VM creation job started","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+vmID+`","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": vmID})
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, vmID, true)
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
@@ -1208,7 +1208,7 @@ func segmentUpdateMockServer(t *testing.T, vmID string) (*httptest.Server, *clie
 				body := testutil.ReadRequestBody(r)
 				segmentId, _ := body["l2SegmentId"].(string)
 				attached = append(attached, segmentId)
-				testutil.HandleCreateJobResponse(w, "job-1", "attach issued")
+				testutil.HandleCreateJobResponse(w, "job-1")
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 				testutil.HandleJobResponse(w, "job-1", "", true)
 			default:
@@ -1400,7 +1400,7 @@ func TestCreateVirtualMachineSendsSubnetIdBodyMockHTTP(t *testing.T) {
 				if err := json.Unmarshal(body, &createBody); err != nil {
 					t.Fatalf("unmarshaling the create body failed: %v", err)
 				}
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"VM creation job started","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+vmID+`","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": vmID})
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, vmID, true)
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
@@ -1459,7 +1459,7 @@ func createBodyForResourceGroup(t *testing.T, group types.String) map[string]any
 				if err := json.Unmarshal(body, &createBody); err != nil {
 					t.Fatalf("unmarshaling the create body failed: %v", err)
 				}
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"VM creation job started","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+vmID+`","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": vmID})
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, vmID, true)
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
@@ -1607,7 +1607,7 @@ func TestCreateVirtualMachineSendsPublicIpKeysMockHTTP(t *testing.T) {
 					if err := json.Unmarshal(body, captured); err != nil {
 						t.Fatalf("unmarshaling the create body failed: %v", err)
 					}
-					testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"VM creation job started","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+vmID+`","resourceName":"","resourceType":""}]}}`))
+					testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": vmID})
 				case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 					testutil.HandleJobResponse(w, jobID, vmID, true)
 				case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
@@ -1993,13 +1993,7 @@ func writePublicIpJobStatus(w http.ResponseWriter, r *http.Request, failedJobs [
 		testutil.HandleJobResponse(w, jobID, "", true)
 		return
 	}
-	testutil.WriteJSONResponse(w, map[string]any{
-		"success": true, "message": "Job status retrieved",
-		"data": map[string]any{"jobs": []map[string]any{{
-			"jobId": jobID, "isCompleted": false, "isTerminal": true,
-			"hasFailed": true, "errorMessage": jobID + " refused",
-		}}},
-	})
+	testutil.HandleJobOutcomeResponse(w, jobID, "", "failed", jobID+" refused")
 }
 
 // publicIpUpdateMockServer serves the VPC address verbs and records them in order. The
@@ -2011,8 +2005,8 @@ func publicIpUpdateMockServer(t *testing.T, carriedID string, failedJobs ...stri
 }
 
 // publicIpMockServer is publicIpUpdateMockServer with the id the acquire 202 names. An
-// empty acquiredID leaves the sibling field out. GPCN does that for a request it
-// refused before it inserted the row.
+// empty acquiredID leaves the resource out. GPCN does that for a request it refused
+// before it inserted the row.
 func publicIpMockServer(t *testing.T, carriedID, acquiredID string, failedJobs ...string) (*httptest.Server, *client.GpcnClient, *[]string) {
 	t.Helper()
 
@@ -2027,14 +2021,11 @@ func publicIpMockServer(t *testing.T, carriedID, acquiredID string, failedJobs .
 				testutil.WriteJSONResponse(w, publicIpPrimaryInterfaceBody(carriedID))
 			case r.Method == http.MethodPost && r.URL.Path == addressesPath:
 				verbs = append(verbs, "acquire")
-				acquired := map[string]any{"jobId": testPublicIpJobAcquire}
-				if acquiredID != "" {
-					acquired["publicIpId"] = acquiredID
+				if acquiredID == "" {
+					testutil.HandleCreateJobResponse(w, testPublicIpJobAcquire)
+					return
 				}
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true, "message": "Operation initiated successfully",
-					"data": acquired,
-				})
+				testutil.HandleCreateJobResponseWithResource(w, testPublicIpJobAcquire, map[string]any{"id": acquiredID})
 			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/attach"):
 				target := publicIpVerbTarget(r.URL.Path, addressesPath, "/attach")
 				verbs = append(verbs, "attach "+target)
@@ -2042,13 +2033,13 @@ func publicIpMockServer(t *testing.T, carriedID, acquiredID string, failedJobs .
 				if target != acquiredID {
 					attachJob = testPublicIpJobHeldAttach
 				}
-				testutil.HandleCreateJobResponse(w, attachJob, "attach issued")
+				testutil.HandleCreateJobResponse(w, attachJob)
 			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/detach"):
 				verbs = append(verbs, "detach "+publicIpVerbTarget(r.URL.Path, addressesPath, "/detach"))
-				testutil.HandleCreateJobResponse(w, testPublicIpJobDetach, "detach issued")
+				testutil.HandleCreateJobResponse(w, testPublicIpJobDetach)
 			case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, addressesPath+"/"):
 				verbs = append(verbs, "release "+strings.TrimPrefix(r.URL.Path, addressesPath+"/"))
-				testutil.HandleCreateJobResponse(w, testPublicIpJobRelease, "release issued")
+				testutil.HandleCreateJobResponse(w, testPublicIpJobRelease)
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 				writePublicIpJobStatus(w, r, failedJobs)
 			default:
@@ -2447,7 +2438,7 @@ func TestPrimaryInterfaceCarriesAForeignAddressDetailBytes(t *testing.T) {
 	}
 }
 
-// An updated-wire 202 names the machine before the job ends. A failed job then still
+// The 202 names the machine before the job ends. A failed job then still
 // returns that ID, so the caller saves it and Terraform taints the machine.
 func TestCreateVirtualMachineReturnsIDWhenJobFails(t *testing.T) {
 	useFastVMStatusPollInterval(t)
@@ -2494,14 +2485,13 @@ func TestCreateVirtualMachineReturnsIDWhenJobFails(t *testing.T) {
 	}
 }
 
-// The current 202 names no machine. The completed job does, so a status wait
-// that fails after it still returns that ID.
+// The 202 in this test names no resource, so the ID comes from the completed job.
 func TestCreateVirtualMachineReturnsIDWhenStatusWaitFails(t *testing.T) {
 	useFastVMStatusPollInterval(t)
 	useNoInitialPollDelay(t)
 	const (
-		jobID = "job-legacy-create"
-		vmID  = "vm-legacy-1"
+		jobID = "job-readback-create"
+		vmID  = "vm-readback-1"
 	)
 
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
@@ -2510,13 +2500,9 @@ func TestCreateVirtualMachineReturnsIDWhenStatusWaitFails(t *testing.T) {
 			w.Header().Set("Content-Type", "application/json")
 			switch {
 			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
-				_, _ = w.Write([]byte(`{"success":true,"message":"VM creation job started",` +
-					`"data":{"jobs":[{"jobId":"` + jobID + `","stage":"queued","isCompleted":false,` +
-					`"isTerminal":false,"hasFailed":false,"progressPercentage":0}]}}`))
+				testutil.HandleBatchCreateJobResponse(w, jobID, nil)
 			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
-				_, _ = w.Write([]byte(`{"success":true,"message":"Job status retrieved",` +
-					`"data":{"jobs":[{"jobId":"` + jobID + `","stage":"completed","isCompleted":true,` +
-					`"isTerminal":true,"hasFailed":false,"progressPercentage":100,"resourceId":"` + vmID + `"}]}}`))
+				testutil.HandleJobResponse(w, jobID, vmID, true)
 			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+vmID):
 				_, _ = w.Write([]byte(`{"success":true,"message":"VM retrieved",` +
 					`"data":{"id":"` + vmID + `","name":"test-vm","status":"Destroyed"}}`))

@@ -69,7 +69,7 @@ func HandleJobResponse(w http.ResponseWriter, jobID, resourceID string, complete
 		"id":             jobID,
 		"resourceType":   "virtual_machine",
 		"operation":      "create",
-		"verb":           "Creating",
+		"datacenterId":   "dc-1",
 		"resourceId":     nil,
 		"resourceName":   nil,
 		"stage":          "running",
@@ -95,37 +95,104 @@ func HandleJobResponse(w http.ResponseWriter, jobID, resourceID string, complete
 	}
 	WriteJSONResponse(w, map[string]any{
 		"success": true,
-		"message": "Job status retrieved",
+		"message": "Job progress retrieved successfully",
+		"data":    map[string]any{"jobs": []any{job}, "notFound": []any{}},
+	})
+}
+
+// HandleJobOutcomeResponse answers a job status read with one job that ended
+// with the given outcome.
+func HandleJobOutcomeResponse(w http.ResponseWriter, jobID, resourceID, outcome, failureReason string) {
+	stage := outcome
+	switch outcome {
+	case "succeeded":
+		stage = "completed"
+	case "abandoned":
+		stage = "failed"
+	}
+	job := map[string]any{
+		"id":             jobID,
+		"resourceType":   "virtual_machine",
+		"operation":      "create",
+		"datacenterId":   "dc-1",
+		"resourceId":     nil,
+		"resourceName":   nil,
+		"stage":          stage,
+		"outcome":        outcome,
+		"progress":       100,
+		"message":        nil,
+		"failureReason":  nil,
+		"retryable":      false,
+		"createdAt":      "2026-11-02T00:00:00Z",
+		"startedAt":      "2026-11-02T00:00:00Z",
+		"lastProgressAt": "2026-11-02T00:00:00Z",
+		"completedAt":    "2026-11-02T00:00:01Z",
+		"version":        1,
+	}
+	if resourceID != "" {
+		job["resourceId"] = resourceID
+	}
+	if failureReason != "" {
+		job["failureReason"] = failureReason
+	}
+	WriteJSONResponse(w, map[string]any{
+		"success": true,
+		"message": "Job progress retrieved successfully",
 		"data":    map[string]any{"jobs": []any{job}, "notFound": []any{}},
 	})
 }
 
 // HandleCreateJobResponse answers a request that starts a job, as the API
 // accepts it: the job under data.job, queued.
-func HandleCreateJobResponse(w http.ResponseWriter, jobID string, message string) {
+func HandleCreateJobResponse(w http.ResponseWriter, jobID string) {
 	WriteJSONResponse(w, map[string]any{
 		"success": true,
-		"message": message,
-		"data": map[string]any{"job": map[string]any{
-			"id":             jobID,
-			"resourceType":   "virtual_machine",
-			"operation":      "create",
-			"verb":           "Creating",
-			"resourceId":     nil,
-			"resourceName":   nil,
-			"stage":          "queued",
-			"outcome":        nil,
-			"progress":       0,
-			"message":        nil,
-			"failureReason":  nil,
-			"retryable":      false,
-			"createdAt":      "2026-11-02T00:00:00Z",
-			"startedAt":      nil,
-			"lastProgressAt": nil,
-			"completedAt":    nil,
-			"version":        1,
-		}},
+		"data":    map[string]any{"job": queuedJob(jobID)},
 	})
+}
+
+// HandleCreateJobResponseWithResource answers a request that starts a job and
+// names the row the job works on under data.resource.
+func HandleCreateJobResponseWithResource(w http.ResponseWriter, jobID string, resource map[string]any) {
+	WriteJSONResponse(w, map[string]any{
+		"success": true,
+		"data":    map[string]any{"job": queuedJob(jobID), "resource": resource},
+	})
+}
+
+// HandleBatchCreateJobResponse answers a create that the API accepts as a
+// batch of one, as the GPU and VM creates do.
+func HandleBatchCreateJobResponse(w http.ResponseWriter, jobID string, resource map[string]any) {
+	entry := map[string]any{"job": queuedJob(jobID)}
+	if resource != nil {
+		entry["resource"] = resource
+	}
+	WriteJSONResponse(w, map[string]any{
+		"success": true,
+		"data":    map[string]any{"jobs": []any{entry}},
+	})
+}
+
+func queuedJob(jobID string) map[string]any {
+	return map[string]any{
+		"id":             jobID,
+		"resourceType":   "virtual_machine",
+		"operation":      "create",
+		"datacenterId":   "dc-1",
+		"resourceId":     nil,
+		"resourceName":   nil,
+		"stage":          "queued",
+		"outcome":        nil,
+		"progress":       0,
+		"message":        nil,
+		"failureReason":  nil,
+		"retryable":      false,
+		"createdAt":      "2026-11-02T00:00:00Z",
+		"startedAt":      nil,
+		"lastProgressAt": nil,
+		"completedAt":    nil,
+		"version":        1,
+	}
 }
 
 // ReadRequestBody reads and unmarshals the request body into a map

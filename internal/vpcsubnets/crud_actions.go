@@ -26,19 +26,8 @@ type ApiSubnet struct {
 	NsgName          *string `json:"nsgName"`
 	AttachedNicCount int64   `json:"attachedNicCount"`
 	FailureReason    *string `json:"failureReason"`
-	ActiveJobID      *string `json:"activeJobId"`
 	CreatedAt        string  `json:"createdAt"`
 	UpdatedAt        string  `json:"updatedAt"`
-}
-
-// createSubnetResponse reads the row under its own key. The job id, and the row
-// an answer carries as data.resource, come from client.JobStatusSingularResponse.
-type createSubnetResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Data    struct {
-		Subnet ApiSubnet `json:"subnet"`
-	} `json:"data"`
 }
 
 type listSubnetsResponse struct {
@@ -122,14 +111,8 @@ func IssueCreateSubnet(gpcnClient *client.GpcnClient, ctx context.Context, model
 	if err := json.Unmarshal(body, &accepted); err != nil {
 		return nil, err
 	}
-	var created createSubnetResponse
-	if err := json.Unmarshal(body, &created); err != nil {
-		return nil, err
-	}
-	// The answer carries the row as data.resource or data.subnet.
-	subnet := created.Data.Subnet
+	var subnet ApiSubnet
 	if accepted.Data.Resource != nil {
-		subnet = ApiSubnet{}
 		if err := json.Unmarshal(accepted.Data.Resource, &subnet); err != nil {
 			return nil, err
 		}

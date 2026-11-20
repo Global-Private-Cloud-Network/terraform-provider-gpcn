@@ -180,7 +180,7 @@ func startVolumePlanRecordingMockServer(t *testing.T) (*httptest.Server, func(st
 				rec.groupId = groupId
 			}
 			rec.mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-1", "create issued")
+			testutil.HandleCreateJobResponse(w, "job-1")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", volPlanTestID, true)
 		case r.Method == http.MethodPut && r.URL.Path == volumePath+"/resize":
@@ -199,7 +199,7 @@ func startVolumePlanRecordingMockServer(t *testing.T) (*httptest.Server, func(st
 				rec.groupId = rec.moveOnResize
 			}
 			rec.mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-1", "resize issued")
+			testutil.HandleCreateJobResponse(w, "job-1")
 		case r.Method == http.MethodPut && r.URL.Path == volumePath:
 			body := testutil.ReadRequestBody(r)
 			if _, present := body["resourceGroupId"]; !present {
@@ -235,7 +235,7 @@ func startVolumePlanRecordingMockServer(t *testing.T) (*httptest.Server, func(st
 			rec.mu.Unlock()
 			testutil.WriteJSONResponse(w, volPlanTestReadBody(currentName, currentSize, currentGroup))
 		case r.Method == http.MethodDelete && r.URL.Path == volumePath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -517,13 +517,13 @@ func startUnknownVolumeTypePlanMockServer(t *testing.T) *httptest.Server {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+volPlanTestDatacenterID+"/volume-sizes":
 			testutil.WriteJSONResponse(w, sizesBody)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/volumes/":
-			testutil.HandleCreateJobResponse(w, "job-1", "create issued")
+			testutil.HandleCreateJobResponse(w, "job-1")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", volPlanTestID, true)
 		case r.Method == http.MethodGet && r.URL.Path == volumePath:
 			testutil.WriteJSONResponse(w, readBody)
 		case r.Method == http.MethodDelete && r.URL.Path == volumePath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -680,13 +680,13 @@ func startThirdClassVolumePlanMockServer(t *testing.T) *httptest.Server {
 		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+volPlanTestDatacenterID+"/volume-sizes":
 			testutil.WriteJSONResponse(w, sizesBody)
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/volumes/":
-			testutil.HandleCreateJobResponse(w, "job-1", "create issued")
+			testutil.HandleCreateJobResponse(w, "job-1")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			testutil.HandleJobResponse(w, "job-1", volPlanTestID, true)
 		case r.Method == http.MethodGet && r.URL.Path == volumePath:
 			testutil.WriteJSONResponse(w, readBody)
 		case r.Method == http.MethodDelete && r.URL.Path == volumePath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -1251,7 +1251,7 @@ func TestVolumeResourcePlanUnsupportedGrowDoesNotMove(t *testing.T) {
 
 const volUpdatedPlanTestFailureReason = "the storage pool is full"
 
-// A create job that fails on the updated wire leaves the volume behind. The
+// A create job that fails leaves the volume behind. The
 // 202 named it, so the create saves its ID, Terraform taints it, and the next
 // apply replaces it.
 func TestVolumeCreateJobFailedIsReplaced(t *testing.T) {

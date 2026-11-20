@@ -1,7 +1,6 @@
 package provider
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"terraform-provider-gpcn/internal/client"
 	"terraform-provider-gpcn/internal/testutil"
 	"terraform-provider-gpcn/internal/vpcvpngateways"
 
@@ -71,37 +69,24 @@ type vpnGatewayPlanTestServerState struct {
 	createdAt string
 	// createdAtOverride replaces the creation time the POST sets.
 	createdAtOverride string
-	// activeJobID is the job the row still runs. The job poll for it settles the
-	// row to ready.
-	activeJobID string
-	// deleteBusyCreating answers the next DELETE with a 409 for a gateway whose
-	// create still runs. The gateway then reads creating for creatingReads reads
-	// and ready after that.
-	deleteBusyCreating bool
-	creatingReads      int
-	waitingForCreate   bool
-	deleteAttempts     int
-	deleting           bool
-	getCount           int
-	getsAfterDel       int
-	createBodies       []map[string]any
-	deleteCount        int
-	// resendRemoving answers every DELETE after the first with a 409 for a
-	// gateway whose removal runs.
-	resendRemoving bool
+	deleteAttempts    int
+	deleting          bool
+	getCount          int
+	getsAfterDel      int
+	createBodies      []map[string]any
+	deleteCount       int
+	// resendBadGateway answers every DELETE after the first with a 502.
+	resendBadGateway bool
 	// heldByJobID is the job the row names in heldBy. The job poll for it
 	// settles the row to ready.
 	heldByJobID string
 }
 
 func (s *vpnGatewayPlanTestServerState) row() map[string]any {
-	var failureReason, reservedBlock, address, activeJobID any
+	var failureReason, reservedBlock, address any
 	createdAt := vpnGatewayPlanTestTimestamp
 	if s.createdAt != "" {
 		createdAt = s.createdAt
-	}
-	if s.activeJobID != "" {
-		activeJobID = s.activeJobID
 	}
 	if s.failureReason != "" {
 		failureReason = s.failureReason
@@ -120,7 +105,6 @@ func (s *vpnGatewayPlanTestServerState) row() map[string]any {
 		"address":       address,
 		"reservedBlock": reservedBlock,
 		"failureReason": failureReason,
-		"activeJobId":   activeJobID,
 		"createdAt":     createdAt,
 		"updatedAt":     vpnGatewayPlanTestTimestamp,
 	}
@@ -149,12 +133,6 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 		case r.Method == http.MethodGet && r.URL.Path == gatewayPath:
 			state.mu.Lock()
 			state.getCount++
-			if state.creatingReads > 0 {
-				state.creatingReads--
-			} else if state.waitingForCreate {
-				state.waitingForCreate = false
-				state.rowState = "ready"
-			}
 			if state.deleting {
 				state.getsAfterDel++
 				if state.deleteHold > 0 {
@@ -203,31 +181,14 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 				writeVpnGatewayPlanTestError(w, createStatus, "Internal Server Error", vpnGatewayPlanTestBadGateway)
 				return
 			}
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true,
-				"message": "Operation initiated successfully",
-				"data": map[string]any{
-					"jobId": "job-create",
-					"vpnGateway": map[string]any{
-						"id": vpnGatewayPlanTestID, "vpcId": vpnGatewayPlanTestVpcID, "kind": "router",
-						"state": "creating", "address": nil, "reservedBlock": nil, "failureReason": nil,
-					},
-				},
-				"meta": nil,
-			})
+			testutil.HandleCreateJobResponse(w, "job-create")
 		case r.Method == http.MethodDelete && r.URL.Path == gatewayPath:
 			state.mu.Lock()
 			state.deleteAttempts++
-			if state.resendRemoving && state.deleteAttempts > 1 {
+			if state.resendBadGateway && state.deleteAttempts > 1 {
 				state.mu.Unlock()
-				writeVpnGatewayPlanTestError(w, http.StatusConflict, vpcvpngateways.CodeGatewayRemoving, "The VPN gateway is already being removed.")
+				writeVpnGatewayPlanTestError(w, http.StatusBadGateway, "Internal Server Error", vpnGatewayPlanTestBadGateway)
 				return
-			}
-			busyCreating := state.deleteBusyCreating
-			if busyCreating {
-				state.deleteBusyCreating = false
-				state.waitingForCreate = true
-				state.rowState = "creating"
 			}
 			refusal := state.refuseDelete
 			state.refuseDelete = ""
@@ -235,7 +196,7 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 			if gone {
 				state.exists = false
 			}
-			if refusal == "" && !gone && !busyCreating {
+			if refusal == "" && !gone {
 				state.deleteCount++
 				if state.deleteHold > 0 {
 					state.deleting = true
@@ -248,10 +209,6 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 				}
 			}
 			state.mu.Unlock()
-			if busyCreating {
-				writeVpnGatewayPlanTestError(w, http.StatusConflict, "VPN_GATEWAY_BUSY_CREATING", "The VPN gateway is still being created.")
-				return
-			}
 			if gone {
 				writeVpnGatewayPlanTestError(w, http.StatusNotFound, "VPN_GATEWAY_NOT_FOUND", "This VPC has no VPN gateway.")
 				return
@@ -260,12 +217,7 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 				writeVpnGatewayPlanTestError(w, http.StatusConflict, "VPN_GATEWAY_IN_USE", refusal)
 				return
 			}
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true,
-				"message": "Operation initiated successfully",
-				"data":    map[string]any{"jobId": "job-delete", "vpnGateway": map[string]any{"id": vpnGatewayPlanTestID, "state": "removing"}},
-				"meta":    nil,
-			})
+			testutil.HandleCreateJobResponse(w, "job-delete")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			jobID := "job-1"
 			if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
@@ -273,10 +225,6 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 			}
 			state.mu.Lock()
 			failJob := state.failJob || (state.failDeleteJob && jobID == "job-delete")
-			if state.activeJobID != "" && jobID == state.activeJobID {
-				state.activeJobID = ""
-				state.rowState = "ready"
-			}
 			if state.heldByJobID != "" && jobID == state.heldByJobID {
 				state.heldByJobID = ""
 				state.rowState = "ready"
@@ -284,11 +232,12 @@ func startVpnGatewayPlanMockServer(t *testing.T) (*httptest.Server, *vpnGatewayP
 			cancelJob := state.cancelJob
 			state.mu.Unlock()
 			if cancelJob {
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"`+jobID+`","stage":"`+client.JobStageCancelled+`","isCompleted":false,"isTerminal":true,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+vpnGatewayPlanTestID+`","resourceName":"","resourceType":""}]}}`))
+				//nolint:misspell // The value is the byte the API sends, not prose.
+				testutil.HandleJobOutcomeResponse(w, jobID, vpnGatewayPlanTestID, "cancelled", "")
 				return
 			}
 			if failJob {
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":true,"progressPercentage":0,"message":"","errorMessage":"`+vpnGatewayPlanTestJobFail+`","resourceId":"`+vpnGatewayPlanTestID+`","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleJobOutcomeResponse(w, jobID, vpnGatewayPlanTestID, "failed", vpnGatewayPlanTestJobFail)
 				return
 			}
 			testutil.HandleJobResponse(w, jobID, vpnGatewayPlanTestID, true)
@@ -765,49 +714,23 @@ func TestVpcVpnGatewayResourceCreateAcceptedIgnoresClockSkew(t *testing.T) {
 	})
 }
 
-// An adopted row that still runs a job is read again once the job ends, so the
-// state holds the settled row.
-func TestVpcVpnGatewayResourceCreate5xxPollsAdoptedJob(t *testing.T) {
-	t.Parallel()
-	server, state := startVpnGatewayPlanMockServer(t)
-	state.set(func(s *vpnGatewayPlanTestServerState) {
-		s.createStatus = http.StatusBadGateway
-		s.createdState = "creating"
-		s.activeJobID = "job-live"
-	})
-	config := vpnGatewayPlanTestConfig(server.URL)
-
-	resource.UnitTest(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{Config: config, ExpectError: vpnGatewayRefusal(vpnGatewayPlanTestBadGateway)},
-			{
-				PreConfig: func() {
-					state.mu.Lock()
-					defer state.mu.Unlock()
-					if state.activeJobID != "" {
-						t.Errorf("Expected the create to poll the job of the adopted row, which still runs %q", state.activeJobID)
-					}
-					state.createStatus = 0
-					state.createdState = "ready"
-				},
-				Config: config,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(gpcnVpcVpnGatewayTest, plancheck.ResourceActionReplace),
-					},
-				},
-			},
-		},
-	})
-}
-
 // A delete job that fails can leave the removal parked while the platform still
-// removes it. The destroy keeps reading until the API answers 404.
+// removes it. The resend fails in transit, and the destroy keeps reading until
+// the API answers 404. With retries off, one resend is one DELETE.
 func TestVpcVpnGatewayResourceDeleteParkedRemovalWaits(t *testing.T) {
 	t.Parallel()
 	server, state := startVpnGatewayPlanMockServer(t)
-	config := vpnGatewayPlanTestConfig(server.URL)
+	config := fmt.Sprintf(`
+provider "gpcn" {
+  host        = %q
+  api_key     = "test-key"
+  max_retries = 0
+}
+
+resource "gpcn_vpc_vpn_gateway" "test" {
+  vpc_id = %q
+}
+`, server.URL, vpnGatewayPlanTestVpcID)
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -829,7 +752,7 @@ func TestVpcVpnGatewayResourceDeleteParkedRemovalWaits(t *testing.T) {
 					state.set(func(s *vpnGatewayPlanTestServerState) {
 						s.failDeleteJob = true
 						s.deleteHold = 2
-						s.resendRemoving = true
+						s.resendBadGateway = true
 					})
 					return nil
 				},
@@ -860,38 +783,6 @@ func TestVpcVpnGatewayResourceDeleteWaitsForRow(t *testing.T) {
 				Config: config,
 				Check: func(*terraform.State) error {
 					state.set(func(s *vpnGatewayPlanTestServerState) { s.deleteHold = 2 })
-					return nil
-				},
-			},
-		},
-	})
-}
-
-// A delete that meets a gateway whose create still runs waits until the gateway
-// leaves the creating state, and then sends the delete again.
-func TestVpcVpnGatewayResourceDeleteWhileCreatingWaits(t *testing.T) {
-	t.Parallel()
-	server, state := startVpnGatewayPlanMockServer(t)
-	config := vpnGatewayPlanTestConfig(server.URL)
-
-	resource.UnitTest(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		CheckDestroy: func(*terraform.State) error {
-			state.mu.Lock()
-			defer state.mu.Unlock()
-			if state.deleteAttempts != 2 {
-				return fmt.Errorf("expected 2 DELETE requests (the 409 and the retry), got %d", state.deleteAttempts)
-			}
-			if state.waitingForCreate {
-				return fmt.Errorf("expected the wait to read the gateway until it left the creating state")
-			}
-			return nil
-		},
-		Steps: []resource.TestStep{
-			{
-				Config: config,
-				Check: func(*terraform.State) error {
-					state.set(func(s *vpnGatewayPlanTestServerState) { s.deleteBusyCreating = true; s.creatingReads = 2 })
 					return nil
 				},
 			},

@@ -121,7 +121,7 @@ func volumeOperationServer(t *testing.T, volumeAction string) (*client.GpcnClien
 						t.Errorf("expected virtualMachineId %s in the attach body, got %v", testVMID, body["virtualMachineId"])
 					}
 				}
-				testutil.HandleCreateJobResponse(w, testJobID, volumeAction+" started")
+				testutil.HandleCreateJobResponse(w, testJobID)
 
 			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, testJobID, testVolID, true)

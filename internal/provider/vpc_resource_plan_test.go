@@ -53,14 +53,6 @@ const vpcGroupNotFoundBody = `{"success":false,"message":"Resource group not fou
 const vpcNotFoundBody = `{"success":false,"message":"VPC not found",` +
 	`"error":{"code":"Resource Not Found","statusCode":404,"details":null}}`
 
-// A VPC already being torn down refuses a second claim.
-const vpcTearingDownRefusalBody = `{"success":false,` +
-	`"message":"The VPC is not active (status: deleting); this operation needs an active VPC.",` +
-	`"error":{"code":"VPC_NOT_ACTIVE","statusCode":409,"details":null}}`
-
-// The marker a teardown writes when its dispatch dies before the engine.
-const vpcPlanTestParkedReason = "VPC removal could not be started; retry the delete"
-
 // The text a job carries when its worker dies before any terminal stage.
 const vpcPlanTestAbandonedJobError = "Job was dispatched but never reached a terminal stage " +
 	"(worker crash or restart) \u2014 reclaimed by the stale-job sweep."
@@ -96,19 +88,8 @@ type vpcMock struct {
 	// land during an apply.
 	movedOnUpdate string
 	movedOnJob    string
-	// tearingDownDeletes counts the deletes that answer the refusal a live
-	// teardown raises. The first of them parks the row in deleting.
-	tearingDownDeletes int
-	// parkedTeardownDeletes counts the deletes that lose the same race to a
-	// teardown whose dispatch dies. The row then carries a failure reason.
-	parkedTeardownDeletes int
-	failureReason         any
-	tearingDown           bool
-	// deletingGets is how many reads still answer deleting. The row answers 404
-	// after them, which is the end of the teardown.
-	deletingGets   int
-	getsWhileGoing int
-	// deleteJobFailures counts the teardown jobs that answer a failure. A row
+	failureReason any
+	// deleteJobFailures counts the delete jobs that answer a failure. A row
 	// such a job leaves behind never reaches 404.
 	deleteJobFailures int
 }
@@ -116,31 +97,27 @@ type vpcMock struct {
 // vpcMockRefusals seeds the answers the mock refuses with. A test states them
 // before the server starts, because the handler goroutine reads them.
 type vpcMockRefusals struct {
-	create                string
-	deletes               int
-	deleteNotFound        bool
-	tearingDownDeletes    int
-	parkedTeardownDeletes int
-	deleteJobFailures     int
-	emptyGroupUntilWrite  bool
-	refusedMoves          int
+	create               string
+	deletes              int
+	deleteNotFound       bool
+	deleteJobFailures    int
+	emptyGroupUntilWrite bool
+	refusedMoves         int
 }
 
 func startVpcPlanMockServer(t *testing.T, refusals vpcMockRefusals) *vpcMock {
 	t.Helper()
 
 	mock := &vpcMock{
-		cidr:                  vpcPlanTestCidr,
-		groupID:               vpcPlanTestDefaultGroup,
-		status:                "active",
-		createRefusal:         refusals.create,
-		deleteRefusals:        refusals.deletes,
-		deleteNotFound:        refusals.deleteNotFound,
-		tearingDownDeletes:    refusals.tearingDownDeletes,
-		parkedTeardownDeletes: refusals.parkedTeardownDeletes,
-		deleteJobFailures:     refusals.deleteJobFailures,
-		emptyGroupUntilWrite:  refusals.emptyGroupUntilWrite,
-		refusedMoves:          refusals.refusedMoves,
+		cidr:                 vpcPlanTestCidr,
+		groupID:              vpcPlanTestDefaultGroup,
+		status:               "active",
+		createRefusal:        refusals.create,
+		deleteRefusals:       refusals.deletes,
+		deleteNotFound:       refusals.deleteNotFound,
+		deleteJobFailures:    refusals.deleteJobFailures,
+		emptyGroupUntilWrite: refusals.emptyGroupUntilWrite,
+		refusedMoves:         refusals.refusedMoves,
 	}
 	vpcPath := "/v1/resource/vpcs/" + vpcPlanTestID
 
@@ -208,26 +185,13 @@ func (m *vpcMock) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 	created := m.vpcBody()
 	created["status"] = "creating"
-	created["activeJobId"] = vpcPlanTestCreateJobID
-	testutil.WriteJSONResponse(w, map[string]any{
-		"success": true,
-		"message": "Operation initiated successfully",
-		"meta":    nil,
-		"data":    map[string]any{"jobId": vpcPlanTestCreateJobID, "vpc": created},
-	})
+	created["heldBy"] = map[string]any{"jobId": vpcPlanTestCreateJobID, "operation": "create", "verb": "create"}
+	testutil.HandleCreateJobResponseWithResource(w, vpcPlanTestCreateJobID, created)
 }
 
 func (m *vpcMock) handleGet(w http.ResponseWriter) {
 	m.mutex.Lock()
 	notFound := m.getNotFound
-	if m.tearingDown {
-		m.getsWhileGoing++
-		if m.deletingGets > 0 {
-			m.deletingGets--
-		} else {
-			notFound = true
-		}
-	}
 	m.mutex.Unlock()
 
 	if notFound {
@@ -275,34 +239,13 @@ func (m *vpcMock) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 func (m *vpcMock) handleDelete(w http.ResponseWriter) {
 	m.mutex.Lock()
-	tearingDown := m.tearingDownDeletes > 0
-	if tearingDown {
-		m.tearingDownDeletes--
-		m.status = "deleting"
-		m.tearingDown = true
-		m.deletingGets = 2
-	}
-	// The dispatch dies between the refusal and the read. The row the next
-	// read answers with therefore carries the parked marker.
-	parked := !tearingDown && m.parkedTeardownDeletes > 0
-	if parked {
-		m.parkedTeardownDeletes--
-		m.status = "deleting"
-		m.failureReason = vpcPlanTestParkedReason
-		m.tearingDown = true
-		m.deletingGets = 1
-	}
-	refuse := !tearingDown && !parked && m.deleteRefusals > 0
+	refuse := m.deleteRefusals > 0
 	if refuse {
 		m.deleteRefusals--
 	}
 	notFound := m.deleteNotFound
 	m.mutex.Unlock()
 
-	if tearingDown || parked {
-		writeVpcRefusal(w, http.StatusConflict, vpcTearingDownRefusalBody)
-		return
-	}
 	if refuse {
 		writeVpcRefusal(w, http.StatusConflict, vpcNotEmptyRefusalBody)
 		return
@@ -312,17 +255,11 @@ func (m *vpcMock) handleDelete(w http.ResponseWriter) {
 		return
 	}
 
-	testutil.WriteJSONResponse(w, map[string]any{
-		"success": true,
-		"message": "Operation initiated successfully",
-		"meta":    nil,
-		"data":    map[string]any{"jobId": vpcPlanTestDeleteJobID},
-	})
+	testutil.HandleCreateJobResponse(w, vpcPlanTestDeleteJobID)
 }
 
-// handleJob answers the poll for the job the request names. A teardown job the
-// test arms to fail answers the terminal failure shape. The row it leaves
-// behind parks in deleting with the reason the job writes.
+// handleJob answers the poll for the job the request names. A delete job the
+// test arms to fail ends failed. The row stays, with the reason the job writes.
 func (m *vpcMock) handleJob(w http.ResponseWriter, r *http.Request) {
 	jobID := vpcPlanTestCreateJobID
 	if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
@@ -337,24 +274,13 @@ func (m *vpcMock) handleJob(w http.ResponseWriter, r *http.Request) {
 	failing := jobID == vpcPlanTestDeleteJobID && m.deleteJobFailures > 0
 	if failing {
 		m.deleteJobFailures--
-		m.tearingDown = false
-		m.deletingGets = 0
 		m.failureReason = vpcPlanTestAbandonedJobError
+		m.status = "deleting"
 	}
 	m.mutex.Unlock()
 
 	if failing {
-		testutil.WriteJSONResponse(w, map[string]any{
-			"success": true,
-			"message": "Job status retrieved",
-			"data": map[string]any{"jobs": []map[string]any{{
-				"jobId":        jobID,
-				"isCompleted":  false,
-				"isTerminal":   true,
-				"hasFailed":    true,
-				"errorMessage": vpcPlanTestAbandonedJobError,
-			}}},
-		})
+		testutil.HandleJobOutcomeResponse(w, jobID, vpcPlanTestID, "failed", vpcPlanTestAbandonedJobError)
 		return
 	}
 
@@ -362,7 +288,7 @@ func (m *vpcMock) handleJob(w http.ResponseWriter, r *http.Request) {
 }
 
 // egressIp stays null, so the state must keep it null too. failureReason is
-// null until a teardown parks the row.
+// null until a delete job fails.
 func (m *vpcMock) vpcBody() map[string]any {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -376,7 +302,6 @@ func (m *vpcMock) vpcBody() map[string]any {
 		"status":          m.status,
 		"failureReason":   m.failureReason,
 		"egressIp":        nil,
-		"activeJobId":     nil,
 		"resourceGroupId": m.reportedGroup(),
 		"createdAt":       vpcPlanTestTimestamp,
 		"updatedAt":       vpcPlanTestTimestamp,
@@ -476,13 +401,6 @@ func (m *vpcMock) setGetNotFound(notFound bool) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	m.getNotFound = notFound
-}
-
-// The count of reads the provider makes after the refusal.
-func (m *vpcMock) readsWhileTearingDown() int {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-	return m.getsWhileGoing
 }
 
 func (m *vpcMock) requestCount(request string) int {
@@ -964,67 +882,12 @@ func TestVpcResourcePlanRefusesAnIllegalNameserverList(t *testing.T) {
 	})
 }
 
-// A teardown another caller started refuses the second claim, and the refusal
-// names the very work the destroy asked for. The provider waits for the row to
-// go instead of handing the reader an error about its own request.
-func TestVpcResourcePlanWaitsOutATeardownAlreadyRunning(t *testing.T) {
+// The DELETE is accepted, and its job fails. The job leaves the VPC in place.
+// The provider reports the job error instead of a destroy it never achieves.
+// The row stays in state for the next apply to delete again.
+func TestVpcResourcePlanReportsADeleteWhoseJobFails(t *testing.T) {
 	t.Parallel()
-	mock := startVpcPlanMockServer(t, vpcMockRefusals{tearingDownDeletes: 1})
-
-	resource.UnitTest(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config: vpcPlanTestConfig(mock.url, "vpc-tearing-down"),
-			},
-			{
-				Config:  vpcPlanTestConfig(mock.url, "vpc-tearing-down"),
-				Destroy: true,
-			},
-		},
-	})
-
-	// The status read plus the two polls that end at the 404.
-	if count := mock.readsWhileTearingDown(); count != 3 {
-		t.Errorf("reads while tearing down = %d, want 3", count)
-	}
-}
-
-// A teardown whose dispatch fails parks the row in deleting with a reason.
-// No job then drives that row, so a wait for the 404 never ends. The platform
-// re-admits a delete on a parked row, and the provider claims it again.
-func TestVpcResourcePlanReclaimsAParkedTeardown(t *testing.T) {
-	t.Parallel()
-	mock := startVpcPlanMockServer(t, vpcMockRefusals{parkedTeardownDeletes: 1})
-
-	resource.UnitTest(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config: vpcPlanTestConfig(mock.url, "vpc-parked-teardown"),
-			},
-			{
-				Config:  vpcPlanTestConfig(mock.url, "vpc-parked-teardown"),
-				Destroy: true,
-			},
-		},
-	})
-
-	if count := mock.requestCount("DELETE /v1/resource/vpcs/" + vpcPlanTestID); count != 2 {
-		t.Errorf("DELETE count = %d, want 2", count)
-	}
-	// The status read alone. A provider that waits polls the row as well.
-	if count := mock.readsWhileTearingDown(); count != 1 {
-		t.Errorf("reads while tearing down = %d, want 1", count)
-	}
-}
-
-// A teardown job that fails leaves the VPC in place. The provider reports the
-// job error instead of a destroy it never achieves. The row stays in state for
-// the next apply to claim again.
-func TestVpcResourcePlanReportsAParkedReclaimWhoseJobFails(t *testing.T) {
-	t.Parallel()
-	mock := startVpcPlanMockServer(t, vpcMockRefusals{parkedTeardownDeletes: 1, deleteJobFailures: 1})
+	mock := startVpcPlanMockServer(t, vpcMockRefusals{deleteJobFailures: 1})
 	config := vpcPlanTestConfig(mock.url, "vpc-reclaim-job-fails")
 
 	resource.UnitTest(t, resource.TestCase{
@@ -1448,9 +1311,7 @@ func TestVpcResourcePlanReplacementWithUnsetGroupJoinsDefault(t *testing.T) {
 // it when the create read the row from data.resource.
 const vpcAcceptedPlanTestID = "vpc-accepted-1"
 
-// startVpcAcceptedPlanMockServer answers in the updated-wire shapes: the 202 carries
-// data.job and data.resource, and the job read carries an outcome. A detailHeldBy
-// is the heldBy of every detail read.
+// A detailHeldBy is the heldBy of every detail read.
 func startVpcAcceptedPlanMockServer(t *testing.T, detailHeldBy ...map[string]any) *httptest.Server {
 	t.Helper()
 
@@ -1551,8 +1412,7 @@ func startVpcAcceptedPlanMockServer(t *testing.T, detailHeldBy ...map[string]any
 	return server
 }
 
-// An updated-wire 202 drives the create to a green apply, and the id in state is
-// the one data.resource carries.
+// The id in state is the one data.resource carries.
 func TestVpcCreateReadsAcceptedResource(t *testing.T) {
 	t.Parallel()
 	server := startVpcAcceptedPlanMockServer(t)
@@ -1572,8 +1432,8 @@ func TestVpcCreateReadsAcceptedResource(t *testing.T) {
 	})
 }
 
-// An updated-wire read names the job that holds the VPC in heldBy and carries no
-// activeJobId. active_job_id reads that job.
+// A read names the job that holds the VPC in heldBy. active_job_id reads that
+// job.
 func TestVpcActiveJobIDFromHeldBy(t *testing.T) {
 	t.Parallel()
 	server := startVpcAcceptedPlanMockServer(t, map[string]any{"jobId": "job-h", "operation": "update", "verb": "update"})

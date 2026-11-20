@@ -182,7 +182,6 @@ func (s *nsgPlanTestServerState) detail() map[string]any {
 			"failureReason": failureReason,
 			"ruleCount":     len(s.rules),
 			"subnetCount":   s.subnetCount,
-			"activeJobId":   nil,
 			"createdAt":     nsgPlanTestTimestamp,
 			"updatedAt":     nsgPlanTestTimestamp,
 		},
@@ -210,11 +209,7 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 			state.storeRules(body)
 			state.deleted = false
 			state.mu.Unlock()
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true,
-				"message": "Operation initiated successfully",
-				"data":    map[string]any{"nsgId": nsgPlanTestID, "jobId": "job-create"},
-			})
+			testutil.HandleCreateJobResponseWithResource(w, "job-create", map[string]any{"id": nsgPlanTestID})
 		case r.Method == http.MethodGet && r.URL.Path == groupPath:
 			state.mu.Lock()
 			state.reads++
@@ -243,7 +238,7 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 			state.rulesPuts++
 			state.storeRules(body)
 			state.mu.Unlock()
-			testutil.HandleCreateJobResponse(w, "job-rules", "Operation initiated successfully")
+			testutil.HandleCreateJobResponse(w, "job-rules")
 		case r.Method == http.MethodPut && r.URL.Path == groupPath:
 			body := testutil.ReadRequestBody(r)
 			state.mu.Lock()
@@ -279,7 +274,7 @@ func startNsgPlanMockServer(t *testing.T) (*httptest.Server, *nsgPlanTestServerS
 				fmt.Fprint(w, `{"success":false,"message":"The VPC's default security group cannot be deleted while it is the default","error":{"code":"Duplicate Resource","statusCode":409,"details":null}}`)
 				return
 			}
-			testutil.HandleCreateJobResponse(w, "job-delete", "Operation initiated successfully")
+			testutil.HandleCreateJobResponse(w, "job-delete")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			nsgPlanTestHandleJob(w, r, state)
 		default:
@@ -320,17 +315,7 @@ func nsgPlanTestHandleJob(w http.ResponseWriter, r *http.Request, state *nsgPlan
 	state.mu.Unlock()
 
 	if jobID == "job-create" && failCreate {
-		testutil.WriteJSONResponse(w, map[string]any{
-			"success": true,
-			"message": "Job status retrieved",
-			"data": map[string]any{"jobs": []map[string]any{{
-				"jobId":        jobID,
-				"isCompleted":  false,
-				"isTerminal":   true,
-				"hasFailed":    true,
-				"errorMessage": nsgPlanTestFailedReason,
-			}}},
-		})
+		testutil.HandleJobOutcomeResponse(w, jobID, "", "failed", nsgPlanTestFailedReason)
 		return
 	}
 
