@@ -1,6 +1,6 @@
 ## 1.8.0 (Unreleased)
 
-NOTES:
+BREAKING CHANGES:
 
 - **Provider**: this release needs the GPCN™ API's updated job model. The provider no longer reads the job and accepted answers the API sent before that update.
 
