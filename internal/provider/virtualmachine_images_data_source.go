@@ -39,6 +39,7 @@ type virtualMachineImageTF struct {
 	Managed         types.Bool   `tfsdk:"managed"`
 	AcceptsSshKey   types.Bool   `tfsdk:"accepts_ssh_key"`
 	AcceptsPassword types.Bool   `tfsdk:"accepts_password"`
+	AcceptsUsername types.Bool   `tfsdk:"accepts_username"`
 }
 
 func (o virtualMachineImageTF) AttrTypes() map[string]attr.Type {
@@ -49,6 +50,7 @@ func (o virtualMachineImageTF) AttrTypes() map[string]attr.Type {
 		"managed":          types.BoolType,
 		"accepts_ssh_key":  types.BoolType,
 		"accepts_password": types.BoolType,
+		"accepts_username": types.BoolType,
 	}
 }
 
@@ -103,6 +105,10 @@ func (d *virtualMachineImagesDataSource) Schema(_ context.Context, _ datasource.
 						"accepts_password": schema.BoolAttribute{
 							Computed:    true,
 							Description: "Whether a gpcn_virtualmachine created from this image accepts initial_auth with password",
+						},
+						"accepts_username": schema.BoolAttribute{
+							Computed:    true,
+							Description: "Whether a gpcn_virtualmachine created from this image accepts initial_auth with username. When false, omit username and the login of the image applies",
 						},
 					},
 				},
@@ -180,6 +186,7 @@ func (d *virtualMachineImagesDataSource) Read(ctx context.Context, req datasourc
 			Managed:         types.BoolValue(img.Managed),
 			AcceptsSshKey:   types.BoolValue(img.AcceptsSshKey),
 			AcceptsPassword: types.BoolValue(img.AcceptsPassword),
+			AcceptsUsername: types.BoolValue(img.AcceptsUsername),
 		})
 	}
 

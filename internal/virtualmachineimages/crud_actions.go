@@ -34,6 +34,7 @@ type VMImageAPIResponse struct {
 		Customizations *struct {
 			SshKey   bool `json:"sshKey"`
 			Password bool `json:"password"`
+			Username bool `json:"username"`
 		} `json:"customizations"`
 	} `json:"config"`
 }
@@ -46,6 +47,7 @@ type FlatImage struct {
 	Managed         bool
 	AcceptsSshKey   bool
 	AcceptsPassword bool
+	AcceptsUsername bool
 }
 
 // Retrieve all virtual machine images for a given datacenter and flattens to include category
@@ -85,6 +87,7 @@ func FetchImages(gpcnClient *client.GpcnClient, ctx context.Context, datacenterI
 				Managed:         managed,
 				AcceptsSshKey:   managed && customizations != nil && customizations.SshKey,
 				AcceptsPassword: managed && customizations != nil && customizations.Password,
+				AcceptsUsername: managed && customizations != nil && customizations.Username,
 			})
 		}
 	}

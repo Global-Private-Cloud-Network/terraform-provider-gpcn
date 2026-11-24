@@ -204,6 +204,17 @@ func setupFlagsImagesResponse() map[string]any {
 				},
 			},
 			map[string]any{
+				"id":        2,
+				"name":      "Windows",
+				"sortOrder": 2,
+				"images": []any{
+					map[string]any{"id": "img-windows", "name": "Managed Windows", "config": map[string]any{
+						"managed":        true,
+						"customizations": map[string]any{"sshKey": false, "password": true, "username": false},
+					}},
+				},
+			},
+			map[string]any{
 				"id":        4,
 				"name":      "Custom",
 				"sortOrder": 4,
@@ -239,13 +250,14 @@ func TestFetchImagesReadsSetupAndCredentialFlags(t *testing.T) {
 		t.Fatalf("FetchImages failed: %v", err)
 	}
 
-	want := map[string][3]bool{
-		"img-both":            {true, true, true},
-		"img-password":        {true, false, true},
-		"img-key":             {true, true, false},
-		"img-none":            {true, false, false},
-		"img-unmanaged-flags": {false, false, false},
-		"img-unmanaged-bare":  {false, false, false},
+	want := map[string][4]bool{
+		"img-both":            {true, true, true, true},
+		"img-password":        {true, false, true, true},
+		"img-key":             {true, true, false, true},
+		"img-none":            {true, false, false, false},
+		"img-windows":         {true, false, true, false},
+		"img-unmanaged-flags": {false, false, false, false},
+		"img-unmanaged-bare":  {false, false, false, false},
 	}
 	if len(images) != len(want) {
 		t.Fatalf("FetchImages returned %d images, want %d", len(images), len(want))
@@ -256,9 +268,9 @@ func TestFetchImagesReadsSetupAndCredentialFlags(t *testing.T) {
 			t.Errorf("unexpected image %q", img.ID)
 			continue
 		}
-		got := [3]bool{img.Managed, img.AcceptsSshKey, img.AcceptsPassword}
+		got := [4]bool{img.Managed, img.AcceptsSshKey, img.AcceptsPassword, img.AcceptsUsername}
 		if got != flags {
-			t.Errorf("image %q: (managed, accepts ssh key, accepts password) = %v, want %v", img.ID, got, flags)
+			t.Errorf("image %q: (managed, accepts ssh key, accepts password, accepts username) = %v, want %v", img.ID, got, flags)
 		}
 	}
 }

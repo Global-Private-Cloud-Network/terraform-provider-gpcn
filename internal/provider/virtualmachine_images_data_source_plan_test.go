@@ -50,6 +50,17 @@ func vmImagesPlanTestBody() map[string]any {
 				},
 			},
 			map[string]any{
+				"id":        2,
+				"name":      "Windows",
+				"sortOrder": 2,
+				"images": []any{
+					vmImagesPlanTestImage("img-windows", map[string]any{
+						"managed":        true,
+						"customizations": map[string]any{"sshKey": false, "password": true, "username": false},
+					}),
+				},
+			},
+			map[string]any{
 				"id":        4,
 				"name":      "Custom",
 				"sortOrder": 4,
@@ -99,16 +110,18 @@ data "gpcn_virtualmachine_images" "test" {
 		managed         string
 		acceptsSshKey   string
 		acceptsPassword string
+		acceptsUsername string
 	}{
-		{"img-both", "true", "true", "true"},
-		{"img-password", "true", "false", "true"},
-		{"img-key", "true", "true", "false"},
-		{"img-none", "true", "false", "false"},
-		{"img-unmanaged-flags", "false", "false", "false"},
-		{"img-unmanaged-bare", "false", "false", "false"},
+		{"img-both", "true", "true", "true", "true"},
+		{"img-password", "true", "false", "true", "true"},
+		{"img-key", "true", "true", "false", "true"},
+		{"img-none", "true", "false", "false", "false"},
+		{"img-windows", "true", "false", "true", "false"},
+		{"img-unmanaged-flags", "false", "false", "false", "false"},
+		{"img-unmanaged-bare", "false", "false", "false", "false"},
 	}
 
-	checks := make([]resource.TestCheckFunc, 0, 1+4*len(want))
+	checks := make([]resource.TestCheckFunc, 0, 1+5*len(want))
 	checks = append(checks, resource.TestCheckResourceAttr(vmImagesPlanTestDataSource, "images.#", fmt.Sprint(len(want))))
 	for i, image := range want {
 		prefix := fmt.Sprintf("images.%d.", i)
@@ -117,6 +130,7 @@ data "gpcn_virtualmachine_images" "test" {
 			resource.TestCheckResourceAttr(vmImagesPlanTestDataSource, prefix+"managed", image.managed),
 			resource.TestCheckResourceAttr(vmImagesPlanTestDataSource, prefix+"accepts_ssh_key", image.acceptsSshKey),
 			resource.TestCheckResourceAttr(vmImagesPlanTestDataSource, prefix+"accepts_password", image.acceptsPassword),
+			resource.TestCheckResourceAttr(vmImagesPlanTestDataSource, prefix+"accepts_username", image.acceptsUsername),
 		)
 	}
 
