@@ -3309,8 +3309,8 @@ func vmFirstBootPlanTestExpectCreateBody(recorded func() []map[string]any, want 
 	}
 }
 
-// The read reports a username and no key. A fill that ignores the import signal returns a
-// block the plan left null, and Terraform refuses that apply.
+// An image can carry its own login, so the read reports a username the configuration
+// never set. The create sends no authMethod, and the next plan is empty.
 func TestVirtualMachineResourcePlanCreatesWithoutInitialAuth(t *testing.T) {
 	shortenVirtualMachinePolling(t)
 	server, recorded := startVirtualMachineFirstBootMockServer(t, vmPlanTestUsername, nil)

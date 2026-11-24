@@ -64,7 +64,7 @@ func TestBasicPlaneValidator(t *testing.T) {
 	v := BasicPlaneValidator{}
 
 	t.Run("u_ffff_passes", func(t *testing.T) {
-		resp := runStringValidator(v, "a￿b")
+		resp := runStringValidator(v, "a\uffffb")
 		if resp.Diagnostics.HasError() {
 			t.Fatalf("expected no error, got %v", resp.Diagnostics)
 		}

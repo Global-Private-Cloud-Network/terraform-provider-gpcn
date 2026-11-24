@@ -1676,7 +1676,7 @@ func TestPopulateAuth(t *testing.T) {
 		{
 			name:     "not_imported_stays_null",
 			current:  nullAuth,
-			response: usernameOnly,
+			response: keyAndName,
 			imported: false,
 			want:     nullAuth,
 		},
