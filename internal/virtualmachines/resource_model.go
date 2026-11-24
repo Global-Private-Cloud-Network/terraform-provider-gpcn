@@ -14,7 +14,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 type ResourceModel struct {
@@ -201,33 +200,20 @@ func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient
 // the plan left null. So only an import fills a null block. It fills it only for a machine with
 // an SSH key, because the schema refuses a block with a username and no key or password.
 func populateAuth(ctx context.Context, current types.Object, response *ReadVirtualMachinesResponse, imported bool) (types.Object, diag.Diagnostics) {
-	if current.IsUnknown() {
+	if !current.IsNull() || !imported {
 		return current, nil
 	}
 
-	var auth ResourceModelInitialAuth
-	if current.IsNull() {
-		if !imported {
-			return current, nil
-		}
-		if response.Data.SshKeyId == "" {
-			return types.ObjectNull(auth.AttrTypes()), nil
-		}
-		auth = ResourceModelInitialAuth{
-			SshKeyId: types.StringValue(response.Data.SshKeyId),
-			Username: types.StringNull(),
-			Password: types.StringNull(),
-		}
-		if response.Data.Username != "" {
-			auth.Username = types.StringValue(response.Data.Username)
-		}
-	} else {
-		if diags := current.As(ctx, &auth, basetypes.ObjectAsOptions{}); diags.HasError() {
-			return current, diags
-		}
-		if auth.Username.IsNull() && response.Data.Username != "" {
-			auth.Username = types.StringValue(response.Data.Username)
-		}
+	if response.Data.SshKeyId == "" {
+		return types.ObjectNull(ResourceModelInitialAuth{}.AttrTypes()), nil
+	}
+	auth := ResourceModelInitialAuth{
+		SshKeyId: types.StringValue(response.Data.SshKeyId),
+		Username: types.StringNull(),
+		Password: types.StringNull(),
+	}
+	if response.Data.Username != "" {
+		auth.Username = types.StringValue(response.Data.Username)
 	}
 
 	return types.ObjectValueFrom(ctx, auth.AttrTypes(), auth)

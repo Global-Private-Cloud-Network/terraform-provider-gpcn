@@ -179,13 +179,12 @@ func addFirstBootKeys(ctx context.Context, model ResourceModel, body map[string]
 		if !auth.SshKeyId.IsNull() && auth.SshKeyId.ValueString() != "" {
 			body["authMethod"] = "ssh-key"
 			body["sshKeyId"] = auth.SshKeyId.ValueString()
-			if !auth.Username.IsNull() && auth.Username.ValueString() != "" {
-				body["username"] = auth.Username.ValueString()
-			}
 		} else {
 			body["authMethod"] = "password"
-			body["username"] = auth.Username.ValueString()
 			body["password"] = auth.Password.ValueString()
+		}
+		if !auth.Username.IsNull() && auth.Username.ValueString() != "" {
+			body["username"] = auth.Username.ValueString()
 		}
 	}
 

@@ -321,8 +321,8 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 						},
 					},
 					"username": schema.StringAttribute{
-						Description: "Username for the virtual machine. Must be 3-20 characters matching ^[a-zA-Z_][a-zA-Z0-9_-]*$",
-						Required:    true,
+						Description: "Username for the virtual machine. Must be 3-20 characters matching ^[a-zA-Z_][a-zA-Z0-9_-]*$. Omit it to use the login of the image; an image whose accepts_username is false in the gpcn_virtualmachine_images data source refuses a username",
+						Optional:    true,
 						Validators: []validator.String{
 							stringvalidator.LengthBetween(3, 20),
 							stringvalidator.RegexMatches(
@@ -332,7 +332,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 						},
 					},
 					"password": schema.StringAttribute{
-						Description: "Password for authentication. Must be 12-20 characters, contain only letters, digits, and ! @ # % - _ ., and include at least one uppercase letter, one lowercase letter, one digit, and one symbol. Cannot be set when ssh_key_id is set. username defaults to the image default if not specified",
+						Description: "Password for authentication. Must be 12-20 characters, contain only letters, digits, and ! @ # % - _ ., and include at least one uppercase letter, one lowercase letter, one digit, and one symbol. Cannot be set when ssh_key_id is set",
 						Optional:    true,
 						Sensitive:   true,
 						Validators: []validator.String{

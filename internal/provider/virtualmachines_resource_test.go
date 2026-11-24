@@ -906,6 +906,13 @@ func TestVirtualMachinesFirstBootValidation(t *testing.T) {
 			  }`,
 			wantErr: `Attribute initial_auth.ssh_key_id string length must be at least 1, got: 0`,
 		},
+		{
+			name: "username_alone",
+			attributes: `initial_auth = {
+			    username = "testuser"
+			  }`,
+			wantErr: `At least one attribute out of [initial_auth.ssh_key_id.<.ssh_key_id,initial_auth.ssh_key_id.<.password,initial_auth.ssh_key_id] must be specified`,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

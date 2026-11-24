@@ -468,7 +468,7 @@ func TestSetNetworkModelValuesNotPresentWithoutPublicIP(t *testing.T) {
 	}
 }
 
-func TestMapVirtualMachineResponseToModelUpdatesAuthUsername(t *testing.T) {
+func TestMapVirtualMachineResponseToModelKeepsConfiguredAuth(t *testing.T) {
 	const (
 		vmID     = "vm-full-mapping-123"
 		username = "admin"
@@ -512,13 +512,8 @@ func TestMapVirtualMachineResponseToModelUpdatesAuthUsername(t *testing.T) {
 		t.Errorf("Expected public IP '%s', got '%s'", publicIP, result.PublicIp.ValueString())
 	}
 
-	var auth ResourceModelInitialAuth
-	authDiags := result.InitialAuth.As(context.Background(), &auth, basetypes.ObjectAsOptions{})
-	if authDiags.HasError() {
-		t.Fatalf("Failed to extract auth: %v", authDiags)
-	}
-	if auth.Username.ValueString() != username {
-		t.Errorf("Expected auth.username '%s', got '%s'", username, auth.Username.ValueString())
+	if !result.InitialAuth.Equal(model.InitialAuth) {
+		t.Errorf("Expected initial_auth %s, got %s", model.InitialAuth, result.InitialAuth)
 	}
 }
 
@@ -1568,6 +1563,8 @@ func TestCreateVirtualMachineAuthBodies(t *testing.T) {
 
 	keyAuth := initialAuthObject(t, types.StringValue(keyID), types.StringValue(username), types.StringNull())
 	passwordAuth := initialAuthObject(t, types.StringNull(), types.StringValue(username), types.StringValue(password))
+	keyAuthNoUsername := initialAuthObject(t, types.StringValue(keyID), types.StringNull(), types.StringNull())
+	passwordAuthNoUsername := initialAuthObject(t, types.StringNull(), types.StringNull(), types.StringValue(password))
 	noAuth := types.ObjectNull(ResourceModelInitialAuth{}.AttrTypes())
 
 	baseBody := func(extra map[string]any) map[string]any {
@@ -1611,6 +1608,20 @@ func TestCreateVirtualMachineAuthBodies(t *testing.T) {
 			userData: types.StringNull(),
 			script:   types.StringNull(),
 			want:     baseBody(map[string]any{"authMethod": "password", "username": username, "password": password}),
+		},
+		{
+			name:     "ssh_key_without_username",
+			auth:     keyAuthNoUsername,
+			userData: types.StringNull(),
+			script:   types.StringNull(),
+			want:     baseBody(map[string]any{"authMethod": "ssh-key", "sshKeyId": keyID}),
+		},
+		{
+			name:     "password_without_username",
+			auth:     passwordAuthNoUsername,
+			userData: types.StringNull(),
+			script:   types.StringNull(),
+			want:     baseBody(map[string]any{"authMethod": "password", "password": password}),
 		},
 		{
 			name:     "no_credential",
@@ -1702,11 +1713,11 @@ func TestPopulateAuth(t *testing.T) {
 			want:     initialAuthObject(t, types.StringValue("key-1"), types.StringNull(), types.StringNull()),
 		},
 		{
-			name:     "configured_fills_username",
+			name:     "configured_block_is_kept",
 			current:  initialAuthObject(t, types.StringValue("key-1"), types.StringNull(), types.StringNull()),
 			response: keyAndName,
 			imported: false,
-			want:     initialAuthObject(t, types.StringValue("key-1"), types.StringValue("ubuntu"), types.StringNull()),
+			want:     initialAuthObject(t, types.StringValue("key-1"), types.StringNull(), types.StringNull()),
 		},
 	}
 

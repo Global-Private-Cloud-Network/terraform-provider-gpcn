@@ -3358,6 +3358,39 @@ func TestVirtualMachineResourcePlanCreatesWithUserData(t *testing.T) {
 	})
 }
 
+// The image applies its own login when the block names no username, and the read
+// reports that login. The block must come back without it, so the next plan is empty.
+func TestVirtualMachineResourcePlanCreatesWithPasswordAndNoUsername(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachineFirstBootMockServer(t, "Administrator", nil)
+
+	const (
+		name     = "vm-plan-password-no-username"
+		password = "Secret-Pass1!"
+	)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmFirstBootPlanTestConfig(server.URL, name, fmt.Sprintf(`
+  initial_auth = {
+    password = %q
+  }`, password)),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+				Check: vmFirstBootPlanTestExpectCreateBody(recorded, vmFirstBootPlanTestBody(name, map[string]any{
+					"authMethod": "password",
+					"password":   password,
+				})),
+			},
+		},
+	})
+}
+
 func TestVirtualMachineResourcePlanReplacesOnFirstBootTextChange(t *testing.T) {
 	tests := []struct {
 		name   string
