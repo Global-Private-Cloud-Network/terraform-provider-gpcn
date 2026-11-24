@@ -4,6 +4,18 @@ BREAKING CHANGES:
 
 - **Provider**: this release needs the GPCN™ API's updated job model. The provider no longer reads the job and accepted answers the API sent before that update.
 
+ENHANCEMENTS:
+
+- **Virtual Machine**: new `first_boot_script`, a script that runs once at the end of the first boot of the machine. GPCN™ accepts it only for an image it sets up. Changing it requires replacement.
+- **Virtual Machine**: new `user_data`, your own user data in place of the setup GPCN™ performs, for an image with a first-boot agent such as cloud-init. It can't be set together with `initial_auth` or `first_boot_script`. Changing it requires replacement.
+- **Virtual Machine**: `initial_auth` is now optional. Omit it when `user_data` is set, or for an image that takes no credential.
+- **Virtual Machine Images data source**: each image reports `managed` (whether GPCN™ sets up a machine created from it), `accepts_ssh_key` and `accepts_password`.
+
+BUG FIXES:
+
+- **Virtual Machine**: `initial_auth` with an empty `ssh_key_id` is refused at plan. Before, the create sent an empty password and GPCN™ refused it.
+- **Virtual Machine**: an import fills `initial_auth` only for a machine with an SSH key. Before, a machine without one imported a block with only a username, which the provider's own validation refuses.
+
 ## 1.7.0 (November 6, 2026)
 
 ENHANCEMENTS:
