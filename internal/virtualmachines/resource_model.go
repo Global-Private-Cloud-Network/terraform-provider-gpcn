@@ -36,6 +36,8 @@ type ResourceModel struct {
 	NetworkHotplug    types.Bool   `tfsdk:"network_hotplug"`
 	InitialAuth       types.Object `tfsdk:"initial_auth"`
 	ResourceGroupId   types.String `tfsdk:"resource_group_id"`
+	FirstBootScript   types.String `tfsdk:"first_boot_script"`
+	UserData          types.String `tfsdk:"user_data"`
 }
 
 type ResourceModelInitialAuth struct {

@@ -63,24 +63,9 @@ type ReadVirtualMachinesResponse struct {
 func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, imageId string, skuId string, model ResourceModel) (*ReadVirtualMachinesResponse, string, error) {
 	tflog.Info(ctx, LogStartingCreateVirtualMachine)
 
-	// Extract auth configuration and set authMethod fields
-	var auth ResourceModelInitialAuth
-	authDiags := model.InitialAuth.As(ctx, &auth, basetypes.ObjectAsOptions{})
-	if authDiags.HasError() {
-		return nil, "", fmt.Errorf("failed to read auth configuration")
-	}
-
-	var authMethod string
-	if !auth.SshKeyId.IsNull() && auth.SshKeyId.ValueString() != "" {
-		authMethod = "ssh-key"
-	} else {
-		authMethod = "password"
-	}
-
 	// Create a new request from the model. The body is .strict() at GPCN, so it carries
 	// only the keys this create needs. subnetId is the fork that names the VPC world.
 	createVMRequestBody := map[string]any{
-		"authMethod":   authMethod,
 		"skuId":        skuId,
 		"datacenterId": model.DatacenterId.ValueString(),
 		"imageId":      imageId,
@@ -88,14 +73,8 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 		"subnetId":     model.SubnetId.ValueString(),
 	}
 
-	if authMethod == "ssh-key" {
-		createVMRequestBody["sshKeyId"] = auth.SshKeyId.ValueString()
-		if !auth.Username.IsNull() && auth.Username.ValueString() != "" {
-			createVMRequestBody["username"] = auth.Username.ValueString()
-		}
-	} else {
-		createVMRequestBody["username"] = auth.Username.ValueString()
-		createVMRequestBody["password"] = auth.Password.ValueString()
+	if err := addFirstBootKeys(ctx, model, createVMRequestBody); err != nil {
+		return nil, "", err
 	}
 
 	if !model.ResourceGroupId.IsNull() && !model.ResourceGroupId.IsUnknown() {
@@ -179,6 +158,41 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 
 	tflog.Info(ctx, LogSuccessfullyProcessedVMCreate)
 	return getVirtualMachineResponse, virtualMachineID, nil
+}
+
+// GPCN reads an omitted authMethod as its own request, not as custom, so a machine
+// with no initial_auth and no user_data sends no authMethod.
+func addFirstBootKeys(ctx context.Context, model ResourceModel, body map[string]any) error {
+	if !model.UserData.IsNull() && !model.UserData.IsUnknown() {
+		body["authMethod"] = "custom"
+		body["userData"] = model.UserData.ValueString()
+		return nil
+	}
+
+	if !model.InitialAuth.IsNull() {
+		var auth ResourceModelInitialAuth
+		authDiags := model.InitialAuth.As(ctx, &auth, basetypes.ObjectAsOptions{})
+		if authDiags.HasError() {
+			return fmt.Errorf("failed to read auth configuration")
+		}
+
+		if !auth.SshKeyId.IsNull() && auth.SshKeyId.ValueString() != "" {
+			body["authMethod"] = "ssh-key"
+			body["sshKeyId"] = auth.SshKeyId.ValueString()
+			if !auth.Username.IsNull() && auth.Username.ValueString() != "" {
+				body["username"] = auth.Username.ValueString()
+			}
+		} else {
+			body["authMethod"] = "password"
+			body["username"] = auth.Username.ValueString()
+			body["password"] = auth.Password.ValueString()
+		}
+	}
+
+	if !model.FirstBootScript.IsNull() && !model.FirstBootScript.IsUnknown() {
+		body["firstBootScript"] = model.FirstBootScript.ValueString()
+	}
+	return nil
 }
 
 // Gets a Virtual Machine by its ID
