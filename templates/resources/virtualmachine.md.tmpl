@@ -51,11 +51,11 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 
 How a VM is set up on its first boot depends on what you set:
 
-- `initial_auth`: GPCN™ sets up the VM and adds the user with its SSH key or password.
+- `initial_auth`: GPCN™ sets up the VM and adds the user with its SSH key or password. Leave `username` out to use the login of the image. Some images, Windows images among them, refuse a username: set only the `password`.
 - `user_data`: your own user data replaces the setup GPCN™ performs. GPCN™ adds no user, SSH key, password or hostname, so the document must create any account it needs. `initial_auth` and `first_boot_script` can't be set with it.
 - Neither: for an image that takes no credential.
 
-GPCN™ accepts `initial_auth` and `first_boot_script` only for an image it sets up. The `managed`, `accepts_ssh_key` and `accepts_password` attributes of the [`gpcn_virtualmachine_images`](../data-sources/virtualmachine_images) data source report this for each image. GPCN™ checks these rules when the VM is created, so a wrong combination fails at apply. A `precondition` on `managed` catches it at plan.
+GPCN™ accepts `initial_auth` and `first_boot_script` only for an image it sets up. The `managed`, `accepts_ssh_key`, `accepts_password` and `accepts_username` attributes of the [`gpcn_virtualmachine_images`](../data-sources/virtualmachine_images) data source report this for each image. GPCN™ checks these rules when the VM is created, so a wrong combination fails at apply. A `precondition` on `managed` catches it at plan.
 
 ### `first_boot_script`
 

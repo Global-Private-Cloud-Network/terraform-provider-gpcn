@@ -75,7 +75,7 @@ resource "gpcn_virtualmachine" "example" {
     # This check fails the plan, before a create that GPCN™ would refuse.
     precondition {
       condition     = data.gpcn_virtualmachine_images.alma_8.images[0].managed
-      error_message = "The image must be one GPCN sets up to take initial_auth and first_boot_script."
+      error_message = "The image must be one GPCN™ sets up to take initial_auth and first_boot_script."
     }
   }
 }
@@ -109,6 +109,7 @@ Read-Only:
 
 - `accepts_password` (Boolean) Whether a gpcn_virtualmachine created from this image accepts initial_auth with password
 - `accepts_ssh_key` (Boolean) Whether a gpcn_virtualmachine created from this image accepts initial_auth with ssh_key_id
+- `accepts_username` (Boolean) Whether a gpcn_virtualmachine created from this image accepts initial_auth with username. When false, omit username and the login of the image applies
 - `id` (String) Unique identifier of the image. Use this as the image_id in a gpcn_virtualmachine resource
 - `image_type` (String) The category this image belongs to
 - `managed` (Boolean) Whether GPCN™ sets up a virtual machine created from this image on its first boot. Only such an image accepts initial_auth and first_boot_script on a gpcn_virtualmachine

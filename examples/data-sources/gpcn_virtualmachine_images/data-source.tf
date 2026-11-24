@@ -60,7 +60,7 @@ resource "gpcn_virtualmachine" "example" {
     # This check fails the plan, before a create that GPCN™ would refuse.
     precondition {
       condition     = data.gpcn_virtualmachine_images.alma_8.images[0].managed
-      error_message = "The image must be one GPCN sets up to take initial_auth and first_boot_script."
+      error_message = "The image must be one GPCN™ sets up to take initial_auth and first_boot_script."
     }
   }
 }

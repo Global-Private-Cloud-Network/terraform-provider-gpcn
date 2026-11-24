@@ -185,14 +185,11 @@ resource "gpcn_volume_attachment" "vm_storage_attachment" {
 <a id="nestedatt--initial_auth"></a>
 ### Nested Schema for `initial_auth`
 
-Required:
-
-- `username` (String) Username for the virtual machine. Must be 3-20 characters matching ^[a-zA-Z_][a-zA-Z0-9_-]*$
-
 Optional:
 
-- `password` (String, Sensitive) Password for authentication. Must be 12-20 characters, contain only letters, digits, and ! @ # % - _ ., and include at least one uppercase letter, one lowercase letter, one digit, and one symbol. Cannot be set when ssh_key_id is set. username defaults to the image default if not specified
+- `password` (String, Sensitive) Password for authentication. Must be 12-20 characters, contain only letters, digits, and ! @ # % - _ ., and include at least one uppercase letter, one lowercase letter, one digit, and one symbol. Cannot be set when ssh_key_id is set
 - `ssh_key_id` (String) ID of the SSH key to use for authentication. Cannot be set together with password
+- `username` (String) Username for the virtual machine. Must be 3-20 characters matching ^[a-zA-Z_][a-zA-Z0-9_-]*$. Omit it to use the login of the image; an image whose accepts_username is false in the gpcn_virtualmachine_images data source refuses a username
 
 
 <a id="nestedatt--network_interfaces"></a>
@@ -234,11 +231,11 @@ terraform import gpcn_virtualmachine.example "c13808d9-3b7d-42c5-a21d-f0961308a3
 
 How a VM is set up on its first boot depends on what you set:
 
-- `initial_auth`: GPCN™ sets up the VM and adds the user with its SSH key or password.
+- `initial_auth`: GPCN™ sets up the VM and adds the user with its SSH key or password. Leave `username` out to use the login of the image. Some images, Windows images among them, refuse a username: set only the `password`.
 - `user_data`: your own user data replaces the setup GPCN™ performs. GPCN™ adds no user, SSH key, password or hostname, so the document must create any account it needs. `initial_auth` and `first_boot_script` can't be set with it.
 - Neither: for an image that takes no credential.
 
-GPCN™ accepts `initial_auth` and `first_boot_script` only for an image it sets up. The `managed`, `accepts_ssh_key` and `accepts_password` attributes of the [`gpcn_virtualmachine_images`](../data-sources/virtualmachine_images) data source report this for each image. GPCN™ checks these rules when the VM is created, so a wrong combination fails at apply. A `precondition` on `managed` catches it at plan.
+GPCN™ accepts `initial_auth` and `first_boot_script` only for an image it sets up. The `managed`, `accepts_ssh_key`, `accepts_password` and `accepts_username` attributes of the [`gpcn_virtualmachine_images`](../data-sources/virtualmachine_images) data source report this for each image. GPCN™ checks these rules when the VM is created, so a wrong combination fails at apply. A `precondition` on `managed` catches it at plan.
 
 ### `first_boot_script`
 
