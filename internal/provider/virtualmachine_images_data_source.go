@@ -33,16 +33,22 @@ type virtualMachineImagesDataSourceModel struct {
 }
 
 type virtualMachineImageTF struct {
-	ID        types.String `tfsdk:"id"`
-	Name      types.String `tfsdk:"name"`
-	ImageType types.String `tfsdk:"image_type"`
+	ID              types.String `tfsdk:"id"`
+	Name            types.String `tfsdk:"name"`
+	ImageType       types.String `tfsdk:"image_type"`
+	Managed         types.Bool   `tfsdk:"managed"`
+	AcceptsSshKey   types.Bool   `tfsdk:"accepts_ssh_key"`
+	AcceptsPassword types.Bool   `tfsdk:"accepts_password"`
 }
 
 func (o virtualMachineImageTF) AttrTypes() map[string]attr.Type {
 	return map[string]attr.Type{
-		"id":         types.StringType,
-		"name":       types.StringType,
-		"image_type": types.StringType,
+		"id":               types.StringType,
+		"name":             types.StringType,
+		"image_type":       types.StringType,
+		"managed":          types.BoolType,
+		"accepts_ssh_key":  types.BoolType,
+		"accepts_password": types.BoolType,
 	}
 }
 
@@ -85,6 +91,18 @@ func (d *virtualMachineImagesDataSource) Schema(_ context.Context, _ datasource.
 						"image_type": schema.StringAttribute{
 							Computed:    true,
 							Description: "The category this image belongs to",
+						},
+						"managed": schema.BoolAttribute{
+							Computed:    true,
+							Description: "Whether GPCN™ sets up a virtual machine created from this image on its first boot. Only such an image accepts initial_auth and first_boot_script on a gpcn_virtualmachine",
+						},
+						"accepts_ssh_key": schema.BoolAttribute{
+							Computed:    true,
+							Description: "Whether a gpcn_virtualmachine created from this image accepts initial_auth with ssh_key_id",
+						},
+						"accepts_password": schema.BoolAttribute{
+							Computed:    true,
+							Description: "Whether a gpcn_virtualmachine created from this image accepts initial_auth with password",
 						},
 					},
 				},
@@ -156,9 +174,12 @@ func (d *virtualMachineImagesDataSource) Read(ctx context.Context, req datasourc
 	var tfImages []virtualMachineImageTF
 	for _, img := range filtered {
 		tfImages = append(tfImages, virtualMachineImageTF{
-			ID:        types.StringValue(img.ID),
-			Name:      types.StringValue(img.Name),
-			ImageType: types.StringValue(img.ImageType),
+			ID:              types.StringValue(img.ID),
+			Name:            types.StringValue(img.Name),
+			ImageType:       types.StringValue(img.ImageType),
+			Managed:         types.BoolValue(img.Managed),
+			AcceptsSshKey:   types.BoolValue(img.AcceptsSshKey),
+			AcceptsPassword: types.BoolValue(img.AcceptsPassword),
 		})
 	}
 

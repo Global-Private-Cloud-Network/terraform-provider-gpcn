@@ -27,15 +27,25 @@ type VMImagesCategoryAPIResponse struct {
 }
 
 type VMImageAPIResponse struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Config struct {
+		Managed        bool `json:"managed"`
+		Customizations *struct {
+			SshKey   bool `json:"sshKey"`
+			Password bool `json:"password"`
+		} `json:"customizations"`
+	} `json:"config"`
 }
 
 // FlatImage is a single image with its parent category name included.
 type FlatImage struct {
-	ID        string
-	Name      string
-	ImageType string
+	ID              string
+	Name            string
+	ImageType       string
+	Managed         bool
+	AcceptsSshKey   bool
+	AcceptsPassword bool
 }
 
 // Retrieve all virtual machine images for a given datacenter and flattens to include category
@@ -66,10 +76,15 @@ func FetchImages(gpcnClient *client.GpcnClient, ctx context.Context, datacenterI
 	var images []FlatImage
 	for _, category := range apiResp.Data {
 		for _, img := range category.Images {
+			managed := img.Config.Managed
+			customizations := img.Config.Customizations
 			images = append(images, FlatImage{
-				ID:        img.ID,
-				Name:      img.Name,
-				ImageType: category.Name,
+				ID:              img.ID,
+				Name:            img.Name,
+				ImageType:       category.Name,
+				Managed:         managed,
+				AcceptsSshKey:   managed && customizations != nil && customizations.SshKey,
+				AcceptsPassword: managed && customizations != nil && customizations.Password,
 			})
 		}
 	}
