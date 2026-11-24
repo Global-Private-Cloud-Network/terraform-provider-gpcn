@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -467,7 +468,7 @@ func TestSetNetworkModelValuesNotPresentWithoutPublicIP(t *testing.T) {
 	}
 }
 
-func TestMapVirtualMachineResponseToModelUpdatesAuthUsername(t *testing.T) {
+func TestMapVirtualMachineResponseToModelKeepsConfiguredAuth(t *testing.T) {
 	const (
 		vmID     = "vm-full-mapping-123"
 		username = "admin"
@@ -511,13 +512,8 @@ func TestMapVirtualMachineResponseToModelUpdatesAuthUsername(t *testing.T) {
 		t.Errorf("Expected public IP '%s', got '%s'", publicIP, result.PublicIp.ValueString())
 	}
 
-	var auth ResourceModelInitialAuth
-	authDiags := result.InitialAuth.As(context.Background(), &auth, basetypes.ObjectAsOptions{})
-	if authDiags.HasError() {
-		t.Fatalf("Failed to extract auth: %v", authDiags)
-	}
-	if auth.Username.ValueString() != username {
-		t.Errorf("Expected auth.username '%s', got '%s'", username, auth.Username.ValueString())
+	if !result.InitialAuth.Equal(model.InitialAuth) {
+		t.Errorf("Expected initial_auth %s, got %s", model.InitialAuth, result.InitialAuth)
 	}
 }
 
@@ -544,8 +540,9 @@ func TestSetModelValuesNotPresentPopulatesAuthOnImport(t *testing.T) {
 	response.Data.Username = username
 	response.Data.SshKeyId = sshKeyID
 
-	// Simulate an import: Auth is null
+	// The state an import writes holds the id alone, so name and auth are null.
 	model := createTestVMModel("import-vm", testVMImage, false)
+	model.Name = types.StringNull()
 	model.InitialAuth = types.ObjectNull(ResourceModelInitialAuth{}.AttrTypes())
 
 	result, diags := MapVirtualMachineResponseToModel(context.Background(), gpcnClient, response, model)
@@ -1495,6 +1492,250 @@ func TestCreateVirtualMachineOmitsUnknownResourceGroupIdMockHTTP(t *testing.T) {
 	body := createBodyForResourceGroup(t, types.StringUnknown())
 	if _, present := body["resourceGroupId"]; present {
 		t.Errorf("Expected no resourceGroupId key for an unknown value, got %v", body["resourceGroupId"])
+	}
+}
+
+func createBodyForModel(t *testing.T, model ResourceModel) map[string]any {
+	t.Helper()
+	useFastVMStatusPollInterval(t)
+	useNoInitialPollDelay(t)
+	const (
+		jobID = "job-auth-1"
+		vmID  = "vm-auth-1"
+	)
+
+	var createBody map[string]any
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatalf("reading the create body failed: %v", err)
+				}
+				if err := json.Unmarshal(body, &createBody); err != nil {
+					t.Fatalf("unmarshaling the create body failed: %v", err)
+				}
+				testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": vmID})
+			case r.Method == "POST" && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, vmID, true)
+			case r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID):
+				testutil.WriteJSONResponse(w, newVMResponse(vmID, "test-vm"))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	if _, _, err := CreateVirtualMachine(gpcnClient, context.Background(), "550e8400-e29b-41d4-a716-446655440000", "sku-abc-123", model); err != nil {
+		t.Fatalf("CreateVirtualMachine failed: %v", err)
+	}
+	if createBody == nil {
+		t.Fatal("Expected the create endpoint to be called")
+	}
+	return createBody
+}
+
+func initialAuthObject(t *testing.T, sshKeyID, username, password types.String) types.Object {
+	t.Helper()
+	auth := ResourceModelInitialAuth{SshKeyId: sshKeyID, Username: username, Password: password}
+	object, diags := types.ObjectValueFrom(context.Background(), auth.AttrTypes(), auth)
+	if diags.HasError() {
+		t.Fatalf("building initial_auth failed: %v", diags)
+	}
+	return object
+}
+
+// The model reads user_data first, then initial_auth. first_boot_script rides on every
+// row but the user_data row. The texts carry a CRLF and outer spaces, which GPCN takes
+// as written.
+func TestCreateVirtualMachineAuthBodies(t *testing.T) {
+	const (
+		userData = " #cloud-config\r\nusers: [] "
+		script   = " echo first boot\r\nexit 0 "
+		keyID    = "ssh-key-123"
+		username = "operator"
+		password = "Secret-Pass1!"
+	)
+
+	keyAuth := initialAuthObject(t, types.StringValue(keyID), types.StringValue(username), types.StringNull())
+	passwordAuth := initialAuthObject(t, types.StringNull(), types.StringValue(username), types.StringValue(password))
+	keyAuthNoUsername := initialAuthObject(t, types.StringValue(keyID), types.StringNull(), types.StringNull())
+	passwordAuthNoUsername := initialAuthObject(t, types.StringNull(), types.StringNull(), types.StringValue(password))
+	noAuth := types.ObjectNull(ResourceModelInitialAuth{}.AttrTypes())
+
+	baseBody := func(extra map[string]any) map[string]any {
+		body := map[string]any{
+			"skuId":        "sku-abc-123",
+			"datacenterId": testDatacenterID,
+			"imageId":      "550e8400-e29b-41d4-a716-446655440000",
+			"name":         "test-vm",
+			"subnetId":     "subnet-uuid-test",
+		}
+		for key, value := range extra {
+			body[key] = value
+		}
+		return body
+	}
+
+	tests := []struct {
+		name     string
+		auth     types.Object
+		userData types.String
+		script   types.String
+		want     map[string]any
+	}{
+		{
+			name:     "user_data",
+			auth:     noAuth,
+			userData: types.StringValue(userData),
+			script:   types.StringNull(),
+			want:     baseBody(map[string]any{"authMethod": "custom", "userData": userData}),
+		},
+		{
+			name:     "ssh_key",
+			auth:     keyAuth,
+			userData: types.StringNull(),
+			script:   types.StringNull(),
+			want:     baseBody(map[string]any{"authMethod": "ssh-key", "sshKeyId": keyID, "username": username}),
+		},
+		{
+			name:     "password",
+			auth:     passwordAuth,
+			userData: types.StringNull(),
+			script:   types.StringNull(),
+			want:     baseBody(map[string]any{"authMethod": "password", "username": username, "password": password}),
+		},
+		{
+			name:     "ssh_key_without_username",
+			auth:     keyAuthNoUsername,
+			userData: types.StringNull(),
+			script:   types.StringNull(),
+			want:     baseBody(map[string]any{"authMethod": "ssh-key", "sshKeyId": keyID}),
+		},
+		{
+			name:     "password_without_username",
+			auth:     passwordAuthNoUsername,
+			userData: types.StringNull(),
+			script:   types.StringNull(),
+			want:     baseBody(map[string]any{"authMethod": "password", "password": password}),
+		},
+		{
+			name:     "no_credential",
+			auth:     noAuth,
+			userData: types.StringNull(),
+			script:   types.StringNull(),
+			want:     baseBody(nil),
+		},
+		{
+			name:     "ssh_key_with_script",
+			auth:     keyAuth,
+			userData: types.StringNull(),
+			script:   types.StringValue(script),
+			want:     baseBody(map[string]any{"authMethod": "ssh-key", "sshKeyId": keyID, "username": username, "firstBootScript": script}),
+		},
+		{
+			name:     "password_with_script",
+			auth:     passwordAuth,
+			userData: types.StringNull(),
+			script:   types.StringValue(script),
+			want:     baseBody(map[string]any{"authMethod": "password", "username": username, "password": password, "firstBootScript": script}),
+		},
+		{
+			name:     "no_credential_with_script",
+			auth:     noAuth,
+			userData: types.StringNull(),
+			script:   types.StringValue(script),
+			want:     baseBody(map[string]any{"firstBootScript": script}),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			model := createTestVMModel("test-vm", testVMImage, false)
+			model.InitialAuth = tc.auth
+			model.UserData = tc.userData
+			model.FirstBootScript = tc.script
+
+			got := createBodyForModel(t, model)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("Expected the create body %#v, got %#v", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestPopulateAuth(t *testing.T) {
+	const (
+		usernameOnly = `{"success": true, "data": {"id": "vm-1", "username": "ubuntu", "sshKeyId": null}}`
+		keyAndName   = `{"success": true, "data": {"id": "vm-1", "username": "ubuntu", "sshKeyId": "key-1"}}`
+		keyOnly      = `{"success": true, "data": {"id": "vm-1", "username": null, "sshKeyId": "key-1"}}`
+	)
+
+	nullAuth := types.ObjectNull(ResourceModelInitialAuth{}.AttrTypes())
+
+	tests := []struct {
+		name     string
+		current  types.Object
+		response string
+		imported bool
+		want     types.Object
+	}{
+		{
+			name:     "not_imported_stays_null",
+			current:  nullAuth,
+			response: keyAndName,
+			imported: false,
+			want:     nullAuth,
+		},
+		{
+			name:     "imported_without_key_stays_null",
+			current:  nullAuth,
+			response: usernameOnly,
+			imported: true,
+			want:     nullAuth,
+		},
+		{
+			name:     "imported_with_key",
+			current:  nullAuth,
+			response: keyAndName,
+			imported: true,
+			want:     initialAuthObject(t, types.StringValue("key-1"), types.StringValue("ubuntu"), types.StringNull()),
+		},
+		{
+			name:     "imported_with_key_and_no_username",
+			current:  nullAuth,
+			response: keyOnly,
+			imported: true,
+			want:     initialAuthObject(t, types.StringValue("key-1"), types.StringNull(), types.StringNull()),
+		},
+		{
+			name:     "configured_block_is_kept",
+			current:  initialAuthObject(t, types.StringValue("key-1"), types.StringNull(), types.StringNull()),
+			response: keyAndName,
+			imported: false,
+			want:     initialAuthObject(t, types.StringValue("key-1"), types.StringNull(), types.StringNull()),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var response ReadVirtualMachinesResponse
+			if err := json.Unmarshal([]byte(tc.response), &response); err != nil {
+				t.Fatalf("decoding the response failed: %v", err)
+			}
+
+			got, diags := populateAuth(context.Background(), tc.current, &response, tc.imported)
+			if diags.HasError() {
+				t.Fatalf("Unexpected diagnostics: %v", diags)
+			}
+			if !got.Equal(tc.want) {
+				t.Errorf("Expected %s, got %s", tc.want, got)
+			}
+		})
 	}
 }
 

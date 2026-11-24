@@ -174,3 +174,103 @@ func TestFilterImagesNoMatches(t *testing.T) {
 		t.Errorf("Expected 0 results for non-matching filter, got %d", len(result))
 	}
 }
+
+func setupFlagsImagesResponse() map[string]any {
+	return map[string]any{
+		"success": true,
+		"message": "Virtual machine images retrieved successfully",
+		"data": []any{
+			map[string]any{
+				"id":        1,
+				"name":      "Linux",
+				"sortOrder": 1,
+				"images": []any{
+					map[string]any{"id": "img-both", "name": "Managed Both", "config": map[string]any{
+						"managed":        true,
+						"customizations": map[string]any{"sshKey": true, "password": true, "username": true},
+					}},
+					map[string]any{"id": "img-password", "name": "Managed Password", "config": map[string]any{
+						"managed":        true,
+						"customizations": map[string]any{"sshKey": false, "password": true, "username": true},
+					}},
+					map[string]any{"id": "img-key", "name": "Managed Key", "config": map[string]any{
+						"managed":        true,
+						"customizations": map[string]any{"sshKey": true, "password": false, "username": true},
+					}},
+					map[string]any{"id": "img-none", "name": "Managed None", "config": map[string]any{
+						"managed":        true,
+						"customizations": map[string]any{"sshKey": false, "password": false, "username": false},
+					}},
+				},
+			},
+			map[string]any{
+				"id":        2,
+				"name":      "Windows",
+				"sortOrder": 2,
+				"images": []any{
+					map[string]any{"id": "img-windows", "name": "Managed Windows", "config": map[string]any{
+						"managed":        true,
+						"customizations": map[string]any{"sshKey": false, "password": true, "username": false},
+					}},
+				},
+			},
+			map[string]any{
+				"id":        4,
+				"name":      "Custom",
+				"sortOrder": 4,
+				"images": []any{
+					map[string]any{"id": "img-unmanaged-flags", "name": "Unmanaged Flags", "config": map[string]any{
+						"managed":        false,
+						"customizations": map[string]any{"sshKey": true, "password": true, "username": true},
+					}},
+					map[string]any{"id": "img-unmanaged-bare", "name": "Unmanaged Bare", "config": map[string]any{
+						"managed": false,
+					}},
+				},
+			},
+		},
+	}
+}
+
+func TestFetchImagesReadsSetupAndCredentialFlags(t *testing.T) {
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machine-images") {
+				testutil.WriteJSONResponse(w, setupFlagsImagesResponse())
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	images, err := FetchImages(gpcnClient, context.Background(), "dc-test-123")
+	if err != nil {
+		t.Fatalf("FetchImages failed: %v", err)
+	}
+
+	want := map[string][4]bool{
+		"img-both":            {true, true, true, true},
+		"img-password":        {true, false, true, true},
+		"img-key":             {true, true, false, true},
+		"img-none":            {true, false, false, false},
+		"img-windows":         {true, false, true, false},
+		"img-unmanaged-flags": {false, false, false, false},
+		"img-unmanaged-bare":  {false, false, false, false},
+	}
+	if len(images) != len(want) {
+		t.Fatalf("FetchImages returned %d images, want %d", len(images), len(want))
+	}
+	for _, img := range images {
+		flags, ok := want[img.ID]
+		if !ok {
+			t.Errorf("unexpected image %q", img.ID)
+			continue
+		}
+		got := [4]bool{img.Managed, img.AcceptsSshKey, img.AcceptsPassword, img.AcceptsUsername}
+		if got != flags {
+			t.Errorf("image %q: (managed, accepts ssh key, accepts password, accepts username) = %v, want %v", img.ID, got, flags)
+		}
+	}
+}

@@ -111,6 +111,36 @@ resource "gpcn_virtualmachine" "example" {
     ssh_key_id = gpcn_ssh_key.uploaded.id
     username   = "almalinux"
   }
+
+  # Runs once at the end of the first boot, as root. Changing it replaces the machine.
+  first_boot_script = <<-EOT
+    #!/bin/bash
+    dnf install -y nginx
+    systemctl enable --now nginx
+  EOT
+}
+
+# A virtual machine that sets itself up from your own user data. GPCN™ adds no
+# user, SSH key, password or hostname, so the document creates the account.
+resource "gpcn_virtualmachine" "custom" {
+  name          = "terraform-demo-vm-custom"
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+
+  size_id  = data.gpcn_virtualmachine_sizes.micro.sizes[0].id
+  image_id = data.gpcn_virtualmachine_images.alma_8.images[0].id
+
+  subnet_id = gpcn_vpc_subnet.example.id
+
+  # Changing it replaces the machine.
+  user_data = <<-EOT
+    #cloud-config
+    users:
+      - name: deploy
+        groups: wheel
+        sudo: "ALL=(ALL) NOPASSWD:ALL"
+        ssh_authorized_keys:
+          - ssh-ed25519 AAAA... deploy@example.com
+  EOT
 }
 
 # Attach the storage volume to the virtual machine
@@ -127,7 +157,6 @@ resource "gpcn_volume_attachment" "vm_storage_attachment" {
 
 - `datacenter_id` (String) Unique identifier of the data center where the virtual machine will be created. Changing this value requires replacing the virtual machine
 - `image_id` (String) Unique identifier of the operating system image to use for the virtual machine. Use the gpcn_virtualmachine_images data source to look up the image ID. Changing this value requires replacing the virtual machine
-- `initial_auth` (Attributes) Initial authentication configuration for the virtual machine. Either ssh_key_id or password must be specified. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine (see [below for nested schema](#nestedatt--initial_auth))
 - `name` (String) Human-readable name for the virtual machine. Must be 1-60 characters, starting and ending with an alphanumeric character, containing only letters, digits, spaces, periods, and hyphens
 - `size_id` (String) Unique identifier (SKU ID) of the size to use for the virtual machine. Use the gpcn_virtualmachine_sizes data source to look up the size ID. Changing to a non-upgradeable size requires replacing the virtual machine
 - `subnet_id` (String) Unique identifier of the VPC subnet the virtual machine is born on. Use the gpcn_vpc_subnet resource to create one. A machine lives in exactly one VPC, so changing this value requires replacing the virtual machine
@@ -135,9 +164,12 @@ resource "gpcn_volume_attachment" "vm_storage_attachment" {
 ### Optional
 
 - `allocate_public_ip` (Boolean) Whether to acquire an elastic IP on the VPC that holds the birth interface and attach it to that interface. Changing this value in place needs the vpc-public-ip:create, vpc-public-ip:update and vpc-public-ip:delete permissions. Destroying the virtual machine releases an address acquired this way. Never inferred on import: an imported machine records its address as public_ip_id, so destroying it leaves the address held
+- `first_boot_script` (String, Sensitive) Script that runs once at the end of the first boot of the virtual machine, after GPCN™ sets it up: as root on a Linux image, as SYSTEM under Windows PowerShell on a Windows image. GPCN™ accepts it only for an image it sets up (managed is true in the gpcn_virtualmachine_images data source). At most 8,192 bytes of UTF-8. GPCN™ does not trim or change it. The create does not wait for the script or report its result. Cannot be set together with user_data. Changing it requires replacement, because GPCN™ takes it only at creation and never returns it
+- `initial_auth` (Attributes) Initial authentication for the virtual machine: either ssh_key_id or password, with an optional username. Omit it when user_data is set, or for an image that takes no credential. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine (see [below for nested schema](#nestedatt--initial_auth))
 - `l2_segment_ids` (List of String) IDs of the L2 segments the virtual machine carries. They attach after the machine is created, and the machine is stopped for a change unless its image supports network hotplug. After an import, name the segments the machine carries; otherwise the next apply detaches them. Maximum of 4, because the birth subnet interface holds one of the five interfaces GPCN™ allows
 - `public_ip_id` (String) ID of a held gpcn_vpc_public_ip to attach to the primary interface. Cannot be set together with allocate_public_ip. The address outlives the virtual machine, because your organization holds it. An import fills this from the address the primary interface carries. Name this address in the configuration after an import; otherwise the next apply detaches it. Import that address as a gpcn_vpc_public_ip too when Terraform should own its release. Do not name an address that a gpcn_vpc_public_ip_attachment also binds; one resource owns a binding
 - `resource_group_id` (String) ID of the resource group this virtual machine belongs to. When omitted, the machine is created in the tenant's Default resource group and this attribute reports that group. Changing it moves the machine in place. Removing it from configuration leaves the machine where it is, but a replacement created while it is unset joins the Default resource group
+- `user_data` (String, Sensitive) Your own user data, which GPCN™ delivers to the virtual machine unchanged in place of its own setup, for the first-boot agent of the image to read. GPCN™ then adds no user, SSH key, password or hostname, so it cannot be set together with initial_auth or first_boot_script. At most 16,384 bytes of UTF-8, with no character above U+FFFF. It stays readable from inside the virtual machine, so do not put a secret in it that the machine must not hold. Changing it requires replacement, because GPCN™ takes it only at creation and never returns it
 
 ### Read-Only
 
@@ -153,14 +185,11 @@ resource "gpcn_volume_attachment" "vm_storage_attachment" {
 <a id="nestedatt--initial_auth"></a>
 ### Nested Schema for `initial_auth`
 
-Required:
-
-- `username` (String) Username for the virtual machine. Must be 3-20 characters matching ^[a-zA-Z_][a-zA-Z0-9_-]*$
-
 Optional:
 
-- `password` (String, Sensitive) Password for authentication. Must be 12-20 characters, contain only letters, digits, and ! @ # % - _ ., and include at least one uppercase letter, one lowercase letter, one digit, and one symbol. Cannot be set when ssh_key_id is set. username defaults to the image default if not specified
+- `password` (String, Sensitive) Password for authentication. Must be 12-20 characters, contain only letters, digits, and ! @ # % - _ ., and include at least one uppercase letter, one lowercase letter, one digit, and one symbol. Cannot be set when ssh_key_id is set
 - `ssh_key_id` (String) ID of the SSH key to use for authentication. Cannot be set together with password
+- `username` (String) Username for the virtual machine. Must be 3-20 characters matching ^[a-zA-Z_][a-zA-Z0-9_-]*$. Omit it to use the login of the image; an image whose accepts_username is false in the gpcn_virtualmachine_images data source refuses a username
 
 
 <a id="nestedatt--network_interfaces"></a>
@@ -198,6 +227,39 @@ The [`terraform import` command](https://developer.hashicorp.com/terraform/cli/c
 terraform import gpcn_virtualmachine.example "c13808d9-3b7d-42c5-a21d-f0961308a38a"
 ```
 
+## First boot
+
+How a VM is set up on its first boot depends on what you set:
+
+- `initial_auth`: GPCN™ sets up the VM and adds the user with its SSH key or password. Leave `username` out to use the login of the image. Some images, Windows images among them, refuse a username: set only the `password`.
+- `user_data`: your own user data replaces the setup GPCN™ performs. GPCN™ adds no user, SSH key, password or hostname, so the document must create any account it needs. `initial_auth` and `first_boot_script` can't be set with it.
+- Neither: for an image that takes no credential.
+
+GPCN™ accepts `initial_auth` and `first_boot_script` only for an image it sets up. The `managed`, `accepts_ssh_key`, `accepts_password` and `accepts_username` attributes of the [`gpcn_virtualmachine_images`](../data-sources/virtualmachine_images) data source report this for each image. GPCN™ checks these rules when the VM is created, so a wrong combination fails at apply. A `precondition` on `managed` catches it at plan.
+
+### `first_boot_script`
+
+The script runs once, at the end of the first boot, after GPCN™ has set up the user, the hostname and the disk.
+
+- On a Linux image it runs as root. A first line that starts with `#!` picks the interpreter. Without one, the script runs under `/bin/sh`. Save the file without a byte-order mark.
+- On a Windows image it runs as SYSTEM under Windows PowerShell 5.1. It can't prompt for input.
+- The create doesn't wait for the script, and GPCN™ doesn't report its result. The VM reaches Running whether the script succeeds or fails. Its output is inside the VM: `/var/log/cloud-init-output.log` on Linux, `C:\ProgramData\first-boot-scripts\run.log` on Windows.
+
+### `user_data`
+
+The first-boot agent of the image reads the document, for example cloud-init on Linux or cloudbase-init on Windows. An image with no such agent ignores it.
+
+- At some data centers, a Linux image runs the `runcmd` section and the scripts of a document at every boot. Guard a command that must run only once.
+- The document stays readable from inside the VM for the life of the VM. Terraform hides it in plan output, but don't put a secret in it that the VM must not hold.
+
+### Changing either text
+
+GPCN™ takes `first_boot_script` and `user_data` only when it creates the VM, and never returns them. Any change to either one replaces the VM, a changed line ending included. Terraform normalizes text to Unicode NFC before the provider sends it.
+
+A replacement destroys the VM before it creates the new one. If GPCN™ then refuses the create, no VM remains.
+
+To change the text in your configuration and keep the running VM, add `lifecycle { ignore_changes = [first_boot_script] }` (or `user_data`).
+
 ## Machines on legacy networks
 
 A VM created on a legacy network can't move onto a VPC subnet. [Migrating from `gpcn_network` to VPCs](../guides/migrating-from-gpcn-network#move-a-vm-onto-a-vpc-subnet) walks you through replacing it without losing track of the running machine.
@@ -205,3 +267,7 @@ A VM created on a legacy network can't move onto a VPC subnet. [Migrating from `
 ## Imported machines
 
 An imported VM gets `subnet_id`, `l2_segment_ids` and `public_ip_id` filled in from GPCN™. An import never sets `allocate_public_ip`, so destroying an imported VM leaves its elastic IP held.
+
+An imported VM gets `initial_auth` only when it has an SSH key. A VM created with a password, or with no credential, imports without the block. If your configuration has the block, the first apply records it in state and doesn't change the VM.
+
+An import can't fill `first_boot_script` or `user_data`. Adding either one to the configuration of an imported VM plans a replacement, unless `lifecycle { ignore_changes = [...] }` names it.

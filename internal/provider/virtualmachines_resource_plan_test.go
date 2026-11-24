@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"regexp"
 	"slices"
 	"strings"
@@ -3187,6 +3188,329 @@ func TestVirtualMachineResourcePlanCreateOnSubnet(t *testing.T) {
 			},
 		},
 	})
+}
+
+// startVirtualMachineFirstBootMockServer keeps every create body. Its read answers the
+// username and sshKeyId given here, because GPCN returns neither text nor the auth
+// method, and those two values are all an import can read.
+func startVirtualMachineFirstBootMockServer(t *testing.T, username, sshKeyID any) (*httptest.Server, func() []map[string]any) {
+	t.Helper()
+
+	var mu sync.Mutex
+	name := ""
+	birthSubnetID := ""
+	status := virtualmachines.VMStatusRunning.String()
+	var createBodies []map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/virtual-machines/":
+			body := testutil.ReadRequestBody(r)
+			mu.Lock()
+			createBodies = append(createBodies, body)
+			name, _ = body["name"].(string)
+			birthSubnetID, _ = body["subnetId"].(string)
+			status = virtualmachines.VMStatusRunning.String()
+			mu.Unlock()
+			testutil.HandleBatchCreateJobResponse(w, "job-1", map[string]any{"id": vmPlanTestID})
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", vmPlanTestID, true)
+		case r.Method == http.MethodPost && r.URL.Path == vmPlanTestPath+"/stop":
+			mu.Lock()
+			status = virtualmachines.VMStatusShutoff.String()
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, map[string]any{"success": true})
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath+"/network-interfaces":
+			mu.Lock()
+			currentSubnet := birthSubnetID
+			mu.Unlock()
+			testutil.WriteJSONResponse(w, vmPlanTestNetworkInterfacesBody(currentSubnet))
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/resource/data-centers/"+vmPlanTestDatacenterID+"/virtual-machine-images":
+			testutil.WriteJSONResponse(w, vmPlanTestImagesBody())
+		case r.Method == http.MethodGet && r.URL.Path == vmPlanTestPath:
+			mu.Lock()
+			currentName, currentStatus := name, status
+			mu.Unlock()
+			body := vmPlanTestReadBody(currentName, currentStatus, vmPlanTestSizeID)
+			data := body["data"].(map[string]any)
+			data["username"] = username
+			data["sshKeyId"] = sshKeyID
+			testutil.WriteJSONResponse(w, body)
+		case r.Method == http.MethodDelete && r.URL.Path == vmPlanTestPath:
+			testutil.HandleCreateJobResponse(w, "job-2")
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	recorded := func() []map[string]any {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]map[string]any(nil), createBodies...)
+	}
+
+	return server, recorded
+}
+
+// vmFirstBootPlanTestConfig adds the given lines to a machine that sets no credential.
+func vmFirstBootPlanTestConfig(host, name, lines string) string {
+	return fmt.Sprintf(`
+provider "gpcn" {
+  host    = %q
+  api_key = "test-key"
+}
+
+resource "gpcn_virtualmachine" "test" {
+  name          = %q
+  datacenter_id = %q
+  size_id       = %q
+  image_id      = %q
+  subnet_id     = %q
+%s
+}
+`, host, name, vmPlanTestDatacenterID, vmPlanTestSizeID, vmPlanTestImageID, vmPlanTestSubnetID, lines)
+}
+
+var vmFirstBootPlanTestKeyAuth = fmt.Sprintf(`
+  initial_auth = {
+    ssh_key_id = %q
+    username   = %q
+  }`, vmPlanTestSshKeyID, vmPlanTestUsername)
+
+// vmFirstBootPlanTestBody is the whole create body of the machine the config helper
+// describes, with the given first-boot keys.
+func vmFirstBootPlanTestBody(name string, firstBootKeys map[string]any) map[string]any {
+	body := map[string]any{
+		"skuId":        vmPlanTestSizeID,
+		"datacenterId": vmPlanTestDatacenterID,
+		"imageId":      vmPlanTestImageID,
+		"name":         name,
+		"subnetId":     vmPlanTestSubnetID,
+	}
+	for key, value := range firstBootKeys {
+		body[key] = value
+	}
+	return body
+}
+
+func vmFirstBootPlanTestExpectCreateBody(recorded func() []map[string]any, want map[string]any) resource.TestCheckFunc {
+	return func(*terraform.State) error {
+		bodies := recorded()
+		if len(bodies) != 1 {
+			return fmt.Errorf("expected one create, got %d", len(bodies))
+		}
+		if !reflect.DeepEqual(bodies[0], want) {
+			return fmt.Errorf("expected the create body %#v, got %#v", want, bodies[0])
+		}
+		return nil
+	}
+}
+
+// An image can carry its own login, so the read reports a username the configuration
+// never set. The create sends no authMethod, and the next plan is empty.
+func TestVirtualMachineResourcePlanCreatesWithoutInitialAuth(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachineFirstBootMockServer(t, vmPlanTestUsername, nil)
+
+	const name = "vm-plan-no-auth"
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmFirstBootPlanTestConfig(server.URL, name, ""),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+				Check: vmFirstBootPlanTestExpectCreateBody(recorded, vmFirstBootPlanTestBody(name, nil)),
+			},
+		},
+	})
+}
+
+func TestVirtualMachineResourcePlanCreatesWithUserData(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachineFirstBootMockServer(t, vmPlanTestUsername, vmPlanTestSshKeyID)
+
+	const name = "vm-plan-user-data"
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmFirstBootPlanTestConfig(server.URL, name, `  user_data = "#cloud-config\nusers: []\n"`),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+				Check: vmFirstBootPlanTestExpectCreateBody(recorded, vmFirstBootPlanTestBody(name, map[string]any{
+					"authMethod": "custom",
+					"userData":   "#cloud-config\nusers: []\n",
+				})),
+			},
+		},
+	})
+}
+
+// The image applies its own login when the block names no username, and the read
+// reports that login. The block must come back without it, so the next plan is empty.
+func TestVirtualMachineResourcePlanCreatesWithPasswordAndNoUsername(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	server, recorded := startVirtualMachineFirstBootMockServer(t, "Administrator", nil)
+
+	const (
+		name     = "vm-plan-password-no-username"
+		password = "Secret-Pass1!"
+	)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: vmFirstBootPlanTestConfig(server.URL, name, fmt.Sprintf(`
+  initial_auth = {
+    password = %q
+  }`, password)),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PostApplyPostRefresh: []plancheck.PlanCheck{
+						plancheck.ExpectEmptyPlan(),
+					},
+				},
+				Check: vmFirstBootPlanTestExpectCreateBody(recorded, vmFirstBootPlanTestBody(name, map[string]any{
+					"authMethod": "password",
+					"password":   password,
+				})),
+			},
+		},
+	})
+}
+
+func TestVirtualMachineResourcePlanReplacesOnFirstBootTextChange(t *testing.T) {
+	tests := []struct {
+		name   string
+		before string
+		after  string
+	}{
+		{
+			name:   "user_data",
+			before: `  user_data = "#cloud-config\nusers: []\n"`,
+			after:  `  user_data = "#cloud-config\nusers: []\nruncmd: []\n"`,
+		},
+		{
+			name:   "first_boot_script",
+			before: vmFirstBootPlanTestKeyAuth + "\n  first_boot_script = \"echo one\"",
+			after:  vmFirstBootPlanTestKeyAuth + "\n  first_boot_script = \"echo two\"",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			shortenVirtualMachinePolling(t)
+			server, _ := startVirtualMachineFirstBootMockServer(t, vmPlanTestUsername, vmPlanTestSshKeyID)
+
+			const name = "vm-plan-first-boot-change"
+
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config: vmFirstBootPlanTestConfig(server.URL, name, tc.before),
+					},
+					{
+						Config: vmFirstBootPlanTestConfig(server.URL, name, tc.after),
+						ConfigPlanChecks: resource.ConfigPlanChecks{
+							PreApply: []plancheck.PlanCheck{
+								plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionDestroyBeforeCreate),
+							},
+						},
+					},
+				},
+			})
+		})
+	}
+}
+
+// An import fills initial_auth only for a machine with a key. A block with a username
+// alone fails the schema, so a configuration generated from it would never plan.
+func TestVirtualMachineResourcePlanImportsMachineWithoutCredentials(t *testing.T) {
+	tests := []struct {
+		name     string
+		username any
+		sshKeyID any
+		lines    string
+		check    func(attributes map[string]string) error
+	}{
+		{
+			name:     "no_username_no_key",
+			username: nil,
+			sshKeyID: nil,
+			lines:    "",
+			check:    vmFirstBootPlanTestNoInitialAuth,
+		},
+		{
+			name:     "username_without_key",
+			username: vmPlanTestUsername,
+			sshKeyID: nil,
+			lines:    "",
+			check:    vmFirstBootPlanTestNoInitialAuth,
+		},
+		{
+			name:     "username_and_key",
+			username: vmPlanTestUsername,
+			sshKeyID: vmPlanTestSshKeyID,
+			lines:    vmFirstBootPlanTestKeyAuth,
+			check: func(attributes map[string]string) error {
+				if got := attributes["initial_auth.ssh_key_id"]; got != vmPlanTestSshKeyID {
+					return fmt.Errorf("expected the imported ssh_key_id %q, got %q", vmPlanTestSshKeyID, got)
+				}
+				if got := attributes["initial_auth.username"]; got != vmPlanTestUsername {
+					return fmt.Errorf("expected the imported username %q, got %q", vmPlanTestUsername, got)
+				}
+				return nil
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			shortenVirtualMachinePolling(t)
+			server, _ := startVirtualMachineFirstBootMockServer(t, tc.username, tc.sshKeyID)
+
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config: vmFirstBootPlanTestConfig(server.URL, "vm-plan-import-auth", tc.lines),
+					},
+					{
+						ResourceName: gpcnVirtualMachineTest,
+						ImportState:  true,
+						ImportStateCheck: func(states []*terraform.InstanceState) error {
+							if len(states) != 1 {
+								return fmt.Errorf("expected one imported state, got %d", len(states))
+							}
+							return tc.check(states[0].Attributes)
+						},
+					},
+				},
+			})
+		})
+	}
+}
+
+func vmFirstBootPlanTestNoInitialAuth(attributes map[string]string) error {
+	for key, value := range attributes {
+		if strings.HasPrefix(key, "initial_auth.") {
+			return fmt.Errorf("expected no initial_auth in the imported state, got %s = %q", key, value)
+		}
+	}
+	return nil
 }
 
 // startVirtualMachineCarriedAddressMockServer reports an address on the primary

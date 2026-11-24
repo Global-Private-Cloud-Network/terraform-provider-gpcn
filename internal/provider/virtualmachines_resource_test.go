@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"regexp"
+	"strings"
 	"testing"
+
+	"terraform-provider-gpcn/internal/virtualmachines"
 
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-testing/compare"
@@ -41,8 +44,8 @@ resource "gpcn_vpc_subnet" "vm_subnet" {
 `, suffix, octet)
 }
 
-// vmOctetSlot names the block each of the five acceptance cases owns. Each case takes
-// its own /16, so parallel cases never share a block. Slots 5 to 7 wait for the next
+// vmOctetSlot names the block each of the six acceptance cases owns. Each case takes
+// its own /16, so parallel cases never share a block. Slots 6 and 7 wait for the next
 // cases.
 var vmOctetSlot = map[string]int{
 	"TestVirtualMachinesAuth":                     0,
@@ -50,6 +53,7 @@ var vmOctetSlot = map[string]int{
 	"TestVirtualMachinesSizeUpgrade":              2,
 	"TestVirtualMachinesChangePublicIpAllocation": 3,
 	"TestVirtualMachinesResource":                 4,
+	"TestVirtualMachinesFirstBoot":                5,
 }
 
 const (
@@ -647,6 +651,95 @@ func TestVirtualMachinesAuth(t *testing.T) {
 	})
 }
 
+// GPCN takes both texts only at creation, so each change replaces the machine. The image
+// must be one GPCN sets up, because only such an image takes first_boot_script.
+func TestVirtualMachinesFirstBoot(t *testing.T) {
+	t.Parallel()
+	rName := acctest.RandString(8)
+	vpcOctet := vpcTestOctetFor(t, t.Name())
+	sshKeyName := fmt.Sprintf("vm-first-boot-key-%s", rName)
+	vmName := fmt.Sprintf("vm-first-boot-%s", rName)
+
+	const (
+		scriptOne = "#!/bin/sh\necho one > /root/first-boot.txt\n"
+		scriptTwo = "#!/bin/sh\necho two > /root/first-boot.txt\n"
+		userData  = "#cloud-config\nusers:\n  - name: firstboot\n    shell: /bin/bash\n"
+	)
+
+	sshKey := fmt.Sprintf(`
+			resource "gpcn_ssh_key" "vm_uploaded_key" {
+				name       = "%s"
+				public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl terraform-acc-test"
+			}
+			`, sshKeyName)
+
+	withScript := func(script string) string {
+		return providerConfig + dataCenterImagesAndSize() + vpcAndSubnet(rName, vpcOctet) + sshKey + fmt.Sprintf(`
+			resource "gpcn_virtualmachine" "test" {
+				name          = "%s"
+				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+
+				size_id   = data.gpcn_virtualmachine_sizes.vm_size.sizes[0].id
+				image_id  = data.gpcn_virtualmachine_images.vm_image.images[0].id
+				subnet_id = gpcn_vpc_subnet.vm_subnet.id
+
+				initial_auth = {
+					ssh_key_id = gpcn_ssh_key.vm_uploaded_key.id
+					username   = "testuser"
+				}
+				first_boot_script = %q
+			}
+			`, vmName, script)
+	}
+
+	resource.Test(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config: withScript(scriptOne),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionCreate),
+					},
+				},
+				Check: resource.ComposeAggregateTestCheckFunc(
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "first_boot_script", scriptOne),
+					resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "initial_auth.username", "testuser"),
+				),
+			},
+			{
+				Config: withScript(scriptTwo),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionReplace),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "first_boot_script", scriptTwo),
+			},
+			{
+				Config: providerConfig + dataCenterImagesAndSize() + vpcAndSubnet(rName, vpcOctet) + sshKey + fmt.Sprintf(`
+			resource "gpcn_virtualmachine" "test" {
+				name          = "%s"
+				datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+
+				size_id   = data.gpcn_virtualmachine_sizes.vm_size.sizes[0].id
+				image_id  = data.gpcn_virtualmachine_images.vm_image.images[0].id
+				subnet_id = gpcn_vpc_subnet.vm_subnet.id
+
+				user_data = %q
+			}
+			`, vmName, userData),
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{
+						plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionReplace),
+					},
+				},
+				Check: resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "user_data", userData),
+			},
+		},
+	})
+}
+
 /*
 *
 ----- Unit tests -----
@@ -739,6 +832,97 @@ func TestVirtualMachinesInvalidAuth(t *testing.T) {
 					{
 						Config:      vmConfigWithAuth(tc.authBlock),
 						ExpectError: regexp.MustCompile(tc.wantErr),
+					},
+				},
+			})
+		})
+	}
+}
+
+func TestVirtualMachinesFirstBootValidation(t *testing.T) {
+	vmConfigWithFirstBoot := func(attributes string) string {
+		return providerConfig + `
+		resource "gpcn_virtualmachine" "test" {
+		  name               = "terraform-first-boot-test-vm"
+		  datacenter_id      = "any-datacenter-id"
+		  size_id            = "sku-abc-123"
+		  image_id           = "eb7da49d-cc71-480a-968d-fbf2841bedf7"
+		  subnet_id          = "subnet-abc-123"
+		  allocate_public_ip = false
+		  ` + attributes + `
+		}
+		`
+	}
+	keyAuth := `initial_auth = {
+		    ssh_key_id = "ssh-key-123"
+		    username   = "testuser"
+		  }`
+
+	tests := []struct {
+		name       string
+		attributes string
+		wantErr    string
+	}{
+		{
+			name:       "user_data_with_initial_auth",
+			attributes: `user_data = "#cloud-config"` + "\n" + keyAuth,
+			wantErr:    `Attribute "initial_auth" cannot be specified when "user_data" is specified`,
+		},
+		{
+			name:       "user_data_with_first_boot_script",
+			attributes: `user_data = "#cloud-config"` + "\n" + `first_boot_script = "echo hi"`,
+			wantErr:    `Attribute "first_boot_script" cannot be specified when "user_data" is specified`,
+		},
+		{
+			name:       "empty_user_data",
+			attributes: `user_data = ""`,
+			wantErr:    `Attribute user_data string length must be at least 1, got: 0`,
+		},
+		{
+			name:       "empty_first_boot_script",
+			attributes: `first_boot_script = ""` + "\n" + keyAuth,
+			wantErr:    `Attribute first_boot_script string length must be at least 1, got: 0`,
+		},
+		{
+			name:       "user_data_over_16384_bytes",
+			attributes: `user_data = "` + strings.Repeat("a", 16385) + `"`,
+			wantErr:    fmt.Sprintf(virtualmachines.ErrDetailTextTooLong, 16384, 16385),
+		},
+		{
+			name:       "first_boot_script_over_8192_bytes",
+			attributes: `first_boot_script = "` + strings.Repeat("a", 8193) + `"` + "\n" + keyAuth,
+			wantErr:    fmt.Sprintf(virtualmachines.ErrDetailTextTooLong, 8192, 8193),
+		},
+		{
+			name:       "user_data_above_basic_plane",
+			attributes: `user_data = "#cloud-config \U00010000"`,
+			wantErr:    virtualmachines.ErrDetailUserDataCharacter,
+		},
+		{
+			name: "empty_ssh_key_id",
+			attributes: `initial_auth = {
+			    ssh_key_id = ""
+			    username   = "testuser"
+			  }`,
+			wantErr: `Attribute initial_auth.ssh_key_id string length must be at least 1, got: 0`,
+		},
+		{
+			name: "username_alone",
+			attributes: `initial_auth = {
+			    username = "testuser"
+			  }`,
+			wantErr: `At least one attribute out of`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config:      vmConfigWithFirstBoot(tc.attributes),
+						ExpectError: vmPlanTestSentencePattern(tc.wantErr),
 					},
 				},
 			})

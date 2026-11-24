@@ -14,7 +14,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/attr"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-framework/types/basetypes"
 )
 
 type ResourceModel struct {
@@ -36,6 +35,8 @@ type ResourceModel struct {
 	NetworkHotplug    types.Bool   `tfsdk:"network_hotplug"`
 	InitialAuth       types.Object `tfsdk:"initial_auth"`
 	ResourceGroupId   types.String `tfsdk:"resource_group_id"`
+	FirstBootScript   types.String `tfsdk:"first_boot_script"`
+	UserData          types.String `tfsdk:"user_data"`
 }
 
 type ResourceModelInitialAuth struct {
@@ -167,6 +168,9 @@ func RefreshVirtualMachineModelFromResponse(response *ReadVirtualMachinesRespons
 func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient, response *ReadVirtualMachinesResponse, model ResourceModel) (ResourceModel, diag.Diagnostics) {
 	var allDiags diag.Diagnostics
 
+	// name is Required, so only the state an import writes holds a null name.
+	imported := model.Name.IsNull()
+
 	if model.DatacenterId.IsNull() {
 		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
 	}
@@ -184,37 +188,32 @@ func setModelValuesNotPresent(ctx context.Context, gpcnClient *client.GpcnClient
 	model, networkDiags = setNetworkModelValuesNotPresent(ctx, gpcnClient, response.Data.ID, model)
 	allDiags.Append(networkDiags...)
 
-	// Populate auth from response. On import, auth is null and must be constructed from the response.
+	// Only an import fills initial_auth from the response, and only for a machine with a key.
 	var authDiags diag.Diagnostics
-	model.InitialAuth, authDiags = populateAuth(ctx, model.InitialAuth, response)
+	model.InitialAuth, authDiags = populateAuth(ctx, model.InitialAuth, response, imported)
 	allDiags.Append(authDiags...)
 
 	return model, allDiags
 }
 
-// Fill auth fields from the API response. On import, current is null
-func populateAuth(ctx context.Context, current types.Object, response *ReadVirtualMachinesResponse) (types.Object, diag.Diagnostics) {
-	if current.IsUnknown() {
+// A configuration can omit initial_auth, and Terraform refuses a create that returns a block
+// the plan left null. So only an import fills a null block. It fills it only for a machine with
+// an SSH key, because the schema refuses a block with a username and no key or password.
+func populateAuth(ctx context.Context, current types.Object, response *ReadVirtualMachinesResponse, imported bool) (types.Object, diag.Diagnostics) {
+	if !current.IsNull() || !imported {
 		return current, nil
 	}
 
-	var auth ResourceModelInitialAuth
-	if current.IsNull() {
-		auth = ResourceModelInitialAuth{
-			Username: types.StringValue(response.Data.Username),
-			SshKeyId: types.StringNull(),
-			Password: types.StringNull(),
-		}
-		if response.Data.SshKeyId != "" {
-			auth.SshKeyId = types.StringValue(response.Data.SshKeyId)
-		}
-	} else {
-		if diags := current.As(ctx, &auth, basetypes.ObjectAsOptions{}); diags.HasError() {
-			return current, diags
-		}
-		if auth.Username.IsNull() && response.Data.Username != "" {
-			auth.Username = types.StringValue(response.Data.Username)
-		}
+	if response.Data.SshKeyId == "" {
+		return types.ObjectNull(ResourceModelInitialAuth{}.AttrTypes()), nil
+	}
+	auth := ResourceModelInitialAuth{
+		SshKeyId: types.StringValue(response.Data.SshKeyId),
+		Username: types.StringNull(),
+		Password: types.StringNull(),
+	}
+	if response.Data.Username != "" {
+		auth.Username = types.StringValue(response.Data.Username)
 	}
 
 	return types.ObjectValueFrom(ctx, auth.AttrTypes(), auth)

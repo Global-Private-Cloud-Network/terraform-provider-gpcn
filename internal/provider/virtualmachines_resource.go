@@ -275,14 +275,42 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 					stringplanmodifier.UseNonNullStateForUnknown(),
 				},
 			},
+			"first_boot_script": schema.StringAttribute{
+				Description: "Script that runs once at the end of the first boot of the virtual machine, after GPCN™ sets it up: as root on a Linux image, as SYSTEM under Windows PowerShell on a Windows image. GPCN™ accepts it only for an image it sets up (managed is true in the gpcn_virtualmachine_images data source). At most 8,192 bytes of UTF-8. GPCN™ does not trim or change it. The create does not wait for the script or report its result. Cannot be set together with user_data. Changing it requires replacement, because GPCN™ takes it only at creation and never returns it",
+				Optional:    true,
+				Sensitive:   true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+					virtualmachines.MaxBytesValidator{Max: 8192},
+					stringvalidator.ConflictsWith(path.MatchRoot("user_data")),
+				},
+			},
+			"user_data": schema.StringAttribute{
+				Description: "Your own user data, which GPCN™ delivers to the virtual machine unchanged in place of its own setup, for the first-boot agent of the image to read. GPCN™ then adds no user, SSH key, password or hostname, so it cannot be set together with initial_auth or first_boot_script. At most 16,384 bytes of UTF-8, with no character above U+FFFF. It stays readable from inside the virtual machine, so do not put a secret in it that the machine must not hold. Changing it requires replacement, because GPCN™ takes it only at creation and never returns it",
+				Optional:    true,
+				Sensitive:   true,
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.RequiresReplace(),
+				},
+				Validators: []validator.String{
+					stringvalidator.LengthAtLeast(1),
+					virtualmachines.MaxBytesValidator{Max: 16384},
+					virtualmachines.BasicPlaneValidator{},
+					stringvalidator.ConflictsWith(path.MatchRoot("initial_auth"), path.MatchRoot("first_boot_script")),
+				},
+			},
 			"initial_auth": schema.SingleNestedAttribute{
-				Description: "Initial authentication configuration for the virtual machine. Either ssh_key_id or password must be specified. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine",
-				Required:    true,
+				Description: "Initial authentication for the virtual machine: either ssh_key_id or password, with an optional username. Omit it when user_data is set, or for an image that takes no credential. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine",
+				Optional:    true,
 				Attributes: map[string]schema.Attribute{
 					"ssh_key_id": schema.StringAttribute{
 						Description: "ID of the SSH key to use for authentication. Cannot be set together with password",
 						Optional:    true,
 						Validators: []validator.String{
+							stringvalidator.LengthAtLeast(1),
 							stringvalidator.ConflictsWith(
 								path.MatchRelative().AtParent().AtName("password"),
 							),
@@ -293,8 +321,8 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 						},
 					},
 					"username": schema.StringAttribute{
-						Description: "Username for the virtual machine. Must be 3-20 characters matching ^[a-zA-Z_][a-zA-Z0-9_-]*$",
-						Required:    true,
+						Description: "Username for the virtual machine. Must be 3-20 characters matching ^[a-zA-Z_][a-zA-Z0-9_-]*$. Omit it to use the login of the image; an image whose accepts_username is false in the gpcn_virtualmachine_images data source refuses a username",
+						Optional:    true,
 						Validators: []validator.String{
 							stringvalidator.LengthBetween(3, 20),
 							stringvalidator.RegexMatches(
@@ -304,7 +332,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 						},
 					},
 					"password": schema.StringAttribute{
-						Description: "Password for authentication. Must be 12-20 characters, contain only letters, digits, and ! @ # % - _ ., and include at least one uppercase letter, one lowercase letter, one digit, and one symbol. Cannot be set when ssh_key_id is set. username defaults to the image default if not specified",
+						Description: "Password for authentication. Must be 12-20 characters, contain only letters, digits, and ! @ # % - _ ., and include at least one uppercase letter, one lowercase letter, one digit, and one symbol. Cannot be set when ssh_key_id is set",
 						Optional:    true,
 						Sensitive:   true,
 						Validators: []validator.String{

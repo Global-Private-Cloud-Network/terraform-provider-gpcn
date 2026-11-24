@@ -97,6 +97,36 @@ resource "gpcn_virtualmachine" "example" {
     ssh_key_id = gpcn_ssh_key.uploaded.id
     username   = "almalinux"
   }
+
+  # Runs once at the end of the first boot, as root. Changing it replaces the machine.
+  first_boot_script = <<-EOT
+    #!/bin/bash
+    dnf install -y nginx
+    systemctl enable --now nginx
+  EOT
+}
+
+# A virtual machine that sets itself up from your own user data. GPCN™ adds no
+# user, SSH key, password or hostname, so the document creates the account.
+resource "gpcn_virtualmachine" "custom" {
+  name          = "terraform-demo-vm-custom"
+  datacenter_id = data.gpcn_datacenters.central_us.datacenters[0].id
+
+  size_id  = data.gpcn_virtualmachine_sizes.micro.sizes[0].id
+  image_id = data.gpcn_virtualmachine_images.alma_8.images[0].id
+
+  subnet_id = gpcn_vpc_subnet.example.id
+
+  # Changing it replaces the machine.
+  user_data = <<-EOT
+    #cloud-config
+    users:
+      - name: deploy
+        groups: wheel
+        sudo: "ALL=(ALL) NOPASSWD:ALL"
+        ssh_authorized_keys:
+          - ssh-ed25519 AAAA... deploy@example.com
+  EOT
 }
 
 # Attach the storage volume to the virtual machine
