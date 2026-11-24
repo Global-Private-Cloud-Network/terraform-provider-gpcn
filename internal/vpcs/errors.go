@@ -41,9 +41,6 @@ const (
 	// The API counts children in two populations. The reader deletes the first
 	// and waits for the second.
 	ErrDetailVpcNotEmpty = "%s Blockers: %s. In flight: %s."
-	// A teardown another caller started owns the row. The provider waits for
-	// the row to go, and this sentence reports the wait running out.
-	ErrDetailVpcTeardownTimeout = "a teardown was already running, and the VPC was still present after %s"
 	// A row the answer cannot name cannot reach state.
 	ErrDetailNoVpcIDInCreate = "the create response carried no VPC ID"
 )

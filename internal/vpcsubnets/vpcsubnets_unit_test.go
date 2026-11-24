@@ -455,14 +455,8 @@ func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
 			handlerMu.Lock()
 			createID = r.Header.Get("x-Correlation-ID")
 			handlerMu.Unlock()
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true,
-				"message": "Operation initiated successfully",
-				"data": map[string]any{
-					"jobId":  "job-create",
-					"subnet": map[string]any{"id": unitTestSubnetID, "cidr": "10.50.1.0/24", "nsgId": unitTestNsgID},
-				},
-			})
+			testutil.HandleCreateJobResponseWithResource(w, "job-create",
+				map[string]any{"id": unitTestSubnetID, "cidr": "10.50.1.0/24", "nsgId": unitTestNsgID})
 		},
 	})
 
@@ -506,11 +500,7 @@ func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
 			handlerMu.Lock()
 			rebindID = r.Header.Get("x-Correlation-ID")
 			handlerMu.Unlock()
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true,
-				"message": "Operation initiated successfully",
-				"data":    map[string]any{"jobId": "job-rebind"},
-			})
+			testutil.HandleCreateJobResponse(w, "job-rebind")
 		},
 	})
 
@@ -574,11 +564,7 @@ func TestCreateSubnetCarriesOneCorrelationIDUnit(t *testing.T) {
 			handlerMu.Lock()
 			deleteID = r.Header.Get("x-Correlation-ID")
 			handlerMu.Unlock()
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true,
-				"message": "Operation initiated successfully",
-				"data":    map[string]any{"jobId": "job-delete"},
-			})
+			testutil.HandleCreateJobResponse(w, "job-delete")
 		},
 	})
 
@@ -608,14 +594,8 @@ func TestIssueCreateSubnetRejectsResponseWithoutIDUnit(t *testing.T) {
 	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, _ *http.Request) {
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true,
-				"message": "Operation initiated successfully",
-				"data": map[string]any{
-					"jobId":  "job-create",
-					"subnet": map[string]any{"cidr": "10.50.1.0/24", "nsgId": unitTestNsgID},
-				},
-			})
+			testutil.HandleCreateJobResponseWithResource(w, "job-create",
+				map[string]any{"cidr": "10.50.1.0/24", "nsgId": unitTestNsgID})
 		},
 	})
 
@@ -633,7 +613,6 @@ func TestIssueCreateSubnetRejectsResponseWithoutIDUnit(t *testing.T) {
 	}
 }
 
-// The updated-wire 202 carries the job as data.job and the row as data.resource.
 func TestIssueCreateSubnetReadsAcceptedResource(t *testing.T) {
 	t.Parallel()
 

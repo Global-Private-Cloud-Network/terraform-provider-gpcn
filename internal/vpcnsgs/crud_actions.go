@@ -24,7 +24,6 @@ type ApiNsg struct {
 	FailureReason *string `json:"failureReason"`
 	RuleCount     int64   `json:"ruleCount"`
 	SubnetCount   int64   `json:"subnetCount"`
-	ActiveJobID   *string `json:"activeJobId"`
 	CreatedAt     string  `json:"createdAt"`
 	UpdatedAt     string  `json:"updatedAt"`
 }
@@ -49,16 +48,6 @@ type ApiRule struct {
 type NsgDetail struct {
 	Nsg   ApiNsg    `json:"nsg"`
 	Rules []ApiRule `json:"rules"`
-}
-
-// createNsgResponse reads the group id under its own key. The job id, and the
-// id an answer carries in data.resource, come from client.JobStatusSingularResponse.
-type createNsgResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
-	Data    struct {
-		NsgID string `json:"nsgId"`
-	} `json:"data"`
 }
 
 type readNsgResponse struct {
@@ -122,15 +111,7 @@ func IssueCreateNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, n
 	if err := json.Unmarshal(body, &accepted); err != nil {
 		return nil, err
 	}
-	var created createNsgResponse
-	if err := json.Unmarshal(body, &created); err != nil {
-		return nil, err
-	}
-	// The answer names the group in data.resource or as data.nsgId.
 	nsgID := accepted.Data.ResourceId
-	if nsgID == "" {
-		nsgID = created.Data.NsgID
-	}
 	// The ID is what Create writes to state before the poll. Without one the
 	// group exists and Terraform cannot name it, so the create stops here.
 	if nsgID == "" {

@@ -2,7 +2,6 @@ package vpcvpngateways
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -185,10 +184,7 @@ func TestVpcVpnGatewayUnitCreateVpnGatewaySendsEmptyObjectBody(t *testing.T) {
 			switch {
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/vpcs/"+testVpcID+"/vpn-gateway":
 				createBody.Store(testutil.ReadRequestBody(r))
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true, "message": "Operation initiated successfully",
-					"data": map[string]any{"jobId": "job-create", "vpnGateway": map[string]any{"id": testGatewayID, "state": "creating"}},
-				})
+				testutil.HandleCreateJobResponse(w, "job-create")
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 				testutil.HandleJobResponse(w, "job-create", testGatewayID, true)
 			default:
@@ -242,7 +238,7 @@ func removingRow(reason string) string {
 	}
 	return `{"success":true,"message":"","data":{"id":"` + testGatewayID + `","vpcId":"` + testVpcID +
 		`","kind":"router","state":"removing","address":"198.51.100.7","reservedBlock":null,"failureReason":` + failure +
-		`,"activeJobId":null,"createdAt":"2026-01-02T15:04:05Z","updatedAt":"2026-01-02T15:04:05Z"}}`
+		`,"createdAt":"2026-01-02T15:04:05Z","updatedAt":"2026-01-02T15:04:05Z"}}`
 }
 
 func TestVpcVpnGatewayUnitWaitForVpnGatewayGoneTimeoutNamesLastStateAndFailureReason(t *testing.T) {
@@ -303,17 +299,13 @@ func deleteServer(t *testing.T, deleteStatus int, answers []string, options ...d
 				status = option.resendStatus
 			}
 			switch {
-			case r.Method == http.MethodDelete && r.URL.Path == path && status == http.StatusConflict:
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusConflict)
-				fmt.Fprint(w, `{"success":false,"message":"The VPN gateway is already being removed.","error":{"code":"VPN_GATEWAY_REMOVING","statusCode":409,"details":null}}`)
+			case r.Method == http.MethodDelete && r.URL.Path == path && status == http.StatusBadGateway:
+				w.WriteHeader(http.StatusBadGateway)
+				fmt.Fprint(w, "Bad Gateway")
 			case r.Method == http.MethodDelete && r.URL.Path == path:
-				testutil.WriteJSONResponse(w, map[string]any{
-					"success": true, "message": "Operation initiated successfully",
-					"data": map[string]any{"jobId": "job-delete"},
-				})
+				testutil.HandleCreateJobResponse(w, "job-delete")
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"job-delete","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":true,"progressPercentage":0,"message":"","errorMessage":"removal failed","resourceId":"","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleJobOutcomeResponse(w, "job-delete", "", "failed", "removal failed")
 			case r.Method == http.MethodGet && r.URL.Path == path:
 				index := min(int(reads.Add(1))-1, len(answers)-1)
 				w.Header().Set("Content-Type", "application/json")
@@ -338,7 +330,7 @@ func TestVpcVpnGatewayUnitWaitAfterFailedDeleteJob(t *testing.T) {
 		removingRow("The VPN gateway's removal failed; it is retried automatically."),
 		removingRow("The VPN gateway's removal failed; it is retried automatically."),
 		"gone",
-	}, deleteServerOptions{resendStatus: http.StatusConflict, deletes: &deletes})
+	}, deleteServerOptions{resendStatus: http.StatusBadGateway, deletes: &deletes})
 
 	if err := deleteVpnGateway(gpcnClient, context.Background(), testVpcID, time.Millisecond, time.Minute); err != nil {
 		t.Fatalf("Expected the failed job to fall through to the wait and end at the 404, got %v", err)
@@ -348,18 +340,6 @@ func TestVpcVpnGatewayUnitWaitAfterFailedDeleteJob(t *testing.T) {
 	}
 	if got := deletes.Load(); got != 2 {
 		t.Errorf("Expected 2 DELETEs, got %d", got)
-	}
-}
-
-func TestVpcVpnGatewayUnitDeleteRemoving409FallsThroughToWait(t *testing.T) {
-	t.Parallel()
-	gpcnClient, reads := deleteServer(t, http.StatusConflict, []string{removingRow(""), "gone"})
-
-	if err := deleteVpnGateway(gpcnClient, context.Background(), testVpcID, time.Millisecond, time.Minute); err != nil {
-		t.Fatalf("Expected the 409 to fall through to the wait, got %v", err)
-	}
-	if got := reads.Load(); got != 2 {
-		t.Errorf("Expected 2 reads, got %d", got)
 	}
 }
 
@@ -435,7 +415,7 @@ func pollCountServer(t *testing.T) (*client.GpcnClient, *atomic.Int32) {
 				return
 			}
 			polls.Add(1)
-			testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"job-live","stage":"running","isCompleted":false,"isTerminal":false,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"","resourceName":"","resourceType":""}]}}`))
+			testutil.HandleJobResponse(w, "job-live", "", false)
 		},
 	})
 	return gpcnClient, &polls
@@ -469,100 +449,6 @@ func TestVpcVpnGatewayUnitPollAdoptedJobWithoutJobDoesNotPoll(t *testing.T) {
 
 	if got := polls.Load(); got != 0 {
 		t.Errorf("Expected no poll without an active job, got %d", got)
-	}
-}
-
-// creatingRow is a gateway that has not finished its create.
-func creatingRow() string {
-	return `{"success":true,"message":"","data":{"id":"` + testGatewayID + `","vpcId":"` + testVpcID +
-		`","kind":"router","state":"creating","address":null,"reservedBlock":null,"failureReason":null,` +
-		`"activeJobId":null,"createdAt":"2026-01-02T15:04:05Z","updatedAt":"2026-01-02T15:04:05Z"}}`
-}
-
-// A delete that waits for a create shares the deadline of the removal. A
-// create that never ends ends the delete with the removal timeout error.
-func TestVpcVpnGatewayUnitDeleteWhileCreatingTimesOut(t *testing.T) {
-	t.Parallel()
-	var deletes atomic.Int32
-	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			switch r.Method {
-			case http.MethodDelete:
-				deletes.Add(1)
-				w.WriteHeader(http.StatusConflict)
-				fmt.Fprint(w, `{"success":false,"message":"The VPN gateway is still being created.","error":{"code":"VPN_GATEWAY_BUSY_CREATING","statusCode":409,"details":null}}`)
-			case http.MethodGet:
-				fmt.Fprint(w, creatingRow())
-			default:
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-
-	err := deleteVpnGateway(gpcnClient, context.Background(), testVpcID, time.Millisecond, 20*time.Millisecond)
-	if want := fmt.Sprintf(ErrFmtStillCreating, testVpcID, 20*time.Millisecond); err == nil || err.Error() != want {
-		t.Fatalf("Expected %q, got %v", want, err)
-	}
-	if got := deletes.Load(); got != 1 {
-		t.Errorf("Expected one DELETE before the timeout, got %d", got)
-	}
-}
-
-// A gateway that leaves the creating state only for the next DELETE to meet
-// 409 again must not keep the loop going past the shared deadline.
-func TestVpcVpnGatewayUnitDeleteRepeatedBusyStopsAtDeadline(t *testing.T) {
-	t.Parallel()
-	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			switch r.Method {
-			case http.MethodDelete:
-				w.WriteHeader(http.StatusConflict)
-				fmt.Fprint(w, `{"success":false,"message":"The VPN gateway is still being created.","error":{"code":"VPN_GATEWAY_BUSY_CREATING","statusCode":409,"details":null}}`)
-			case http.MethodGet:
-				fmt.Fprint(w, removingRow(""))
-			default:
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	err := deleteVpnGateway(gpcnClient, ctx, testVpcID, time.Millisecond, 20*time.Millisecond)
-	if want := fmt.Sprintf(ErrFmtStillCreating, testVpcID, 20*time.Millisecond); err == nil || err.Error() != want {
-		t.Fatalf("Expected %q, got %v", want, err)
-	}
-}
-
-// A read that fails while the delete waits for a create reports the create
-// wait, not the removal wait.
-func TestVpcVpnGatewayUnitDeleteWhileCreatingReadFailureNamesTheCreateWait(t *testing.T) {
-	t.Parallel()
-	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
-		T: t,
-		Handler: func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			switch r.Method {
-			case http.MethodDelete:
-				w.WriteHeader(http.StatusConflict)
-				fmt.Fprint(w, `{"success":false,"message":"The VPN gateway is still being created.","error":{"code":"VPN_GATEWAY_BUSY_CREATING","statusCode":409,"details":null}}`)
-			case http.MethodGet:
-				w.WriteHeader(http.StatusForbidden)
-				fmt.Fprint(w, `{"success":false,"message":"forbidden","error":{"code":"FORBIDDEN","statusCode":403,"details":null}}`)
-			default:
-				testutil.LogUnexpectedRequest(t, w, r)
-			}
-		},
-	})
-
-	err := deleteVpnGateway(gpcnClient, context.Background(), testVpcID, time.Millisecond, time.Minute)
-	const prefix = "wait for the VPN gateway create to finish failed: "
-	if err == nil || !strings.HasPrefix(err.Error(), prefix) {
-		t.Fatalf("Expected an error that starts with %q, got %v", prefix, err)
 	}
 }
 
@@ -700,8 +586,8 @@ func TestDeleteVpnGatewayWaitsOutBusyHolder(t *testing.T) {
 }
 
 // The deadline can pass inside the holder poll, or in the wait after the
-// holder ended. Both name the holder, never a create that still runs. Only
-// the first says that the holder still runs.
+// holder ended. Both name the holder. Only the first says that the holder
+// still runs.
 func TestDeleteVpnGatewayBusyDeadlineNamesTheHolder(t *testing.T) {
 	for name, test := range map[string]struct {
 		holder       string
@@ -786,15 +672,12 @@ func TestWaitForVpnGatewayGoneReportsSecondPark(t *testing.T) {
 	}
 }
 
-// The answer to the resend decides how the wait goes on. A 409 for a removal
-// that runs means the platform drives the removal again, so the wait keeps
-// reading at the interval and never reports a second park.
+// The answer to the resend decides how the wait goes on. After a resend lost
+// in transit, the wait keeps reading at the interval.
 func TestWaitForVpnGatewayGoneResendAnswers(t *testing.T) {
 	const interval = 30 * time.Millisecond
 	setRemovalPollInterval(t, interval)
 	const inUse = "Remove the VPC's VPN connections before removing its VPN gateway."
-	removing := gatewayAnswer{http.StatusConflict, `{"success":false,"message":"The VPN gateway is already being removed.",` +
-		`"error":{"code":"VPN_GATEWAY_REMOVING","statusCode":409,"details":null}}`}
 	parked := gatewayAnswer{http.StatusOK, removingRow(parkedGatewayReason)}
 	gone := gatewayAnswer{http.StatusNotFound, goneGatewayBody}
 	accepted := gatewayAnswer{http.StatusAccepted, gatewayAcceptedBody("job-delete")}
@@ -811,9 +694,7 @@ func TestWaitForVpnGatewayGoneResendAnswers(t *testing.T) {
 		// anyReads skips the read count of a wait that runs until its timeout.
 		anyReads bool
 	}{
-		"not found":                       {deletes: []gatewayAnswer{accepted, gone}, reads: []gatewayAnswer{parked}},
-		"removal runs, then gone":         {deletes: []gatewayAnswer{accepted, removing}, reads: []gatewayAnswer{parked, gone}},
-		"removal runs, parked, then gone": {deletes: []gatewayAnswer{accepted, removing}, reads: []gatewayAnswer{parked, parked, gone}},
+		"not found": {deletes: []gatewayAnswer{accepted, gone}, reads: []gatewayAnswer{parked}},
 		"the resend fails in transit, then gone": {
 			deletes: []gatewayAnswer{accepted, {http.StatusBadGateway, `{"success":false,"message":"bad gateway"}`}},
 			reads:   []gatewayAnswer{parked, gone},
@@ -892,7 +773,7 @@ func TestWaitForVpnGatewayGoneResendAnswers(t *testing.T) {
 			}
 			server.mu.Lock()
 			defer server.mu.Unlock()
-			if test.deletes[1] == removing {
+			if name == "the resend fails in transit, then gone" {
 				if gap := server.times[http.MethodGet][1].Sub(server.times[http.MethodDelete][1]); gap < interval {
 					t.Errorf("Expected a read at least %s after the resend, got %s", interval, gap)
 				}

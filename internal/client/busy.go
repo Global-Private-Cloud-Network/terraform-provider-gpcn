@@ -20,13 +20,9 @@ const ActionAwaitHolder = "Wait for the job holding the resource"
 // A test replaces holderPollConfig to shorten the poll intervals.
 var holderPollConfig = DefaultPollingConfig
 
-// A row names the job that holds it as heldBy or as activeJobId. heldBy wins.
-func ActiveJobID(heldBy *HeldBy, activeJobID *string) *string {
+func ActiveJobID(heldBy *HeldBy) *string {
 	if heldBy != nil && heldBy.JobID != "" {
 		return &heldBy.JobID
-	}
-	if activeJobID != nil && *activeJobID != "" {
-		return activeJobID
 	}
 	return nil
 }

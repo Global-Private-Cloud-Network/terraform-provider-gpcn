@@ -115,27 +115,22 @@ func TestBusyHolderReadsResourceBusy(t *testing.T) {
 	}
 }
 
-func TestActiveJobIDPrefersHeldBy(t *testing.T) {
+func TestActiveJobIDReadsTheHolder(t *testing.T) {
 	held := "held-job"
-	active := "active-job"
-	empty := ""
 
 	tests := []struct {
-		name        string
-		heldBy      *HeldBy
-		activeJobID *string
-		want        *string
+		name   string
+		heldBy *HeldBy
+		want   *string
 	}{
-		{name: "heldBy and activeJobId", heldBy: &HeldBy{JobID: held}, activeJobID: &active, want: &held},
-		{name: "activeJobId only", activeJobID: &active, want: &active},
-		{name: "heldBy with an empty job id", heldBy: &HeldBy{JobID: ""}, activeJobID: &active, want: &active},
-		{name: "neither"},
-		{name: "an empty activeJobId", activeJobID: &empty},
+		{name: "a holder with a job id", heldBy: &HeldBy{JobID: held}, want: &held},
+		{name: "a holder with an empty job id", heldBy: &HeldBy{JobID: ""}},
+		{name: "no holder"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ActiveJobID(tt.heldBy, tt.activeJobID)
+			got := ActiveJobID(tt.heldBy)
 			switch {
 			case tt.want == nil && got != nil:
 				t.Errorf("ActiveJobID = %q, want nil", *got)
@@ -175,11 +170,6 @@ func TestAwaitHolderReturnsNilOnTerminalAnswers(t *testing.T) {
 		{
 			name: "abandoned",
 			body: holderJobsBody(`{"id":"h1","stage":"failed","outcome":"abandoned","progress":40,"message":null,"failureReason":null}`),
-		},
-		{
-			name: "a legacy failed job",
-			body: `{"success":true,"message":"Job progress retrieved successfully","data":{"jobs":[{"jobId":"h1",` +
-				`"stage":"failed","errorMessage":"capacity","isCompleted":false,"isTerminal":true,"hasFailed":true}]}}`,
 		},
 		{
 			name: "a job the read does not return",

@@ -73,7 +73,7 @@ type vpnConnPlanTestServerState struct {
 	putStatus int
 	// jobStatus makes the job poll answer with this error status.
 	jobStatus int
-	// cancelJob makes the job poll report a job in the stage the platform sets when it stops a job.
+	// cancelJob makes the job poll report a job the platform stopped.
 	cancelJob bool
 	// postStatus makes the POST insert the row and then answer with this status.
 	postStatus int
@@ -81,32 +81,19 @@ type vpnConnPlanTestServerState struct {
 	itemStatus int
 	// keepRow makes the POST leave the stored row as the test planted it.
 	keepRow bool
-	// postActiveJob is the job the row made by the POST still runs.
-	postActiveJob string
 	// listStatus makes the list GET answer with this status.
 	listStatus int
-	// deleteRemoving answers the next DELETE with a 409 for a connection that
-	// is already being removed.
-	deleteRemoving bool
-	// removingHold is the number of detail reads after that 409 that still show
-	// the row as removing. The read after that answers 404.
-	removingHold int
-	removing     bool
 	// parkDeletes is the number of accepted DELETE requests whose job fails and
 	// leaves the row parked in the removing state with a failure reason.
 	parkDeletes int
 	// resendConflicts makes the next DELETE after the first answer a refusing
 	// 409 whose details still carry the parked reason, and leaves the row parked.
 	resendConflicts bool
-	// resendMeetsRemoval makes the next DELETE after the first meet a removal
-	// another caller started: a 409 with a null reason, then removing, then 404.
-	resendMeetsRemoval bool
-	failDeleteJob      bool
-	getsAfterDel       int
-	postBodies         []map[string]any
-	postRaw            []string
-	putBodies          []map[string]any
-	deleteCount        int
+	failDeleteJob   bool
+	postBodies      []map[string]any
+	postRaw         []string
+	putBodies       []map[string]any
+	deleteCount     int
 	// postHeldByJob is the job that holds the row made by the POST, named in
 	// heldBy.
 	postHeldByJob string
@@ -155,7 +142,7 @@ func vpnConnPlanTestRowFromBody(body map[string]any, state string) map[string]an
 		"peerAddress": body["peerAddress"], "peerCidrs": body["peerCidrs"],
 		"ikeVersion": "v2", "encryption": "aes256", "integrity": "sha256", "dhGroup": 14, "pfsGroup": 14,
 		"ikeLifetimeSeconds": 28800, "ipsecLifetimeSeconds": 3600, "dpd": true,
-		"desiredApplied": true, "activeJobId": nil, "acceptedVerbs": []string{"update", "reset", "delete"},
+		"desiredApplied": true, "acceptedVerbs": []string{"update", "reset", "delete"},
 		"createdAt": time.Now().UTC().Format(time.RFC3339Nano), "updatedAt": vpnConnPlanTestTimestamp,
 	}
 	for _, key := range []string{"description", "ikeVersion", "encryption", "integrity", "dhGroup", "pfsGroup", "ikeLifetimeSeconds", "ipsecLifetimeSeconds", "dpd"} {
@@ -180,13 +167,6 @@ func writeVpnConnPlanTestParkedRefusal(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusConflict)
 	fmt.Fprintf(w, `{"success":false,"message":%q,"error":{"code":"VPN_STATE_CONFLICT","statusCode":409,`+
 		`"details":{"state":"removing","verb":"delete","failureReason":%q}}}`, vpnConnPlanTestResendConflict, vpnConnPlanTestDeleteFailed)
-}
-
-func writeVpnConnPlanTestRemoving(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusConflict)
-	fmt.Fprint(w, `{"success":false,"message":"The VPN connection is being removed.","error":{"code":"VPN_STATE_CONFLICT","statusCode":409,`+
-		`"details":{"state":"removing","verb":"delete","failureReason":null}}}`)
 }
 
 func init() {
@@ -216,7 +196,7 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			}
 			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "", "meta": nil, "data": map[string]any{
 				"id": vpnConnPlanTestGatewayID, "vpcId": vpnConnPlanTestVpcID, "kind": "router", "state": "ready",
-				"address": vpnConnPlanTestLocalEnd, "reservedBlock": nil, "failureReason": nil, "activeJobId": nil,
+				"address": vpnConnPlanTestLocalEnd, "reservedBlock": nil, "failureReason": nil,
 				"createdAt": vpnConnPlanTestTimestamp, "updatedAt": vpnConnPlanTestTimestamp,
 			}})
 		case r.Method == http.MethodPost && r.URL.Path == collection:
@@ -230,9 +210,6 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			if !state.keepRow {
 				state.exists = true
 				state.row = vpnConnPlanTestRowFromBody(body, state.createdState)
-				if state.postActiveJob != "" {
-					state.row["activeJobId"] = state.postActiveJob
-				}
 				if state.postHeldByJob != "" {
 					state.row["heldBy"] = map[string]any{"jobId": state.postHeldByJob, "operation": "create", "verb": "create"}
 				}
@@ -244,10 +221,7 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				writeVpnConnPlanTestError(w, postStatus, "Internal Server Error", vpnConnPlanTestBadGateway)
 				return
 			}
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true, "message": "Operation initiated successfully", "meta": nil,
-				"data": map[string]any{"jobId": "job-create", "vpnConnection": map[string]any{"id": vpnConnPlanTestConnID, "state": "creating"}},
-			})
+			testutil.HandleCreateJobResponseWithResource(w, "job-create", map[string]any{"id": vpnConnPlanTestConnID, "state": "creating"})
 		case r.Method == http.MethodGet && r.URL.Path == collection:
 			state.mu.Lock()
 			rows := []map[string]any{}
@@ -263,15 +237,6 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			testutil.WriteJSONResponse(w, map[string]any{"success": true, "message": "", "data": rows, "meta": map[string]any{"hasNextPage": false}})
 		case r.Method == http.MethodGet && r.URL.Path == item:
 			state.mu.Lock()
-			if state.removing {
-				state.getsAfterDel++
-				if state.removingHold > 0 {
-					state.removingHold--
-					state.row["state"] = "removing"
-				} else {
-					state.exists = false
-				}
-			}
 			exists := state.exists
 			itemStatus := state.itemStatus
 			detail := state.detail()
@@ -316,29 +281,16 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				state.row["failureReason"] = nil
 			}
 			state.mu.Unlock()
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true, "message": "Operation initiated successfully", "meta": nil,
-				"data": map[string]any{"jobId": "job-update"},
-			})
+			testutil.HandleCreateJobResponse(w, "job-update")
 		case r.Method == http.MethodDelete && r.URL.Path == item:
 			state.mu.Lock()
 			conflict := state.deleteConflict
 			state.deleteConflict = ""
-			alreadyRemoving := state.deleteRemoving
-			state.deleteRemoving = false
 			refusesParked := state.resendConflicts && state.deleteCount > 0 && conflict == ""
 			if refusesParked {
 				state.resendConflicts = false
 			}
-			if state.resendMeetsRemoval && state.deleteCount > 0 && conflict == "" {
-				state.resendMeetsRemoval = false
-				alreadyRemoving = true
-				state.removingHold = 1
-				state.row["failureReason"] = nil
-			}
 			switch {
-			case alreadyRemoving:
-				state.removing = true
 			case refusesParked:
 			case conflict == "" && state.parkDeletes > 0:
 				state.parkDeletes--
@@ -351,10 +303,6 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				state.deleteCount++
 			}
 			state.mu.Unlock()
-			if alreadyRemoving {
-				writeVpnConnPlanTestRemoving(w)
-				return
-			}
 			if refusesParked {
 				writeVpnConnPlanTestParkedRefusal(w)
 				return
@@ -363,10 +311,7 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				writeVpnConnPlanTestError(w, http.StatusConflict, "VPN_STATE_CONFLICT", conflict)
 				return
 			}
-			testutil.WriteJSONResponse(w, map[string]any{
-				"success": true, "message": "Operation initiated successfully", "meta": nil,
-				"data": map[string]any{"jobId": "job-delete"},
-			})
+			testutil.HandleCreateJobResponse(w, "job-delete")
 		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 			jobID := "job-1"
 			if ids, ok := testutil.ReadRequestBody(r)["jobIds"].([]any); ok && len(ids) > 0 {
@@ -388,10 +333,6 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				state.failDeleteJob = false
 				failJob = true
 			}
-			if active, _ := state.row["activeJobId"].(string); active != "" && jobID == active {
-				state.row["activeJobId"] = nil
-				state.row["state"] = "connecting"
-			}
 			if heldBy, _ := state.row["heldBy"].(map[string]any); heldBy != nil && heldBy["jobId"] == jobID {
 				state.row["heldBy"] = nil
 				state.row["state"] = "connecting"
@@ -402,11 +343,12 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 				return
 			}
 			if cancelJob {
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"`+jobID+`","stage":"`+client.JobStageCancelled+`","isCompleted":false,"isTerminal":true,"hasFailed":false,"progressPercentage":0,"message":"","errorMessage":"","resourceId":"`+vpnConnPlanTestConnID+`","resourceName":"","resourceType":""}]}}`))
+				//nolint:misspell // The value is the byte the API sends, not prose.
+				testutil.HandleJobOutcomeResponse(w, jobID, vpnConnPlanTestConnID, "cancelled", "")
 				return
 			}
 			if failJob {
-				testutil.WriteJSONResponse(w, json.RawMessage(`{"success":true,"message":"","data":{"jobs":[{"jobId":"`+jobID+`","stage":"","isCompleted":false,"isTerminal":false,"hasFailed":true,"progressPercentage":0,"message":"","errorMessage":"`+vpnConnPlanTestJobFailText+`","resourceId":"`+vpnConnPlanTestConnID+`","resourceName":"","resourceType":""}]}}`))
+				testutil.HandleJobOutcomeResponse(w, jobID, vpnConnPlanTestConnID, "failed", vpnConnPlanTestJobFailText)
 				return
 			}
 			testutil.HandleJobResponse(w, jobID, vpnConnPlanTestConnID, true)
@@ -774,43 +716,6 @@ func TestVpcVpnConnectionResourceCreate5xxNoRowNamesTheImport(t *testing.T) {
 	})
 }
 
-// An adopted row that still runs a job is read again once the job ends.
-func TestVpcVpnConnectionResourceCreate5xxPollsAdoptedJob(t *testing.T) {
-	t.Parallel()
-	server, state := startVpnConnPlanMockServer(t)
-	state.set(func(s *vpnConnPlanTestServerState) {
-		s.postStatus = http.StatusBadGateway
-		s.createdState = "creating"
-		s.postActiveJob = "job-live"
-	})
-	config := newVpnConnPlanTestConfig().render(server.URL)
-
-	resource.UnitTest(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{Config: config, ExpectError: vpnConnRefusal(vpnConnPlanTestBadGateway)},
-			{
-				PreConfig: func() {
-					state.mu.Lock()
-					defer state.mu.Unlock()
-					if state.row["activeJobId"] != nil {
-						t.Errorf("Expected the create to poll the job of the adopted row, which still runs %v", state.row["activeJobId"])
-					}
-					state.postStatus = 0
-					state.postActiveJob = ""
-					state.createdState = "connecting"
-				},
-				Config: config,
-				ConfigPlanChecks: resource.ConfigPlanChecks{
-					PreApply: []plancheck.PlanCheck{
-						plancheck.ExpectResourceAction(gpcnVpcVpnConnectionTest, plancheck.ResourceActionReplace),
-					},
-				},
-			},
-		},
-	})
-}
-
 // A job that ended, followed by a detail read that fails, still leaves a row.
 // The create saves the planned values and the ID with the error, so Terraform
 // taints the resource.
@@ -928,14 +833,12 @@ func TestVpcVpnConnectionResourceParkedFailedRetrySettles(t *testing.T) {
 }
 
 // Saved settings that do not run call for an update only when the connection
-// is idle. While it is being created or removed, or while a job runs, the plan
-// stays empty.
+// is idle. While it is being created or removed, the plan stays empty.
 func TestVpcVpnConnectionResourceUnappliedWhileBusyPlansNoUpdate(t *testing.T) {
 	t.Parallel()
 	for name, busy := range map[string]func(*vpnConnPlanTestServerState){
-		"creating":       func(s *vpnConnPlanTestServerState) { s.row["state"] = "creating" },
-		"removing":       func(s *vpnConnPlanTestServerState) { s.row["state"] = "removing" },
-		"job is running": func(s *vpnConnPlanTestServerState) { s.row["state"] = "connected"; s.row["activeJobId"] = "job-live" },
+		"creating": func(s *vpnConnPlanTestServerState) { s.row["state"] = "creating" },
+		"removing": func(s *vpnConnPlanTestServerState) { s.row["state"] = "removing" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -1321,35 +1224,6 @@ func TestVpcVpnConnectionResourceDeleteStateConflict(t *testing.T) {
 	})
 }
 
-// A delete that meets a removal already under way waits until the API answers
-// 404, instead of failing on the 409.
-func TestVpcVpnConnectionResourceDeleteAlreadyRemovingWaits(t *testing.T) {
-	t.Parallel()
-	server, state := startVpnConnPlanMockServer(t)
-	config := newVpnConnPlanTestConfig().render(server.URL)
-
-	resource.UnitTest(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		CheckDestroy: func(*terraform.State) error {
-			state.mu.Lock()
-			defer state.mu.Unlock()
-			if state.getsAfterDel != 3 {
-				return fmt.Errorf("expected 3 reads after the 409 (two removing, one 404), got %d", state.getsAfterDel)
-			}
-			return nil
-		},
-		Steps: []resource.TestStep{
-			{
-				Config: config,
-				Check: func(*terraform.State) error {
-					state.set(func(s *vpnConnPlanTestServerState) { s.deleteRemoving = true; s.removingHold = 2 })
-					return nil
-				},
-			},
-		},
-	})
-}
-
 // A failed update job keeps the prior state. The values the API saved show up
 // on the next refresh, and the W1 warning tells the operator to apply again.
 func TestVpcVpnConnectionResourceUpdateJobFailedKeepsState(t *testing.T) {
@@ -1569,13 +1443,15 @@ func TestVpcVpnConnectionResourceDesiredAppliedWarning(t *testing.T) {
 		t.Errorf("Expected the W1 bytes %q, got %q", w1, warnings[0].Detail())
 	}
 
-	state.set(func(s *vpnConnPlanTestServerState) { s.row["activeJobId"] = "job-live" })
+	state.set(func(s *vpnConnPlanTestServerState) {
+		s.row["heldBy"] = map[string]any{"jobId": "job-live", "operation": "update", "verb": "update"}
+	})
 	if warnings := read().Diagnostics.Warnings(); len(warnings) != 0 {
 		t.Errorf("Expected no warning while a job is active, got %v", warnings)
 	}
 
 	for _, busy := range []string{"creating", "removing"} {
-		state.set(func(s *vpnConnPlanTestServerState) { s.row["activeJobId"] = nil; s.row["state"] = busy })
+		state.set(func(s *vpnConnPlanTestServerState) { s.row["heldBy"] = nil; s.row["state"] = busy })
 		if warnings := read().Diagnostics.Warnings(); len(warnings) != 0 {
 			t.Errorf("Expected no warning while the state is %s, got %v", busy, warnings)
 		}
@@ -1740,29 +1616,6 @@ func TestVpcVpnConnectionResourceDeleteParkedTwiceReports(t *testing.T) {
 	})
 }
 
-// A resend that meets a removal another caller started counts as sent, so the
-// wait goes on and the destroy ends on the 404.
-func TestVpcVpnConnectionResourceDeleteResendMeetsRemovalWaits(t *testing.T) {
-	t.Parallel()
-	server, state := startVpnConnPlanMockServer(t)
-	config := newVpnConnPlanTestConfig().render(server.URL)
-	// A short polling timeout keeps a wait that never ends from stalling the test.
-	config = strings.Replace(config, `api_key = "test-key"`, "api_key = \"test-key\"\n  polling_timeout = 5", 1)
-
-	resource.UnitTest(t, resource.TestCase{
-		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
-		Steps: []resource.TestStep{
-			{
-				Config: config,
-				Check: func(*terraform.State) error {
-					state.set(func(s *vpnConnPlanTestServerState) { s.parkDeletes = 1; s.resendMeetsRemoval = true })
-					return nil
-				},
-			},
-		},
-	})
-}
-
 // A resend the API refuses with a 409 ends the destroy at once. The error
 // carries the failure reason and the API's message, and it tells the operator
 // to run the destroy or apply again.
@@ -1828,8 +1681,8 @@ func TestVpcVpnConnectionResourceUpdateSendsOnce(t *testing.T) {
 	})
 }
 
-// An updated-wire read names a running job in heldBy and carries no activeJobId.
-// Saved settings that do not run then call for no update.
+// A read names a running job in heldBy. Saved settings that do not run then
+// call for no update.
 func TestVpcVpnConnectionHeldByWithholdsResend(t *testing.T) {
 	t.Parallel()
 	server, state := startVpnConnPlanMockServer(t)
@@ -1844,7 +1697,6 @@ func TestVpcVpnConnectionHeldByWithholdsResend(t *testing.T) {
 					state.set(func(s *vpnConnPlanTestServerState) {
 						s.desiredApplied = false
 						s.row["state"] = "connected"
-						s.row["activeJobId"] = nil
 						s.row["heldBy"] = map[string]any{"jobId": "job-live", "operation": "update", "verb": "update"}
 					})
 				},

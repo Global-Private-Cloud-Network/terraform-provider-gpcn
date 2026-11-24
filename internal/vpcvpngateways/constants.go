@@ -26,16 +26,9 @@ var RemovalPollInterval = 5 * time.Second
 // the row of this request. It absorbs the difference between the two clocks.
 const AdoptWindow = 2 * time.Minute
 
-// CodeGatewayRemoving is the code of the 409 for a gateway whose removal runs.
-const CodeGatewayRemoving = "VPN_GATEWAY_REMOVING"
-
 // CodeGatewayExists is the code of the 409 for a VPC that already has a
 // gateway.
 const CodeGatewayExists = "VPN_GATEWAY_EXISTS"
-
-// CodeGatewayBusyCreating is the code of the 409 for a gateway whose create
-// still runs.
-const CodeGatewayBusyCreating = "VPN_GATEWAY_BUSY_CREATING"
 
 const (
 	ActionCreateVpnGateway = "Create GPCN VPN Gateway"

@@ -31,7 +31,6 @@ type vpcPayload struct {
 	Status          string         `json:"status"`
 	FailureReason   *string        `json:"failureReason"`
 	EgressIp        *string        `json:"egressIp"`
-	ActiveJobId     *string        `json:"activeJobId"`
 	HeldBy          *client.HeldBy `json:"heldBy"`
 	CreatedAt       string         `json:"createdAt"`
 	UpdatedAt       string         `json:"updatedAt"`
@@ -47,15 +46,14 @@ type readVpcResponse struct {
 }
 
 // The create 202 carries the new row beside the job. The row exists already, so
-// its id reaches state before the poll starts. CreateVpc fills both fields from
-// either shape of the answer.
+// its id reaches state before the poll starts.
 type createVpcResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
+	Success bool
+	Message string
 	Data    struct {
-		JobID string     `json:"jobId"`
-		Vpc   vpcPayload `json:"vpc"`
-	} `json:"data"`
+		JobID string
+		Vpc   vpcPayload
+	}
 }
 
 func CreateVpc(gpcnClient *client.GpcnClient, ctx context.Context, model ResourceModel) (*createVpcResponse, error) {
@@ -90,12 +88,7 @@ func CreateVpc(gpcnClient *client.GpcnClient, ctx context.Context, model Resourc
 	if err := json.Unmarshal(response, &accepted); err != nil {
 		return nil, err
 	}
-	var createdVpc createVpcResponse
-	if err := json.Unmarshal(response, &createdVpc); err != nil {
-		return nil, err
-	}
-	// The answer names the job as data.job.id or data.jobId, and carries the
-	// row as data.resource or data.vpc.
+	createdVpc := createVpcResponse{Success: accepted.Success, Message: accepted.Message}
 	createdVpc.Data.JobID = accepted.Data.JobID
 	if accepted.Data.Resource != nil {
 		var row vpcPayload
@@ -164,10 +157,6 @@ func UpdateVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string,
 	return GetVpc(gpcnClient, ctx, vpcID)
 }
 
-// DeleteVpc claims the VPC and waits for the teardown job. A VPC that is still
-// being created answers VPC_NOT_ACTIVE. Only the end of its create job clears
-// that refusal. A VPC already being torn down answers the same refusal. The row
-// itself says whether a job drives that teardown.
 func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteVpcWithID, vpcID))
 
@@ -199,44 +188,7 @@ func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string)
 		jobID, err = issueVpcDelete(gpcnClient, ctx, vpcID)
 	}
 	if err != nil {
-		if !client.HasErrorCode(err, ERROR_CODE_VPC_NOT_ACTIVE) {
-			return err
-		}
-		vpcResponse, readErr := GetVpc(gpcnClient, ctx, vpcID)
-		// The teardown can end between the refusal and this read. The row is
-		// then gone, which is what the delete asked for.
-		if client.IsNotFound(readErr) {
-			tflog.Info(ctx, fmt.Sprintf(LogVpcTeardownFinished, vpcID))
-			return nil
-		}
-		// A read that fails says nothing about the row. The reader needs the
-		// failure the provider met, not the refusal that sent it to the row.
-		if readErr != nil {
-			return readErr
-		}
-		activeJobIDRef := client.ActiveJobID(vpcResponse.Data.HeldBy, vpcResponse.Data.ActiveJobId)
-		switch {
-		// A teardown that parked writes a failure reason, and no job then
-		// drives the row. The platform re-admits a delete on it, so a wait
-		// would never end.
-		case vpcResponse.Data.Status == VPC_STATUS_DELETING && vpcResponse.Data.FailureReason == nil:
-			tflog.Info(ctx, fmt.Sprintf(LogWaitingForVpcTeardown, vpcID))
-			return awaitVpcGone(gpcnClient, ctx, vpcID)
-		case vpcResponse.Data.Status == VPC_STATUS_DELETING:
-			tflog.Info(ctx, fmt.Sprintf(LogReclaimingParkedVpcTeardown, vpcID, *vpcResponse.Data.FailureReason))
-		case vpcResponse.Data.Status == VPC_STATUS_CREATING && activeJobIDRef != nil:
-			activeJobID := *activeJobIDRef
-			tflog.Info(ctx, fmt.Sprintf(LogWaitingForVpcActiveJob, vpcID, activeJobID))
-			if pollErr := AwaitVpcJob(gpcnClient, ctx, ACTION_CREATE_VPC, activeJobID); pollErr != nil {
-				tflog.Warn(ctx, fmt.Sprintf(LogVpcActiveJobPollFailed, vpcID, pollErr.Error()))
-			}
-		default:
-			return err
-		}
-		jobID, err = issueVpcDelete(gpcnClient, ctx, vpcID)
-		if err != nil {
-			return err
-		}
+		return err
 	}
 
 	// After a busy wait the job poll shares the deadline of that wait.
@@ -265,40 +217,6 @@ func issueVpcDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID st
 	}
 	tflog.Info(ctx, LogIssuedDeleteVpcJob)
 	return deletedVpc.Data.JobID, nil
-}
-
-// awaitVpcGone waits out a teardown the caller did not start. The row answers
-// 404 when the teardown ends, which is the state the delete asked for. The
-// teardown job belongs to the other caller, so only the row reports progress.
-func awaitVpcGone(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string) error {
-	config := client.DefaultPollingConfig()
-	if clientConfig := gpcnClient.Config(); clientConfig != nil && clientConfig.PollingTimeout > 0 {
-		config.Timeout = clientConfig.PollingTimeout
-	}
-
-	startTime := time.Now()
-	interval := config.InitialInterval
-	for {
-		_, err := GetVpc(gpcnClient, ctx, vpcID)
-		if client.IsNotFound(err) {
-			tflog.Info(ctx, fmt.Sprintf(LogVpcTeardownFinished, vpcID))
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-
-		elapsed := time.Since(startTime)
-		if elapsed >= config.Timeout {
-			return fmt.Errorf(ErrDetailVpcTeardownTimeout, elapsed)
-		}
-
-		time.Sleep(interval)
-		interval *= 2
-		if interval > config.MaxInterval {
-			interval = config.MaxInterval
-		}
-	}
 }
 
 func sendVpcRequest(gpcnClient *client.GpcnClient, ctx context.Context, method, url string, requestBody map[string]any) ([]byte, error) {

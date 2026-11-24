@@ -91,7 +91,7 @@ func startNetworkPlanMockServer(t *testing.T, initialName string) (*httptest.Ser
 			mu.Unlock()
 			testutil.WriteJSONResponse(w, networkPlanTestReadBody(current))
 		case r.Method == http.MethodDelete && r.URL.Path == networkPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
@@ -314,7 +314,7 @@ func startCustomNetworkPlanMockServer(t *testing.T) (*httptest.Server, *customNe
 			}
 			testutil.WriteJSONResponse(w, mock.readBody())
 		case r.Method == http.MethodDelete && r.URL.Path == networkPath:
-			testutil.HandleCreateJobResponse(w, "job-2", "delete issued")
+			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
