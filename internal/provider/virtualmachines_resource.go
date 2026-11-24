@@ -303,7 +303,7 @@ func (r *virtualMachinesResource) Schema(_ context.Context, _ resource.SchemaReq
 				},
 			},
 			"initial_auth": schema.SingleNestedAttribute{
-				Description: "Initial authentication for the virtual machine: a username with either ssh_key_id or password. Omit it when user_data is set, or for an image that takes no credential. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine",
+				Description: "Initial authentication for the virtual machine: either ssh_key_id or password, with an optional username. Omit it when user_data is set, or for an image that takes no credential. This block is only applied at creation time; subsequent changes update the Terraform state only and do not affect the running machine",
 				Optional:    true,
 				Attributes: map[string]schema.Attribute{
 					"ssh_key_id": schema.StringAttribute{
