@@ -2,6 +2,7 @@ package virtualmachines
 
 import (
 	"context"
+	"fmt"
 	"regexp"
 
 	"github.com/hashicorp/terraform-plugin-framework/path"
@@ -38,6 +39,57 @@ func (v PublicIpIdConflictsValidator) ValidateString(ctx context.Context, req va
 
 	if allocatePublicIp.ValueBool() {
 		resp.Diagnostics.AddAttributeError(req.Path, ErrSummaryPublicIpConflict, ErrDetailPublicIpIdConflictsWithAllocate)
+	}
+}
+
+// stringvalidator.LengthAtMost counts characters. GPCN™ caps the length in bytes of UTF-8.
+type MaxBytesValidator struct {
+	Max int
+}
+
+var _ validator.String = MaxBytesValidator{}
+
+func (v MaxBytesValidator) Description(_ context.Context) string {
+	return fmt.Sprintf("value must be at most %d bytes of UTF-8", v.Max)
+}
+
+func (v MaxBytesValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (v MaxBytesValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+
+	value := req.ConfigValue.ValueString()
+	if len(value) > v.Max {
+		resp.Diagnostics.AddAttributeError(req.Path, ErrSummaryTextTooLong, fmt.Sprintf(ErrDetailTextTooLong, v.Max, len(value)))
+	}
+}
+
+type BasicPlaneValidator struct{}
+
+var _ validator.String = BasicPlaneValidator{}
+
+func (v BasicPlaneValidator) Description(_ context.Context) string {
+	return "value must not contain a character above U+FFFF"
+}
+
+func (v BasicPlaneValidator) MarkdownDescription(ctx context.Context) string {
+	return v.Description(ctx)
+}
+
+func (v BasicPlaneValidator) ValidateString(_ context.Context, req validator.StringRequest, resp *validator.StringResponse) {
+	if req.ConfigValue.IsNull() || req.ConfigValue.IsUnknown() {
+		return
+	}
+
+	for _, character := range req.ConfigValue.ValueString() {
+		if character > 0xFFFF {
+			resp.Diagnostics.AddAttributeError(req.Path, ErrSummaryUserDataCharacter, ErrDetailUserDataCharacter)
+			return
+		}
 	}
 }
 

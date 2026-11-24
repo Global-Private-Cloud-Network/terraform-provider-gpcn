@@ -21,6 +21,8 @@ const (
 	ErrSummaryPublicIpConflict                    = "Invalid public IP configuration"
 	ErrSummaryVMCreatedAttachFailed               = "Virtual machine created but a network interface attach failed"
 	ErrSummaryVMLeftStopped                       = "Virtual machine left stopped"
+	ErrSummaryTextTooLong                         = "Text too long"
+	ErrSummaryUserDataCharacter                   = "Unsupported character in user_data"
 )
 
 // Warning summary constants
@@ -44,6 +46,8 @@ const (
 	ErrDetailPrimaryInterfaceNotOnAVpc       = "the primary network interface of virtual machine %s is not on a VPC subnet, and a public IP attaches to a VPC interface only"
 	ErrDetailVMCreatedAttachFailed           = "virtual machine %s was created and is in state, but attaching %s failed: %s. Terraform has marked the machine tainted: run terraform untaint on it and apply again to attach the remaining networks, or let the next apply replace it."
 	ErrDetailParkedDeleteFailed              = "GPCN™ could not delete virtual machine %s, which a failed create left behind: %s. Run the destroy or apply again to retry the delete"
+	ErrDetailTextTooLong                     = "The value must be at most %d bytes of UTF-8, got %d."
+	ErrDetailUserDataCharacter               = "user_data must not contain a character above U+FFFF, such as an emoji. GPCN™ refuses it."
 )
 
 // GPCN reports one address row whatever bound the address. A
