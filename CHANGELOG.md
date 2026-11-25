@@ -1,5 +1,9 @@
 ## 1.8.1 (Unreleased)
 
+ENHANCEMENTS:
+
+- **Virtual Machine, GPU, Volume, Volume Attachment, L2 Segment, Subnet, Security Group, Elastic IP**: an update or destroy that finds the resource held by another job waits for that job to end and sends the request again, within `polling_timeout`. Before, it failed and had to be run again.
+
 BUG FIXES:
 
 - **Provider**: cancelling an apply or destroy (Ctrl-C) now stops a job poll, a retry backoff and a virtual machine status poll at once, instead of when the current wait ends. The destroy of a deprecated `gpcn_network` still finishes its pause between delete attempts.
@@ -8,6 +12,7 @@ BUG FIXES:
 - **Virtual Machine**: destroying a machine that a failed create left behind releases its elastic IP by the same rule as any other destroy: only when its primary interface is on a VPC. When the provider cannot read the interfaces, or none of them is primary, it releases the address as before and warns.
 - **VPC, VPN Connection, VPN Gateway**: when the wait for the job that holds the resource runs out after a read that did not return that job, the error says that the API key cannot read it. Before, it said that the job had ended.
 - **VPN Connection**: an update cancelled while it waits for another job no longer says that the change may still apply.
+- **Provider**: a destroy that waits for another job no longer drops the resource from state when the read of that job answers 404.
 
 ## 1.8.0 (November 24, 2026)
 
