@@ -2168,6 +2168,49 @@ func TestSetNetworkModelValuesNotPresentNeverInfersAnAcquiredAddressUnit(t *test
 	}
 }
 
+func TestReleasesParkedAddress(t *testing.T) {
+	nic := func(isPrimary bool, world string) networks.ReadVirtualMachineNetworkDataResponseTF {
+		return networks.ReadVirtualMachineNetworkDataResponseTF{
+			IsPrimary: types.BoolValue(isPrimary),
+			World:     types.StringValue(world),
+		}
+	}
+	listErr := errors.New("HTTP 404: Virtual machine not found")
+	vpcPrimary := []networks.ReadVirtualMachineNetworkDataResponseTF{nic(false, networks.NicWorldL2), nic(true, networks.NicWorldVpc)}
+	legacyPrimary := []networks.ReadVirtualMachineNetworkDataResponseTF{nic(true, networks.NicWorldLegacy)}
+	noPrimary := []networks.ReadVirtualMachineNetworkDataResponseTF{nic(false, networks.NicWorldVpc)}
+
+	tests := []struct {
+		name         string
+		allocate     types.Bool
+		live         []networks.ReadVirtualMachineNetworkDataResponseTF
+		listErr      error
+		wantReleases bool
+		wantReason   string
+	}{
+		{"allocate false with a VPC primary", types.BoolValue(false), vpcPrimary, nil, false, ""},
+		{"allocate null with a VPC primary", types.BoolNull(), vpcPrimary, nil, false, ""},
+		{"allocate false with a failed listing", types.BoolValue(false), nil, listErr, false, ""},
+		{"allocate true with a failed listing", types.BoolValue(true), nil, listErr, true, "HTTP 404: Virtual machine not found"},
+		{"allocate true with no interface", types.BoolValue(true), nil, nil, true, "no interface is marked primary"},
+		{"allocate true with no primary", types.BoolValue(true), noPrimary, nil, true, "no interface is marked primary"},
+		{"allocate true with a legacy primary", types.BoolValue(true), legacyPrimary, nil, false, ""},
+		{"allocate true with a VPC primary", types.BoolValue(true), vpcPrimary, nil, true, ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			releases, reason := ReleasesParkedAddress(ResourceModel{AllocatePublicIp: tc.allocate}, tc.live, tc.listErr)
+			if releases != tc.wantReleases {
+				t.Errorf("Expected releases %t, got %t", tc.wantReleases, releases)
+			}
+			if reason != tc.wantReason {
+				t.Errorf("Expected the reason '%s', got '%s'", tc.wantReason, reason)
+			}
+		})
+	}
+}
+
 // The refusal of an address on a machine that has no VPC is the only report the user
 // reads. The release pins the bytes, and the compiler accepts any rewording.
 func TestPrimaryInterfaceNotOnAVpcBytes(t *testing.T) {

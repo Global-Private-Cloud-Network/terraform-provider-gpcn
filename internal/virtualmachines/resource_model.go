@@ -264,6 +264,19 @@ func ReleasesAcquiredAddress(state ResourceModel, live []networks.ReadVirtualMac
 	return named && world == networks.NicWorldVpc
 }
 
+func ReleasesParkedAddress(state ResourceModel, live []networks.ReadVirtualMachineNetworkDataResponseTF, listErr error) (bool, string) {
+	if !state.AllocatePublicIp.ValueBool() {
+		return false, ""
+	}
+	if listErr != nil {
+		return true, listErr.Error()
+	}
+	if _, named := primaryInterfaceWorld(live); !named {
+		return true, ReasonNoPrimaryInterface
+	}
+	return ReleasesAcquiredAddress(state, live), ""
+}
+
 // primaryInterfaceWorld names the world of the birth interface. A list with no primary
 // names none.
 func primaryInterfaceWorld(interfaces []networks.ReadVirtualMachineNetworkDataResponseTF) (string, bool) {

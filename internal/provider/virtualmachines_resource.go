@@ -750,13 +750,22 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 	// A failed create leaves the machine in Error with a failure reason. That
 	// machine skips the interface detach too.
 	if inError && failureReason != nil && *failureReason != "" {
-		// Deleting a machine a failed create left behind also releases the
-		// address that create acquired. The body asks only for addresses still
-		// bound to the machine's interfaces, so the decision needs no interface
-		// listing.
-		// The delete releases the address only when this resource acquired one.
-		var parkedDeleteRequestBody io.Reader
+		// The listing only decides the release. A failed listing, a 404 included,
+		// does not stop the delete.
+		var parkedInterfaces []networks.ReadVirtualMachineNetworkDataResponseTF
+		var listErr error
 		if state.AllocatePublicIp.ValueBool() {
+			parkedInterfaces, listErr = networks.GetNetworkInterfaces(r.client, ctx, state.ID.ValueString())
+		}
+		releases, fallbackReason := virtualmachines.ReleasesParkedAddress(state, parkedInterfaces, listErr)
+		if fallbackReason != "" {
+			resp.Diagnostics.AddWarning(
+				virtualmachines.WarnSummaryParkedInterfaceListFailed,
+				fmt.Sprintf(virtualmachines.WarnDetailParkedReleaseFellBack, state.ID.ValueString(), fallbackReason),
+			)
+		}
+		var parkedDeleteRequestBody io.Reader
+		if releases {
 			jsonDeleteRequestBody, err := json.Marshal(map[string]any{"releasePublicIps": true})
 			if err != nil {
 				resp.Diagnostics.AddError(

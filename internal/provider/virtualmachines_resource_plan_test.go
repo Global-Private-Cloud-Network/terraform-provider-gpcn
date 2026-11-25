@@ -4852,6 +4852,10 @@ type vmUpdatedMock struct {
 	// reads answer as usual.
 	failRead           bool
 	readsBeforeFailure int
+	// interfacesBody replaces the interface listing.
+	interfacesBody map[string]any
+	// interfacesNotFound answers every interface listing with 404.
+	interfacesNotFound bool
 }
 
 // vmUpdatedRead is a status and a failure reason as a read reports them. A nil
@@ -4965,8 +4969,19 @@ func startVirtualMachineUpdatedMockServer(t *testing.T) *vmUpdatedMock {
 			mock.mu.Lock()
 			boundID := mock.boundID
 			segmentNics := slices.Clone(mock.segmentNics)
+			interfacesBody, interfacesNotFound := mock.interfacesBody, mock.interfacesNotFound
 			mock.events = append(mock.events, "list-interfaces")
 			mock.mu.Unlock()
+			if interfacesNotFound {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"success":false,"message":"Virtual machine not found","error":{"code":"Resource Not Found","statusCode":404,"details":null}}`))
+				return
+			}
+			if interfacesBody != nil {
+				testutil.WriteJSONResponse(w, interfacesBody)
+				return
+			}
 			address := ""
 			if boundID != "" {
 				address = vmPlanTestAcquiredIpAddress
@@ -5137,10 +5152,81 @@ func TestVirtualMachineDeleteParkedSkipsStop(t *testing.T) {
 	if stops != 0 {
 		t.Errorf("Expected no stop of the parked machine, got %d", stops)
 	}
-	want := []string{"read", "delete"}
+	want := []string{"read", "list-interfaces", "delete"}
 	if got := mock.deletePhase(); !slices.Equal(got, want) {
-		t.Errorf("Expected the delete to read and delete, with no interface listing or detach, got %v", got)
+		t.Errorf("Expected the delete to read, list the interfaces and delete, with no detach, got %v", got)
 	}
+}
+
+// vmUpdatedPlanTestDestroyParked creates a machine with an acquired address, then
+// destroys it while it reads parked.
+func vmUpdatedPlanTestDestroyParked(t *testing.T, name string, change func(*vmUpdatedMock)) *vmUpdatedMock {
+	t.Helper()
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineUpdatedMockServer(t)
+	config := vmPublicIpPlanTestConfig(mock.server.URL, name, true, "")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() {
+					mock.set(func(m *vmUpdatedMock) {
+						m.parked = true
+						change(m)
+					})
+				},
+				Config:  config,
+				Destroy: true,
+			},
+		},
+	})
+	return mock
+}
+
+func vmUpdatedPlanTestExpectParkedDelete(t *testing.T, mock *vmUpdatedMock, wantBody string) {
+	t.Helper()
+	_, deleteBodies := mock.recorded()
+	if len(deleteBodies) != 1 {
+		t.Fatalf("Expected one delete, got %d", len(deleteBodies))
+	}
+	if deleteBodies[0] != wantBody {
+		t.Errorf("Expected the delete body '%s', got '%s'", wantBody, deleteBodies[0])
+	}
+	want := []string{"read", "list-interfaces", "delete"}
+	if got := mock.deletePhase(); !slices.Equal(got, want) {
+		t.Errorf("Expected the delete to read, list the interfaces and delete, got %v", got)
+	}
+}
+
+// A parked machine on a legacy network has no VPC address to give back.
+func TestVirtualMachineDeleteParkedReleasesOnlyAVpcPrimary(t *testing.T) {
+	mock := vmUpdatedPlanTestDestroyParked(t, "vm-updated-parked-legacy", func(m *vmUpdatedMock) {
+		m.interfacesBody = vmLegacyPlanTestInterfacesBody(vmPlanTestAcquiredIpID, vmPlanTestAcquiredIpAddress)
+	})
+
+	vmUpdatedPlanTestExpectParkedDelete(t, mock, "")
+}
+
+// A listing that answers 404 is not proof that the parked machine is gone. The
+// destroy still sends the delete.
+func TestVirtualMachineDeleteParkedFallsBackWhenTheListingFails(t *testing.T) {
+	mock := vmUpdatedPlanTestDestroyParked(t, "vm-updated-parked-listing-fails", func(m *vmUpdatedMock) {
+		m.interfacesNotFound = true
+	})
+
+	vmUpdatedPlanTestExpectParkedDelete(t, mock, `{"releasePublicIps":true}`)
+}
+
+// A listing with no primary names no network, so the configuration decides.
+func TestVirtualMachineDeleteParkedFallsBackWithoutAPrimary(t *testing.T) {
+	mock := vmUpdatedPlanTestDestroyParked(t, "vm-updated-parked-no-primary", func(m *vmUpdatedMock) {
+		m.interfacesBody = vmPublicIpPlanTestInterfacesBody("", "")
+		m.interfacesBody["data"].([]map[string]any)[0]["isPrimary"] = 0
+	})
+
+	vmUpdatedPlanTestExpectParkedDelete(t, mock, `{"releasePublicIps":true}`)
 }
 
 // vmUpdatedPlanTestDestroyWithRead creates the machine, then destroys it while reads report the
