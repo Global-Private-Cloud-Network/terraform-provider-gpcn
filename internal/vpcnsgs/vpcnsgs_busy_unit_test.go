@@ -93,7 +93,7 @@ func TestRenameNsgWaitsOutBusyHolder(t *testing.T) {
 	recorded.check(t, `{"description":"text","name":"renamed"}`, "send", "poll holder-job", "send")
 }
 
-// The holder adds a VPN-owned rule between the two sends, so only a body built
+// The holder adds a VPN-owned rule between the two sends. Only a body built
 // again for the second send carries it.
 func TestReplaceNsgRulesWaitsOutBusyHolder(t *testing.T) {
 	groupPath := nsgPath(unitTestVpcID, unitTestNsgID)
