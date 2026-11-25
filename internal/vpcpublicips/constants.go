@@ -1,5 +1,7 @@
 package vpcpublicips
 
+import "time"
+
 var BASE_URL_V1 string = "/v1/resource/vpcs/"
 
 // VPC public IP states
@@ -34,3 +36,7 @@ func publicIpsURL(vpcID string) string {
 func publicIpURL(vpcID, publicIpID string) string {
 	return publicIpsURL(vpcID) + "/" + publicIpID
 }
+
+// BusyRetryInterval is the wait before a request goes out again after the job
+// that held the resource ended. It is a variable so that tests can shorten it.
+var BusyRetryInterval = 5 * time.Second
