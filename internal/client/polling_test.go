@@ -1,6 +1,7 @@
 package client_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -505,5 +506,36 @@ func TestPollRefusesEmptyJobID(t *testing.T) {
 	}
 	if got := int(calls.Load()); got != 0 {
 		t.Errorf("poll calls = %d, want 0", got)
+	}
+}
+
+// TestPollReturnsAtOnceWhenContextIsCancelled covers a Ctrl-C during the wait
+// between two reads: the poll returns the cancel instead of sleeping out the
+// interval.
+func TestPollReturnsAtOnceWhenContextIsCancelled(t *testing.T) {
+	gpcnClient, calls := jobsServer(t, updatedJobsBody(`{"id":"job-1","stage":"running","outcome":null}`))
+
+	config := &client.PollingConfig{
+		Timeout:         10 * time.Second,
+		InitialInterval: 2 * time.Second,
+		MaxInterval:     2 * time.Second,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	start := time.Now()
+	timer := time.AfterFunc(50*time.Millisecond, cancel)
+	defer timer.Stop()
+	_, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, pollTestAction, "job-1", config)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want context.Canceled", err)
+	}
+	if elapsed >= 500*time.Millisecond {
+		t.Errorf("poll returned after %s, want under 500ms", elapsed)
+	}
+	if got := int(calls.Load()); got != 1 {
+		t.Errorf("poll calls = %d, want 1", got)
 	}
 }

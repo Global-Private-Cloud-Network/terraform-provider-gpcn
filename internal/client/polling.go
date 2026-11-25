@@ -203,7 +203,11 @@ func PerformLongPollingWithConfig(gpcnClient *GpcnClient, ctx context.Context, a
 		}
 
 		// Sleep with exponential backoff
-		time.Sleep(interval)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(interval):
+		}
 		interval *= 2
 		if interval > config.MaxInterval {
 			interval = config.MaxInterval
