@@ -21,12 +21,13 @@ func AddVolumeToVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Contex
 	if err != nil {
 		return errors.New("error marshaling the json request body GPCN Virtual Machines - Attach Volume")
 	}
-	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/attach", bytes.NewBuffer(jsonAttachVolumeRequestBody))
-	if err != nil {
-		return err
-	}
-
-	response, err := gpcnClient.DoWithRetry(request)
+	response, pollConfig, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/attach", bytes.NewBuffer(jsonAttachVolumeRequestBody))
+		if err != nil {
+			return nil, err
+		}
+		return gpcnClient.DoWithRetry(request)
+	})
 	if err != nil {
 		return err
 	}
@@ -44,7 +45,7 @@ func AddVolumeToVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Contex
 		return err
 	}
 
-	_, err = client.PerformLongPolling(gpcnClient, ctx, "Attach GPCN Volume to VM", attachVolumeResponse.Data.JobID)
+	_, err = client.PerformLongPollingWithConfig(gpcnClient, ctx, "Attach GPCN Volume to VM", attachVolumeResponse.Data.JobID, pollConfig)
 
 	if err != nil {
 		return err
@@ -55,12 +56,13 @@ func AddVolumeToVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Contex
 
 // Remove a volume from the virtual machine
 func RemoveVolumeFromVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, volumeId string) error {
-	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/detach", nil)
-	if err != nil {
-		return err
-	}
-
-	response, err := gpcnClient.DoWithRetry(request)
+	response, pollConfig, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/detach", nil)
+		if err != nil {
+			return nil, err
+		}
+		return gpcnClient.DoWithRetry(request)
+	})
 	if err != nil {
 		return err
 	}
@@ -78,7 +80,7 @@ func RemoveVolumeFromVirtualMachine(gpcnClient *client.GpcnClient, ctx context.C
 		return err
 	}
 
-	_, err = client.PerformLongPolling(gpcnClient, ctx, "Detach GPCN Volume from VM", detachVolumeResponse.Data.JobID)
+	_, err = client.PerformLongPollingWithConfig(gpcnClient, ctx, "Detach GPCN Volume from VM", detachVolumeResponse.Data.JobID, pollConfig)
 
 	if err != nil {
 		return err
