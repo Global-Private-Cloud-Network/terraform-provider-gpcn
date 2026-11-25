@@ -13,6 +13,7 @@ const (
 // Error detail message templates
 const (
 	ErrDetailExpectedGpcnClient         = "Expected *client.GpcnClient, got: %T. Please report this issue to the provider developers."
+	ErrDetailNoResourceIDInJob          = "the create job named no GPU ID"
 	ErrDetailReadGPUFailed              = "Failed to read GPU with ID %s"
 	ErrDetailUpdateGPUFailed            = "Failed to update GPU with ID %s"
 	ErrDetailDeleteGPUFailed            = "Failed to delete GPU with ID %s"

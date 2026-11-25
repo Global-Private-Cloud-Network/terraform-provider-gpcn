@@ -58,7 +58,7 @@ type ReadVirtualMachinesResponse struct {
 }
 
 // CreateVirtualMachine also returns the machine ID it knows when it fails: the
-// ID the completed job names, else the ID the 202 carried. A row can outlive a
+// ID the 202 carried, else the ID the completed job names. A row can outlive a
 // failed create, so the caller records that ID and Terraform taints the machine.
 func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, imageId string, skuId string, model ResourceModel) (*ReadVirtualMachinesResponse, string, error) {
 	tflog.Info(ctx, LogStartingCreateVirtualMachine)
@@ -128,10 +128,9 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to get job ID from create VM response: %w", err)
 	}
-	// The ID the 202 names, if any. The completed job names it again.
 	virtualMachineID, err := client.GetJobResourceID(&createVirtualMachineResponse)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to get job ID from create VM response: %w", err)
+		return nil, "", fmt.Errorf("failed to get resource ID from create VM response: %w", err)
 	}
 
 	jobResp, err := client.PerformLongPolling(gpcnClient, ctx, "Create GPCN Virtual Machine", jobID)
@@ -141,17 +140,18 @@ func CreateVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, im
 
 	tflog.Info(ctx, LogLongPollingCompletedCreateVM)
 
-	// Extract resource ID with bounds checking
-	resourceID, err := client.GetJobResourceID(jobResp)
-	if err != nil {
-		return nil, virtualMachineID, fmt.Errorf("failed to get resource ID from create VM job response: %w", err)
+	if virtualMachineID == "" {
+		virtualMachineID, err = client.GetJobResourceID(jobResp)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to get resource ID from create VM job response: %w", err)
+		}
 	}
-	if resourceID != "" {
-		virtualMachineID = resourceID
+	if virtualMachineID == "" {
+		return nil, "", errors.New(ErrDetailNoResourceIDInJob)
 	}
 
 	// Wait for the VM to actually be spun up before doing anything more
-	getVirtualMachineResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, resourceID, []string{VMStatusRunning.String(), VMStatusShutoff.String(), VMStatusStopped.String()}, DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS, DEFAULT_INITIAL_POLL_DELAY_SECONDS)
+	getVirtualMachineResponse, err := PollForVirtualMachineStatus(gpcnClient, ctx, virtualMachineID, []string{VMStatusRunning.String(), VMStatusShutoff.String(), VMStatusStopped.String()}, DEFAULT_VIRTUALMACHINE_STATUS_TIMEOUT_SECONDS, DEFAULT_INITIAL_POLL_DELAY_SECONDS)
 	if err != nil {
 		return nil, virtualMachineID, err
 	}

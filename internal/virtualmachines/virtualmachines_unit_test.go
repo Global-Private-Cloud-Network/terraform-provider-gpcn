@@ -2839,6 +2839,119 @@ func TestCreateVirtualMachineReturnsIDWhenStatusWaitFails(t *testing.T) {
 	}
 }
 
+func TestCreateVirtualMachineReturnsIDWhenReadBackFails(t *testing.T) {
+	useNoInitialPollDelay(t)
+	const (
+		jobID = "job-readback-fails"
+		vmID  = "vm-readback-fails-1"
+	)
+
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+				w.WriteHeader(http.StatusAccepted)
+				testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": vmID})
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, vmID, true)
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/"+vmID):
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"success":false,"message":"Internal server error","error":{"code":"INTERNAL_ERROR","statusCode":500,"details":null}}`))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+
+	response, id, err := CreateVirtualMachine(gpcnClient, context.Background(), "image-1", "sku-1", createTestVMModel("test-vm", testVMImage, false))
+	if err == nil {
+		t.Fatal("Expected the failed read-back to fail the create")
+	}
+	if response != nil {
+		t.Errorf("Expected no response, got %+v", response)
+	}
+	if id != vmID {
+		t.Errorf("Expected ID %q from the 202, got %q", vmID, id)
+	}
+}
+
+func TestCreateVirtualMachineReadsBackByTheAcceptedID(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	useNoInitialPollDelay(t)
+	const (
+		jobID = "job-accepted-vm"
+		vmID  = "vm-accepted-1"
+	)
+
+	var readPaths []string
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+				testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": vmID})
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, "", true)
+			case r.Method == http.MethodGet:
+				readPaths = append(readPaths, r.URL.Path)
+				testutil.WriteJSONResponse(w, newVMResponse(vmID, "test-vm"))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	_, id, err := CreateVirtualMachine(gpcnClient, context.Background(), "image-1", "sku-1", createTestVMModel("test-vm", testVMImage, false))
+	if err != nil {
+		t.Fatalf("CreateVirtualMachine failed: %v", err)
+	}
+	if id != vmID {
+		t.Errorf("Expected ID %q from the 202, got %q", vmID, id)
+	}
+	if want := []string{BASE_URL_V1 + vmID}; !slices.Equal(readPaths, want) {
+		t.Errorf("Expected reads %v, got %v", want, readPaths)
+	}
+}
+
+func TestCreateVirtualMachineRejectsJobWithoutResourceID(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	useNoInitialPollDelay(t)
+	const jobID = "job-unnamed-vm"
+
+	var readPaths []string
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+				testutil.HandleBatchCreateJobResponse(w, jobID, nil)
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, "", true)
+			case r.Method == http.MethodGet:
+				readPaths = append(readPaths, r.URL.Path)
+				testutil.WriteJSONResponse(w, newVMResponse("", ""))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	_, id, err := CreateVirtualMachine(gpcnClient, context.Background(), "image-1", "sku-1", createTestVMModel("test-vm", testVMImage, false))
+	if err == nil || err.Error() != "the create job named no virtual machine ID" {
+		t.Errorf("Expected the missing ID to fail the create, got %v", err)
+	}
+	if id != "" {
+		t.Errorf("Expected no ID, got %q", id)
+	}
+	if len(readPaths) != 0 {
+		t.Errorf("Expected no read, got %v", readPaths)
+	}
+}
+
 // The updated API reports networkHotplug as a JSON boolean, and the current API as a
 // number. The body is literal JSON, so the decoder cannot make its fixture agree.
 func TestGetVirtualMachineReadsBooleanNetworkHotplug(t *testing.T) {
