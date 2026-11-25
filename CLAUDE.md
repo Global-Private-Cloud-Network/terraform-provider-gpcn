@@ -189,7 +189,7 @@ The `internal/client/` package provides a configurable HTTP client:
   - `polling_timeout`: Max wait for async operations (default: 10m)
   - `max_retries`: Retry count for transient failures (default: 3)
 
-- **Retry with backoff**: Use `client.DoWithRetry(req)` for requests that should retry on transient failures.
+- **Retry with backoff**: Use `client.DoWithRetry(req)` for requests that should retry on transient failures. A cancelled request context ends the backoff and the job poll at once; `PollForVirtualMachineStatus` returns the last read when the cancel lands during its settle wait, because the machine has already reached the target.
 
 - **User-Agent**: `provider.Configure` sets `client.Config.UserAgent` to `terraform-provider-gpcn/<version>`; the transport sends it on every request.
 
