@@ -18,8 +18,12 @@ var (
 	// ErrHolderStillRunning matches, through errors.Is, the error of a holder
 	// job that outlived the wait.
 	ErrHolderStillRunning = errors.New("a job still holds the resource")
-	// ErrBusyWaitExhausted matches every error of a busy wait that ran out of
-	// time, so the caller knows the API never processed the request.
+	// ErrHolderNotVisible matches, through errors.Is, the deadline error of a
+	// holder job that the batch read does not return.
+	ErrHolderNotVisible = errors.New("the holder job is not visible")
+	// ErrBusyWaitExhausted matches every error of a busy wait that ended without
+	// the API taking the request: the deadline, a cancel, or a failed holder
+	// read.
 	ErrBusyWaitExhausted = errors.New("the busy wait ran out")
 )
 
@@ -59,6 +63,26 @@ func (e *holderEndedAtDeadlineError) Error() string { return e.message }
 
 func (e *holderEndedAtDeadlineError) Is(target error) bool { return target == ErrBusyWaitExhausted }
 
+type holderNotVisibleAtDeadlineError struct {
+	message string
+}
+
+func (e *holderNotVisibleAtDeadlineError) Error() string { return e.message }
+
+func (e *holderNotVisibleAtDeadlineError) Is(target error) bool {
+	return target == ErrHolderNotVisible || target == ErrBusyWaitExhausted
+}
+
+type busyWaitError struct {
+	cause error
+}
+
+func (e *busyWaitError) Error() string { return e.cause.Error() }
+
+func (e *busyWaitError) Unwrap() error { return e.cause }
+
+func (e *busyWaitError) Is(target error) bool { return target == ErrBusyWaitExhausted }
+
 // Configuration errors
 var (
 	ErrMissingHost   = errors.New("missing required configuration: host")
@@ -81,4 +105,6 @@ const (
 	ErrDetailUnknownOutcome     = "the job ended with outcome %q, which this provider version does not recognize"
 	ErrFmtHolderStillRunning    = "job %s still holds this resource after %s; run the apply or destroy again once that job ends"
 	ErrFmtHolderEndedAtDeadline = "job %s ended as the wait for it ran out after %s, so the provider did not send the request; run the apply or destroy again"
+
+	ErrFmtHolderNotVisibleAtDeadline = "job %s held this resource for %s, and the job read does not return it to this API key; run the apply or destroy again once it ends"
 )

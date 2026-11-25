@@ -394,6 +394,44 @@ func TestDeleteVpcBusyChainStopsAtDeadline(t *testing.T) {
 	}
 }
 
+// The test changes a package variable, so it does not run in parallel.
+func TestDeleteVpcNamesAHolderTheKeyCannotReadAtTheDeadline(t *testing.T) {
+	previous := BusyRetryInterval
+	BusyRetryInterval = 10 * time.Millisecond
+	t.Cleanup(func() { BusyRetryInterval = previous })
+
+	var deletes atomic.Int32
+	gpcnClient := vpcClientWithPollingTimeout(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodDelete && r.URL.Path == BASE_URL_V1+vpcUnitTestID:
+			deletes.Add(1)
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{"success":false,"message":"VPC is busy: create in progress.",` +
+				`"error":{"code":"RESOURCE_BUSY","statusCode":409,"details":{"resourceType":"vpc",` +
+				`"resourceId":"` + vpcUnitTestID + `","heldBy":{"jobId":"h1","operation":"create","verb":"create"}}}}`))
+		case r.Method == http.MethodPost && r.URL.Path == client.JOBS_BASE_URL_V1:
+			_, _ = w.Write([]byte(`{"success":true,"data":{"jobs":[],"notFound":["h1"]}}`))
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}, 300*time.Millisecond)
+
+	err := DeleteVpc(gpcnClient, t.Context(), vpcUnitTestID)
+	if !errors.Is(err, client.ErrHolderNotVisible) {
+		t.Fatalf("Expected the not-visible holder error, got %v", err)
+	}
+	if !errors.Is(err, client.ErrBusyWaitExhausted) {
+		t.Errorf("Expected the busy wait error, got %v", err)
+	}
+	if want := "job h1 held this resource for "; !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("Expected the error to start with %q, got %q", want, err.Error())
+	}
+	if got := deletes.Load(); got < 2 {
+		t.Errorf("Expected more than one DELETE before the deadline, got %d", got)
+	}
+}
+
 // vpcDeadlineServer answers the first DELETE with a 409 RESOURCE_BUSY whose
 // holder ends after holderDelay. The next DELETE gets a 202 after
 // acceptDelay, and its job never ends. The counter holds the DELETEs.

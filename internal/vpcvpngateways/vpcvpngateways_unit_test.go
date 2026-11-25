@@ -630,6 +630,54 @@ func TestDeleteVpnGatewayBusyDeadlineNamesTheHolder(t *testing.T) {
 	}
 }
 
+func notVisibleHolderServer() *scriptedGatewayServer {
+	return &scriptedGatewayServer{
+		answers: map[string][]gatewayAnswer{
+			http.MethodDelete: {{http.StatusConflict, busyGatewayBody("delete")}},
+			http.MethodGet:    {{http.StatusOK, removingRow(parkedGatewayReason)}},
+		},
+		jobs: map[string]string{"h1": `{"success":true,"data":{"jobs":[],"notFound":["h1"]}}`},
+	}
+}
+
+func assertNamesNotVisibleHolder(t *testing.T, err error, sent int) {
+	t.Helper()
+	if !errors.Is(err, client.ErrHolderNotVisible) {
+		t.Fatalf("Expected the not-visible holder error, got %v", err)
+	}
+	if !errors.Is(err, client.ErrBusyWaitExhausted) {
+		t.Errorf("Expected the busy wait error, got %v", err)
+	}
+	if want := "job h1 held this resource for "; !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("Expected the error to start with %q, got %q", want, err.Error())
+	}
+	if sent < 2 {
+		t.Errorf("Expected more than one request before the deadline, got %d", sent)
+	}
+}
+
+func TestDeleteVpnGatewayNamesAHolderTheKeyCannotReadAtTheDeadline(t *testing.T) {
+	setRemovalPollInterval(t, 10*time.Millisecond)
+	server := notVisibleHolderServer()
+	gpcnClient := server.client(t)
+
+	err := deleteVpnGateway(gpcnClient, t.Context(), testVpcID, time.Millisecond, 300*time.Millisecond)
+	assertNamesNotVisibleHolder(t, err, server.count(http.MethodDelete))
+}
+
+// The test changes package variables, so it does not run in parallel.
+func TestDeleteVpnGatewayResendNamesAHolderTheKeyCannotReadAtTheDeadline(t *testing.T) {
+	setRemovalPollInterval(t, 10*time.Millisecond)
+	previous := ResendMinBudget
+	ResendMinBudget = 100 * time.Millisecond
+	t.Cleanup(func() { ResendMinBudget = previous })
+	server := notVisibleHolderServer()
+	gpcnClient := server.client(t)
+
+	err := waitForVpnGatewayGone(gpcnClient, t.Context(), testVpcID, 10*time.Millisecond, time.Now(), 300*time.Millisecond)
+	assertNamesNotVisibleHolder(t, err, server.count(http.MethodDelete))
+}
+
 func TestWaitForVpnGatewayGoneResendsParkedRemoval(t *testing.T) {
 	t.Parallel()
 	server := &scriptedGatewayServer{

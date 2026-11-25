@@ -103,6 +103,11 @@ type vpnConnPlanTestServerState struct {
 	// holderEndsAfter makes a read of the putBusyHolder job wait this long and
 	// then report the job succeeded.
 	holderEndsAfter time.Duration
+	// holderStatus makes a read of the putBusyHolder job answer with this error
+	// status.
+	holderStatus int
+	// onHolderRead runs on each read of the putBusyHolder job.
+	onHolderRead func()
 }
 
 func (s *vpnConnPlanTestServerState) set(update func(*vpnConnPlanTestServerState)) {
@@ -321,8 +326,15 @@ func startVpnConnPlanMockServer(t *testing.T) (*httptest.Server, *vpnConnPlanTes
 			failJob := state.failJob
 			jobStatus, cancelJob := state.jobStatus, state.cancelJob
 			if holder := state.putBusyHolder; holder != "" && jobID == holder {
-				endsAfter := state.holderEndsAfter
+				endsAfter, holderStatus, onHolderRead := state.holderEndsAfter, state.holderStatus, state.onHolderRead
 				state.mu.Unlock()
+				if onHolderRead != nil {
+					onHolderRead()
+				}
+				if holderStatus != 0 {
+					writeVpnConnPlanTestError(w, holderStatus, "Service Unavailable", vpnConnPlanTestBadGateway)
+					return
+				}
 				if endsAfter > 0 {
 					time.Sleep(endsAfter)
 				}
@@ -1794,6 +1806,79 @@ func TestVpcVpnConnectionResourceUpdateBusyCarriesNoNote(t *testing.T) {
 	}
 	if hasNote {
 		t.Errorf("note present = true, want false; diagnostics: %v", resp.Diagnostics)
+	}
+}
+
+// vpnConnDirectRename prepares an update of the name of a held connection. The
+// function it returns runs the update and returns the details of the errors.
+func vpnConnDirectRename(t *testing.T, set func(s *vpnConnPlanTestServerState)) func(context.Context) []string {
+	t.Helper()
+	server, state := startVpnConnPlanMockServer(t)
+	state.set(func(s *vpnConnPlanTestServerState) {
+		s.exists = true
+		s.row = vpnConnPlanTestRowFromBody(map[string]any{
+			"name": "branch-office", "peerAddress": "203.0.113.10", "peerCidrs": []string{"192.168.10.0/24"},
+		}, "connected")
+		s.putBusyHolder = "job-holder"
+		set(s)
+	})
+	r, prior := vpnConnDirectCall(t, server.URL)
+	priorModel := vpnConnDirectModel(vpnConnPlanTestConnID)
+	if diags := prior.Set(context.Background(), &priorModel); diags.HasError() {
+		t.Fatalf("failed to build state: %v", diags)
+	}
+	plan := tfsdk.Plan{Schema: prior.Schema}
+	planModel := priorModel
+	planModel.Name = types.StringValue("branch-office-2")
+	if diags := plan.Set(context.Background(), &planModel); diags.HasError() {
+		t.Fatalf("failed to build plan: %v", diags)
+	}
+
+	return func(ctx context.Context) []string {
+		resp := &fwresource.UpdateResponse{State: prior}
+		r.Update(ctx, fwresource.UpdateRequest{
+			Plan: plan, State: prior, Config: tfsdk.Config{Schema: prior.Schema, Raw: plan.Raw},
+		}, resp)
+
+		errs := resp.Diagnostics.Errors()
+		details := make([]string, 0, len(errs))
+		for _, d := range errs {
+			details = append(details, d.Detail())
+		}
+		return details
+	}
+}
+
+// The cancel comes after the holder read, while the update waits to send the
+// PUT again. The test changes a package variable, so it does not run in
+// parallel.
+func TestVpcVpnConnectionResourceUpdateCancelledWaitCarriesNoNote(t *testing.T) {
+	previous := vpcvpnconnections.RemovalPollInterval
+	vpcvpnconnections.RemovalPollInterval = time.Minute
+	t.Cleanup(func() { vpcvpnconnections.RemovalPollInterval = previous })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	rename := vpnConnDirectRename(t, func(s *vpnConnPlanTestServerState) {
+		s.holderEndsAfter = time.Millisecond
+		s.onHolderRead = func() { time.AfterFunc(200*time.Millisecond, cancel) }
+	})
+	details := rename(ctx)
+	if want := []string{context.Canceled.Error()}; !slices.Equal(details, want) {
+		t.Errorf("details = %q, want %q", details, want)
+	}
+}
+
+// A failed holder read ends the wait. The PUT that the API refused busy carries
+// no note.
+func TestVpcVpnConnectionResourceUpdateHolderReadFailureCarriesNoNote(t *testing.T) {
+	t.Parallel()
+	rename := vpnConnDirectRename(t, func(s *vpnConnPlanTestServerState) {
+		s.holderStatus = http.StatusServiceUnavailable
+	})
+	details := rename(t.Context())
+	if want := []string{vpnConnPlanTestBadGateway}; !slices.Equal(details, want) {
+		t.Errorf("details = %q, want %q", details, want)
 	}
 }
 

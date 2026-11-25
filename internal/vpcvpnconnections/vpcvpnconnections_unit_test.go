@@ -1085,6 +1085,97 @@ func TestResendDeleteBusyChainStopsAtDeadline(t *testing.T) {
 	assertBusyChainStopped(t, err, time.Since(start), busy)
 }
 
+func notVisibleHolderServer(method string) *busyConnServer {
+	return &busyConnServer{
+		answers: map[string][]connAnswer{method: {{http.StatusConflict, busyConnBody}}},
+		jobs:    map[string]string{"h1": `{"success":true,"data":{"jobs":[],"notFound":["h1"]}}`},
+	}
+}
+
+func assertNamesNotVisibleHolder(t *testing.T, err error, sent int) {
+	t.Helper()
+	if !errors.Is(err, client.ErrHolderNotVisible) {
+		t.Fatalf("Expected the not-visible holder error, got %v", err)
+	}
+	if !errors.Is(err, client.ErrBusyWaitExhausted) {
+		t.Errorf("Expected the busy wait error, got %v", err)
+	}
+	if want := "job h1 held this resource for "; !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("Expected the error to start with %q, got %q", want, err.Error())
+	}
+	if sent < 2 {
+		t.Errorf("Expected more than one request before the deadline, got %d", sent)
+	}
+}
+
+func TestUpdateVpnConnectionNamesAHolderTheKeyCannotReadAtTheDeadline(t *testing.T) {
+	setBusyChainInterval(t)
+	server := notVisibleHolderServer(http.MethodPut)
+	gpcnClient := server.client(t)
+	gpcnClient.Config().PollingTimeout = busyChainTimeout
+
+	accepted, err := UpdateVpnConnection(gpcnClient, t.Context(), testVpcID, testConnID, map[string]any{"dpd": false})
+	assertNamesNotVisibleHolder(t, err, server.count(http.MethodPut))
+	if accepted {
+		t.Error("Expected a PUT that the API never took to read as not accepted")
+	}
+}
+
+func TestDeleteVpnConnectionNamesAHolderTheKeyCannotReadAtTheDeadline(t *testing.T) {
+	setBusyChainInterval(t)
+	server := notVisibleHolderServer(http.MethodDelete)
+	gpcnClient := server.client(t)
+
+	err := deleteVpnConnection(gpcnClient, t.Context(), testVpcID, testConnID, 10*time.Millisecond, busyChainTimeout)
+	assertNamesNotVisibleHolder(t, err, server.count(http.MethodDelete))
+}
+
+func TestResendDeleteNamesAHolderTheKeyCannotReadAtTheDeadline(t *testing.T) {
+	setBusyChainInterval(t)
+	server := notVisibleHolderServer(http.MethodDelete)
+	gpcnClient := server.client(t)
+
+	_, _, err := resendDelete(gpcnClient, t.Context(), testVpcID, testConnID, time.Now(), busyChainTimeout)
+	assertNamesNotVisibleHolder(t, err, server.count(http.MethodDelete))
+}
+
+// The cancel comes after the holder read, while the loop sleeps.
+func TestUpdateVpnConnectionCancelledWaitIsNotSent(t *testing.T) {
+	setBusyChainInterval(t)
+	RemovalPollInterval = time.Minute
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var puts atomic.Int32
+	gpcnClient := apiServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == client.JOBS_BASE_URL_V1:
+			_, _ = w.Write([]byte(connJobBody("h1", "succeeded")))
+			time.AfterFunc(200*time.Millisecond, cancel)
+		case r.Method == http.MethodPut:
+			puts.Add(1)
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(busyConnBody))
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	})
+
+	accepted, err := UpdateVpnConnection(gpcnClient, ctx, testVpcID, testConnID, map[string]any{"dpd": false})
+	if !errors.Is(err, client.ErrBusyWaitExhausted) {
+		t.Errorf("Expected the busy wait error, got %v", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("Expected the cancel in the error, got %v", err)
+	}
+	if accepted {
+		t.Error("Expected a PUT that the API never took to read as not accepted")
+	}
+	if got := puts.Load(); got != 1 {
+		t.Errorf("Expected one PUT, got %d", got)
+	}
+}
+
 // sharedDeadlineServer answers the first request of the method with a 409
 // RESOURCE_BUSY whose holder ends after holderDelay. The next request gets a
 // 202 after acceptDelay, and its job never ends. The counter holds the
