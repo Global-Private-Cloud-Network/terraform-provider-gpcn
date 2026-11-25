@@ -99,7 +99,7 @@ const (
 // Warning detail message templates
 const (
 	WarnDetailRemovingNetworkInterfaceWithIDFailed = "Removing the network interface with ID '%s' failed"
-	WarnDetailParkedReleaseFellBack                = "The provider could not read which network the primary interface of virtual machine %s is on (%s), so the delete asked GPCN™ to release the elastic IP because allocate_public_ip is true"
+	WarnDetailParkedReleaseFellBack                = "The provider could not read which network the primary interface of virtual machine %s is on (%s), so the delete asks GPCN™ to release the elastic IP because allocate_public_ip is true"
 	ReasonNoPrimaryInterface                       = "no interface is marked primary"
 )
 
