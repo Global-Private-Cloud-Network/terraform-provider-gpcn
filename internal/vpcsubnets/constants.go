@@ -1,5 +1,7 @@
 package vpcsubnets
 
+import "time"
+
 // BaseURLV1 is the VPC collection. Every subnet route is scoped under a VPC.
 // A subnet carries no datacenter and no resource group of its own.
 const BaseURLV1 = "/v1/resource/vpcs/"
@@ -29,3 +31,7 @@ const (
 	ActionRebindNsg    = "Rebind GPCN VPC Subnet Security Group"
 	ActionDeleteSubnet = "Delete GPCN VPC Subnet"
 )
+
+// BusyRetryInterval is the wait before a request goes out again after the job
+// that held the resource ended. It is a variable so that tests can shorten it.
+var BusyRetryInterval = 5 * time.Second
