@@ -294,7 +294,7 @@ func TestAwaitHolderReportsElapsedFromWaitStartMidPoll(t *testing.T) {
 
 func TestHolderEndedAtDeadlineNamesTheEndedJob(t *testing.T) {
 	err := HolderEndedAtDeadline("h1", time.Now().Add(-90*time.Second))
-	want := "job h1 ended as the wait for it ran out after 1m30s, so the provider did not send the request; run the apply or destroy again"
+	want := "job h1 ended as the wait for it ran out after 1m30s, so the provider did not send the request again; run the apply or destroy again"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
 	}
@@ -308,7 +308,7 @@ func TestHolderEndedAtDeadlineNamesTheEndedJob(t *testing.T) {
 
 func TestHolderNotVisibleAtDeadlineNamesTheJob(t *testing.T) {
 	err := HolderNotVisibleAtDeadline("h1", time.Now().Add(-90*time.Second))
-	want := "job h1 held this resource for 1m30s, and the job read does not return it to this API key; run the apply or destroy again once it ends"
+	want := "the wait for job h1 ran out after 1m30s, and the job read does not return that job to this API key; run the apply or destroy again once it ends"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
 	}

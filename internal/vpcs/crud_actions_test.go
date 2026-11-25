@@ -424,7 +424,7 @@ func TestDeleteVpcNamesAHolderTheKeyCannotReadAtTheDeadline(t *testing.T) {
 	if !errors.Is(err, client.ErrBusyWaitExhausted) {
 		t.Errorf("Expected the busy wait error, got %v", err)
 	}
-	if want := "job h1 held this resource for "; !strings.HasPrefix(err.Error(), want) {
+	if want := "the wait for job h1 ran out after "; !strings.HasPrefix(err.Error(), want) {
 		t.Errorf("Expected the error to start with %q, got %q", want, err.Error())
 	}
 	if got := deletes.Load(); got < 2 {
