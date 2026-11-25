@@ -4319,10 +4319,9 @@ resource "gpcn_virtualmachine" "test" {
   subnet_id          = %q
   %sinitial_auth = {
     ssh_key_id = %q
-    username   = %q
   }
 }
-`, host, name, vmPlanTestDatacenterID, sizeID, vmPlanTestImageID, vmPlanTestSubnetID, groupLine, vmPlanTestSshKeyID, vmPlanTestUsername)
+`, host, name, vmPlanTestDatacenterID, sizeID, vmPlanTestImageID, vmPlanTestSubnetID, groupLine, vmPlanTestSshKeyID)
 }
 
 func vmGroupPlanTestExpectAction(action plancheck.ResourceActionType) resource.ConfigPlanChecks {
@@ -4485,10 +4484,9 @@ func TestVirtualMachineResourcePlanImportReadsGroup(t *testing.T) {
 				Check:  resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "resource_group_id", vmPlanTestGroupG),
 			},
 			{
-				ResourceName:            gpcnVirtualMachineTest,
-				ImportState:             true,
-				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"initial_auth.username"},
+				ResourceName:      gpcnVirtualMachineTest,
+				ImportState:       true,
+				ImportStateVerify: true,
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
 					if len(states) != 1 {
 						return fmt.Errorf("expected one imported state, got %d", len(states))
