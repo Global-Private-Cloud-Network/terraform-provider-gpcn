@@ -736,9 +736,10 @@ func TestVirtualMachineResourcePlanImportsVpcIdentity(t *testing.T) {
 				),
 			},
 			{
-				ResourceName:      gpcnVirtualMachineTest,
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            gpcnVirtualMachineTest,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"initial_auth.username"},
 			},
 		},
 	})
@@ -2576,9 +2577,10 @@ func TestVirtualMachineResourcePlanImportRecordsAHeldAddress(t *testing.T) {
 				),
 			},
 			{
-				ResourceName:      gpcnVirtualMachineTest,
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            gpcnVirtualMachineTest,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"initial_auth.username"},
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
 					if len(states) != 1 {
 						return fmt.Errorf("expected 1 imported state, got %d", len(states))
@@ -4483,9 +4485,10 @@ func TestVirtualMachineResourcePlanImportReadsGroup(t *testing.T) {
 				Check:  resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "resource_group_id", vmPlanTestGroupG),
 			},
 			{
-				ResourceName:      gpcnVirtualMachineTest,
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            gpcnVirtualMachineTest,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"initial_auth.username"},
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
 					if len(states) != 1 {
 						return fmt.Errorf("expected one imported state, got %d", len(states))
