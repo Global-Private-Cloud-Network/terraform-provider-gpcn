@@ -184,9 +184,10 @@ func deleteVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID 
 	// lastHolder is the job that held the gateway at the last answer. The
 	// deadline error then names that job.
 	var lastHolder string
+	var lastOutcome client.HolderOutcome
 	for {
 		if lastHolder != "" && time.Since(startTime) >= timeout {
-			return client.HolderEndedAtDeadline(lastHolder, startTime)
+			return client.HolderDeadline(lastOutcome, lastHolder, startTime)
 		}
 		request, err := http.NewRequestWithContext(ctx, http.MethodDelete, gatewayPath(vpcID), nil)
 		if err != nil {
@@ -197,12 +198,14 @@ func deleteVpnGateway(gpcnClient *client.GpcnClient, ctx context.Context, vpcID 
 		holder, busy := client.BusyHolder(err)
 		lastHolder = holder
 		if busy {
-			if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime, startTime.Add(timeout)); err != nil {
-				return err
+			var waitErr error
+			lastOutcome, waitErr = client.AwaitHolder(gpcnClient, ctx, holder, startTime, startTime.Add(timeout))
+			if waitErr != nil {
+				return waitErr
 			}
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return client.BusyWaitEnded(ctx.Err())
 			case <-time.After(RemovalPollInterval):
 			}
 			continue
@@ -317,17 +320,18 @@ func resendDelete(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, rea
 		if !busy {
 			break
 		}
-		if err := client.AwaitHolder(gpcnClient, ctx, holder, startTime, startTime.Add(timeout)); err != nil {
-			return resendNotSent, false, nil, err
+		outcome, waitErr := client.AwaitHolder(gpcnClient, ctx, holder, startTime, startTime.Add(timeout))
+		if waitErr != nil {
+			return resendNotSent, false, nil, waitErr
 		}
 		select {
 		case <-ctx.Done():
-			return resendNotSent, false, nil, ctx.Err()
+			return resendNotSent, false, nil, client.BusyWaitEnded(ctx.Err())
 		case <-time.After(RemovalPollInterval):
 		}
 		// No DELETE goes out after the deadline.
 		if !time.Now().Before(startTime.Add(timeout)) {
-			return resendNotSent, false, nil, client.HolderEndedAtDeadline(holder, startTime)
+			return resendNotSent, false, nil, client.HolderDeadline(outcome, holder, startTime)
 		}
 	}
 

@@ -47,14 +47,21 @@ func BusyHolder(err error) (string, bool) {
 	return jobID, true
 }
 
-// AwaitHolder returns nil on every end of the holder job, because the caller
-// then sends its request again. Every error other than the deadline returns
-// unchanged. start is the start of the caller's wait, the time its deadline
-// counts from, so the deadline error reports how long the caller waited.
-func AwaitHolder(gpcnClient *GpcnClient, ctx context.Context, jobID string, start, deadline time.Time) error {
+type HolderOutcome int
+
+const (
+	HolderEnded HolderOutcome = iota
+	HolderNotVisible
+)
+
+// AwaitHolder returns a nil error when the holder job ends or is not visible.
+// The caller then sends its request again. start is the start of the caller's
+// wait, the time its deadline counts from. So the deadline error reports how
+// long the caller waited.
+func AwaitHolder(gpcnClient *GpcnClient, ctx context.Context, jobID string, start, deadline time.Time) (HolderOutcome, error) {
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
-		return newHolderStillRunningError(jobID, time.Since(start))
+		return HolderEnded, newHolderStillRunningError(jobID, time.Since(start))
 	}
 
 	config := holderPollConfig()
@@ -63,20 +70,38 @@ func AwaitHolder(gpcnClient *GpcnClient, ctx context.Context, jobID string, star
 	switch {
 	case err == nil,
 		errors.Is(err, ErrJobFailed),
-		errors.Is(err, ErrJobCancelledByPlatform),
-		errors.Is(err, ErrJobNotVisibleTarget):
-		return nil
+		errors.Is(err, ErrJobCancelledByPlatform):
+		return HolderEnded, nil
+	case errors.Is(err, ErrJobNotVisibleTarget):
+		return HolderNotVisible, nil
 	case errors.Is(err, ErrLongPollingTimeout):
-		return newHolderStillRunningError(jobID, time.Since(start))
+		return HolderEnded, newHolderStillRunningError(jobID, time.Since(start))
 	default:
-		return err
+		return HolderEnded, BusyWaitEnded(err)
 	}
 }
 
-// HolderEndedAtDeadline reports a holder job that ended, but only after the
-// wait ran out, so the caller sent nothing.
+// BusyWaitEnded marks cause as the end of a busy wait whose last send was
+// refused.
+func BusyWaitEnded(cause error) error {
+	return &busyWaitError{cause: cause}
+}
+
+func HolderDeadline(outcome HolderOutcome, jobID string, start time.Time) error {
+	if outcome == HolderNotVisible {
+		return HolderNotVisibleAtDeadline(jobID, start)
+	}
+	return HolderEndedAtDeadline(jobID, start)
+}
+
+// HolderEndedAtDeadline reports a holder job that ended. The wait ran out before
+// the caller could send the request again.
 func HolderEndedAtDeadline(jobID string, start time.Time) error {
 	return &holderEndedAtDeadlineError{message: fmt.Sprintf(ErrFmtHolderEndedAtDeadline, jobID, time.Since(start).Round(time.Second))}
+}
+
+func HolderNotVisibleAtDeadline(jobID string, start time.Time) error {
+	return &holderNotVisibleAtDeadlineError{message: fmt.Sprintf(ErrFmtHolderNotVisibleAtDeadline, jobID, time.Since(start).Round(time.Second))}
 }
 
 func newHolderStillRunningError(jobID string, elapsed time.Duration) error {

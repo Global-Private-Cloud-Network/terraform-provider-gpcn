@@ -173,17 +173,18 @@ func DeleteVpc(gpcnClient *client.GpcnClient, ctx context.Context, vpcID string)
 	waitedBusy := false
 	for holder, busy := client.BusyHolder(err); busy; holder, busy = client.BusyHolder(err) {
 		waitedBusy = true
-		if err := client.AwaitHolder(gpcnClient, ctx, holder, start, deadline); err != nil {
-			return err
+		outcome, waitErr := client.AwaitHolder(gpcnClient, ctx, holder, start, deadline)
+		if waitErr != nil {
+			return waitErr
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return client.BusyWaitEnded(ctx.Err())
 		case <-time.After(BusyRetryInterval):
 		}
 		// No DELETE goes out after the deadline.
 		if !time.Now().Before(deadline) {
-			return client.HolderEndedAtDeadline(holder, start)
+			return client.HolderDeadline(outcome, holder, start)
 		}
 		jobID, err = issueVpcDelete(gpcnClient, ctx, vpcID)
 	}

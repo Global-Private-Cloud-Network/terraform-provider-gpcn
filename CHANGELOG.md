@@ -6,6 +6,8 @@ BUG FIXES:
 - **Virtual Machine, GPU, Volume**: a create reads the new resource back by the ID the API gave when it accepted the request, and a volume resize reads the volume back by its own ID. Before, both depended on the finished job to name it.
 - **Virtual Machine**: importing a machine with an SSH key no longer records its username in `initial_auth`, so a configuration without `username` plans no change after the import.
 - **Virtual Machine**: destroying a machine that a failed create left behind releases its elastic IP by the same rule as any other destroy: only when its primary interface is on a VPC. When the provider cannot read the interfaces, it releases the address as before and warns.
+- **VPC, VPN Connection, VPN Gateway**: when the API key cannot read the job that holds the resource, the error at the end of the wait says so. Before, it said that the job had ended.
+- **VPN Connection**: an update cancelled while it waits for another job no longer says that the change may still apply.
 
 ## 1.8.0 (November 24, 2026)
 
