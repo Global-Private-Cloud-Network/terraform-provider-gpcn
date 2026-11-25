@@ -4,6 +4,7 @@ BUG FIXES:
 
 - **Provider**: cancelling an apply or destroy (Ctrl-C) now stops a job poll, a retry backoff and a virtual machine status poll at once, instead of when the current wait ends.
 - **Virtual Machine, GPU, Volume**: a create reads the new resource back by the ID the API gave when it accepted the request, and a volume resize reads the volume back by its own ID. Before, both depended on the finished job to name it.
+- **Virtual Machine**: importing a machine with an SSH key no longer records its username in `initial_auth`, so a configuration without `username` plans no change after the import.
 
 ## 1.8.0 (November 24, 2026)
 

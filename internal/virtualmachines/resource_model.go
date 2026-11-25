@@ -212,9 +212,6 @@ func populateAuth(ctx context.Context, current types.Object, response *ReadVirtu
 		Username: types.StringNull(),
 		Password: types.StringNull(),
 	}
-	if response.Data.Username != "" {
-		auth.Username = types.StringValue(response.Data.Username)
-	}
 
 	return types.ObjectValueFrom(ctx, auth.AttrTypes(), auth)
 }

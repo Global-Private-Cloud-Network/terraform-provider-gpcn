@@ -268,6 +268,6 @@ A VM created on a legacy network can't move onto a VPC subnet. [Migrating from `
 
 An imported VM gets `subnet_id`, `l2_segment_ids` and `public_ip_id` filled in from GPCN™. An import never sets `allocate_public_ip`, so destroying an imported VM leaves its elastic IP held.
 
-An imported VM gets `initial_auth` only when it has an SSH key. A VM created with a password, or with no credential, imports without the block. If your configuration has the block, the first apply records it in state and doesn't change the VM.
+An imported VM gets `initial_auth` only when it has an SSH key. A VM created with a password, or with no credential, imports without the block. The import records the SSH key and no username, so a configuration without `username` plans no change to the block. If your configuration sets a `username` or a `password`, or has the block when the import recorded none, the first apply records it in state and doesn't change the VM.
 
 An import can't fill `first_boot_script` or `user_data`. Adding either one to the configuration of an imported VM plans a replacement, unless `lifecycle { ignore_changes = [...] }` names it.

@@ -560,8 +560,8 @@ func TestSetModelValuesNotPresentPopulatesAuthOnImport(t *testing.T) {
 	if authDiags.HasError() {
 		t.Fatalf("Failed to extract auth: %v", authDiags)
 	}
-	if auth.Username.ValueString() != username {
-		t.Errorf("Expected auth.username '%s', got '%s'", username, auth.Username.ValueString())
+	if !auth.Username.IsNull() {
+		t.Errorf("Expected a null auth.username, got %s", auth.Username)
 	}
 	if auth.SshKeyId.ValueString() != sshKeyID {
 		t.Errorf("Expected auth.ssh_key_id '%s', got '%s'", sshKeyID, auth.SshKeyId.ValueString())
@@ -1745,7 +1745,6 @@ func TestPopulateAuth(t *testing.T) {
 	const (
 		usernameOnly = `{"success": true, "data": {"id": "vm-1", "username": "ubuntu", "sshKeyId": null}}`
 		keyAndName   = `{"success": true, "data": {"id": "vm-1", "username": "ubuntu", "sshKeyId": "key-1"}}`
-		keyOnly      = `{"success": true, "data": {"id": "vm-1", "username": null, "sshKeyId": "key-1"}}`
 	)
 
 	nullAuth := types.ObjectNull(ResourceModelInitialAuth{}.AttrTypes())
@@ -1775,13 +1774,6 @@ func TestPopulateAuth(t *testing.T) {
 			name:     "imported_with_key",
 			current:  nullAuth,
 			response: keyAndName,
-			imported: true,
-			want:     initialAuthObject(t, types.StringValue("key-1"), types.StringValue("ubuntu"), types.StringNull()),
-		},
-		{
-			name:     "imported_with_key_and_no_username",
-			current:  nullAuth,
-			response: keyOnly,
 			imported: true,
 			want:     initialAuthObject(t, types.StringValue("key-1"), types.StringNull(), types.StringNull()),
 		},

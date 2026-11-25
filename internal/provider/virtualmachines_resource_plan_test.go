@@ -3442,51 +3442,21 @@ func TestVirtualMachineResourcePlanImportsMachineWithoutCredentials(t *testing.T
 	tests := []struct {
 		name     string
 		username any
-		sshKeyID any
-		lines    string
-		check    func(attributes map[string]string) error
 	}{
-		{
-			name:     "no_username_no_key",
-			username: nil,
-			sshKeyID: nil,
-			lines:    "",
-			check:    vmFirstBootPlanTestNoInitialAuth,
-		},
-		{
-			name:     "username_without_key",
-			username: vmPlanTestUsername,
-			sshKeyID: nil,
-			lines:    "",
-			check:    vmFirstBootPlanTestNoInitialAuth,
-		},
-		{
-			name:     "username_and_key",
-			username: vmPlanTestUsername,
-			sshKeyID: vmPlanTestSshKeyID,
-			lines:    vmFirstBootPlanTestKeyAuth,
-			check: func(attributes map[string]string) error {
-				if got := attributes["initial_auth.ssh_key_id"]; got != vmPlanTestSshKeyID {
-					return fmt.Errorf("expected the imported ssh_key_id %q, got %q", vmPlanTestSshKeyID, got)
-				}
-				if got := attributes["initial_auth.username"]; got != vmPlanTestUsername {
-					return fmt.Errorf("expected the imported username %q, got %q", vmPlanTestUsername, got)
-				}
-				return nil
-			},
-		},
+		{name: "no_username_no_key", username: nil},
+		{name: "username_without_key", username: vmPlanTestUsername},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			shortenVirtualMachinePolling(t)
-			server, _ := startVirtualMachineFirstBootMockServer(t, tc.username, tc.sshKeyID)
+			server, _ := startVirtualMachineFirstBootMockServer(t, tc.username, nil)
 
 			resource.UnitTest(t, resource.TestCase{
 				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 				Steps: []resource.TestStep{
 					{
-						Config: vmFirstBootPlanTestConfig(server.URL, "vm-plan-import-auth", tc.lines),
+						Config: vmFirstBootPlanTestConfig(server.URL, "vm-plan-import-auth", ""),
 					},
 					{
 						ResourceName: gpcnVirtualMachineTest,
@@ -3495,12 +3465,86 @@ func TestVirtualMachineResourcePlanImportsMachineWithoutCredentials(t *testing.T
 							if len(states) != 1 {
 								return fmt.Errorf("expected one imported state, got %d", len(states))
 							}
-							return tc.check(states[0].Attributes)
+							return vmFirstBootPlanTestNoInitialAuth(states[0].Attributes)
 						},
 					},
 				},
 			})
 		})
+	}
+}
+
+func TestVirtualMachineResourcePlanImportedKeyPlansByConfiguration(t *testing.T) {
+	keyOnlyAuth := fmt.Sprintf("  initial_auth = { ssh_key_id = %q }", vmPlanTestSshKeyID)
+
+	tests := []struct {
+		name  string
+		lines string
+		plan  plancheck.PlanCheck
+		check resource.TestCheckFunc
+	}{
+		{
+			name:  "without_username_plans_empty",
+			lines: keyOnlyAuth,
+			plan:  plancheck.ExpectEmptyPlan(),
+			check: resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "initial_auth.ssh_key_id", vmPlanTestSshKeyID),
+		},
+		{
+			name:  "with_username_plans_an_update",
+			lines: vmFirstBootPlanTestKeyAuth,
+			plan:  plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
+			check: resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "initial_auth.username", vmPlanTestUsername),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			shortenVirtualMachinePolling(t)
+			server, _ := startVirtualMachineFirstBootMockServer(t, vmPlanTestUsername, vmPlanTestSshKeyID)
+
+			const name = "vm-plan-import-key"
+			vmFirstBootPlanTestSeedMachine(t, server.URL, name)
+
+			config := vmFirstBootPlanTestConfig(server.URL, name, tc.lines)
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config:             config,
+						ResourceName:       gpcnVirtualMachineTest,
+						ImportState:        true,
+						ImportStateId:      vmPlanTestID,
+						ImportStatePersist: true,
+					},
+					{
+						Config: config,
+						ConfigPlanChecks: resource.ConfigPlanChecks{
+							PreApply: []plancheck.PlanCheck{tc.plan},
+						},
+						Check: tc.check,
+					},
+				},
+			})
+		})
+	}
+}
+
+// A persisted import needs a machine that no Terraform state holds, so the test posts the
+// create itself.
+func vmFirstBootPlanTestSeedMachine(t *testing.T, host, name string) {
+	t.Helper()
+
+	body := fmt.Sprintf(`{"name":%q,"subnetId":%q}`, name, vmPlanTestSubnetID)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, host+"/v1/resource/virtual-machines/", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("building the seed request failed: %v", err)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("seeding the machine failed: %v", err)
+	}
+	if err := response.Body.Close(); err != nil {
+		t.Fatalf("closing the seed response failed: %v", err)
 	}
 }
 
