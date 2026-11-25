@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"terraform-provider-gpcn/internal/client"
 )
@@ -99,6 +101,55 @@ func TestDoWithRetryNoRetryOn400(t *testing.T) {
 
 	if int(attemptCount.Load()) != 1 {
 		t.Errorf("expected exactly 1 attempt for non-retryable 400, got %d", attemptCount.Load())
+	}
+}
+
+// TestDoWithRetryStopsOnCancelledContext covers a Ctrl-C during the backoff
+// after a 503: the request is not sent again.
+func TestDoWithRetryStopsOnCancelledContext(t *testing.T) {
+	t.Parallel()
+
+	var attemptCount atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attemptCount.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.MaxRetries = 3
+	cfg.InitialRetryDelay = 2 * time.Second
+	cfg.MaxRetryDelay = 2 * time.Second
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/test", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	start := time.Now()
+	timer := time.AfterFunc(50*time.Millisecond, cancel)
+	defer timer.Stop()
+	resp, err := gpcnClient.DoWithRetry(req)
+	elapsed := time.Since(start)
+	if resp != nil {
+		resp.Body.Close()
+	}
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want context.Canceled", err)
+	}
+	if elapsed >= 500*time.Millisecond {
+		t.Errorf("DoWithRetry returned after %s, want under 500ms", elapsed)
+	}
+	if got := int(attemptCount.Load()); got != 1 {
+		t.Errorf("attempts = %d, want 1", got)
 	}
 }
 

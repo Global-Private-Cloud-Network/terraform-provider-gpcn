@@ -278,13 +278,21 @@ func (c *GpcnClient) DoWithRetry(req *http.Request) (*http.Response, error) {
 
 		// Check if error is retryable
 		var httpErr *HTTPError
-		if ok := isHTTPError(err, &httpErr); ok && !httpErr.IsRetryable() {
+		ok := isHTTPError(err, &httpErr)
+		if ok && !httpErr.IsRetryable() {
 			return nil, err // Don't retry non-retryable errors
+		}
+		if !ok && req.Context().Err() != nil {
+			return nil, err
 		}
 
 		// Don't sleep after the last attempt
 		if attempt < c.config.MaxRetries {
-			time.Sleep(c.retryWait(delay, httpErr))
+			select {
+			case <-req.Context().Done():
+				return nil, req.Context().Err()
+			case <-time.After(c.retryWait(delay, httpErr)):
+			}
 			// Exponential backoff with cap
 			delay *= 2
 			if delay > c.config.MaxRetryDelay {
