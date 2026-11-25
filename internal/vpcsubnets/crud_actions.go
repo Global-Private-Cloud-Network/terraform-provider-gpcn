@@ -206,7 +206,7 @@ func UpdateSubnet(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, sub
 		return nil, err
 	}
 
-	response, _, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
 		request, err := http.NewRequestWithContext(ctx, "PUT", subnetPath(vpcID, subnetID), bytes.NewBuffer(jsonUpdateSubnetRequestBody))
 		if err != nil {
 			return nil, err
@@ -242,7 +242,7 @@ func RebindSubnetNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 		return err
 	}
 
-	jobID, pollConfig, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (string, error) {
+	jobID, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (string, error) {
 		request, err := http.NewRequestWithContext(ctx, "PUT", subnetPath(vpcID, subnetID)+nsgPathSegment, bytes.NewBuffer(rebindRequestBody))
 		if err != nil {
 			return "", err
@@ -254,7 +254,7 @@ func RebindSubnetNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 	}
 	tflog.Info(ctx, LogIssuedRebindSubnetNsgJob)
 
-	if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, ActionRebindNsg, jobID, pollConfig); err != nil {
+	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionRebindNsg, jobID); err != nil {
 		return fmt.Errorf("rebind subnet security group polling failed: %w", err)
 	}
 
@@ -267,7 +267,7 @@ func RebindSubnetNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 func DeleteSubnet(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, subnetID string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteSubnetWithID, subnetID))
 
-	jobID, pollConfig, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (string, error) {
+	jobID, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (string, error) {
 		request, err := http.NewRequestWithContext(ctx, "DELETE", subnetPath(vpcID, subnetID), nil)
 		if err != nil {
 			return "", err
@@ -279,7 +279,7 @@ func DeleteSubnet(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, sub
 	}
 	tflog.Info(ctx, LogIssuedDeleteSubnetJob)
 
-	if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, ActionDeleteSubnet, jobID, pollConfig); err != nil {
+	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionDeleteSubnet, jobID); err != nil {
 		return fmt.Errorf("delete subnet polling failed: %w", err)
 	}
 

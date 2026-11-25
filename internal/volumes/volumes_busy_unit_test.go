@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"sync"
 	"testing"
@@ -139,4 +140,69 @@ func TestRemoveVolumeFromVirtualMachineWaitsOutBusyHolder(t *testing.T) {
 		t.Fatalf("RemoveVolumeFromVirtualMachine = %v, want nil", err)
 	}
 	recorded.check(t, "", "send", "poll holder-job", "send", "poll own-job")
+}
+
+// The holder takes 2.5s of the 4s timeout, so 1.5s of the wait remains. The
+// second null read of the resize job starts about 2.5s after the accept.
+func TestUpdateVolumeKeepsItsOwnTimeoutAfterAWait(t *testing.T) {
+	const (
+		pollingTimeout = 4 * time.Second
+		holderEnds     = 2500 * time.Millisecond
+		firstReadEnds  = 1500 * time.Millisecond
+	)
+	previous := BusyRetryInterval
+	BusyRetryInterval = time.Millisecond
+	t.Cleanup(func() { BusyRetryInterval = previous })
+
+	var mu sync.Mutex
+	var sentAt, acceptedAt time.Time
+	ownReads := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == DATA_CENTERS_BASE_URL_V1+testDatacenterID+"/volume-sizes":
+			testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{"volumeTypes": []map[string]any{{
+				"componentCode":  "vol-add-ssd",
+				"availableSizes": []map[string]any{{"skuId": "sku-1", "sizeGb": 200}},
+			}}}})
+		case r.Method == http.MethodGet && r.URL.Path == BASE_URL_V1+"vol-1":
+			testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{"id": "vol-1"}})
+		case r.Method == http.MethodPut && r.URL.Path == BASE_URL_V1+"vol-1/resize":
+			if sentAt.IsZero() {
+				sentAt = time.Now()
+				testutil.HandleBusyResponse(w, "holder-job")
+				return
+			}
+			acceptedAt = time.Now()
+			acceptOwnJob(w, r)
+		case r.Method == http.MethodPost && r.URL.Path == client.JOBS_BASE_URL_V1:
+			ids, _ := testutil.ReadRequestBody(r)["jobIds"].([]any)
+			if jobID, _ := ids[0].(string); jobID == "holder-job" {
+				time.Sleep(time.Until(sentAt.Add(holderEnds)))
+				testutil.HandleJobResponse(w, jobID, "", true)
+				return
+			}
+			ownReads++
+			if ownReads == 1 {
+				time.Sleep(time.Until(acceptedAt.Add(firstReadEnds)))
+			}
+			testutil.HandleJobResponse(w, "own-job", "", ownReads > 2)
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.MaxRetries = 0
+	cfg.PollingTimeout = pollingTimeout
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	if _, err := UpdateVolume(gpcnClient, context.Background(), "vol-1", createTestVolumeModel("vol", "SSD", 200)); err != nil {
+		t.Fatalf("UpdateVolume = %v, want nil", err)
+	}
 }

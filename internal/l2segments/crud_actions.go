@@ -157,7 +157,7 @@ func UpdateL2Segment(gpcnClient *client.GpcnClient, ctx context.Context, segment
 	}
 	tflog.Info(ctx, LogConstructedUpdateL2SegmentRequestBody)
 
-	segmentResponse, _, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*readL2SegmentResponse, error) {
+	segmentResponse, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*readL2SegmentResponse, error) {
 		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+segmentID, bytes.NewBuffer(jsonUpdateRequestBody))
 		if err != nil {
 			return nil, err
@@ -178,7 +178,7 @@ func UpdateL2Segment(gpcnClient *client.GpcnClient, ctx context.Context, segment
 func DeleteL2Segment(gpcnClient *client.GpcnClient, ctx context.Context, segmentID string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteL2SegmentWithID, segmentID))
 
-	deleteResponse, pollConfig, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*client.JobStatusSingularResponse, error) {
+	deleteResponse, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*client.JobStatusSingularResponse, error) {
 		request, err := http.NewRequestWithContext(ctx, "DELETE", BASE_URL_V1+segmentID, nil)
 		if err != nil {
 			return nil, err
@@ -191,7 +191,7 @@ func DeleteL2Segment(gpcnClient *client.GpcnClient, ctx context.Context, segment
 	}
 	tflog.Info(ctx, LogIssuedDeleteL2SegmentJob)
 
-	if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, ActionDeleteL2Segment, deleteResponse.Data.JobID, pollConfig); err != nil {
+	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionDeleteL2Segment, deleteResponse.Data.JobID); err != nil {
 		return err
 	}
 

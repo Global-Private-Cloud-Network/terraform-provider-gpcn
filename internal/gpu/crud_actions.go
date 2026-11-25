@@ -191,7 +191,7 @@ func UpdateGPU(gpcnClient *client.GpcnClient, ctx context.Context, id, name, res
 		return err
 	}
 
-	response, _, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
 		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+id, bytes.NewBuffer(jsonUpdateGPURequestBody))
 		if err != nil {
 			return nil, err
@@ -210,7 +210,7 @@ func UpdateGPU(gpcnClient *client.GpcnClient, ctx context.Context, id, name, res
 func DeleteGPU(gpcnClient *client.GpcnClient, ctx context.Context, id string) error {
 	tflog.Info(ctx, LogStartingDeleteGPU)
 
-	response, pollConfig, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
 		request, err := http.NewRequestWithContext(ctx, "DELETE", BASE_URL_V1+id, nil)
 		if err != nil {
 			return nil, err
@@ -236,7 +236,7 @@ func DeleteGPU(gpcnClient *client.GpcnClient, ctx context.Context, id string) er
 	}
 
 	// Perform long polling to wait for job completion
-	_, err = client.PerformLongPollingWithConfig(gpcnClient, ctx, "Delete GPCN GPU", deleteGPUResponse.Data.JobID, pollConfig)
+	_, err = client.PerformLongPolling(gpcnClient, ctx, "Delete GPCN GPU", deleteGPUResponse.Data.JobID)
 	if err != nil {
 		return err
 	}

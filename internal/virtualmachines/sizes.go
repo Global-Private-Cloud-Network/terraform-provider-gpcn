@@ -25,7 +25,7 @@ func UpdateVirtualMachineSize(gpcnClient *client.GpcnClient, ctx context.Context
 	if err != nil {
 		return err
 	}
-	response, pollConfig, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
 		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+virtualMachineId+"/size", bytes.NewBuffer(jsonUpdateVMRequestBody))
 		if err != nil {
 			return nil, err
@@ -48,7 +48,7 @@ func UpdateVirtualMachineSize(gpcnClient *client.GpcnClient, ctx context.Context
 		return err
 	}
 
-	_, err = client.PerformLongPollingWithConfig(gpcnClient, ctx, "Update Virtual Machine Size", updateVirtualMachineSizeResponse.Data.JobID, pollConfig)
+	_, err = client.PerformLongPolling(gpcnClient, ctx, "Update Virtual Machine Size", updateVirtualMachineSizeResponse.Data.JobID)
 	if err != nil {
 		return err
 	}

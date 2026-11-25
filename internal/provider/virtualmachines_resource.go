@@ -876,7 +876,7 @@ func (r *virtualMachinesResource) sendDeleteAndPoll(ctx context.Context, state v
 	}
 
 	var requestErr error
-	response, pollConfig, err := client.SendWaitingForHolder(r.client, ctx, virtualmachines.BusyRetryInterval, func() (*http.Response, error) {
+	response, err := client.SendWaitingForHolder(r.client, ctx, virtualmachines.BusyRetryInterval, func() (*http.Response, error) {
 		var body io.Reader
 		if deleteRequestBytes != nil {
 			body = bytes.NewReader(deleteRequestBytes)
@@ -931,7 +931,7 @@ func (r *virtualMachinesResource) sendDeleteAndPoll(ctx context.Context, state v
 		return
 	}
 
-	_, err = client.PerformLongPollingWithConfig(r.client, ctx, "Delete GPCN Virtual Machine", deleteVirtualMachineResponse.Data.JobID, pollConfig)
+	_, err = client.PerformLongPolling(r.client, ctx, "Delete GPCN Virtual Machine", deleteVirtualMachineResponse.Data.JobID)
 
 	if err != nil {
 		resp.Diagnostics.Append(pollFailure(err))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -355,10 +356,9 @@ func busyThenAccepted(sends *int) func() (string, error) {
 func TestSendWaitingForHolderSendsAgainAfterTheHolder(t *testing.T) {
 	fastHolderPolling(t)
 	gpcnClient, calls := holderServer(t, http.StatusOK, holderJobsBody(holderTestSucceededJob))
-	gpcnClient.config.PollingTimeout = 5 * time.Minute
 
 	sends := 0
-	result, config, err := SendWaitingForHolder(gpcnClient, t.Context(), time.Millisecond, busyThenAccepted(&sends))
+	result, err := SendWaitingForHolder(gpcnClient, t.Context(), time.Millisecond, busyThenAccepted(&sends))
 	if err != nil {
 		t.Fatalf("SendWaitingForHolder = %v, want nil", err)
 	}
@@ -371,48 +371,6 @@ func TestSendWaitingForHolderSendsAgainAfterTheHolder(t *testing.T) {
 	if got := int(calls.Load()); got != 1 {
 		t.Errorf("poll calls = %d, want 1", got)
 	}
-	if config.Timeout <= 0 || config.Timeout >= 5*time.Minute {
-		t.Errorf("Timeout = %s, want more than 0 and less than 5m", config.Timeout)
-	}
-	if want := DefaultPollingConfig(); config.InitialInterval != want.InitialInterval || config.MaxInterval != want.MaxInterval {
-		t.Errorf("intervals = %s and %s, want the defaults", config.InitialInterval, config.MaxInterval)
-	}
-}
-
-func TestSendWaitingForHolderKeepsTheFullTimeoutWithoutAWait(t *testing.T) {
-	tests := []struct {
-		name           string
-		pollingTimeout time.Duration
-		want           time.Duration
-	}{
-		{name: "the configured timeout", pollingTimeout: 7 * time.Minute, want: 7 * time.Minute},
-		{name: "no configured timeout", want: DefaultPollingConfig().Timeout},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			gpcnClient, calls := holderServer(t, http.StatusOK, holderJobsBody(holderTestSucceededJob))
-			gpcnClient.config.PollingTimeout = tt.pollingTimeout
-
-			sends := 0
-			result, config, err := SendWaitingForHolder(gpcnClient, t.Context(), time.Millisecond, func() (string, error) {
-				sends++
-				return "accepted", nil
-			})
-			if err != nil {
-				t.Fatalf("SendWaitingForHolder = %v, want nil", err)
-			}
-			if result != "accepted" || sends != 1 {
-				t.Errorf("result = %q after %d sends, want accepted after 1", result, sends)
-			}
-			if config.Timeout != tt.want {
-				t.Errorf("Timeout = %s, want %s", config.Timeout, tt.want)
-			}
-			if got := int(calls.Load()); got != 0 {
-				t.Errorf("poll calls = %d, want 0", got)
-			}
-		})
-	}
 }
 
 func TestSendWaitingForHolderReportsAHolderThatOutlivesTheDeadline(t *testing.T) {
@@ -421,12 +379,9 @@ func TestSendWaitingForHolderReportsAHolderThatOutlivesTheDeadline(t *testing.T)
 	gpcnClient.config.PollingTimeout = 50 * time.Millisecond
 
 	sends := 0
-	_, config, err := SendWaitingForHolder(gpcnClient, t.Context(), time.Millisecond, busyThenAccepted(&sends))
+	_, err := SendWaitingForHolder(gpcnClient, t.Context(), time.Millisecond, busyThenAccepted(&sends))
 	if !errors.Is(err, ErrHolderStillRunning) {
 		t.Errorf("SendWaitingForHolder = %v, want ErrHolderStillRunning", err)
-	}
-	if config != nil {
-		t.Errorf("config = %v, want nil", config)
 	}
 	if sends != 1 {
 		t.Errorf("sends = %d, want 1", sends)
@@ -478,7 +433,7 @@ func TestSendWaitingForHolderStopsAtADeadlineThatPassedAfterTheHolder(t *testing
 
 			sends := 0
 			send := busyThenAccepted(&sends)
-			_, config, err := SendWaitingForHolder(gpcnClient, t.Context(), time.Millisecond, func() (string, error) {
+			_, err = SendWaitingForHolder(gpcnClient, t.Context(), time.Millisecond, func() (string, error) {
 				if sends == 0 {
 					sentAt <- time.Now()
 				}
@@ -489,9 +444,6 @@ func TestSendWaitingForHolderStopsAtADeadlineThatPassedAfterTheHolder(t *testing
 			}
 			if got := errors.Is(err, ErrHolderNotVisible); got != tt.wantNotVisible {
 				t.Errorf("errors.Is(err, ErrHolderNotVisible) = %t, want %t", got, tt.wantNotVisible)
-			}
-			if config != nil {
-				t.Errorf("config = %v, want nil", config)
 			}
 			if sends != 1 {
 				t.Errorf("sends = %d, want 1", sends)
@@ -515,15 +467,12 @@ func TestSendWaitingForHolderStopsWhenTheContextEndsInTheSleep(t *testing.T) {
 	}()
 
 	sends := 0
-	_, config, err := SendWaitingForHolder(gpcnClient, ctx, time.Hour, busyThenAccepted(&sends))
+	_, err := SendWaitingForHolder(gpcnClient, ctx, time.Hour, busyThenAccepted(&sends))
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("SendWaitingForHolder = %v, want context.Canceled", err)
 	}
 	if !errors.Is(err, ErrBusyWaitExhausted) {
 		t.Errorf("SendWaitingForHolder = %v, want ErrBusyWaitExhausted", err)
-	}
-	if config != nil {
-		t.Errorf("config = %v, want nil", config)
 	}
 	if sends != 1 {
 		t.Errorf("sends = %d, want 1", sends)
@@ -550,7 +499,7 @@ func TestSendWaitingForHolderReturnsOtherRefusalsAtOnce(t *testing.T) {
 			gpcnClient, calls := holderServer(t, http.StatusOK, holderJobsBody(holderTestSucceededJob))
 
 			sends := 0
-			result, config, err := SendWaitingForHolder(gpcnClient, t.Context(), time.Millisecond, func() (string, error) {
+			result, err := SendWaitingForHolder(gpcnClient, t.Context(), time.Millisecond, func() (string, error) {
 				sends++
 				return "refused", tt.err
 			})
@@ -558,8 +507,8 @@ func TestSendWaitingForHolderReturnsOtherRefusalsAtOnce(t *testing.T) {
 			if err != tt.err {
 				t.Errorf("SendWaitingForHolder = %v, want the error of the send", err)
 			}
-			if result != "refused" || config != nil {
-				t.Errorf("result = %q with config %v, want the result of the send and no config", result, config)
+			if result != "refused" {
+				t.Errorf("result = %q, want the result of the send", result)
 			}
 			if sends != 1 {
 				t.Errorf("sends = %d, want 1", sends)
@@ -569,4 +518,59 @@ func TestSendWaitingForHolderReturnsOtherRefusalsAtOnce(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSendWaitingForHolder(t *testing.T) {
+	t.Run("ends a chain of holders at one deadline", func(t *testing.T) {
+		fastHolderPolling(t)
+
+		// A deadline that starts again for the second holder ends at about 4.5s.
+		const pollingTimeout = 3 * time.Second
+		const firstHolderEnds = 1500 * time.Millisecond
+
+		start := time.Now()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			raw, _ := io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			if strings.Contains(string(raw), "h2") {
+				_, _ = w.Write([]byte(holderJobsBody(`{"id":"h2","stage":"running","outcome":null}`)))
+				return
+			}
+			time.Sleep(time.Until(start.Add(firstHolderEnds)))
+			_, _ = w.Write([]byte(holderJobsBody(holderTestSucceededJob)))
+		}))
+		t.Cleanup(server.Close)
+
+		cfg := DefaultConfig(server.URL, "test-key")
+		cfg.MaxRetries = 0
+		cfg.PollingTimeout = pollingTimeout
+		gpcnClient, err := NewGpcnClient(cfg)
+		if err != nil {
+			t.Fatalf("failed to create client: %v", err)
+		}
+
+		sends := 0
+		_, err = SendWaitingForHolder(gpcnClient, t.Context(), time.Millisecond, func() (string, error) {
+			sends++
+			body := busyTestBody
+			if sends > 1 {
+				body = strings.Replace(body, `"jobId":"h1"`, `"jobId":"h2"`, 1)
+			}
+			return "", busyTestError(http.StatusConflict, body)
+		})
+		elapsed := time.Since(start)
+		if !errors.Is(err, ErrHolderStillRunning) || !strings.HasPrefix(err.Error(), "job h2 still holds this resource after ") {
+			t.Fatalf("SendWaitingForHolder = %v, want the still-running error of h2", err)
+		}
+		// The error counts from the first send, and it rounds to a second.
+		if !strings.Contains(err.Error(), " after 3s;") && !strings.Contains(err.Error(), " after 4s;") {
+			t.Errorf("error = %q, want an elapsed time of about 3s", err.Error())
+		}
+		if elapsed >= 4*time.Second {
+			t.Errorf("elapsed = %s, want less than 4s", elapsed)
+		}
+		if sends != 2 {
+			t.Errorf("sends = %d, want 2", sends)
+		}
+	})
 }

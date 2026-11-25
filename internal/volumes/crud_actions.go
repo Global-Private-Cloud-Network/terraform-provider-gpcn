@@ -183,7 +183,7 @@ func UpdateVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 	}
 
 	// A resize is the only change this call makes.
-	response, pollConfig, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
 		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/resize", bytes.NewBuffer(jsonUpdateVolumeRequestBody))
 		if err != nil {
 			return nil, err
@@ -213,7 +213,7 @@ func UpdateVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 		return nil, errors.New("the job to update the GPCN Volume failed to start")
 	}
 
-	_, err = client.PerformLongPollingWithConfig(gpcnClient, ctx, "Update GPCN Volume", updateVolumeResponse.Data.JobID, pollConfig)
+	_, err = client.PerformLongPolling(gpcnClient, ctx, "Update GPCN Volume", updateVolumeResponse.Data.JobID)
 	if err != nil {
 		return nil, fmt.Errorf("update volume polling failed: %w", err)
 	}
@@ -245,7 +245,7 @@ func DeleteVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 			return err
 		}
 	}
-	response, pollConfig, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
 		request, err := http.NewRequestWithContext(ctx, "DELETE", BASE_URL_V1+volumeId, nil)
 		if err != nil {
 			return nil, err
@@ -272,7 +272,7 @@ func DeleteVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 		return err
 	}
 
-	_, err = client.PerformLongPollingWithConfig(gpcnClient, ctx, "Delete GPCN Volume", deleteVolumeResponse.Data.JobID, pollConfig)
+	_, err = client.PerformLongPolling(gpcnClient, ctx, "Delete GPCN Volume", deleteVolumeResponse.Data.JobID)
 
 	if err != nil {
 		return err
@@ -289,7 +289,7 @@ func MoveVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId, re
 		return err
 	}
 
-	response, _, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
 		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId, bytes.NewBuffer(jsonMoveVolumeRequestBody))
 		if err != nil {
 			return nil, err

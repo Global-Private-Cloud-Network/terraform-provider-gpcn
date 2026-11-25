@@ -175,7 +175,7 @@ func RenameNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, nsgID,
 		return err
 	}
 
-	response, _, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
 		request, err := http.NewRequestWithContext(ctx, "PUT", nsgPath(vpcID, nsgID), bytes.NewBuffer(renameRequestBody))
 		if err != nil {
 			return nil, err
@@ -209,7 +209,7 @@ func ReplaceNsgRules(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 	var resent []ApiRule
 	var mergeDiags diag.Diagnostics
 	// The holder can add a VPN-owned rule, so each send reads the group again.
-	jobID, pollConfig, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (string, error) {
+	jobID, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (string, error) {
 		before, err := GetNsg(gpcnClient, ctx, vpcID, nsgID)
 		if err != nil {
 			return "", err
@@ -242,7 +242,7 @@ func ReplaceNsgRules(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 	diags.Append(mergeDiags...)
 	tflog.Info(ctx, LogIssuedReplaceNsgRulesJob)
 
-	if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, ActionReplaceNsgRules, jobID, pollConfig); err != nil {
+	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionReplaceNsgRules, jobID); err != nil {
 		return nil, diags, fmt.Errorf("replace security group rules polling failed: %w", err)
 	}
 
@@ -266,7 +266,7 @@ func ReplaceNsgRules(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 func DeleteNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, nsgID string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteNsgWithID, nsgID))
 
-	jobID, pollConfig, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (string, error) {
+	jobID, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (string, error) {
 		request, err := http.NewRequestWithContext(ctx, "DELETE", nsgPath(vpcID, nsgID), nil)
 		if err != nil {
 			return "", err
@@ -278,7 +278,7 @@ func DeleteNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, nsgID 
 	}
 	tflog.Info(ctx, LogIssuedDeleteNsgJob)
 
-	if _, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, ActionDeleteNsg, jobID, pollConfig); err != nil {
+	if _, err := client.PerformLongPolling(gpcnClient, ctx, ActionDeleteNsg, jobID); err != nil {
 		return fmt.Errorf("delete security group polling failed: %w", err)
 	}
 

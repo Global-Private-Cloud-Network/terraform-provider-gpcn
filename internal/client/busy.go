@@ -108,11 +108,10 @@ func newHolderStillRunningError(jobID string, elapsed time.Duration) error {
 	return &holderStillRunningError{message: fmt.Sprintf(ErrFmtHolderStillRunning, jobID, elapsed.Round(time.Second))}
 }
 
-// SendWaitingForHolder calls send again while a job holds the resource. The job
-// poll that follows a wait shares the deadline of that wait through the returned
-// config. DoWithRetry can meet its own job as the holder, so an error that ends
-// the wait does not prove that the API never took the request.
-func SendWaitingForHolder[T any](gpcnClient *GpcnClient, ctx context.Context, interval time.Duration, send func() (T, error)) (T, *PollingConfig, error) {
+// SendWaitingForHolder calls send again while a job holds the resource, for up
+// to the polling timeout. DoWithRetry can meet its own job as the holder. An
+// error that ends the wait does not prove that the API never took the request.
+func SendWaitingForHolder[T any](gpcnClient *GpcnClient, ctx context.Context, interval time.Duration, send func() (T, error)) (T, error) {
 	var none T
 	start := time.Now()
 	timeout := DefaultPollingConfig().Timeout
@@ -121,32 +120,21 @@ func SendWaitingForHolder[T any](gpcnClient *GpcnClient, ctx context.Context, in
 	}
 	deadline := start.Add(timeout)
 
-	waited := false
 	result, err := send()
 	for holder, busy := BusyHolder(err); busy; holder, busy = BusyHolder(err) {
-		waited = true
 		outcome, waitErr := AwaitHolder(gpcnClient, ctx, holder, start, deadline)
 		if waitErr != nil {
-			return none, nil, waitErr
+			return none, waitErr
 		}
 		select {
 		case <-ctx.Done():
-			return none, nil, BusyWaitEnded(ctx.Err())
+			return none, BusyWaitEnded(ctx.Err())
 		case <-time.After(interval):
 		}
 		if !time.Now().Before(deadline) {
-			return none, nil, HolderDeadline(outcome, holder, start)
+			return none, HolderDeadline(outcome, holder, start)
 		}
 		result, err = send()
 	}
-	if err != nil {
-		return result, nil, err
-	}
-
-	pollConfig := DefaultPollingConfig()
-	pollConfig.Timeout = timeout
-	if waited {
-		pollConfig.Timeout = max(timeout-time.Since(start), 0)
-	}
-	return result, pollConfig, nil
+	return result, err
 }
