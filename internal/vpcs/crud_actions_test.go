@@ -400,7 +400,10 @@ func TestDeleteVpcNamesAHolderTheKeyCannotReadAtTheDeadline(t *testing.T) {
 	BusyRetryInterval = 10 * time.Millisecond
 	t.Cleanup(func() { BusyRetryInterval = previous })
 
-	var deletes atomic.Int32
+	// The deadline passes inside the second holder read.
+	const timeout = time.Second
+	holdRepeatReadUntil := time.Now().Add(timeout + 200*time.Millisecond)
+	var deletes, reads atomic.Int32
 	gpcnClient := vpcClientWithPollingTimeout(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -411,11 +414,14 @@ func TestDeleteVpcNamesAHolderTheKeyCannotReadAtTheDeadline(t *testing.T) {
 				`"error":{"code":"RESOURCE_BUSY","statusCode":409,"details":{"resourceType":"vpc",` +
 				`"resourceId":"` + vpcUnitTestID + `","heldBy":{"jobId":"h1","operation":"create","verb":"create"}}}}`))
 		case r.Method == http.MethodPost && r.URL.Path == client.JOBS_BASE_URL_V1:
+			if reads.Add(1) > 1 {
+				time.Sleep(time.Until(holdRepeatReadUntil))
+			}
 			_, _ = w.Write([]byte(`{"success":true,"data":{"jobs":[],"notFound":["h1"]}}`))
 		default:
 			testutil.LogUnexpectedRequest(t, w, r)
 		}
-	}, 300*time.Millisecond)
+	}, timeout)
 
 	err := DeleteVpc(gpcnClient, t.Context(), vpcUnitTestID)
 	if !errors.Is(err, client.ErrHolderNotVisible) {

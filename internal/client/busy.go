@@ -54,10 +54,10 @@ const (
 	HolderNotVisible
 )
 
-// AwaitHolder returns a nil error when the holder job ends or is not visible,
-// because the caller then sends its request again. start is the start of the
-// caller's wait, the time its deadline counts from, so the deadline error
-// reports how long the caller waited.
+// AwaitHolder returns a nil error when the holder job ends or is not visible.
+// The caller then sends its request again. start is the start of the caller's
+// wait, the time its deadline counts from. So the deadline error reports how
+// long the caller waited.
 func AwaitHolder(gpcnClient *GpcnClient, ctx context.Context, jobID string, start, deadline time.Time) (HolderOutcome, error) {
 	remaining := time.Until(deadline)
 	if remaining <= 0 {
@@ -81,12 +81,9 @@ func AwaitHolder(gpcnClient *GpcnClient, ctx context.Context, jobID string, star
 	}
 }
 
-// BusyWaitEnded marks cause as the end of a busy wait in which the API did not
-// take the request.
+// BusyWaitEnded marks cause as the end of a busy wait whose last send was
+// refused.
 func BusyWaitEnded(cause error) error {
-	if errors.Is(cause, ErrBusyWaitExhausted) {
-		return cause
-	}
 	return &busyWaitError{cause: cause}
 }
 
@@ -97,8 +94,8 @@ func HolderDeadline(outcome HolderOutcome, jobID string, start time.Time) error 
 	return HolderEndedAtDeadline(jobID, start)
 }
 
-// HolderEndedAtDeadline reports a holder job that ended, but only after the
-// wait ran out, so the caller sent nothing.
+// HolderEndedAtDeadline reports a holder job that ended. The wait ran out before
+// the caller could send the request again.
 func HolderEndedAtDeadline(jobID string, start time.Time) error {
 	return &holderEndedAtDeadlineError{message: fmt.Sprintf(ErrFmtHolderEndedAtDeadline, jobID, time.Since(start).Round(time.Second))}
 }

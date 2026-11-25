@@ -510,6 +510,8 @@ type scriptedGatewayServer struct {
 	jobs    map[string]string
 	counts  map[string]int
 	times   map[string][]time.Time
+	// holdRepeatPollUntil delays every poll of a job after its first one.
+	holdRepeatPollUntil time.Time
 }
 
 func (s *scriptedGatewayServer) count(key string) int {
@@ -532,6 +534,9 @@ func (s *scriptedGatewayServer) client(t *testing.T) *client.GpcnClient {
 				ids, _ := testutil.ReadRequestBody(r)["jobIds"].([]any)
 				jobID, _ := ids[0].(string)
 				s.counts["poll "+jobID]++
+				if s.counts["poll "+jobID] > 1 {
+					time.Sleep(time.Until(s.holdRepeatPollUntil))
+				}
 				_, _ = w.Write([]byte(s.jobs[jobID]))
 				return
 			}
@@ -630,13 +635,17 @@ func TestDeleteVpnGatewayBusyDeadlineNamesTheHolder(t *testing.T) {
 	}
 }
 
+const notVisibleHolderTimeout = time.Second
+
+// notVisibleHolderServer makes the deadline pass inside the second holder read.
 func notVisibleHolderServer() *scriptedGatewayServer {
 	return &scriptedGatewayServer{
 		answers: map[string][]gatewayAnswer{
 			http.MethodDelete: {{http.StatusConflict, busyGatewayBody("delete")}},
 			http.MethodGet:    {{http.StatusOK, removingRow(parkedGatewayReason)}},
 		},
-		jobs: map[string]string{"h1": `{"success":true,"data":{"jobs":[],"notFound":["h1"]}}`},
+		jobs:                map[string]string{"h1": `{"success":true,"data":{"jobs":[],"notFound":["h1"]}}`},
+		holdRepeatPollUntil: time.Now().Add(notVisibleHolderTimeout + 200*time.Millisecond),
 	}
 }
 
@@ -661,7 +670,7 @@ func TestDeleteVpnGatewayNamesAHolderTheKeyCannotReadAtTheDeadline(t *testing.T)
 	server := notVisibleHolderServer()
 	gpcnClient := server.client(t)
 
-	err := deleteVpnGateway(gpcnClient, t.Context(), testVpcID, time.Millisecond, 300*time.Millisecond)
+	err := deleteVpnGateway(gpcnClient, t.Context(), testVpcID, time.Millisecond, notVisibleHolderTimeout)
 	assertNamesNotVisibleHolder(t, err, server.count(http.MethodDelete))
 }
 
@@ -674,7 +683,7 @@ func TestDeleteVpnGatewayResendNamesAHolderTheKeyCannotReadAtTheDeadline(t *test
 	server := notVisibleHolderServer()
 	gpcnClient := server.client(t)
 
-	err := waitForVpnGatewayGone(gpcnClient, t.Context(), testVpcID, 10*time.Millisecond, time.Now(), 300*time.Millisecond)
+	err := waitForVpnGatewayGone(gpcnClient, t.Context(), testVpcID, 10*time.Millisecond, time.Now(), notVisibleHolderTimeout)
 	assertNamesNotVisibleHolder(t, err, server.count(http.MethodDelete))
 }
 

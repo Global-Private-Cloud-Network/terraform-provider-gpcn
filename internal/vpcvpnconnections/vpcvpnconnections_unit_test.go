@@ -839,6 +839,8 @@ type busyConnServer struct {
 	jobs    map[string]string
 	counts  map[string]int
 	bodies  [][]byte
+	// holdRepeatPollUntil delays every poll of a job after its first one.
+	holdRepeatPollUntil time.Time
 }
 
 func (s *busyConnServer) count(key string) int {
@@ -867,6 +869,9 @@ func (s *busyConnServer) client(t *testing.T) *client.GpcnClient {
 				return
 			}
 			s.counts["poll "+request.JobIDs[0]]++
+			if s.counts["poll "+request.JobIDs[0]] > 1 {
+				time.Sleep(time.Until(s.holdRepeatPollUntil))
+			}
 			_, _ = w.Write([]byte(s.jobs[request.JobIDs[0]]))
 			return
 		}
@@ -1085,10 +1090,14 @@ func TestResendDeleteBusyChainStopsAtDeadline(t *testing.T) {
 	assertBusyChainStopped(t, err, time.Since(start), busy)
 }
 
+const notVisibleHolderTimeout = time.Second
+
+// notVisibleHolderServer makes the deadline pass inside the second holder read.
 func notVisibleHolderServer(method string) *busyConnServer {
 	return &busyConnServer{
-		answers: map[string][]connAnswer{method: {{http.StatusConflict, busyConnBody}}},
-		jobs:    map[string]string{"h1": `{"success":true,"data":{"jobs":[],"notFound":["h1"]}}`},
+		answers:             map[string][]connAnswer{method: {{http.StatusConflict, busyConnBody}}},
+		jobs:                map[string]string{"h1": `{"success":true,"data":{"jobs":[],"notFound":["h1"]}}`},
+		holdRepeatPollUntil: time.Now().Add(notVisibleHolderTimeout + 200*time.Millisecond),
 	}
 }
 
@@ -1112,7 +1121,7 @@ func TestUpdateVpnConnectionNamesAHolderTheKeyCannotReadAtTheDeadline(t *testing
 	setBusyChainInterval(t)
 	server := notVisibleHolderServer(http.MethodPut)
 	gpcnClient := server.client(t)
-	gpcnClient.Config().PollingTimeout = busyChainTimeout
+	gpcnClient.Config().PollingTimeout = notVisibleHolderTimeout
 
 	accepted, err := UpdateVpnConnection(gpcnClient, t.Context(), testVpcID, testConnID, map[string]any{"dpd": false})
 	assertNamesNotVisibleHolder(t, err, server.count(http.MethodPut))
@@ -1126,7 +1135,7 @@ func TestDeleteVpnConnectionNamesAHolderTheKeyCannotReadAtTheDeadline(t *testing
 	server := notVisibleHolderServer(http.MethodDelete)
 	gpcnClient := server.client(t)
 
-	err := deleteVpnConnection(gpcnClient, t.Context(), testVpcID, testConnID, 10*time.Millisecond, busyChainTimeout)
+	err := deleteVpnConnection(gpcnClient, t.Context(), testVpcID, testConnID, 10*time.Millisecond, notVisibleHolderTimeout)
 	assertNamesNotVisibleHolder(t, err, server.count(http.MethodDelete))
 }
 
@@ -1135,7 +1144,7 @@ func TestResendDeleteNamesAHolderTheKeyCannotReadAtTheDeadline(t *testing.T) {
 	server := notVisibleHolderServer(http.MethodDelete)
 	gpcnClient := server.client(t)
 
-	_, _, err := resendDelete(gpcnClient, t.Context(), testVpcID, testConnID, time.Now(), busyChainTimeout)
+	_, _, err := resendDelete(gpcnClient, t.Context(), testVpcID, testConnID, time.Now(), notVisibleHolderTimeout)
 	assertNamesNotVisibleHolder(t, err, server.count(http.MethodDelete))
 }
 

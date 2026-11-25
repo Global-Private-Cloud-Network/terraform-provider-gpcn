@@ -1864,8 +1864,14 @@ func TestVpcVpnConnectionResourceUpdateCancelledWaitCarriesNoNote(t *testing.T) 
 		s.onHolderRead = func() { time.AfterFunc(200*time.Millisecond, cancel) }
 	})
 	details := rename(ctx)
-	if want := []string{context.Canceled.Error()}; !slices.Equal(details, want) {
-		t.Errorf("details = %q, want %q", details, want)
+	if len(details) != 1 {
+		t.Fatalf("Expected one error, got %q", details)
+	}
+	if want := "context canceled"; !strings.Contains(details[0], want) {
+		t.Errorf("detail = %q, want it to contain %q", details[0], want)
+	}
+	if strings.Contains(details[0], vpcvpnconnections.ErrDetailUpdateMayStillApply) {
+		t.Errorf("note present = true, want false; detail: %q", details[0])
 	}
 }
 

@@ -21,9 +21,8 @@ var (
 	// ErrHolderNotVisible matches, through errors.Is, the deadline error of a
 	// holder job that the batch read does not return.
 	ErrHolderNotVisible = errors.New("the holder job is not visible")
-	// ErrBusyWaitExhausted matches every error of a busy wait that ended without
-	// the API taking the request: the deadline, a cancel, or a failed holder
-	// read.
+	// ErrBusyWaitExhausted matches every error that ends a busy wait. The last
+	// send was refused busy, and no send followed.
 	ErrBusyWaitExhausted = errors.New("the busy wait ran out")
 )
 

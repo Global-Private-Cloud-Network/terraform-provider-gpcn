@@ -365,7 +365,8 @@ const (
 // in the removing state with a failure reason gets the DELETE once more, when
 // at least ResendMinBudget is left. When the row parks again after that second
 // DELETE, the wait fails with the failure reason. When the API refuses the
-// second DELETE with a 409, the wait fails with the API's message.
+// second DELETE with a 409 other than RESOURCE_BUSY, the wait fails with the
+// API's message.
 func waitForVpnConnectionGone(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, connectionID string, interval time.Duration, startTime time.Time, timeout time.Duration) error {
 	tflog.Info(ctx, fmt.Sprintf(LogWaitingForVpnConnectionGone, connectionID))
 
