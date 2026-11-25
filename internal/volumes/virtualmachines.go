@@ -54,9 +54,18 @@ func AddVolumeToVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Contex
 	return nil
 }
 
-// Remove a volume from the virtual machine
-func RemoveVolumeFromVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, volumeId string) error {
+// RemoveVolumeFromVirtualMachine sends no detach when the volume is not on that
+// machine. The detach names only the volume, so it can act on another machine.
+func RemoveVolumeFromVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, volumeId, virtualMachineId string) error {
 	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		volume, err := GetVolume(gpcnClient, ctx, volumeId)
+		if err != nil {
+			return nil, err
+		}
+		if volume.Data.VirtualMachineId == "" || volume.Data.VirtualMachineId != virtualMachineId {
+			return nil, nil
+		}
+
 		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/detach", nil)
 		if err != nil {
 			return nil, err
@@ -65,6 +74,9 @@ func RemoveVolumeFromVirtualMachine(gpcnClient *client.GpcnClient, ctx context.C
 	})
 	if err != nil {
 		return err
+	}
+	if response == nil {
+		return nil
 	}
 	defer response.Body.Close()
 

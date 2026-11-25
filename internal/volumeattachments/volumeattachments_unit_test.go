@@ -108,6 +108,9 @@ func volumeOperationServer(t *testing.T, volumeAction string) (*client.GpcnClien
 			case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/virtual-machines/"+testVMID):
 				testutil.WriteJSONResponse(w, vmResponse(testVMID, 0, "Running"))
 
+			case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/volumes/"+testVolID):
+				testutil.WriteJSONResponse(w, volumeResponse(testVolID, testVMID))
+
 			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/stop"):
 				w.WriteHeader(http.StatusInternalServerError)
 
@@ -206,7 +209,7 @@ func TestAttachVolumeDoesNotStopVMMockHTTP(t *testing.T) {
 func TestDetachVolumeDoesNotStopVMMockHTTP(t *testing.T) {
 	gpcnClient, recorder := volumeOperationServer(t, "detach")
 
-	err := DetachVolume(gpcnClient, context.Background(), testVolID)
+	err := DetachVolume(gpcnClient, context.Background(), testVMID, testVolID)
 
 	assertNoStopOrStart(t, recorder)
 	if !recorder.saw("PUT", "/volumes/"+testVolID+"/detach") {
@@ -268,6 +271,10 @@ func TestDetachVolumeNotFoundStaysNotFound(t *testing.T) {
 	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/volumes/"+testVolID) {
+				testutil.WriteJSONResponse(w, volumeResponse(testVolID, testVMID))
+				return
+			}
 			if r.Method == "PUT" && strings.HasSuffix(r.URL.Path, "/volumes/"+testVolID+"/detach") {
 				w.WriteHeader(http.StatusNotFound)
 				return
@@ -276,7 +283,7 @@ func TestDetachVolumeNotFoundStaysNotFound(t *testing.T) {
 		},
 	})
 
-	err := DetachVolume(gpcnClient, context.Background(), testVolID)
+	err := DetachVolume(gpcnClient, context.Background(), testVMID, testVolID)
 	if err == nil {
 		t.Fatal("expected DetachVolume to fail when the volume is gone")
 	}

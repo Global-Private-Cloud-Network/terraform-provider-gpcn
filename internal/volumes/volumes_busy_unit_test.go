@@ -133,13 +133,50 @@ func TestAddVolumeToVirtualMachineWaitsOutBusyHolder(t *testing.T) {
 	recorded.check(t, `{"virtualMachineId":"vm-1"}`, "send", "poll holder-job", "send", "poll own-job")
 }
 
-func TestRemoveVolumeFromVirtualMachineWaitsOutBusyHolder(t *testing.T) {
-	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vol-1/detach", acceptOwnJob, nil)
+// volumeOnMachines answers each volume read with the next machine of the list.
+func volumeOnMachines(machines ...string) http.HandlerFunc {
+	reads := 0
+	return func(w http.ResponseWriter, _ *http.Request) {
+		machine := machines[min(reads, len(machines)-1)]
+		reads++
+		testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{
+			"id": "vol-1", "virtualMachineId": machine,
+		}})
+	}
+}
 
-	if err := RemoveVolumeFromVirtualMachine(gpcnClient, context.Background(), "vol-1"); err != nil {
+func TestRemoveVolumeFromVirtualMachineWaitsOutBusyHolder(t *testing.T) {
+	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vol-1/detach", acceptOwnJob, volumeOnMachines("vm-1"))
+
+	if err := RemoveVolumeFromVirtualMachine(gpcnClient, context.Background(), "vol-1", "vm-1"); err != nil {
 		t.Fatalf("RemoveVolumeFromVirtualMachine = %v, want nil", err)
 	}
-	recorded.check(t, "", "send", "poll holder-job", "send", "poll own-job")
+	read := "GET " + BASE_URL_V1 + "vol-1"
+	recorded.check(t, "", read, "send", "poll holder-job", read, "send", "poll own-job")
+}
+
+// checkOneDetach pins a detach that the second volume read stopped.
+func checkOneDetach(t *testing.T, machineAfterTheWait string) {
+	t.Helper()
+	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vol-1/detach", acceptOwnJob, volumeOnMachines("vm-1", machineAfterTheWait))
+
+	if err := RemoveVolumeFromVirtualMachine(gpcnClient, context.Background(), "vol-1", "vm-1"); err != nil {
+		t.Fatalf("RemoveVolumeFromVirtualMachine = %v, want nil", err)
+	}
+	recorded.mu.Lock()
+	defer recorded.mu.Unlock()
+	read := "GET " + BASE_URL_V1 + "vol-1"
+	if want := []string{read, "send", "poll holder-job", read}; !slices.Equal(recorded.events, want) {
+		t.Errorf("events = %q, want %q", recorded.events, want)
+	}
+}
+
+func TestRemoveVolumeFromVirtualMachineLeavesAVolumeThatMoved(t *testing.T) {
+	checkOneDetach(t, "vm-2")
+}
+
+func TestRemoveVolumeFromVirtualMachineSkipsADetachedVolume(t *testing.T) {
+	checkOneDetach(t, "")
 }
 
 // The holder takes 2.5s of the 4s timeout, so 1.5s of the wait remains. The

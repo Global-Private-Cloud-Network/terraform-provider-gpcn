@@ -25,6 +25,6 @@ func AttachVolume(gpcnClient *client.GpcnClient, ctx context.Context, vmId, volu
 }
 
 // GPCN reads the machine from the volume row, so the detach names only the volume.
-func DetachVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId string) error {
-	return volumes.RemoveVolumeFromVirtualMachine(gpcnClient, ctx, volumeId)
+func DetachVolume(gpcnClient *client.GpcnClient, ctx context.Context, vmId, volumeId string) error {
+	return volumes.RemoveVolumeFromVirtualMachine(gpcnClient, ctx, volumeId, vmId)
 }
