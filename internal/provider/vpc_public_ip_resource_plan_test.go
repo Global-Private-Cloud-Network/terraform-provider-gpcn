@@ -713,3 +713,13 @@ func TestVPCPublicIpResourcePlanRefusesABareImportId(t *testing.T) {
 		},
 	})
 }
+
+func TestVPCPublicIpResourcePlanDestroyWaitsOutBusyHolder(t *testing.T) {
+	shortenBusyRetry(t, &vpcpublicips.BusyRetryInterval)
+	server, _ := startVPCPublicIpPlanMockServer(t)
+	deleteRequest := "DELETE /v1/resource/vpcs/" + vpcPublicIpPlanTestVpcID + "/public-ips/" + vpcPublicIpPlanTestID
+	proxy := startBusyPlanTestProxy(t, server, deleteRequest)
+
+	runBusyDestroyPlanTest(t, vpcPublicIpPlanTestConfig(proxy.url))
+	proxy.checkSentAgain(t, map[string]string{deleteRequest: ""})
+}

@@ -1118,3 +1118,13 @@ func TestVpcSubnetCreateKeepsTheConfiguredPrefixWhenTheCarveFailsUnit(t *testing
 		t.Errorf("attached_nic_count = %v, want null", stored.AttachedNicCount)
 	}
 }
+
+func TestVpcSubnetResourcePlanDestroyWaitsOutBusyHolder(t *testing.T) {
+	shortenBusyRetry(t, &vpcsubnets.BusyRetryInterval)
+	server, _ := startSubnetPlanMockServer(t)
+	deleteRequest := "DELETE /v1/resource/vpcs/" + subnetPlanTestVpcID + "/subnets/" + subnetPlanTestID
+	proxy := startBusyPlanTestProxy(t, server, deleteRequest)
+
+	runBusyDestroyPlanTest(t, subnetPlanTestConfig(proxy.url, "subnet-busy", ""))
+	proxy.checkSentAgain(t, map[string]string{deleteRequest: ""})
+}

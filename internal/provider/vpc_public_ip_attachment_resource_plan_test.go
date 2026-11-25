@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"testing"
 
+	"terraform-provider-gpcn/internal/vpcpublicips"
+
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/plancheck"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
@@ -255,4 +257,15 @@ func checkAttachmentDestroySentOneDetach(row *publicIpPlanTestRow) func(*terrafo
 		}
 		return nil
 	}
+}
+
+func TestVPCPublicIpAttachmentResourcePlanDestroyWaitsOutBusyHolder(t *testing.T) {
+	shortenBusyRetry(t, &vpcpublicips.BusyRetryInterval)
+	server, row := startVPCPublicIpPlanMockServer(t)
+	row.becomeReady()
+	deleteRequest := "POST /v1/resource/vpcs/" + vpcPublicIpPlanTestVpcID + "/public-ips/" + vpcPublicIpPlanTestID + "/detach"
+	proxy := startBusyPlanTestProxy(t, server, deleteRequest)
+
+	runBusyDestroyPlanTest(t, vpcPublicIpAttachmentPlanTestConfig(proxy.url))
+	proxy.checkSentAgain(t, map[string]string{deleteRequest: ""})
 }

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 
@@ -1210,6 +1211,37 @@ func TestL2SegmentCreateJobFailedIsReplaced(t *testing.T) {
 					}
 					return nil
 				},
+			},
+		},
+	})
+}
+
+func TestL2SegmentResourcePlanDestroyWaitsOutBusyHolder(t *testing.T) {
+	shortenBusyRetry(t, &l2segments.BusyRetryInterval)
+	server, _ := startL2SegmentPlanMockServer(t)
+	deleteRequest := "DELETE /v1/resource/l2-segments/" + l2PlanTestSegmentID
+	proxy := startBusyPlanTestProxy(t, server, deleteRequest)
+
+	runBusyDestroyPlanTest(t, l2PlanTestConfig(proxy.url, l2PlanTestName))
+	proxy.checkSentAgain(t, map[string]string{deleteRequest: ""})
+}
+
+func TestL2SegmentResourcePlanDestroyReportsAHolderThatOutlivesTheTimeout(t *testing.T) {
+	shortenBusyRetry(t, &l2segments.BusyRetryInterval)
+	server, _ := startL2SegmentPlanMockServer(t)
+	proxy := startBusyPlanTestProxy(t, server, "DELETE /v1/resource/l2-segments/"+l2PlanTestSegmentID)
+	config := strings.Replace(l2PlanTestConfig(proxy.url, l2PlanTestName), "  api_key = \"test-key\"\n", "  api_key = \"test-key\"\n  polling_timeout = 1\n", 1)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() { proxy.setHolderRuns(true) },
+				Config:    config,
+				Destroy:   true,
+				ExpectError: regexp.MustCompile(`(?s)job\s+` + busyPlanTestHolderJob + `\s+still\s+holds\s+this\s+resource\s+after\s+\S+;` +
+					`\s+run\s+the\s+apply\s+or\s+destroy\s+again\s+once\s+that\s+job\s+ends`),
 			},
 		},
 	})

@@ -862,17 +862,40 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 // sendDeleteAndPoll sends the DELETE and waits for its job. The caller chooses
 // how a failed job reads.
 func (r *virtualMachinesResource) sendDeleteAndPoll(ctx context.Context, state virtualmachines.ResourceModel, deleteRequestBody io.Reader, resp *resource.DeleteResponse, pollFailure func(error) diag.Diagnostic) {
-	request, err := http.NewRequestWithContext(ctx, "DELETE", virtualmachines.BASE_URL_V1+state.ID.ValueString(), deleteRequestBody)
-	if err != nil {
+	var deleteRequestBytes []byte
+	if deleteRequestBody != nil {
+		var err error
+		deleteRequestBytes, err = io.ReadAll(deleteRequestBody)
+		if err != nil {
+			resp.Diagnostics.AddError(
+				virtualmachines.ErrSummaryUnableToCreateDeleteRequest,
+				err.Error(),
+			)
+			return
+		}
+	}
+
+	var requestErr error
+	response, pollConfig, err := client.SendWaitingForHolder(r.client, ctx, virtualmachines.BusyRetryInterval, func() (*http.Response, error) {
+		var body io.Reader
+		if deleteRequestBytes != nil {
+			body = bytes.NewReader(deleteRequestBytes)
+		}
+		var request *http.Request
+		request, requestErr = http.NewRequestWithContext(ctx, "DELETE", virtualmachines.BASE_URL_V1+state.ID.ValueString(), body)
+		if requestErr != nil {
+			return nil, requestErr
+		}
+		tflog.Info(ctx, virtualmachines.LogConstructedDeleteGPCNVirtualMachineRequest)
+		return r.client.DoWithRetry(request)
+	})
+	if requestErr != nil {
 		resp.Diagnostics.AddError(
 			virtualmachines.ErrSummaryUnableToCreateDeleteRequest,
-			err.Error(),
+			requestErr.Error(),
 		)
 		return
 	}
-	tflog.Info(ctx, virtualmachines.LogConstructedDeleteGPCNVirtualMachineRequest)
-
-	response, err := r.client.DoWithRetry(request)
 	if client.IsNotFound(err) {
 		// Already deleted outside of Terraform
 		tflog.Info(ctx, virtualmachines.LogVirtualMachineAlreadyDeleted)
@@ -908,7 +931,7 @@ func (r *virtualMachinesResource) sendDeleteAndPoll(ctx context.Context, state v
 		return
 	}
 
-	_, err = client.PerformLongPolling(r.client, ctx, "Delete GPCN Virtual Machine", deleteVirtualMachineResponse.Data.JobID)
+	_, err = client.PerformLongPollingWithConfig(r.client, ctx, "Delete GPCN Virtual Machine", deleteVirtualMachineResponse.Data.JobID, pollConfig)
 
 	if err != nil {
 		resp.Diagnostics.Append(pollFailure(err))
