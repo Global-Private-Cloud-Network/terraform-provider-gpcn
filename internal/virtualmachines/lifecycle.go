@@ -13,12 +13,13 @@ import (
 // Issues a Start command to the virtual machine and then polls until it is verified started
 func StartVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingStartVMWithID, virtualMachineId))
-	request, err := http.NewRequestWithContext(ctx, "POST", BASE_URL_V1+virtualMachineId+"/start", nil)
-	if err != nil {
-		return err
-	}
-
-	response, err := gpcnClient.DoWithRetry(request)
+	response, _, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		request, err := http.NewRequestWithContext(ctx, "POST", BASE_URL_V1+virtualMachineId+"/start", nil)
+		if err != nil {
+			return nil, err
+		}
+		return gpcnClient.DoWithRetry(request)
+	})
 	if err != nil {
 		return err
 	}
@@ -35,12 +36,13 @@ func StartVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, vir
 // Issues a Stop command to the virtual machine and then polls until it is verified stopped
 func StopVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingStopVMWithID, virtualMachineId))
-	request, err := http.NewRequestWithContext(ctx, "POST", BASE_URL_V1+virtualMachineId+"/stop", nil)
-	if err != nil {
-		return err
-	}
-
-	response, err := gpcnClient.DoWithRetry(request)
+	response, _, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		request, err := http.NewRequestWithContext(ctx, "POST", BASE_URL_V1+virtualMachineId+"/stop", nil)
+		if err != nil {
+			return nil, err
+		}
+		return gpcnClient.DoWithRetry(request)
+	})
 	if err != nil {
 		return err
 	}
