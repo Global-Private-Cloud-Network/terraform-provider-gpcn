@@ -3,6 +3,7 @@ package virtualmachines
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -729,6 +730,78 @@ func TestPollForVirtualMachineStatusWaitsTheSettleWait(t *testing.T) {
 	}
 	if elapsed > 5*time.Second {
 		t.Errorf("Expected the poller to return soon after the settle wait, it ran for %v", elapsed)
+	}
+}
+
+func TestPollForVirtualMachineStatusReturnsOnCancel(t *testing.T) {
+	useVMStatusPollInterval(t, 2*time.Second)
+	const vmID = "vm-cancel-123"
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID) {
+				resp := newVMResponse(vmID, "test-vm")
+				resp.Data.Status = "Provisioning"
+				testutil.WriteJSONResponse(w, resp)
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	start := time.Now()
+	timer := time.AfterFunc(50*time.Millisecond, cancel)
+	defer timer.Stop()
+	response, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, 30, 0)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want context.Canceled", err)
+	}
+	if response != nil {
+		t.Errorf("Expected no response on cancel, got '%v'", response)
+	}
+	if elapsed >= VM_STATUS_POLL_INTERVAL {
+		t.Errorf("Expected the poller to return within one interval, it ran for %v", elapsed)
+	}
+}
+
+func TestPollForVirtualMachineStatusSettleSurvivesCancel(t *testing.T) {
+	useVMStatusSettleWait(t, 2*time.Second)
+	const vmID = "vm-settle-cancel-123"
+
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID) {
+				testutil.WriteJSONResponse(w, newVMResponse(vmID, "test-vm"))
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	start := time.Now()
+	timer := time.AfterFunc(50*time.Millisecond, cancel)
+	defer timer.Stop()
+	response, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, 30, 0)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("PollForVirtualMachineStatus failed: %v", err)
+	}
+	if response == nil || response.Data.ID != vmID {
+		t.Fatalf("Expected the response for %s, got '%v'", vmID, response)
+	}
+	if elapsed >= VM_STATUS_SETTLE_WAIT {
+		t.Errorf("Expected the poller to return when the context ends, it ran for %v", elapsed)
 	}
 }
 

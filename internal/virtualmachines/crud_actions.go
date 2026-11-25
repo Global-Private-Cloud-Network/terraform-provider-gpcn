@@ -282,7 +282,11 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 	// Wait for initial delay before starting polling
 	if initialDelaySec > 0 {
 		tflog.Info(ctx, fmt.Sprintf(LogInitialPollDelay, initialDelaySec))
-		time.Sleep(time.Duration(initialDelaySec) * time.Second)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(time.Duration(initialDelaySec) * time.Second):
+		}
 	}
 	var getResp *ReadVirtualMachinesResponse
 	var err error
@@ -303,14 +307,23 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 			tflog.Info(ctx, fmt.Sprintf(LogVMStatusProceedingToAttach, getResp.Data.ID, getResp.Data.Status))
 			// The API can report the target status before the change is complete.
 			// The extra wait lowers that risk.
-			time.Sleep(VM_STATUS_SETTLE_WAIT)
+			// A cancel here still succeeds, because the machine has reached the target.
+			select {
+			case <-ctx.Done():
+				return getResp, nil
+			case <-time.After(VM_STATUS_SETTLE_WAIT):
+			}
 			break
 		}
 		if isTerminalFailureStatus(getResp.Data.Status) {
 			pollErr = &terminalStatusError{vmID: virtualMachineId, status: getResp.Data.Status, targets: targetStatuses}
 			break
 		}
-		time.Sleep(VM_STATUS_POLL_INTERVAL)
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(VM_STATUS_POLL_INTERVAL):
+		}
 		longPollIteration += 1
 
 		if time.Since(pollStart) > time.Duration(timeoutMaxSec)*time.Second {
