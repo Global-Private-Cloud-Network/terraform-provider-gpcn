@@ -281,6 +281,7 @@ func TestIsNotFound(t *testing.T) {
 		{"wrapped 404", fmt.Errorf("get network: %w", &client.HTTPError{StatusCode: 404}), true},
 		{"doubly wrapped 404", fmt.Errorf("outer: %w", fmt.Errorf("inner: %w", &client.HTTPError{StatusCode: 404})), true},
 		{"wrapped 500", fmt.Errorf("get network: %w", &client.HTTPError{StatusCode: 500}), false},
+		{"404 from a holder job read", client.BusyWaitEnded(fmt.Errorf("job status request failed: %w", &client.HTTPError{StatusCode: 404})), false},
 	}
 
 	for _, tt := range tests {
