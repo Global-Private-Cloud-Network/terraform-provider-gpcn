@@ -2,7 +2,7 @@
 
 BUG FIXES:
 
-- **Provider**: cancelling an apply or destroy (Ctrl-C) now stops a job poll, a retry backoff and a virtual machine status poll at once, instead of up to ten seconds later. A cancel that lands after a virtual machine has reached its target status still reports success.
+- **Provider**: cancelling an apply or destroy (Ctrl-C) now stops a job poll, a retry backoff and a virtual machine status poll at once, instead of when the current wait ends.
 
 ## 1.8.0 (November 24, 2026)
 

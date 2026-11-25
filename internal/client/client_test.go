@@ -104,8 +104,6 @@ func TestDoWithRetryNoRetryOn400(t *testing.T) {
 	}
 }
 
-// TestDoWithRetryStopsOnCancelledContext covers a Ctrl-C during the backoff
-// after a 503: the request is not sent again.
 func TestDoWithRetryStopsOnCancelledContext(t *testing.T) {
 	t.Parallel()
 

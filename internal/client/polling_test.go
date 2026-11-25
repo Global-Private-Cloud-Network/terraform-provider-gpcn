@@ -509,9 +509,6 @@ func TestPollRefusesEmptyJobID(t *testing.T) {
 	}
 }
 
-// TestPollReturnsAtOnceWhenContextIsCancelled covers a Ctrl-C during the wait
-// between two reads: the poll returns the cancel instead of sleeping out the
-// interval.
 func TestPollReturnsAtOnceWhenContextIsCancelled(t *testing.T) {
 	gpcnClient, calls := jobsServer(t, updatedJobsBody(`{"id":"job-1","stage":"running","outcome":null}`))
 
