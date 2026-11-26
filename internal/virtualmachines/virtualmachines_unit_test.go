@@ -791,6 +791,9 @@ func TestPollForVirtualMachineStatusStopsInTheInitialDelay(t *testing.T) {
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("error = %v, want context.Canceled", err)
 	}
+	if want := "polling virtual machine " + vmID + " stopped: "; err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("error = %v, want it to start with %q", err, want)
+	}
 	if response != nil {
 		t.Errorf("Expected no response on cancel, got '%v'", response)
 	}
@@ -832,6 +835,9 @@ func TestPollForVirtualMachineStatusReturnsOnCancel(t *testing.T) {
 
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("error = %v, want context.Canceled", err)
+	}
+	if want := "polling virtual machine " + vmID + " stopped: "; err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("error = %v, want it to start with %q", err, want)
 	}
 	if response != nil {
 		t.Errorf("Expected no response on cancel, got '%v'", response)

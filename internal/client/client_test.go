@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -134,7 +135,10 @@ func TestDoWithRetryStopsOnCancelledContext(t *testing.T) {
 	}
 
 	start := time.Now()
-	go cancelOnSignal(answered, cancel)
+	go func() {
+		<-answered
+		time.AfterFunc(100*time.Millisecond, cancel)
+	}()
 	resp, err := gpcnClient.DoWithRetry(req)
 	elapsed := time.Since(start)
 	if resp != nil {
@@ -143,6 +147,9 @@ func TestDoWithRetryStopsOnCancelledContext(t *testing.T) {
 
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("error = %v, want context.Canceled", err)
+	}
+	if err != nil && strings.Contains(err.Error(), "HTTP request failed") {
+		t.Errorf("error = %v, want the cancel to end the backoff, not the request", err)
 	}
 	if elapsed >= 500*time.Millisecond {
 		t.Errorf("DoWithRetry returned after %s, want under 500ms", elapsed)

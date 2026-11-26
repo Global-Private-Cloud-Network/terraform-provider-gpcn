@@ -1,10 +1,12 @@
 package client_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -14,6 +16,7 @@ import (
 	"time"
 
 	"terraform-provider-gpcn/internal/client"
+	"terraform-provider-gpcn/internal/testutil"
 )
 
 const (
@@ -511,22 +514,19 @@ func TestPollRefusesEmptyJobID(t *testing.T) {
 
 func TestPollReturnsAtOnceWhenContextIsCancelled(t *testing.T) {
 	var calls atomic.Int32
-	answered := make(chan struct{}, 1)
 	body := updatedJobsBody(`{"id":"job-1","stage":"running","outcome":null}`)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		calls.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(body))
-		signal(answered)
-	}))
+	server, httpClient := testutil.SetupMockServer(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			calls.Add(1)
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(body))
+		},
+	})
 	defer server.Close()
-
-	cfg := client.DefaultConfig(server.URL, "test-key")
-	cfg.MaxRetries = 0
-	gpcnClient, err := client.NewGpcnClient(cfg)
-	if err != nil {
-		t.Fatalf("failed to create client: %v", err)
-	}
+	answered := make(chan struct{}, 1)
+	httpClient.Transport = &answeredTransport{base: httpClient.Transport, answered: answered}
+	gpcnClient := client.NewGpcnClientFromHTTPClient(httpClient)
 
 	config := &client.PollingConfig{
 		Timeout:         10 * time.Second,
@@ -538,11 +538,14 @@ func TestPollReturnsAtOnceWhenContextIsCancelled(t *testing.T) {
 
 	start := time.Now()
 	go cancelOnSignal(answered, cancel)
-	_, err = client.PerformLongPollingWithConfig(gpcnClient, ctx, pollTestAction, "job-1", config)
+	_, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, pollTestAction, "job-1", config)
 	elapsed := time.Since(start)
 
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("error = %v, want context.Canceled", err)
+	}
+	if want := "polling for job job-1 stopped: "; err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("error = %v, want it to start with %q", err, want)
 	}
 	if elapsed >= 500*time.Millisecond {
 		t.Errorf("poll returned after %s, want under 500ms", elapsed)
@@ -550,4 +553,26 @@ func TestPollReturnsAtOnceWhenContextIsCancelled(t *testing.T) {
 	if got := int(calls.Load()); got != 1 {
 		t.Errorf("poll calls = %d, want 1", got)
 	}
+}
+
+// answeredTransport reads each answer to the end before it signals. A cancel
+// after the signal then lands in the wait, not in the read.
+type answeredTransport struct {
+	base     http.RoundTripper
+	answered chan struct{}
+}
+
+func (a *answeredTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := a.base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+	body, err := io.ReadAll(resp.Body)
+	closeErr := resp.Body.Close()
+	if err = errors.Join(err, closeErr); err != nil {
+		return nil, err
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	signal(a.answered)
+	return resp, nil
 }
