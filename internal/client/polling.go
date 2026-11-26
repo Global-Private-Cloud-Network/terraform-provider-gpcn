@@ -205,7 +205,7 @@ func PerformLongPollingWithConfig(gpcnClient *GpcnClient, ctx context.Context, a
 		// Sleep with exponential backoff
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, fmt.Errorf("polling for job %s stopped: %w", jobId, ctx.Err())
 		case <-time.After(interval):
 		}
 		interval *= 2

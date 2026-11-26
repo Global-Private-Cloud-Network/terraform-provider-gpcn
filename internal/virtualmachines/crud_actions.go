@@ -284,7 +284,7 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 		tflog.Info(ctx, fmt.Sprintf(LogInitialPollDelay, initialDelaySec))
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, fmt.Errorf("polling virtual machine %s stopped: %w", virtualMachineId, ctx.Err())
 		case <-time.After(time.Duration(initialDelaySec) * time.Second):
 		}
 	}
@@ -321,7 +321,7 @@ func PollForVirtualMachineStatus(gpcnClient *client.GpcnClient, ctx context.Cont
 		}
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, fmt.Errorf("polling virtual machine %s stopped: %w", virtualMachineId, ctx.Err())
 		case <-time.After(VM_STATUS_POLL_INTERVAL):
 		}
 		longPollIteration += 1
