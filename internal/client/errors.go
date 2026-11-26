@@ -105,5 +105,5 @@ const (
 	ErrFmtHolderStillRunning    = "job %s still holds this resource after %s; run the apply or destroy again once that job ends"
 	ErrFmtHolderEndedAtDeadline = "job %s ended as the wait for it ran out after %s, so the provider did not send the request again; run the apply or destroy again"
 
-	ErrFmtHolderNotVisibleAtDeadline = "the wait for job %s ran out after %s, and the job read does not return that job to this API key; run the apply or destroy again once it ends"
+	ErrFmtHolderNotVisibleAtDeadline = "the wait for job %s ran out after %s, and the job read does not return that job to this API key; run the apply or destroy again later"
 )

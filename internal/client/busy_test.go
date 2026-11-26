@@ -308,7 +308,7 @@ func TestHolderEndedAtDeadlineNamesTheEndedJob(t *testing.T) {
 
 func TestHolderNotVisibleAtDeadlineNamesTheJob(t *testing.T) {
 	err := HolderNotVisibleAtDeadline("h1", time.Now().Add(-90*time.Second))
-	want := "the wait for job h1 ran out after 1m30s, and the job read does not return that job to this API key; run the apply or destroy again once it ends"
+	want := "the wait for job h1 ran out after 1m30s, and the job read does not return that job to this API key; run the apply or destroy again later"
 	if err.Error() != want {
 		t.Errorf("error = %q, want %q", err.Error(), want)
 	}
