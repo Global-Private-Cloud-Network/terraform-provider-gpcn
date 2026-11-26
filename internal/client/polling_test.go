@@ -510,7 +510,23 @@ func TestPollRefusesEmptyJobID(t *testing.T) {
 }
 
 func TestPollReturnsAtOnceWhenContextIsCancelled(t *testing.T) {
-	gpcnClient, calls := jobsServer(t, updatedJobsBody(`{"id":"job-1","stage":"running","outcome":null}`))
+	var calls atomic.Int32
+	answered := make(chan struct{}, 1)
+	body := updatedJobsBody(`{"id":"job-1","stage":"running","outcome":null}`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+		signal(answered)
+	}))
+	defer server.Close()
+
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.MaxRetries = 0
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
 
 	config := &client.PollingConfig{
 		Timeout:         10 * time.Second,
@@ -521,9 +537,8 @@ func TestPollReturnsAtOnceWhenContextIsCancelled(t *testing.T) {
 	defer cancel()
 
 	start := time.Now()
-	timer := time.AfterFunc(50*time.Millisecond, cancel)
-	defer timer.Stop()
-	_, err := client.PerformLongPollingWithConfig(gpcnClient, ctx, pollTestAction, "job-1", config)
+	go cancelOnSignal(answered, cancel)
+	_, err = client.PerformLongPollingWithConfig(gpcnClient, ctx, pollTestAction, "job-1", config)
 	elapsed := time.Since(start)
 
 	if !errors.Is(err, context.Canceled) {

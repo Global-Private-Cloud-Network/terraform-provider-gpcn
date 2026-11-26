@@ -108,10 +108,12 @@ func TestDoWithRetryStopsOnCancelledContext(t *testing.T) {
 	t.Parallel()
 
 	var attemptCount atomic.Int32
+	answered := make(chan struct{}, 1)
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attemptCount.Add(1)
 		w.WriteHeader(http.StatusServiceUnavailable)
+		signal(answered)
 	}))
 	defer server.Close()
 
@@ -132,8 +134,7 @@ func TestDoWithRetryStopsOnCancelledContext(t *testing.T) {
 	}
 
 	start := time.Now()
-	timer := time.AfterFunc(50*time.Millisecond, cancel)
-	defer timer.Stop()
+	go cancelOnSignal(answered, cancel)
 	resp, err := gpcnClient.DoWithRetry(req)
 	elapsed := time.Since(start)
 	if resp != nil {
@@ -149,6 +150,106 @@ func TestDoWithRetryStopsOnCancelledContext(t *testing.T) {
 	if got := int(attemptCount.Load()); got != 1 {
 		t.Errorf("attempts = %d, want 1", got)
 	}
+}
+
+func TestDoWithRetryRetriesARequestTimeout(t *testing.T) {
+	t.Parallel()
+
+	var attemptCount atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if attemptCount.Add(1) == 1 {
+			<-r.Context().Done()
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.RequestTimeout = 200 * time.Millisecond
+	cfg.MaxRetries = 1
+	cfg.InitialRetryDelay = time.Millisecond
+	cfg.MaxRetryDelay = time.Millisecond
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "/test", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	resp, err := gpcnClient.DoWithRetry(req)
+	if err != nil {
+		t.Fatalf("DoWithRetry failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := int(attemptCount.Load()); got != 2 {
+		t.Errorf("attempts = %d, want 2", got)
+	}
+}
+
+func TestDoWithRetryStopsOnACancelDuringTheRequest(t *testing.T) {
+	t.Parallel()
+
+	var attemptCount atomic.Int32
+	received := make(chan struct{}, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attemptCount.Add(1)
+		signal(received)
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.MaxRetries = 3
+	cfg.InitialRetryDelay = time.Millisecond
+	cfg.MaxRetryDelay = time.Millisecond
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "/test", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
+	}
+
+	go cancelOnSignal(received, cancel)
+	resp, err := gpcnClient.DoWithRetry(req)
+	if resp != nil {
+		resp.Body.Close()
+	}
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want context.Canceled", err)
+	}
+	if got := int(attemptCount.Load()); got != 1 {
+		t.Errorf("attempts = %d, want 1", got)
+	}
+}
+
+// signal never blocks a handler, because only the first request needs to
+// reach the test.
+func signal(ch chan<- struct{}) {
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+}
+
+func cancelOnSignal(ch <-chan struct{}, cancel context.CancelFunc) {
+	<-ch
+	cancel()
 }
 
 // TestIsNotFound verifies that only genuine HTTP 404 responses are reported as

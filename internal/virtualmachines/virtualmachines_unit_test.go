@@ -1,6 +1,7 @@
 package virtualmachines
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -733,11 +735,78 @@ func TestPollForVirtualMachineStatusWaitsTheSettleWait(t *testing.T) {
 	}
 }
 
+// answeredTransport reads each answer to the end before it signals. A cancel
+// after the signal then cannot fail the read that the answer completes.
+type answeredTransport struct {
+	base     http.RoundTripper
+	answered chan struct{}
+}
+
+func (a *answeredTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := a.base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+	body, err := io.ReadAll(resp.Body)
+	closeErr := resp.Body.Close()
+	if err = errors.Join(err, closeErr); err != nil {
+		return nil, err
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	select {
+	case a.answered <- struct{}{}:
+	default:
+	}
+	return resp, nil
+}
+
+func setupAnsweredMockServer(config testutil.MockServerConfig) (*httptest.Server, *client.GpcnClient, <-chan struct{}) {
+	server, httpClient := testutil.SetupMockServer(config)
+	answered := make(chan struct{}, 1)
+	httpClient.Transport = &answeredTransport{base: httpClient.Transport, answered: answered}
+	return server, client.NewGpcnClientFromHTTPClient(httpClient), answered
+}
+
+func TestPollForVirtualMachineStatusStopsInTheInitialDelay(t *testing.T) {
+	const vmID = "vm-initial-delay-cancel"
+
+	var requests atomic.Int32
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			requests.Add(1)
+			testutil.WriteJSONResponse(w, newVMResponse(vmID, "test-vm"))
+		},
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	start := time.Now()
+	timer := time.AfterFunc(100*time.Millisecond, cancel)
+	defer timer.Stop()
+	response, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, 30, 1)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want context.Canceled", err)
+	}
+	if response != nil {
+		t.Errorf("Expected no response on cancel, got '%v'", response)
+	}
+	if elapsed >= 500*time.Millisecond {
+		t.Errorf("Expected the poller to return within 500ms, it ran for %v", elapsed)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Errorf("Expected no request, got %d", got)
+	}
+}
+
 func TestPollForVirtualMachineStatusReturnsOnCancel(t *testing.T) {
 	useVMStatusPollInterval(t, 2*time.Second)
 	const vmID = "vm-cancel-123"
 
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+	server, gpcnClient, answered := setupAnsweredMockServer(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID) {
@@ -754,8 +823,10 @@ func TestPollForVirtualMachineStatusReturnsOnCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	start := time.Now()
-	timer := time.AfterFunc(50*time.Millisecond, cancel)
-	defer timer.Stop()
+	go func() {
+		<-answered
+		cancel()
+	}()
 	response, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, 30, 0)
 	elapsed := time.Since(start)
 
@@ -774,7 +845,7 @@ func TestPollForVirtualMachineStatusSettleSurvivesCancel(t *testing.T) {
 	useVMStatusSettleWait(t, 2*time.Second)
 	const vmID = "vm-settle-cancel-123"
 
-	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+	server, gpcnClient, answered := setupAnsweredMockServer(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID) {
@@ -789,8 +860,10 @@ func TestPollForVirtualMachineStatusSettleSurvivesCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	start := time.Now()
-	timer := time.AfterFunc(50*time.Millisecond, cancel)
-	defer timer.Stop()
+	go func() {
+		<-answered
+		cancel()
+	}()
 	response, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, 30, 0)
 	elapsed := time.Since(start)
 
