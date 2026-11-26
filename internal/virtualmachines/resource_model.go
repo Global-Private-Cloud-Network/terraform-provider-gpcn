@@ -270,6 +270,9 @@ func ReleasesParkedAddress(state ResourceModel, live []networks.ReadVirtualMachi
 	if listErr != nil {
 		return true, listErr.Error()
 	}
+	if len(live) == 0 {
+		return false, ""
+	}
 	if _, named := primaryInterfaceWorld(live); !named {
 		return true, ReasonNoPrimaryInterface
 	}

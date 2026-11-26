@@ -2192,7 +2192,7 @@ func TestReleasesParkedAddress(t *testing.T) {
 		{"allocate null with a VPC primary", types.BoolNull(), vpcPrimary, nil, false, ""},
 		{"allocate false with a failed listing", types.BoolValue(false), nil, listErr, false, ""},
 		{"allocate true with a failed listing", types.BoolValue(true), nil, listErr, true, "HTTP 404: Virtual machine not found"},
-		{"allocate true with no interface", types.BoolValue(true), nil, nil, true, "no interface is marked primary"},
+		{"an empty listing releases nothing", types.BoolValue(true), []networks.ReadVirtualMachineNetworkDataResponseTF{}, nil, false, ""},
 		{"allocate true with no primary", types.BoolValue(true), noPrimary, nil, true, "no interface is marked primary"},
 		{"allocate true with a legacy primary", types.BoolValue(true), legacyPrimary, nil, false, ""},
 		{"allocate true with a VPC primary", types.BoolValue(true), vpcPrimary, nil, true, ""},

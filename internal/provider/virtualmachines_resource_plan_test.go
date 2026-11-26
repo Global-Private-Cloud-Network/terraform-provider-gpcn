@@ -5229,6 +5229,47 @@ func TestVirtualMachineDeleteParkedFallsBackWithoutAPrimary(t *testing.T) {
 	vmUpdatedPlanTestExpectParkedDelete(t, mock, `{"releasePublicIps":true}`)
 }
 
+// A machine with no interface holds no address, so the destroy releases nothing.
+func TestVirtualMachineDeleteParkedReleasesNothingWithoutInterfaces(t *testing.T) {
+	mock := vmUpdatedPlanTestDestroyParked(t, "vm-updated-parked-no-interfaces", func(m *vmUpdatedMock) {
+		m.interfacesBody = map[string]any{"success": true, "message": "ok", "data": []map[string]any{}}
+	})
+
+	vmUpdatedPlanTestExpectParkedDelete(t, mock, "")
+}
+
+// Only a machine that acquired an address needs the network of its primary
+// interface, so the destroy of any other parked machine lists nothing.
+func TestVirtualMachineDeleteParkedListsNothingWithoutAllocate(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineUpdatedMockServer(t)
+	config := vmPublicIpPlanTestConfig(mock.server.URL, "vm-updated-parked-no-allocate", false, "")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() { mock.set(func(m *vmUpdatedMock) { m.parked = true }) },
+				Config:    config,
+				Destroy:   true,
+			},
+		},
+	})
+
+	_, deleteBodies := mock.recorded()
+	if len(deleteBodies) != 1 {
+		t.Fatalf("Expected one delete, got %d", len(deleteBodies))
+	}
+	if deleteBodies[0] != "" {
+		t.Errorf("Expected a delete with no body, got '%s'", deleteBodies[0])
+	}
+	want := []string{"read", "delete"}
+	if got := mock.deletePhase(); !slices.Equal(got, want) {
+		t.Errorf("Expected the delete to read and delete with no interface listing, got %v", got)
+	}
+}
+
 // vmUpdatedPlanTestDestroyWithRead creates the machine, then destroys it while reads report the
 // given status and failure reason.
 func vmUpdatedPlanTestDestroyWithRead(t *testing.T, mock *vmUpdatedMock, name string, read vmUpdatedRead) {

@@ -760,7 +760,7 @@ func (r *virtualMachinesResource) Delete(ctx context.Context, req resource.Delet
 		releases, fallbackReason := virtualmachines.ReleasesParkedAddress(state, parkedInterfaces, listErr)
 		if fallbackReason != "" {
 			resp.Diagnostics.AddWarning(
-				virtualmachines.WarnSummaryParkedInterfaceListFailed,
+				virtualmachines.WarnSummaryParkedReleaseFellBack,
 				fmt.Sprintf(virtualmachines.WarnDetailParkedReleaseFellBack, state.ID.ValueString(), fallbackReason),
 			)
 		}

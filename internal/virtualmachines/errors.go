@@ -28,7 +28,7 @@ const (
 // Warning summary constants
 const (
 	WarnSummaryRemovingNetworkInterfaceFailed = "Removing network interface failed"
-	WarnSummaryParkedInterfaceListFailed      = "Could not read the network interfaces of the virtual machine"
+	WarnSummaryParkedReleaseFellBack          = "Could not tell which network the virtual machine is on"
 )
 
 // Error detail message templates
