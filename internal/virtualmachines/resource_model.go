@@ -212,9 +212,6 @@ func populateAuth(ctx context.Context, current types.Object, response *ReadVirtu
 		Username: types.StringNull(),
 		Password: types.StringNull(),
 	}
-	if response.Data.Username != "" {
-		auth.Username = types.StringValue(response.Data.Username)
-	}
 
 	return types.ObjectValueFrom(ctx, auth.AttrTypes(), auth)
 }
@@ -256,8 +253,7 @@ func resolveImageId(gpcnClient *client.GpcnClient, ctx context.Context, current 
 // ReleasesAcquiredAddress reports whether the destroy asks GPCN to give the address
 // back. Terraform releases only an address it acquired, and only a VPC interface holds
 // one. The release key also needs the vpc-public-ip:delete permission, which a legacy
-// machine must not have to spend. Delete fetches the interfaces before it asks. It
-// returns when that read fails, so the live list is the only source.
+// machine must not have to spend.
 func ReleasesAcquiredAddress(state ResourceModel, live []networks.ReadVirtualMachineNetworkDataResponseTF) bool {
 	if !state.AllocatePublicIp.ValueBool() {
 		return false
@@ -265,6 +261,22 @@ func ReleasesAcquiredAddress(state ResourceModel, live []networks.ReadVirtualMac
 
 	world, named := primaryInterfaceWorld(live)
 	return named && world == networks.NicWorldVpc
+}
+
+func ReleasesParkedAddress(state ResourceModel, live []networks.ReadVirtualMachineNetworkDataResponseTF, listErr error) (bool, string) {
+	if !state.AllocatePublicIp.ValueBool() {
+		return false, ""
+	}
+	if listErr != nil {
+		return true, listErr.Error()
+	}
+	if len(live) == 0 {
+		return false, ""
+	}
+	if _, named := primaryInterfaceWorld(live); !named {
+		return true, ReasonNoPrimaryInterface
+	}
+	return ReleasesAcquiredAddress(state, live), ""
 }
 
 // primaryInterfaceWorld names the world of the birth interface. A list with no primary

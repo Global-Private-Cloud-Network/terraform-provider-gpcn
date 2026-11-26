@@ -1,3 +1,14 @@
+## 1.8.1 (Unreleased)
+
+BUG FIXES:
+
+- **Provider**: cancelling an apply or destroy (Ctrl-C) now stops a job poll, a retry backoff and a virtual machine status poll at once, instead of when the current wait ends. The destroy of a deprecated `gpcn_network` still finishes its pause between delete attempts.
+- **Virtual Machine, GPU, Volume**: a create reads the new resource back by the ID the API gave when it accepted the request, and a volume resize reads the volume back by its own ID. Before, both depended on the finished job to name it.
+- **Virtual Machine**: importing a machine with an SSH key no longer records its username in `initial_auth`, so a configuration whose `initial_auth` sets only `ssh_key_id` plans no change after the import.
+- **Virtual Machine**: destroying a machine that a failed create left behind releases its elastic IP by the same rule as any other destroy: only when its primary interface is on a VPC. When the provider cannot read the interfaces, or none of them is primary, it releases the address as before and warns.
+- **VPC, VPN Connection, VPN Gateway**: when the wait for the job that holds the resource runs out after a read that did not return that job, the error says that the API key cannot read it. Before, it said that the job had ended.
+- **VPN Connection**: an update cancelled while it waits for another job no longer says that the change may still apply.
+
 ## 1.8.0 (November 24, 2026)
 
 BREAKING CHANGES:

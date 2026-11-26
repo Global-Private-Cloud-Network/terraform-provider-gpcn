@@ -736,9 +736,10 @@ func TestVirtualMachineResourcePlanImportsVpcIdentity(t *testing.T) {
 				),
 			},
 			{
-				ResourceName:      gpcnVirtualMachineTest,
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            gpcnVirtualMachineTest,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"initial_auth.username"},
 			},
 		},
 	})
@@ -2576,9 +2577,10 @@ func TestVirtualMachineResourcePlanImportRecordsAHeldAddress(t *testing.T) {
 				),
 			},
 			{
-				ResourceName:      gpcnVirtualMachineTest,
-				ImportState:       true,
-				ImportStateVerify: true,
+				ResourceName:            gpcnVirtualMachineTest,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"initial_auth.username"},
 				ImportStateCheck: func(states []*terraform.InstanceState) error {
 					if len(states) != 1 {
 						return fmt.Errorf("expected 1 imported state, got %d", len(states))
@@ -3442,51 +3444,21 @@ func TestVirtualMachineResourcePlanImportsMachineWithoutCredentials(t *testing.T
 	tests := []struct {
 		name     string
 		username any
-		sshKeyID any
-		lines    string
-		check    func(attributes map[string]string) error
 	}{
-		{
-			name:     "no_username_no_key",
-			username: nil,
-			sshKeyID: nil,
-			lines:    "",
-			check:    vmFirstBootPlanTestNoInitialAuth,
-		},
-		{
-			name:     "username_without_key",
-			username: vmPlanTestUsername,
-			sshKeyID: nil,
-			lines:    "",
-			check:    vmFirstBootPlanTestNoInitialAuth,
-		},
-		{
-			name:     "username_and_key",
-			username: vmPlanTestUsername,
-			sshKeyID: vmPlanTestSshKeyID,
-			lines:    vmFirstBootPlanTestKeyAuth,
-			check: func(attributes map[string]string) error {
-				if got := attributes["initial_auth.ssh_key_id"]; got != vmPlanTestSshKeyID {
-					return fmt.Errorf("expected the imported ssh_key_id %q, got %q", vmPlanTestSshKeyID, got)
-				}
-				if got := attributes["initial_auth.username"]; got != vmPlanTestUsername {
-					return fmt.Errorf("expected the imported username %q, got %q", vmPlanTestUsername, got)
-				}
-				return nil
-			},
-		},
+		{name: "no_username_no_key", username: nil},
+		{name: "username_without_key", username: vmPlanTestUsername},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			shortenVirtualMachinePolling(t)
-			server, _ := startVirtualMachineFirstBootMockServer(t, tc.username, tc.sshKeyID)
+			server, _ := startVirtualMachineFirstBootMockServer(t, tc.username, nil)
 
 			resource.UnitTest(t, resource.TestCase{
 				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 				Steps: []resource.TestStep{
 					{
-						Config: vmFirstBootPlanTestConfig(server.URL, "vm-plan-import-auth", tc.lines),
+						Config: vmFirstBootPlanTestConfig(server.URL, "vm-plan-import-auth", ""),
 					},
 					{
 						ResourceName: gpcnVirtualMachineTest,
@@ -3495,12 +3467,86 @@ func TestVirtualMachineResourcePlanImportsMachineWithoutCredentials(t *testing.T
 							if len(states) != 1 {
 								return fmt.Errorf("expected one imported state, got %d", len(states))
 							}
-							return tc.check(states[0].Attributes)
+							return vmFirstBootPlanTestNoInitialAuth(states[0].Attributes)
 						},
 					},
 				},
 			})
 		})
+	}
+}
+
+func TestVirtualMachineResourcePlanImportedKeyPlansByConfiguration(t *testing.T) {
+	keyOnlyAuth := fmt.Sprintf("  initial_auth = { ssh_key_id = %q }", vmPlanTestSshKeyID)
+
+	tests := []struct {
+		name  string
+		lines string
+		plan  plancheck.PlanCheck
+		check resource.TestCheckFunc
+	}{
+		{
+			name:  "without_username_plans_empty",
+			lines: keyOnlyAuth,
+			plan:  plancheck.ExpectEmptyPlan(),
+			check: resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "initial_auth.ssh_key_id", vmPlanTestSshKeyID),
+		},
+		{
+			name:  "with_username_plans_an_update",
+			lines: vmFirstBootPlanTestKeyAuth,
+			plan:  plancheck.ExpectResourceAction(gpcnVirtualMachineTest, plancheck.ResourceActionUpdate),
+			check: resource.TestCheckResourceAttr(gpcnVirtualMachineTest, "initial_auth.username", vmPlanTestUsername),
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			shortenVirtualMachinePolling(t)
+			server, _ := startVirtualMachineFirstBootMockServer(t, vmPlanTestUsername, vmPlanTestSshKeyID)
+
+			const name = "vm-plan-import-key"
+			vmFirstBootPlanTestSeedMachine(t, server.URL, name)
+
+			config := vmFirstBootPlanTestConfig(server.URL, name, tc.lines)
+			resource.UnitTest(t, resource.TestCase{
+				ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+				Steps: []resource.TestStep{
+					{
+						Config:             config,
+						ResourceName:       gpcnVirtualMachineTest,
+						ImportState:        true,
+						ImportStateId:      vmPlanTestID,
+						ImportStatePersist: true,
+					},
+					{
+						Config: config,
+						ConfigPlanChecks: resource.ConfigPlanChecks{
+							PreApply: []plancheck.PlanCheck{tc.plan},
+						},
+						Check: tc.check,
+					},
+				},
+			})
+		})
+	}
+}
+
+// A persisted import needs a machine that no Terraform state holds, so the test posts the
+// create itself.
+func vmFirstBootPlanTestSeedMachine(t *testing.T, host, name string) {
+	t.Helper()
+
+	body := fmt.Sprintf(`{"name":%q,"subnetId":%q}`, name, vmPlanTestSubnetID)
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodPost, host+"/v1/resource/virtual-machines/", strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("building the seed request failed: %v", err)
+	}
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("seeding the machine failed: %v", err)
+	}
+	if err := response.Body.Close(); err != nil {
+		t.Fatalf("closing the seed response failed: %v", err)
 	}
 }
 
@@ -4273,10 +4319,9 @@ resource "gpcn_virtualmachine" "test" {
   subnet_id          = %q
   %sinitial_auth = {
     ssh_key_id = %q
-    username   = %q
   }
 }
-`, host, name, vmPlanTestDatacenterID, sizeID, vmPlanTestImageID, vmPlanTestSubnetID, groupLine, vmPlanTestSshKeyID, vmPlanTestUsername)
+`, host, name, vmPlanTestDatacenterID, sizeID, vmPlanTestImageID, vmPlanTestSubnetID, groupLine, vmPlanTestSshKeyID)
 }
 
 func vmGroupPlanTestExpectAction(action plancheck.ResourceActionType) resource.ConfigPlanChecks {
@@ -4807,6 +4852,10 @@ type vmUpdatedMock struct {
 	// reads answer as usual.
 	failRead           bool
 	readsBeforeFailure int
+	// interfacesBody replaces the interface listing.
+	interfacesBody map[string]any
+	// interfacesNotFound answers every interface listing with 404.
+	interfacesNotFound bool
 }
 
 // vmUpdatedRead is a status and a failure reason as a read reports them. A nil
@@ -4920,8 +4969,19 @@ func startVirtualMachineUpdatedMockServer(t *testing.T) *vmUpdatedMock {
 			mock.mu.Lock()
 			boundID := mock.boundID
 			segmentNics := slices.Clone(mock.segmentNics)
+			interfacesBody, interfacesNotFound := mock.interfacesBody, mock.interfacesNotFound
 			mock.events = append(mock.events, "list-interfaces")
 			mock.mu.Unlock()
+			if interfacesNotFound {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"success":false,"message":"Virtual machine not found","error":{"code":"Resource Not Found","statusCode":404,"details":null}}`))
+				return
+			}
+			if interfacesBody != nil {
+				testutil.WriteJSONResponse(w, interfacesBody)
+				return
+			}
 			address := ""
 			if boundID != "" {
 				address = vmPlanTestAcquiredIpAddress
@@ -5092,9 +5152,121 @@ func TestVirtualMachineDeleteParkedSkipsStop(t *testing.T) {
 	if stops != 0 {
 		t.Errorf("Expected no stop of the parked machine, got %d", stops)
 	}
+	want := []string{"read", "list-interfaces", "delete"}
+	if got := mock.deletePhase(); !slices.Equal(got, want) {
+		t.Errorf("Expected the delete to read, list the interfaces and delete, with no detach, got %v", got)
+	}
+}
+
+// vmUpdatedPlanTestDestroyParked creates a machine with an acquired address, then
+// destroys it while it reads parked.
+func vmUpdatedPlanTestDestroyParked(t *testing.T, name string, change func(*vmUpdatedMock)) *vmUpdatedMock {
+	t.Helper()
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineUpdatedMockServer(t)
+	config := vmPublicIpPlanTestConfig(mock.server.URL, name, true, "")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() {
+					mock.set(func(m *vmUpdatedMock) {
+						m.parked = true
+						change(m)
+					})
+				},
+				Config:  config,
+				Destroy: true,
+			},
+		},
+	})
+	return mock
+}
+
+func vmUpdatedPlanTestExpectParkedDelete(t *testing.T, mock *vmUpdatedMock, wantBody string) {
+	t.Helper()
+	_, deleteBodies := mock.recorded()
+	if len(deleteBodies) != 1 {
+		t.Fatalf("Expected one delete, got %d", len(deleteBodies))
+	}
+	if deleteBodies[0] != wantBody {
+		t.Errorf("Expected the delete body '%s', got '%s'", wantBody, deleteBodies[0])
+	}
+	want := []string{"read", "list-interfaces", "delete"}
+	if got := mock.deletePhase(); !slices.Equal(got, want) {
+		t.Errorf("Expected the delete to read, list the interfaces and delete, got %v", got)
+	}
+}
+
+// A parked machine on a legacy network has no VPC address to give back.
+func TestVirtualMachineDeleteParkedReleasesOnlyAVpcPrimary(t *testing.T) {
+	mock := vmUpdatedPlanTestDestroyParked(t, "vm-updated-parked-legacy", func(m *vmUpdatedMock) {
+		m.interfacesBody = vmLegacyPlanTestInterfacesBody(vmPlanTestAcquiredIpID, vmPlanTestAcquiredIpAddress)
+	})
+
+	vmUpdatedPlanTestExpectParkedDelete(t, mock, "")
+}
+
+// A listing that answers 404 is not proof that the parked machine is gone. The
+// destroy still sends the delete.
+func TestVirtualMachineDeleteParkedFallsBackWhenTheListingFails(t *testing.T) {
+	mock := vmUpdatedPlanTestDestroyParked(t, "vm-updated-parked-listing-fails", func(m *vmUpdatedMock) {
+		m.interfacesNotFound = true
+	})
+
+	vmUpdatedPlanTestExpectParkedDelete(t, mock, `{"releasePublicIps":true}`)
+}
+
+// A listing with no primary names no network, so the configuration decides.
+func TestVirtualMachineDeleteParkedFallsBackWithoutAPrimary(t *testing.T) {
+	mock := vmUpdatedPlanTestDestroyParked(t, "vm-updated-parked-no-primary", func(m *vmUpdatedMock) {
+		m.interfacesBody = vmPublicIpPlanTestInterfacesBody("", "")
+		m.interfacesBody["data"].([]map[string]any)[0]["isPrimary"] = 0
+	})
+
+	vmUpdatedPlanTestExpectParkedDelete(t, mock, `{"releasePublicIps":true}`)
+}
+
+// A machine with no interface holds no address, so the destroy releases nothing.
+func TestVirtualMachineDeleteParkedReleasesNothingWithoutInterfaces(t *testing.T) {
+	mock := vmUpdatedPlanTestDestroyParked(t, "vm-updated-parked-no-interfaces", func(m *vmUpdatedMock) {
+		m.interfacesBody = map[string]any{"success": true, "message": "ok", "data": []map[string]any{}}
+	})
+
+	vmUpdatedPlanTestExpectParkedDelete(t, mock, "")
+}
+
+// Only a machine that acquired an address needs the network of its primary
+// interface, so the destroy of any other parked machine lists nothing.
+func TestVirtualMachineDeleteParkedListsNothingWithoutAllocate(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	mock := startVirtualMachineUpdatedMockServer(t)
+	config := vmPublicIpPlanTestConfig(mock.server.URL, "vm-updated-parked-no-allocate", false, "")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				PreConfig: func() { mock.set(func(m *vmUpdatedMock) { m.parked = true }) },
+				Config:    config,
+				Destroy:   true,
+			},
+		},
+	})
+
+	_, deleteBodies := mock.recorded()
+	if len(deleteBodies) != 1 {
+		t.Fatalf("Expected one delete, got %d", len(deleteBodies))
+	}
+	if deleteBodies[0] != "" {
+		t.Errorf("Expected a delete with no body, got '%s'", deleteBodies[0])
+	}
 	want := []string{"read", "delete"}
 	if got := mock.deletePhase(); !slices.Equal(got, want) {
-		t.Errorf("Expected the delete to read and delete, with no interface listing or detach, got %v", got)
+		t.Errorf("Expected the delete to read and delete with no interface listing, got %v", got)
 	}
 }
 

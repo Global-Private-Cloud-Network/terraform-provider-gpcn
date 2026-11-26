@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -305,6 +306,45 @@ func TestUpdateVolumeMockHTTP(t *testing.T) {
 	}
 	if !getCalled {
 		t.Error("Expected get volume endpoint to be called")
+	}
+}
+
+func TestUpdateVolumeReadsBackByTheVolumeID(t *testing.T) {
+	const (
+		jobID     = "job-resize-unnamed"
+		volumeID  = "volume-resize-1"
+		newSizeGb = int64(512)
+		skuId     = "sku-uuid-11"
+	)
+
+	var readPaths []string
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/volume-sizes"):
+				testutil.WriteJSONResponse(w, newVolumeSizesResponse(testDatacenterID, []volumeSizesDataVolumeTypesAvailableSizesResponse{
+					{SkuId: skuId, SizeGb: newSizeGb},
+				}))
+			case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/"+volumeID+"/resize"):
+				testutil.HandleCreateJobResponse(w, jobID)
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, "", true)
+			case r.Method == http.MethodGet:
+				readPaths = append(readPaths, r.URL.Path)
+				testutil.WriteJSONResponse(w, newVolumeResponse(volumeID, "test-volume", newSizeGb, skuId))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	if _, err := UpdateVolume(gpcnClient, context.Background(), volumeID, createTestVolumeModel("test-volume", "SSD", newSizeGb)); err != nil {
+		t.Fatalf("UpdateVolume failed: %v", err)
+	}
+	if want := []string{BASE_URL_V1 + volumeID}; !slices.Equal(readPaths, want) {
+		t.Errorf("Expected reads %v, got %v", want, readPaths)
 	}
 }
 
@@ -861,5 +901,130 @@ func TestCreateVolumeReturnsIDWhenReadBackFails(t *testing.T) {
 	}
 	if id != volumeID {
 		t.Errorf("Expected ID %q from the completed job, got %q", volumeID, id)
+	}
+}
+
+func TestCreateVolumeReadsBackByTheAcceptedID(t *testing.T) {
+	const (
+		jobID    = "job-accepted-volume"
+		volumeID = "volume-accepted-1"
+		skuId    = "sku-uuid-10"
+	)
+
+	var readPaths []string
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/volume-sizes"):
+				testutil.WriteJSONResponse(w, newVolumeSizesResponse(testDatacenterID, []volumeSizesDataVolumeTypesAvailableSizesResponse{
+					{SkuId: skuId, SizeGb: 256},
+				}))
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/volumes/"):
+				testutil.HandleCreateJobResponseWithResource(w, jobID, map[string]any{"id": volumeID})
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, "", true)
+			case r.Method == http.MethodGet:
+				readPaths = append(readPaths, r.URL.Path)
+				testutil.WriteJSONResponse(w, newVolumeResponse(volumeID, "test-volume", 256, skuId))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	_, id, err := CreateVolume(gpcnClient, context.Background(), createTestVolumeModel("test-volume", "SSD", 256))
+	if err != nil {
+		t.Fatalf("CreateVolume failed: %v", err)
+	}
+	if id != volumeID {
+		t.Errorf("Expected ID %q from the 202, got %q", volumeID, id)
+	}
+	if want := []string{BASE_URL_V1 + volumeID}; !slices.Equal(readPaths, want) {
+		t.Errorf("Expected reads %v, got %v", want, readPaths)
+	}
+}
+
+func TestCreateVolumePrefersTheAcceptedID(t *testing.T) {
+	const (
+		jobID    = "job-prefers-accepted"
+		volumeID = "id-accepted"
+		skuId    = "sku-uuid-10"
+	)
+
+	var readPaths []string
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/volume-sizes"):
+				testutil.WriteJSONResponse(w, newVolumeSizesResponse(testDatacenterID, []volumeSizesDataVolumeTypesAvailableSizesResponse{
+					{SkuId: skuId, SizeGb: 256},
+				}))
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/volumes/"):
+				testutil.HandleCreateJobResponseWithResource(w, jobID, map[string]any{"id": volumeID})
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, "id-job", true)
+			case r.Method == http.MethodGet:
+				readPaths = append(readPaths, r.URL.Path)
+				testutil.WriteJSONResponse(w, newVolumeResponse(volumeID, "test-volume", 256, skuId))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	_, id, err := CreateVolume(gpcnClient, context.Background(), createTestVolumeModel("test-volume", "SSD", 256))
+	if err != nil {
+		t.Fatalf("CreateVolume failed: %v", err)
+	}
+	if id != volumeID {
+		t.Errorf("Expected ID %q from the 202, got %q", volumeID, id)
+	}
+	if want := []string{BASE_URL_V1 + volumeID}; !slices.Equal(readPaths, want) {
+		t.Errorf("Expected reads %v, got %v", want, readPaths)
+	}
+}
+
+func TestCreateVolumeRejectsJobWithoutResourceID(t *testing.T) {
+	const (
+		jobID = "job-unnamed-volume"
+		skuId = "sku-uuid-10"
+	)
+
+	var readPaths []string
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/volume-sizes"):
+				testutil.WriteJSONResponse(w, newVolumeSizesResponse(testDatacenterID, []volumeSizesDataVolumeTypesAvailableSizesResponse{
+					{SkuId: skuId, SizeGb: 256},
+				}))
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/volumes/"):
+				testutil.HandleCreateJobResponse(w, jobID)
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, "", true)
+			case r.Method == http.MethodGet:
+				readPaths = append(readPaths, r.URL.Path)
+				testutil.WriteJSONResponse(w, newVolumeResponse("", "", 256, skuId))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	_, id, err := CreateVolume(gpcnClient, context.Background(), createTestVolumeModel("test-volume", "SSD", 256))
+	if err == nil || err.Error() != "the create job succeeded but named no volume ID, so a volume may exist that Terraform does not track. Find it in the GPCN™ dashboard, then import it with terraform import or delete it there" {
+		t.Errorf("Expected the missing ID to fail the create, got %v", err)
+	}
+	if id != "" {
+		t.Errorf("Expected no ID, got %q", id)
+	}
+	if len(readPaths) != 0 {
+		t.Errorf("Expected no read, got %v", readPaths)
 	}
 }

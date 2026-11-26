@@ -510,6 +510,8 @@ type scriptedGatewayServer struct {
 	jobs    map[string]string
 	counts  map[string]int
 	times   map[string][]time.Time
+	// holdRepeatPollUntil delays every poll of a job after its first one.
+	holdRepeatPollUntil time.Time
 }
 
 func (s *scriptedGatewayServer) count(key string) int {
@@ -532,6 +534,9 @@ func (s *scriptedGatewayServer) client(t *testing.T) *client.GpcnClient {
 				ids, _ := testutil.ReadRequestBody(r)["jobIds"].([]any)
 				jobID, _ := ids[0].(string)
 				s.counts["poll "+jobID]++
+				if s.counts["poll "+jobID] > 1 {
+					time.Sleep(time.Until(s.holdRepeatPollUntil))
+				}
 				_, _ = w.Write([]byte(s.jobs[jobID]))
 				return
 			}
@@ -628,6 +633,58 @@ func TestDeleteVpnGatewayBusyDeadlineNamesTheHolder(t *testing.T) {
 			}
 		})
 	}
+}
+
+const notVisibleHolderTimeout = time.Second
+
+// notVisibleHolderServer makes the deadline pass inside the second holder read.
+func notVisibleHolderServer() *scriptedGatewayServer {
+	return &scriptedGatewayServer{
+		answers: map[string][]gatewayAnswer{
+			http.MethodDelete: {{http.StatusConflict, busyGatewayBody("delete")}},
+			http.MethodGet:    {{http.StatusOK, removingRow(parkedGatewayReason)}},
+		},
+		jobs:                map[string]string{"h1": `{"success":true,"data":{"jobs":[],"notFound":["h1"]}}`},
+		holdRepeatPollUntil: time.Now().Add(notVisibleHolderTimeout + 200*time.Millisecond),
+	}
+}
+
+func assertNamesNotVisibleHolder(t *testing.T, err error, sent int) {
+	t.Helper()
+	if !errors.Is(err, client.ErrHolderNotVisible) {
+		t.Fatalf("Expected the not-visible holder error, got %v", err)
+	}
+	if !errors.Is(err, client.ErrBusyWaitExhausted) {
+		t.Errorf("Expected the busy wait error, got %v", err)
+	}
+	if want := "the wait for job h1 ran out after "; !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("Expected the error to start with %q, got %q", want, err.Error())
+	}
+	if sent < 2 {
+		t.Errorf("Expected more than one request before the deadline, got %d", sent)
+	}
+}
+
+func TestDeleteVpnGatewayNamesAHolderTheKeyCannotReadAtTheDeadline(t *testing.T) {
+	setRemovalPollInterval(t, 10*time.Millisecond)
+	server := notVisibleHolderServer()
+	gpcnClient := server.client(t)
+
+	err := deleteVpnGateway(gpcnClient, t.Context(), testVpcID, time.Millisecond, notVisibleHolderTimeout)
+	assertNamesNotVisibleHolder(t, err, server.count(http.MethodDelete))
+}
+
+// The test changes package variables, so it does not run in parallel.
+func TestDeleteVpnGatewayResendNamesAHolderTheKeyCannotReadAtTheDeadline(t *testing.T) {
+	setRemovalPollInterval(t, 10*time.Millisecond)
+	previous := ResendMinBudget
+	ResendMinBudget = 100 * time.Millisecond
+	t.Cleanup(func() { ResendMinBudget = previous })
+	server := notVisibleHolderServer()
+	gpcnClient := server.client(t)
+
+	err := waitForVpnGatewayGone(gpcnClient, t.Context(), testVpcID, 10*time.Millisecond, time.Now(), notVisibleHolderTimeout)
+	assertNamesNotVisibleHolder(t, err, server.count(http.MethodDelete))
 }
 
 func TestWaitForVpnGatewayGoneResendsParkedRemoval(t *testing.T) {

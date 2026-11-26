@@ -1,8 +1,10 @@
 package virtualmachines
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +12,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -559,8 +562,8 @@ func TestSetModelValuesNotPresentPopulatesAuthOnImport(t *testing.T) {
 	if authDiags.HasError() {
 		t.Fatalf("Failed to extract auth: %v", authDiags)
 	}
-	if auth.Username.ValueString() != username {
-		t.Errorf("Expected auth.username '%s', got '%s'", username, auth.Username.ValueString())
+	if !auth.Username.IsNull() {
+		t.Errorf("Expected a null auth.username, got %s", auth.Username)
 	}
 	if auth.SshKeyId.ValueString() != sshKeyID {
 		t.Errorf("Expected auth.ssh_key_id '%s', got '%s'", sshKeyID, auth.SshKeyId.ValueString())
@@ -729,6 +732,155 @@ func TestPollForVirtualMachineStatusWaitsTheSettleWait(t *testing.T) {
 	}
 	if elapsed > 5*time.Second {
 		t.Errorf("Expected the poller to return soon after the settle wait, it ran for %v", elapsed)
+	}
+}
+
+// answeredTransport reads each answer to the end before it signals. A cancel
+// after the signal then cannot fail the read that the answer completes.
+type answeredTransport struct {
+	base     http.RoundTripper
+	answered chan struct{}
+}
+
+func (a *answeredTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := a.base.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+	body, err := io.ReadAll(resp.Body)
+	closeErr := resp.Body.Close()
+	if err = errors.Join(err, closeErr); err != nil {
+		return nil, err
+	}
+	resp.Body = io.NopCloser(bytes.NewReader(body))
+	select {
+	case a.answered <- struct{}{}:
+	default:
+	}
+	return resp, nil
+}
+
+func setupAnsweredMockServer(config testutil.MockServerConfig) (*httptest.Server, *client.GpcnClient, <-chan struct{}) {
+	server, httpClient := testutil.SetupMockServer(config)
+	answered := make(chan struct{}, 1)
+	httpClient.Transport = &answeredTransport{base: httpClient.Transport, answered: answered}
+	return server, client.NewGpcnClientFromHTTPClient(httpClient), answered
+}
+
+func TestPollForVirtualMachineStatusStopsInTheInitialDelay(t *testing.T) {
+	const vmID = "vm-initial-delay-cancel"
+
+	var requests atomic.Int32
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			requests.Add(1)
+			testutil.WriteJSONResponse(w, newVMResponse(vmID, "test-vm"))
+		},
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	start := time.Now()
+	timer := time.AfterFunc(100*time.Millisecond, cancel)
+	defer timer.Stop()
+	response, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, 30, 1)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want context.Canceled", err)
+	}
+	if want := "polling virtual machine " + vmID + " stopped: "; err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("error = %v, want it to start with %q", err, want)
+	}
+	if response != nil {
+		t.Errorf("Expected no response on cancel, got '%v'", response)
+	}
+	if elapsed >= 500*time.Millisecond {
+		t.Errorf("Expected the poller to return within 500ms, it ran for %v", elapsed)
+	}
+	if got := requests.Load(); got != 0 {
+		t.Errorf("Expected no request, got %d", got)
+	}
+}
+
+func TestPollForVirtualMachineStatusReturnsOnCancel(t *testing.T) {
+	useVMStatusPollInterval(t, 2*time.Second)
+	const vmID = "vm-cancel-123"
+
+	server, gpcnClient, answered := setupAnsweredMockServer(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID) {
+				resp := newVMResponse(vmID, "test-vm")
+				resp.Data.Status = "Provisioning"
+				testutil.WriteJSONResponse(w, resp)
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	start := time.Now()
+	go func() {
+		<-answered
+		cancel()
+	}()
+	response, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, 30, 0)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want context.Canceled", err)
+	}
+	if want := "polling virtual machine " + vmID + " stopped: "; err == nil || !strings.HasPrefix(err.Error(), want) {
+		t.Errorf("error = %v, want it to start with %q", err, want)
+	}
+	if response != nil {
+		t.Errorf("Expected no response on cancel, got '%v'", response)
+	}
+	if elapsed >= VM_STATUS_POLL_INTERVAL {
+		t.Errorf("Expected the poller to return within one interval, it ran for %v", elapsed)
+	}
+}
+
+func TestPollForVirtualMachineStatusSettleSurvivesCancel(t *testing.T) {
+	useVMStatusSettleWait(t, 2*time.Second)
+	const vmID = "vm-settle-cancel-123"
+
+	server, gpcnClient, answered := setupAnsweredMockServer(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.Contains(r.URL.Path, "/virtual-machines/"+vmID) {
+				testutil.WriteJSONResponse(w, newVMResponse(vmID, "test-vm"))
+			} else {
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	start := time.Now()
+	go func() {
+		<-answered
+		cancel()
+	}()
+	response, err := PollForVirtualMachineStatus(gpcnClient, ctx, vmID, []string{"Running"}, 30, 0)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("PollForVirtualMachineStatus failed: %v", err)
+	}
+	if response == nil || response.Data.ID != vmID {
+		t.Fatalf("Expected the response for %s, got '%v'", vmID, response)
+	}
+	if elapsed >= VM_STATUS_SETTLE_WAIT {
+		t.Errorf("Expected the poller to return when the context ends, it ran for %v", elapsed)
 	}
 }
 
@@ -1672,7 +1824,6 @@ func TestPopulateAuth(t *testing.T) {
 	const (
 		usernameOnly = `{"success": true, "data": {"id": "vm-1", "username": "ubuntu", "sshKeyId": null}}`
 		keyAndName   = `{"success": true, "data": {"id": "vm-1", "username": "ubuntu", "sshKeyId": "key-1"}}`
-		keyOnly      = `{"success": true, "data": {"id": "vm-1", "username": null, "sshKeyId": "key-1"}}`
 	)
 
 	nullAuth := types.ObjectNull(ResourceModelInitialAuth{}.AttrTypes())
@@ -1702,13 +1853,6 @@ func TestPopulateAuth(t *testing.T) {
 			name:     "imported_with_key",
 			current:  nullAuth,
 			response: keyAndName,
-			imported: true,
-			want:     initialAuthObject(t, types.StringValue("key-1"), types.StringValue("ubuntu"), types.StringNull()),
-		},
-		{
-			name:     "imported_with_key_and_no_username",
-			current:  nullAuth,
-			response: keyOnly,
 			imported: true,
 			want:     initialAuthObject(t, types.StringValue("key-1"), types.StringNull(), types.StringNull()),
 		},
@@ -2098,6 +2242,49 @@ func TestSetNetworkModelValuesNotPresentNeverInfersAnAcquiredAddressUnit(t *test
 			}
 			if result.PublicIpId.ValueString() != tc.wantHeld {
 				t.Errorf("Expected public_ip_id '%s', got '%s'", tc.wantHeld, result.PublicIpId.ValueString())
+			}
+		})
+	}
+}
+
+func TestReleasesParkedAddress(t *testing.T) {
+	nic := func(isPrimary bool, world string) networks.ReadVirtualMachineNetworkDataResponseTF {
+		return networks.ReadVirtualMachineNetworkDataResponseTF{
+			IsPrimary: types.BoolValue(isPrimary),
+			World:     types.StringValue(world),
+		}
+	}
+	listErr := errors.New("HTTP 404: Virtual machine not found")
+	vpcPrimary := []networks.ReadVirtualMachineNetworkDataResponseTF{nic(false, networks.NicWorldL2), nic(true, networks.NicWorldVpc)}
+	legacyPrimary := []networks.ReadVirtualMachineNetworkDataResponseTF{nic(true, networks.NicWorldLegacy)}
+	noPrimary := []networks.ReadVirtualMachineNetworkDataResponseTF{nic(false, networks.NicWorldVpc)}
+
+	tests := []struct {
+		name         string
+		allocate     types.Bool
+		live         []networks.ReadVirtualMachineNetworkDataResponseTF
+		listErr      error
+		wantReleases bool
+		wantReason   string
+	}{
+		{"allocate false with a VPC primary", types.BoolValue(false), vpcPrimary, nil, false, ""},
+		{"allocate null with a VPC primary", types.BoolNull(), vpcPrimary, nil, false, ""},
+		{"allocate false with a failed listing", types.BoolValue(false), nil, listErr, false, ""},
+		{"allocate true with a failed listing", types.BoolValue(true), nil, listErr, true, "HTTP 404: Virtual machine not found"},
+		{"an empty listing releases nothing", types.BoolValue(true), []networks.ReadVirtualMachineNetworkDataResponseTF{}, nil, false, ""},
+		{"allocate true with no primary", types.BoolValue(true), noPrimary, nil, true, "no interface is marked primary"},
+		{"allocate true with a legacy primary", types.BoolValue(true), legacyPrimary, nil, false, ""},
+		{"allocate true with a VPC primary", types.BoolValue(true), vpcPrimary, nil, true, ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			releases, reason := ReleasesParkedAddress(ResourceModel{AllocatePublicIp: tc.allocate}, tc.live, tc.listErr)
+			if releases != tc.wantReleases {
+				t.Errorf("Expected releases %t, got %t", tc.wantReleases, releases)
+			}
+			if reason != tc.wantReason {
+				t.Errorf("Expected the reason '%s', got '%s'", tc.wantReason, reason)
 			}
 		})
 	}
@@ -2763,6 +2950,158 @@ func TestCreateVirtualMachineReturnsIDWhenStatusWaitFails(t *testing.T) {
 	}
 	if id != vmID {
 		t.Errorf("Expected ID %q from the completed job, got %q", vmID, id)
+	}
+}
+
+func TestCreateVirtualMachineReturnsIDWhenReadBackFails(t *testing.T) {
+	useNoInitialPollDelay(t)
+	const (
+		jobID = "job-readback-fails"
+		vmID  = "vm-readback-fails-1"
+	)
+
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+				w.WriteHeader(http.StatusAccepted)
+				testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": vmID})
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, vmID, true)
+			case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/"+vmID):
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"success":false,"message":"Internal server error","error":{"code":"INTERNAL_ERROR","statusCode":500,"details":null}}`))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+
+	response, id, err := CreateVirtualMachine(gpcnClient, context.Background(), "image-1", "sku-1", createTestVMModel("test-vm", testVMImage, false))
+	if err == nil {
+		t.Fatal("Expected the failed read-back to fail the create")
+	}
+	if response != nil {
+		t.Errorf("Expected no response, got %+v", response)
+	}
+	if id != vmID {
+		t.Errorf("Expected ID %q from the 202, got %q", vmID, id)
+	}
+}
+
+func TestCreateVirtualMachineReadsBackByTheAcceptedID(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	useNoInitialPollDelay(t)
+	const (
+		jobID = "job-accepted-vm"
+		vmID  = "vm-accepted-1"
+	)
+
+	var readPaths []string
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+				testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": vmID})
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, "", true)
+			case r.Method == http.MethodGet:
+				readPaths = append(readPaths, r.URL.Path)
+				testutil.WriteJSONResponse(w, newVMResponse(vmID, "test-vm"))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	_, id, err := CreateVirtualMachine(gpcnClient, context.Background(), "image-1", "sku-1", createTestVMModel("test-vm", testVMImage, false))
+	if err != nil {
+		t.Fatalf("CreateVirtualMachine failed: %v", err)
+	}
+	if id != vmID {
+		t.Errorf("Expected ID %q from the 202, got %q", vmID, id)
+	}
+	if want := []string{BASE_URL_V1 + vmID}; !slices.Equal(readPaths, want) {
+		t.Errorf("Expected reads %v, got %v", want, readPaths)
+	}
+}
+
+func TestCreateVirtualMachinePrefersTheAcceptedID(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	useNoInitialPollDelay(t)
+	const (
+		jobID = "job-prefers-accepted"
+		vmID  = "id-accepted"
+	)
+
+	var readPaths []string
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+				testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": vmID})
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, "id-job", true)
+			case r.Method == http.MethodGet:
+				readPaths = append(readPaths, r.URL.Path)
+				testutil.WriteJSONResponse(w, newVMResponse(vmID, "test-vm"))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	_, id, err := CreateVirtualMachine(gpcnClient, context.Background(), "image-1", "sku-1", createTestVMModel("test-vm", testVMImage, false))
+	if err != nil {
+		t.Fatalf("CreateVirtualMachine failed: %v", err)
+	}
+	if id != vmID {
+		t.Errorf("Expected ID %q from the 202, got %q", vmID, id)
+	}
+	if want := []string{BASE_URL_V1 + vmID}; !slices.Equal(readPaths, want) {
+		t.Errorf("Expected reads %v, got %v", want, readPaths)
+	}
+}
+
+func TestCreateVirtualMachineRejectsJobWithoutResourceID(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	useNoInitialPollDelay(t)
+	const jobID = "job-unnamed-vm"
+
+	var readPaths []string
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+				testutil.HandleBatchCreateJobResponse(w, jobID, nil)
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, "", true)
+			case r.Method == http.MethodGet:
+				readPaths = append(readPaths, r.URL.Path)
+				testutil.WriteJSONResponse(w, newVMResponse("", ""))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	_, id, err := CreateVirtualMachine(gpcnClient, context.Background(), "image-1", "sku-1", createTestVMModel("test-vm", testVMImage, false))
+	if err == nil || err.Error() != "the create job succeeded but named no virtual machine ID, so a virtual machine may exist that Terraform does not track. Find it in the GPCN™ dashboard, then import it with terraform import or delete it there" {
+		t.Errorf("Expected the missing ID to fail the create, got %v", err)
+	}
+	if id != "" {
+		t.Errorf("Expected no ID, got %q", id)
+	}
+	if len(readPaths) != 0 {
+		t.Errorf("Expected no read, got %v", readPaths)
 	}
 }
 

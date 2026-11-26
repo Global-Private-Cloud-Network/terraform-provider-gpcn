@@ -13,6 +13,7 @@ const (
 // Error detail message templates
 const (
 	ErrDetailExpectedGpcnClient         = "Expected *client.GpcnClient, got: %T. Please report this issue to the provider developers."
+	ErrDetailNoResourceIDInJob          = "the create job succeeded but named no volume ID, so a volume may exist that Terraform does not track. Find it in the GPCN™ dashboard, then import it with terraform import or delete it there"
 	ErrDetailUnableToGetVolumeWithID    = "Unable to get GPCN Volume with ID '%s'"
 	ErrDetailUnableToUpdateVolumeWithID = "Unable to update GPCN Volume with ID '%s'"
 	ErrDetailUnableToDeleteVolumeWithID = "Unable to delete GPCN Volume with ID '%s'"

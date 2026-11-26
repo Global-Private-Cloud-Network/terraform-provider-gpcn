@@ -28,6 +28,7 @@ const (
 // Warning summary constants
 const (
 	WarnSummaryRemovingNetworkInterfaceFailed = "Removing network interface failed"
+	WarnSummaryParkedReleaseFellBack          = "Could not tell which network the virtual machine is on"
 )
 
 // Error detail message templates
@@ -35,6 +36,7 @@ const (
 	ErrDetailExpectedGpcnClient              = "Expected *client.GpcnClient, got: %T. Please report this issue to the provider developers."
 	ErrDetailNetworkInterfacesForVM          = "Error retrieving network interfaces for virtual machine with ID %s"
 	ErrDetailVMInfoFailedCanImport           = "Retrieving information about the Virtual Machine failed. The job was successful, but Terraform could not read more information about its value. You can import the id to repair the state with terraform import"
+	ErrDetailNoResourceIDInJob               = "the create job succeeded but named no virtual machine ID, so a virtual machine may exist that Terraform does not track. Find it in the GPCN™ dashboard, then import it with terraform import or delete it there"
 	ErrDetailUnableToDeleteVMWithID          = "Unable to delete GPCN Virtual Machine with ID %s"
 	ErrDetailUnmarshalingDeleteWithID        = "Error unmarshaling GPCN Virtual Machine - Delete with ID %s"
 	ErrDetailJobInfoCheckDashboard           = "Encountered an error getting job info. The request may still have succeeded. Check the GPCN dashboard for more information"
@@ -97,6 +99,8 @@ const (
 // Warning detail message templates
 const (
 	WarnDetailRemovingNetworkInterfaceWithIDFailed = "Removing the network interface with ID '%s' failed"
+	WarnDetailParkedReleaseFellBack                = "The provider could not read which network the primary interface of virtual machine %s is on (%s), so the delete asks GPCN™ to release the elastic IP because allocate_public_ip is true"
+	ReasonNoPrimaryInterface                       = "no interface is marked primary"
 )
 
 // Polling constants

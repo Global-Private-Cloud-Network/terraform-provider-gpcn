@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -46,7 +47,7 @@ type readGPUResponse struct {
 }
 
 // CreateGPU also returns the GPU ID it knows when it fails: the ID the
-// completed job names, else the ID the 202 carried. A row can outlive a failed
+// 202 carried, else the ID the completed job names. A row can outlive a failed
 // create, so the caller records that ID and Terraform taints the GPU.
 func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId string, plan ResourceModel) (*readGPUResponse, string, error) {
 	tflog.Info(ctx, LogStartingCreateGPU)
@@ -113,10 +114,9 @@ func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId stri
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to get job ID from create GPU response: %w", err)
 	}
-	// The ID the 202 names, if any. The completed job names it again.
 	gpuID, err := client.GetJobResourceID(&createGPUResponse)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to get job ID from create GPU response: %w", err)
+		return nil, "", fmt.Errorf("failed to get resource ID from create GPU response: %w", err)
 	}
 
 	// Perform long polling to wait for job completion
@@ -127,17 +127,18 @@ func CreateGPU(gpcnClient *client.GpcnClient, ctx context.Context, seriesId stri
 
 	tflog.Info(ctx, LogLongPollingCompletedCreateGPU)
 
-	// Extract resource ID with bounds checking
-	resourceID, err := client.GetJobResourceID(jobResp)
-	if err != nil {
-		return nil, gpuID, fmt.Errorf("failed to get resource ID from create GPU job response: %w", err)
+	if gpuID == "" {
+		gpuID, err = client.GetJobResourceID(jobResp)
+		if err != nil {
+			return nil, "", fmt.Errorf("failed to get resource ID from create GPU job response: %w", err)
+		}
 	}
-	if resourceID != "" {
-		gpuID = resourceID
+	if gpuID == "" {
+		return nil, "", errors.New(ErrDetailNoResourceIDInJob)
 	}
 
 	// Get the GPU details after creation
-	getGPUResponse, err := GetGPU(gpcnClient, ctx, resourceID)
+	getGPUResponse, err := GetGPU(gpcnClient, ctx, gpuID)
 	if err != nil {
 		return nil, gpuID, err
 	}

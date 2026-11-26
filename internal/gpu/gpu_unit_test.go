@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -1525,5 +1526,116 @@ func TestCreateGPUReturnsIDWhenReadBackFails(t *testing.T) {
 	}
 	if id != gpuID {
 		t.Errorf("Expected ID %q from the completed job, got %q", gpuID, id)
+	}
+}
+
+func TestCreateGPUReadsBackByTheAcceptedID(t *testing.T) {
+	const (
+		jobID = "job-accepted-gpu"
+		gpuID = "gpu-accepted-1"
+	)
+
+	var readPaths []string
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/gpu/"):
+				testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": gpuID})
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, "", true)
+			case r.Method == http.MethodGet:
+				readPaths = append(readPaths, r.URL.Path)
+				testutil.WriteJSONResponse(w, newGPUResponse(gpuID, "test-gpu"))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	model := createTestGPUModel("test-gpu", "", "nvidia-rtx_a6000-series", testImageName, 1)
+	_, id, err := CreateGPU(gpcnClient, context.Background(), "series-1", model)
+	if err != nil {
+		t.Fatalf("CreateGPU failed: %v", err)
+	}
+	if id != gpuID {
+		t.Errorf("Expected ID %q from the 202, got %q", gpuID, id)
+	}
+	if want := []string{BASE_URL_V1 + gpuID}; !slices.Equal(readPaths, want) {
+		t.Errorf("Expected reads %v, got %v", want, readPaths)
+	}
+}
+
+func TestCreateGPUPrefersTheAcceptedID(t *testing.T) {
+	const (
+		jobID = "job-prefers-accepted"
+		gpuID = "id-accepted"
+	)
+
+	var readPaths []string
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/gpu/"):
+				testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": gpuID})
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, "id-job", true)
+			case r.Method == http.MethodGet:
+				readPaths = append(readPaths, r.URL.Path)
+				testutil.WriteJSONResponse(w, newGPUResponse(gpuID, "test-gpu"))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	model := createTestGPUModel("test-gpu", "", "nvidia-rtx_a6000-series", testImageName, 1)
+	_, id, err := CreateGPU(gpcnClient, context.Background(), "series-1", model)
+	if err != nil {
+		t.Fatalf("CreateGPU failed: %v", err)
+	}
+	if id != gpuID {
+		t.Errorf("Expected ID %q from the 202, got %q", gpuID, id)
+	}
+	if want := []string{BASE_URL_V1 + gpuID}; !slices.Equal(readPaths, want) {
+		t.Errorf("Expected reads %v, got %v", want, readPaths)
+	}
+}
+
+func TestCreateGPURejectsJobWithoutResourceID(t *testing.T) {
+	const jobID = "job-unnamed-gpu"
+
+	var readPaths []string
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/gpu/"):
+				testutil.HandleBatchCreateJobResponse(w, jobID, nil)
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, "", true)
+			case r.Method == http.MethodGet:
+				readPaths = append(readPaths, r.URL.Path)
+				testutil.WriteJSONResponse(w, newGPUResponse("", ""))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	model := createTestGPUModel("test-gpu", "", "nvidia-rtx_a6000-series", testImageName, 1)
+	_, id, err := CreateGPU(gpcnClient, context.Background(), "series-1", model)
+	if err == nil || err.Error() != "the create job succeeded but named no GPU ID, so a GPU may exist that Terraform does not track. Find it in the GPCN™ dashboard, then import it with terraform import or delete it there" {
+		t.Errorf("Expected the missing ID to fail the create, got %v", err)
+	}
+	if id != "" {
+		t.Errorf("Expected no ID, got %q", id)
+	}
+	if len(readPaths) != 0 {
+		t.Errorf("Expected no read, got %v", readPaths)
 	}
 }
