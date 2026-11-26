@@ -1629,7 +1629,7 @@ func TestCreateGPURejectsJobWithoutResourceID(t *testing.T) {
 
 	model := createTestGPUModel("test-gpu", "", "nvidia-rtx_a6000-series", testImageName, 1)
 	_, id, err := CreateGPU(gpcnClient, context.Background(), "series-1", model)
-	if err == nil || err.Error() != "the create job named no GPU ID" {
+	if err == nil || err.Error() != "the create job succeeded but named no GPU ID, so a GPU may exist that Terraform does not track. Find it in the GPCN™ dashboard, then import it with terraform import or delete it there" {
 		t.Errorf("Expected the missing ID to fail the create, got %v", err)
 	}
 	if id != "" {

@@ -3088,7 +3088,7 @@ func TestCreateVirtualMachineRejectsJobWithoutResourceID(t *testing.T) {
 	defer server.Close()
 
 	_, id, err := CreateVirtualMachine(gpcnClient, context.Background(), "image-1", "sku-1", createTestVMModel("test-vm", testVMImage, false))
-	if err == nil || err.Error() != "the create job named no virtual machine ID" {
+	if err == nil || err.Error() != "the create job succeeded but named no virtual machine ID, so a virtual machine may exist that Terraform does not track. Find it in the GPCN™ dashboard, then import it with terraform import or delete it there" {
 		t.Errorf("Expected the missing ID to fail the create, got %v", err)
 	}
 	if id != "" {

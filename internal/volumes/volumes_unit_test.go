@@ -1018,7 +1018,7 @@ func TestCreateVolumeRejectsJobWithoutResourceID(t *testing.T) {
 	defer server.Close()
 
 	_, id, err := CreateVolume(gpcnClient, context.Background(), createTestVolumeModel("test-volume", "SSD", 256))
-	if err == nil || err.Error() != "the create job named no volume ID" {
+	if err == nil || err.Error() != "the create job succeeded but named no volume ID, so a volume may exist that Terraform does not track. Find it in the GPCN™ dashboard, then import it with terraform import or delete it there" {
 		t.Errorf("Expected the missing ID to fail the create, got %v", err)
 	}
 	if id != "" {
