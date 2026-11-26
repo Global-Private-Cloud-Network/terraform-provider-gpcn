@@ -2951,6 +2951,45 @@ func TestCreateVirtualMachineReadsBackByTheAcceptedID(t *testing.T) {
 	}
 }
 
+func TestCreateVirtualMachinePrefersTheAcceptedID(t *testing.T) {
+	useFastVMStatusPollInterval(t)
+	useNoInitialPollDelay(t)
+	const (
+		jobID = "job-prefers-accepted"
+		vmID  = "id-accepted"
+	)
+
+	var readPaths []string
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/virtual-machines/"):
+				testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": vmID})
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, "id-job", true)
+			case r.Method == http.MethodGet:
+				readPaths = append(readPaths, r.URL.Path)
+				testutil.WriteJSONResponse(w, newVMResponse(vmID, "test-vm"))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	_, id, err := CreateVirtualMachine(gpcnClient, context.Background(), "image-1", "sku-1", createTestVMModel("test-vm", testVMImage, false))
+	if err != nil {
+		t.Fatalf("CreateVirtualMachine failed: %v", err)
+	}
+	if id != vmID {
+		t.Errorf("Expected ID %q from the 202, got %q", vmID, id)
+	}
+	if want := []string{BASE_URL_V1 + vmID}; !slices.Equal(readPaths, want) {
+		t.Errorf("Expected reads %v, got %v", want, readPaths)
+	}
+}
+
 func TestCreateVirtualMachineRejectsJobWithoutResourceID(t *testing.T) {
 	useFastVMStatusPollInterval(t)
 	useNoInitialPollDelay(t)

@@ -1567,6 +1567,44 @@ func TestCreateGPUReadsBackByTheAcceptedID(t *testing.T) {
 	}
 }
 
+func TestCreateGPUPrefersTheAcceptedID(t *testing.T) {
+	const (
+		jobID = "job-prefers-accepted"
+		gpuID = "id-accepted"
+	)
+
+	var readPaths []string
+	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/gpu/"):
+				testutil.HandleBatchCreateJobResponse(w, jobID, map[string]any{"id": gpuID})
+			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
+				testutil.HandleJobResponse(w, jobID, "id-job", true)
+			case r.Method == http.MethodGet:
+				readPaths = append(readPaths, r.URL.Path)
+				testutil.WriteJSONResponse(w, newGPUResponse(gpuID, "test-gpu"))
+			default:
+				testutil.LogUnexpectedRequest(t, w, r)
+			}
+		},
+	})
+	defer server.Close()
+
+	model := createTestGPUModel("test-gpu", "", "nvidia-rtx_a6000-series", testImageName, 1)
+	_, id, err := CreateGPU(gpcnClient, context.Background(), "series-1", model)
+	if err != nil {
+		t.Fatalf("CreateGPU failed: %v", err)
+	}
+	if id != gpuID {
+		t.Errorf("Expected ID %q from the 202, got %q", gpuID, id)
+	}
+	if want := []string{BASE_URL_V1 + gpuID}; !slices.Equal(readPaths, want) {
+		t.Errorf("Expected reads %v, got %v", want, readPaths)
+	}
+}
+
 func TestCreateGPURejectsJobWithoutResourceID(t *testing.T) {
 	const jobID = "job-unnamed-gpu"
 
