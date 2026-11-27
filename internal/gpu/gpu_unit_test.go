@@ -924,6 +924,50 @@ func TestSetModelValuesNotPresentWarnsOnAnUnacceptedImageName(t *testing.T) {
 	}
 }
 
+func TestMapGPUResponseToModelHealsADisplayNameImport(t *testing.T) {
+	response := newGPUResponse("gpu-123", "test-gpu")
+	response.Data.ImageName = "ubuntu-22.04"
+	model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100-series", "Ubuntu 22.04 LTS with drivers", 2)
+
+	result, diags := MapGPUResponseToModel(context.Background(), response, model)
+
+	if len(diags) != 0 {
+		t.Fatalf("Expected no diagnostic, got %v", diags)
+	}
+	if got := result.ImageName.ValueString(); got != "ubuntu-22.04" {
+		t.Errorf("Expected ImageName %q, got %v", "ubuntu-22.04", result.ImageName)
+	}
+}
+
+func TestMapGPUResponseToModelKeepsAnAcceptedImageName(t *testing.T) {
+	response := newGPUResponse("gpu-123", "test-gpu")
+	response.Data.ImageName = "ubuntu-22.04"
+	model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100-series", "ubuntu-24.04", 2)
+
+	result, diags := MapGPUResponseToModel(context.Background(), response, model)
+
+	if len(diags) != 0 {
+		t.Fatalf("Expected no diagnostic, got %v", diags)
+	}
+	if got := result.ImageName.ValueString(); got != "ubuntu-24.04" {
+		t.Errorf("Expected ImageName %q, got %v", "ubuntu-24.04", result.ImageName)
+	}
+}
+
+func TestMapGPUResponseToModelKeepsADisplayNameWithoutAReportedName(t *testing.T) {
+	response := newGPUResponse("gpu-123", "test-gpu")
+	model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100-series", "Ubuntu 22.04 LTS with drivers", 2)
+
+	result, diags := MapGPUResponseToModel(context.Background(), response, model)
+
+	if len(diags) != 0 {
+		t.Fatalf("Expected no diagnostic, got %v", diags)
+	}
+	if got := result.ImageName.ValueString(); got != "Ubuntu 22.04 LTS with drivers" {
+		t.Errorf("Expected ImageName %q, got %v", "Ubuntu 22.04 LTS with drivers", result.ImageName)
+	}
+}
+
 func assertImportImageError(t *testing.T, diags diag.Diagnostics, wantDetail string) {
 	t.Helper()
 	errs := diags.Errors()

@@ -129,11 +129,15 @@ func setModelValuesNotPresent(ctx context.Context, response *readGPUResponse, mo
 		model.GPUCount = types.Int64Value(response.Data.Configuration.GPUCount)
 	}
 
-	// Only an import reaches this fill. A value that differs from the image of the
-	// create plans a replacement, so the fill never guesses.
-	if model.ImageName.IsNull() || model.ImageName.ValueString() == "" {
+	// A value that differs from the image of the create plans a replacement, so
+	// the fill never guesses.
+	stored := model.ImageName.ValueString()
+	switch {
+	case stored == "":
 		model.ImageName = types.StringNull()
 		diags.Append(importedImageName(response, &model)...)
+	case !slices.Contains(GPUImageNames, stored):
+		healUnacceptedImageName(response, &model)
 	}
 
 	// initial_auth changes the state only, so the API value must not win.
@@ -163,6 +167,14 @@ func importedImageName(response *readGPUResponse, model *ResourceModel) diag.Dia
 	}
 	model.ImageName = types.StringValue(imageName)
 	return diags
+}
+
+// An older import stored the display name of the image, which no configuration can hold.
+func healUnacceptedImageName(response *readGPUResponse, model *ResourceModel) {
+	reported := strings.ToLower(response.Data.ImageName)
+	if slices.Contains(GPUImageNames, reported) {
+		model.ImageName = types.StringValue(reported)
+	}
 }
 
 // Only the name can change out of band and reconcile in place. A refresh of any other
