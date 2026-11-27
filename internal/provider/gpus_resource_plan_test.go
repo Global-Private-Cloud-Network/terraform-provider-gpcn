@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 
@@ -169,7 +170,7 @@ func (m *gpuPlanTestMock) putCount() int {
 func startGPUPlanMockServer(t *testing.T) (*httptest.Server, *gpuPlanTestMock) {
 	t.Helper()
 
-	mock := &gpuPlanTestMock{group: gpuPlanTestDefaultGroup, imageName: gpuPlanTestImageName}
+	mock := &gpuPlanTestMock{group: gpuPlanTestDefaultGroup}
 	gpuPath := "/v1/resource/gpu/" + gpuPlanTestID
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -657,6 +658,7 @@ func TestGPUResourcePlanImportReadsGroup(t *testing.T) {
 
 	mock.setName("gpu-plan-a")
 	mock.setGroup(gpuPlanTestGroupA)
+	mock.imageName = gpuPlanTestImageName
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -1099,6 +1101,45 @@ func TestGPUResourcePlanImportRefusesAMissingImageName(t *testing.T) {
 				ImportState:   true,
 				ImportStateId: gpuPlanTestID,
 				ExpectError:   regexp.MustCompile(`Cannot read the GPU's image`),
+			},
+		},
+	})
+}
+
+func TestGPUResourcePlanImportAdoptsAnUnacceptedImageWithIgnoreChanges(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+	mock.planSeries = true
+	mock.imageName = "massed-compute-default"
+	mock.setName("gpu-plan-a")
+
+	config := strings.Replace(gpuPlanTestConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a"),
+		"  initial_auth = {", "  lifecycle {\n    ignore_changes = [image_name]\n  }\n  initial_auth = {", 1)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:             config,
+				ResourceName:       gpcnGPUTest,
+				ImportState:        true,
+				ImportStateId:      gpuPlanTestID,
+				ImportStatePersist: true,
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported state, got %d", len(states))
+					}
+					if got := states[0].Attributes["image_name"]; got != "massed-compute-default" {
+						return fmt.Errorf("imported image_name = %q, want %q", got, "massed-compute-default")
+					}
+					return nil
+				},
+			},
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
 			},
 		},
 	})
