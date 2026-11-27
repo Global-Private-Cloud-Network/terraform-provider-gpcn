@@ -1,5 +1,9 @@
 ## 1.8.1 (Unreleased)
 
+BREAKING CHANGES:
+
+- **GPU**: an import needs a GPCN™ API that reports the image on the GPU detail, and is refused until it does. Before, the import succeeded and wrote the image's display name to `image_name`.
+
 ENHANCEMENTS:
 
 - **Virtual Machine, GPU, Volume, Volume Attachment, L2 Segment, Subnet, Security Group, Elastic IP**: an update or destroy that finds the resource held by another job waits up to `polling_timeout` for that job to end and sends the request again. Before, it failed and had to be run again.
@@ -14,6 +18,7 @@ BUG FIXES:
 - **VPN Connection**: an update cancelled while it waits for another job no longer says that the change may still apply.
 - **Provider**: a destroy that waits for another job no longer drops the resource from state when the read of that job answers 404.
 - **Volume Attachment**: a destroy no longer detaches a volume that has moved to another machine.
+- **GPU**: importing a GPU sets `image_name` from the image the GPU was created with, so the plan after an import no longer proposes replacing the GPU. A state that an earlier import filled with the image's display name is corrected on the next refresh. A GPU whose image `image_name` does not accept is imported with a warning, and `lifecycle { ignore_changes = [image_name] }` adopts it.
 
 ## 1.8.0 (November 24, 2026)
 

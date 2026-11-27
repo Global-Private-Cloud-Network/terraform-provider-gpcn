@@ -132,11 +132,10 @@ func TestGPUResource(t *testing.T) {
 			},
 			// ImportState testing
 			{
-				ResourceName:      gpcnGPUTest,
-				ImportState:       true,
-				ImportStateVerify: true,
-				// Image name is mapped to a "full" image name on the API
-				ImportStateVerifyIgnore: []string{"image_name", "created_time", "last_updated"},
+				ResourceName:            gpcnGPUTest,
+				ImportState:             true,
+				ImportStateVerify:       true,
+				ImportStateVerifyIgnore: []string{"created_time", "last_updated"},
 			},
 			// Update and Read testing (name change only — does not trigger replacement)
 			{
@@ -406,7 +405,7 @@ func TestGPUResourceSkuCode(t *testing.T) {
 				ResourceName:            gpcnGPUTest,
 				ImportState:             true,
 				ImportStateVerify:       true,
-				ImportStateVerifyIgnore: []string{"image_name", "created_time", "last_updated"},
+				ImportStateVerifyIgnore: []string{"created_time", "last_updated"},
 			},
 			// A name change must not replace a GPU that pins its series by series_code.
 			{

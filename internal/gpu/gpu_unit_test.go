@@ -74,6 +74,29 @@ func newGPUResponse(id, name string) *readGPUResponse {
 	return resp
 }
 
+func mapGPUResponse(t *testing.T, response *readGPUResponse, model ResourceModel) ResourceModel {
+	t.Helper()
+	result, diags := MapGPUResponseToModel(context.Background(), response, model)
+	if diags.HasError() {
+		t.Fatalf("Expected no error from the mapper, got %v", diags)
+	}
+	return result
+}
+
+func importModel() ResourceModel {
+	return ResourceModel{
+		Name:            types.StringNull(),
+		DatacenterId:    types.StringNull(),
+		SeriesName:      types.StringNull(),
+		SeriesCode:      types.StringNull(),
+		SkuCode:         types.StringNull(),
+		GPUCount:        types.Int64Null(),
+		ImageName:       types.StringNull(),
+		InitialAuth:     types.ObjectNull(ResourceModelInitialAuth{}.AttrTypes()),
+		ResourceGroupId: types.StringNull(),
+	}
+}
+
 func newInventoryResponse(seriesID, seriesCode, datacenterID string, gpuCount, availableCount int64) inventoryResp {
 	availableSkus := make([]struct {
 		SkuCode     string `json:"skuCode"`
@@ -254,7 +277,7 @@ func TestMapGPUResponseToModelUnit(t *testing.T) {
 	response := newGPUResponse("gpu-123", "test-gpu")
 	model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100-series", testImageName, 2)
 
-	result := MapGPUResponseToModel(context.Background(), response, model)
+	result := mapGPUResponse(t, response, model)
 
 	if result.ID.ValueString() != "gpu-123" {
 		t.Errorf("Expected ID 'gpu-123', got '%s'", result.ID.ValueString())
@@ -513,7 +536,7 @@ func TestMapGPUResponseToModelSkuCodeUnit(t *testing.T) {
 	model.GPUCount = types.Int64Null()
 	model.SkuCode = types.StringNull()
 
-	result := MapGPUResponseToModel(context.Background(), response, model)
+	result := mapGPUResponse(t, response, model)
 	if result.SkuCode.ValueString() != "gpu_1x_a6000" {
 		t.Errorf("Expected sku_code back-filled to 'gpu_1x_a6000', got '%s'", result.SkuCode.ValueString())
 	}
@@ -797,7 +820,7 @@ func TestMapGPUResponseToModelRefreshesDriftUnit(t *testing.T) {
 	model.SkuCode = types.StringValue("gpu_2x_a6000")
 
 	// Read maps first and refreshes second, so the test follows the same order.
-	result := MapGPUResponseToModel(context.Background(), response, model)
+	result := mapGPUResponse(t, response, model)
 	result = RefreshGPUModelFromResponse(response, result)
 
 	if result.Name.ValueString() != "renamed-in-portal" {
@@ -828,7 +851,7 @@ func TestMapGPUResponseToModelKeepsImageAndAuthUnit(t *testing.T) {
 
 	model := createTestGPUModel("test-gpu", "NVIDIA RTX A6000 Series", "nvidia-rtx_a6000-series", testImageName, 2)
 
-	result := MapGPUResponseToModel(context.Background(), response, model)
+	result := mapGPUResponse(t, response, model)
 	result = RefreshGPUModelFromResponse(response, result)
 
 	if result.ImageName.ValueString() != testImageName {
@@ -844,13 +867,128 @@ func TestMapGPUResponseToModelKeepsImageAndAuthUnit(t *testing.T) {
 	}
 }
 
+func TestSetModelValuesNotPresentImportsTheImageName(t *testing.T) {
+	for reported, want := range map[string]string{
+		"ubuntu-24.04": "ubuntu-24.04",
+		"Ubuntu-22.04": "ubuntu-22.04",
+	} {
+		response := newGPUResponse("gpu-123", "test-gpu")
+		response.Data.Image = "Ubuntu 22.04 LTS with drivers"
+		response.Data.ImageName = reported
+
+		result, diags := setModelValuesNotPresent(context.Background(), response, importModel())
+
+		if diags.HasError() {
+			t.Fatalf("%s: expected no error, got %v", reported, diags)
+		}
+		if result.ImageName.ValueString() != want {
+			t.Errorf("%s: expected ImageName %q, got %v", reported, want, result.ImageName)
+		}
+	}
+}
+
+func TestSetModelValuesNotPresentRefusesAMissingImageName(t *testing.T) {
+	response := newGPUResponse("gpu-123", "test-gpu")
+	response.Data.Image = "Ubuntu 22.04 LTS with drivers"
+
+	result, diags := setModelValuesNotPresent(context.Background(), response, importModel())
+
+	assertImportImageError(t, diags, "GPCN™ does not report the image of GPU gpu-123 yet, so the provider cannot set image_name. A wrong value would plan a replacement of the GPU. Run the command again once GPCN™ reports the image.")
+	if !result.ImageName.IsNull() {
+		t.Errorf("Expected ImageName null, got %v", result.ImageName)
+	}
+}
+
+func TestSetModelValuesNotPresentWarnsOnAnUnacceptedImageName(t *testing.T) {
+	response := newGPUResponse("gpu-123", "test-gpu")
+	response.Data.ImageName = "Massed-Compute-Default"
+
+	result, diags := setModelValuesNotPresent(context.Background(), response, importModel())
+
+	if diags.HasError() {
+		t.Fatalf("Expected no error, got %v", diags)
+	}
+	warnings := diags.Warnings()
+	if len(warnings) != 1 {
+		t.Fatalf("Expected one warning, got %v", diags)
+	}
+	if got, want := warnings[0].Summary(), "The GPU's image is not one image_name accepts"; got != want {
+		t.Errorf("Expected summary %q, got %q", want, got)
+	}
+	wantDetail := `GPU gpu-123 was created with image "Massed-Compute-Default", which image_name does not accept (it accepts ubuntu-22.04, ubuntu-24.04). The next plan replaces the GPU unless the configuration sets lifecycle { ignore_changes = [image_name] }.`
+	if got := warnings[0].Detail(); got != wantDetail {
+		t.Errorf("Expected detail %q, got %q", wantDetail, got)
+	}
+	if got := result.ImageName.ValueString(); got != "Massed-Compute-Default" {
+		t.Errorf("Expected ImageName %q, got %v", "Massed-Compute-Default", result.ImageName)
+	}
+}
+
+func TestMapGPUResponseToModelHealsADisplayNameImport(t *testing.T) {
+	response := newGPUResponse("gpu-123", "test-gpu")
+	response.Data.ImageName = "ubuntu-22.04"
+	model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100-series", "Ubuntu 22.04 LTS with drivers", 2)
+
+	result, diags := MapGPUResponseToModel(context.Background(), response, model)
+
+	if len(diags) != 0 {
+		t.Fatalf("Expected no diagnostic, got %v", diags)
+	}
+	if got := result.ImageName.ValueString(); got != "ubuntu-22.04" {
+		t.Errorf("Expected ImageName %q, got %v", "ubuntu-22.04", result.ImageName)
+	}
+}
+
+func TestMapGPUResponseToModelKeepsAnAcceptedImageName(t *testing.T) {
+	response := newGPUResponse("gpu-123", "test-gpu")
+	response.Data.ImageName = "ubuntu-22.04"
+	model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100-series", "ubuntu-24.04", 2)
+
+	result, diags := MapGPUResponseToModel(context.Background(), response, model)
+
+	if len(diags) != 0 {
+		t.Fatalf("Expected no diagnostic, got %v", diags)
+	}
+	if got := result.ImageName.ValueString(); got != "ubuntu-24.04" {
+		t.Errorf("Expected ImageName %q, got %v", "ubuntu-24.04", result.ImageName)
+	}
+}
+
+func TestMapGPUResponseToModelKeepsADisplayNameWithoutAReportedName(t *testing.T) {
+	response := newGPUResponse("gpu-123", "test-gpu")
+	model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100-series", "Ubuntu 22.04 LTS with drivers", 2)
+
+	result, diags := MapGPUResponseToModel(context.Background(), response, model)
+
+	if len(diags) != 0 {
+		t.Fatalf("Expected no diagnostic, got %v", diags)
+	}
+	if got := result.ImageName.ValueString(); got != "Ubuntu 22.04 LTS with drivers" {
+		t.Errorf("Expected ImageName %q, got %v", "Ubuntu 22.04 LTS with drivers", result.ImageName)
+	}
+}
+
+func assertImportImageError(t *testing.T, diags diag.Diagnostics, wantDetail string) {
+	t.Helper()
+	errs := diags.Errors()
+	if len(errs) != 1 {
+		t.Fatalf("Expected one error, got %v", diags)
+	}
+	if got := errs[0].Summary(); got != "Cannot read the GPU's image" {
+		t.Errorf("Expected summary %q, got %q", "Cannot read the GPU's image", got)
+	}
+	if got := errs[0].Detail(); got != wantDetail {
+		t.Errorf("Expected detail %q, got %q", wantDetail, got)
+	}
+}
+
 func TestMapGPUResponseToModelKeepsPlanValuesUnit(t *testing.T) {
 	response := newGPUResponse("gpu-123", "renamed-in-portal")
 	response.Data.Configuration.GPUCount = 4
 
 	model := createTestGPUModel("planned-name", "NVIDIA RTX A6000 Series", "nvidia-rtx_a6000-series", testImageName, 2)
 
-	result := MapGPUResponseToModel(context.Background(), response, model)
+	result := mapGPUResponse(t, response, model)
 
 	if result.Name.ValueString() != "planned-name" {
 		t.Errorf("Expected Name 'planned-name', got '%s'", result.Name.ValueString())
@@ -1429,7 +1567,7 @@ func TestMapGPUResponseToModelResourceGroupUnit(t *testing.T) {
 	} {
 		model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100-series", testImageName, 2)
 		model.ResourceGroupId = prior
-		result := MapGPUResponseToModel(context.Background(), response, model)
+		result := mapGPUResponse(t, response, model)
 		if result.ResourceGroupId.ValueString() != "rg-reported" {
 			t.Errorf("%s: expected the read group 'rg-reported', got %v", name, result.ResourceGroupId)
 		}
@@ -1438,7 +1576,7 @@ func TestMapGPUResponseToModelResourceGroupUnit(t *testing.T) {
 	response.Data.ResourceGroupId = ""
 	model := createTestGPUModel("test-gpu", "NVIDIA H100 Series", "nvidia-h100-series", testImageName, 2)
 	model.ResourceGroupId = types.StringValue("rg-configured")
-	result := MapGPUResponseToModel(context.Background(), response, model)
+	result := mapGPUResponse(t, response, model)
 	if !result.ResourceGroupId.IsNull() {
 		t.Errorf("Expected an empty group to map to null, got %v", result.ResourceGroupId)
 	}

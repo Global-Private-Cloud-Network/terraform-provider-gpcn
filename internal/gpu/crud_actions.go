@@ -42,6 +42,7 @@ type readGPUResponse struct {
 		} `json:"datacenter"`
 		SshKeyId        string `json:"sshKeyId"`
 		Image           string `json:"image"`
+		ImageName       string `json:"imageName"`
 		ResourceGroupId string `json:"resourceGroupId"`
 	} `json:"data"`
 }

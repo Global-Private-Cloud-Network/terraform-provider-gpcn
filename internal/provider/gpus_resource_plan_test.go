@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"regexp"
+	"strings"
 	"sync"
 	"testing"
 
@@ -115,6 +116,11 @@ type gpuPlanTestMock struct {
 	createBody map[string]any
 	putBodies  []map[string]any
 
+	// imageName is the image the read reports. Empty leaves the field out.
+	imageName string
+	// planSeries serves the series of the configuration in place of the sentinel.
+	planSeries bool
+
 	refuseMoveOnce bool
 	defaultOnPut   string
 	// movedOnPut moves the GPU to this group while the next update request is
@@ -219,9 +225,25 @@ func startGPUPlanMockServer(t *testing.T) (*httptest.Server, *gpuPlanTestMock) {
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodGet && r.URL.Path == gpuPath:
 			mock.mu.Lock()
-			name, group := mock.name, mock.group
+			name, group, imageName, planSeries := mock.name, mock.group, mock.imageName, mock.planSeries
 			mock.mu.Unlock()
-			testutil.WriteJSONResponse(w, gpuCatalogTestReadBody(t, name, group))
+			body := gpuCatalogTestReadBody(t, name, group)
+			data, _ := body["data"].(map[string]any)
+			if imageName != "" {
+				data["imageName"] = imageName
+			}
+			if planSeries {
+				data["configuration"] = map[string]any{
+					"name":     gpuPlanTestSeriesName,
+					"code":     gpuPlanTestSeriesCode,
+					"skuCode":  gpuPlanTestSkuCode,
+					"gpuCount": 1,
+					"cpu":      6,
+					"ram":      48,
+					"disk":     256,
+				}
+			}
+			testutil.WriteJSONResponse(w, body)
 		case r.Method == http.MethodDelete && r.URL.Path == gpuPath:
 			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
@@ -636,6 +658,7 @@ func TestGPUResourcePlanImportReadsGroup(t *testing.T) {
 
 	mock.setName("gpu-plan-a")
 	mock.setGroup(gpuPlanTestGroupA)
+	mock.imageName = gpuPlanTestImageName
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
@@ -1017,4 +1040,106 @@ func TestGPUResourcePlanDestroyWaitsOutBusyHolder(t *testing.T) {
 
 	runBusyDestroyPlanTest(t, gpuPlanTestConfig(proxy.url, seriesField, "gpu-plan-busy"))
 	proxy.checkSentAgain(t, map[string]string{deleteRequest: ""})
+}
+
+func TestGPUResourcePlanImportSetsImageName(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+	mock.planSeries = true
+	mock.imageName = "Ubuntu-22.04"
+	mock.setName("gpu-plan-a")
+
+	config := gpuPlanTestConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:             config,
+				ResourceName:       gpcnGPUTest,
+				ImportState:        true,
+				ImportStateId:      gpuPlanTestID,
+				ImportStatePersist: true,
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported state, got %d", len(states))
+					}
+					for attribute, want := range map[string]string{
+						"id":         gpuPlanTestID,
+						"image_name": gpuPlanTestImageName,
+					} {
+						if got := states[0].Attributes[attribute]; got != want {
+							return fmt.Errorf("imported %s = %q, want %q", attribute, got, want)
+						}
+					}
+					return nil
+				},
+			},
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+		},
+	})
+}
+
+func TestGPUResourcePlanImportRefusesAMissingImageName(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+
+	mock.setName("gpu-plan-a")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:        gpuPlanTestConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a"),
+				ResourceName:  gpcnGPUTest,
+				ImportState:   true,
+				ImportStateId: gpuPlanTestID,
+				ExpectError:   regexp.MustCompile(`Cannot read the GPU's image`),
+			},
+		},
+	})
+}
+
+func TestGPUResourcePlanImportAdoptsAnUnacceptedImageWithIgnoreChanges(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+	mock.planSeries = true
+	mock.imageName = "massed-compute-default"
+	mock.setName("gpu-plan-a")
+
+	config := strings.Replace(gpuPlanTestConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a"),
+		"  initial_auth = {", "  lifecycle {\n    ignore_changes = [image_name]\n  }\n  initial_auth = {", 1)
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:             config,
+				ResourceName:       gpcnGPUTest,
+				ImportState:        true,
+				ImportStateId:      gpuPlanTestID,
+				ImportStatePersist: true,
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported state, got %d", len(states))
+					}
+					if got := states[0].Attributes["image_name"]; got != "massed-compute-default" {
+						return fmt.Errorf("imported image_name = %q, want %q", got, "massed-compute-default")
+					}
+					return nil
+				},
+			},
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+		},
+	})
 }
