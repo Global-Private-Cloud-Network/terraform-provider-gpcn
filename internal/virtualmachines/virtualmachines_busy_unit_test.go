@@ -93,13 +93,40 @@ func TestUpdateVirtualMachineWaitsOutBusyHolder(t *testing.T) {
 	recorded.check(t, `{"name":"renamed"}`, "send", "poll holder-job", "send")
 }
 
+// machineOnSizes answers each machine read with the next SKU of the list.
+func machineOnSizes(skus ...string) http.HandlerFunc {
+	reads := 0
+	return func(w http.ResponseWriter, _ *http.Request) {
+		sku := skus[min(reads, len(skus)-1)]
+		reads++
+		testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{
+			"id": "vm-1", "configuration": map[string]any{"skuId": sku},
+		}})
+	}
+}
+
 func TestUpdateVirtualMachineSizeWaitsOutBusyHolder(t *testing.T) {
-	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vm-1/size", acceptOwnJob, nil)
+	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vm-1/size", acceptOwnJob, machineOnSizes("sku-1"))
 
 	if err := UpdateVirtualMachineSize(gpcnClient, context.Background(), "vm-1", "sku-2"); err != nil {
 		t.Fatalf("UpdateVirtualMachineSize = %v, want nil", err)
 	}
-	recorded.check(t, `{"skuId":"sku-2"}`, "send", "poll holder-job", "send", "poll own-job")
+	read := "GET " + BASE_URL_V1 + "vm-1"
+	recorded.check(t, `{"skuId":"sku-2"}`, read, "send", "poll holder-job", read, "send", "poll own-job")
+}
+
+func TestUpdateVirtualMachineSizeLeavesASizeTheHolderSet(t *testing.T) {
+	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vm-1/size", acceptOwnJob, machineOnSizes("sku-1", "sku-2"))
+
+	if err := UpdateVirtualMachineSize(gpcnClient, context.Background(), "vm-1", "sku-2"); err != nil {
+		t.Fatalf("UpdateVirtualMachineSize = %v, want nil", err)
+	}
+	recorded.mu.Lock()
+	defer recorded.mu.Unlock()
+	read := "GET " + BASE_URL_V1 + "vm-1"
+	if want := []string{read, "send", "poll holder-job", read}; !slices.Equal(recorded.events, want) {
+		t.Errorf("events = %q, want %q", recorded.events, want)
+	}
 }
 
 func TestStopVirtualMachineWaitsOutBusyHolder(t *testing.T) {
