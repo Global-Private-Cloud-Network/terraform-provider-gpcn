@@ -8,6 +8,7 @@ BUG FIXES:
 - **Virtual Machine**: destroying a machine that a failed create left behind releases its elastic IP by the same rule as any other destroy: only when its primary interface is on a VPC. When the provider cannot read the interfaces, or none of them is primary, it releases the address as before and warns.
 - **VPC, VPN Connection, VPN Gateway**: when the wait for the job that holds the resource runs out after a read that did not return that job, the error says that the API key cannot read it. Before, it said that the job had ended.
 - **VPN Connection**: an update cancelled while it waits for another job no longer says that the change may still apply.
+- **GPU**: importing a GPU sets `image_name` from the image the GPU was created with, so the plan after an import no longer proposes replacing the GPU. An import is refused when GPCN™ does not report that image or reports one that `image_name` does not accept.
 
 ## 1.8.0 (November 24, 2026)
 

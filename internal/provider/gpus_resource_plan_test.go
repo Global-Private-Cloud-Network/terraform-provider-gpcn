@@ -114,6 +114,11 @@ type gpuPlanTestMock struct {
 	createBody map[string]any
 	putBodies  []map[string]any
 
+	// imageName is the image the read reports. Empty leaves the field out.
+	imageName string
+	// planSeries serves the series of the configuration in place of the sentinel.
+	planSeries bool
+
 	refuseMoveOnce bool
 	defaultOnPut   string
 	// movedOnPut moves the GPU to this group while the next update request is
@@ -163,7 +168,7 @@ func (m *gpuPlanTestMock) putCount() int {
 func startGPUPlanMockServer(t *testing.T) (*httptest.Server, *gpuPlanTestMock) {
 	t.Helper()
 
-	mock := &gpuPlanTestMock{group: gpuPlanTestDefaultGroup}
+	mock := &gpuPlanTestMock{group: gpuPlanTestDefaultGroup, imageName: gpuPlanTestImageName}
 	gpuPath := "/v1/resource/gpu/" + gpuPlanTestID
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -218,9 +223,25 @@ func startGPUPlanMockServer(t *testing.T) (*httptest.Server, *gpuPlanTestMock) {
 			testutil.WriteJSONResponse(w, map[string]any{"success": true})
 		case r.Method == http.MethodGet && r.URL.Path == gpuPath:
 			mock.mu.Lock()
-			name, group := mock.name, mock.group
+			name, group, imageName, planSeries := mock.name, mock.group, mock.imageName, mock.planSeries
 			mock.mu.Unlock()
-			testutil.WriteJSONResponse(w, gpuCatalogTestReadBody(t, name, group))
+			body := gpuCatalogTestReadBody(t, name, group)
+			data, _ := body["data"].(map[string]any)
+			if imageName != "" {
+				data["imageName"] = imageName
+			}
+			if planSeries {
+				data["configuration"] = map[string]any{
+					"name":     gpuPlanTestSeriesName,
+					"code":     gpuPlanTestSeriesCode,
+					"skuCode":  gpuPlanTestSkuCode,
+					"gpuCount": 1,
+					"cpu":      6,
+					"ram":      48,
+					"disk":     256,
+				}
+			}
+			testutil.WriteJSONResponse(w, body)
 		case r.Method == http.MethodDelete && r.URL.Path == gpuPath:
 			testutil.HandleCreateJobResponse(w, "job-2")
 		default:
@@ -1002,6 +1023,55 @@ func TestGpuCreateJobFailedIsReplaced(t *testing.T) {
 					}
 					return nil
 				},
+			},
+		},
+	})
+}
+
+func TestGPUResourcePlanImportSetsImageName(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+	mock.planSeries = true
+
+	config := gpuPlanTestConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a")
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{
+				Config:            config,
+				ResourceName:      gpcnGPUTest,
+				ImportState:       true,
+				ImportStateId:     gpuPlanTestID,
+				ImportStateVerify: true,
+			},
+			{
+				Config: config,
+				ConfigPlanChecks: resource.ConfigPlanChecks{
+					PreApply: []plancheck.PlanCheck{plancheck.ExpectEmptyPlan()},
+				},
+			},
+		},
+	})
+}
+
+func TestGPUResourcePlanImportRefusesAMissingImageName(t *testing.T) {
+	t.Parallel()
+	server, mock := startGPUPlanMockServer(t)
+
+	mock.setName("gpu-plan-a")
+	mock.imageName = ""
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{
+				Config:        gpuPlanTestConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a"),
+				ResourceName:  gpcnGPUTest,
+				ImportState:   true,
+				ImportStateId: gpuPlanTestID,
+				ExpectError:   regexp.MustCompile(`Cannot import the GPU's image`),
 			},
 		},
 	})

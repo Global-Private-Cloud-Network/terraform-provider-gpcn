@@ -2,6 +2,9 @@ package gpu
 
 import (
 	"context"
+	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/hashicorp/terraform-plugin-framework/attr"
@@ -67,7 +70,7 @@ func ModelFromPlanWithID(plan ResourceModel, id string) ResourceModel {
 }
 
 // Update the plan or state with new values from the GET response
-func MapGPUResponseToModel(ctx context.Context, response *readGPUResponse, model ResourceModel) ResourceModel {
+func MapGPUResponseToModel(ctx context.Context, response *readGPUResponse, model ResourceModel) (ResourceModel, diag.Diagnostics) {
 	model.ID = types.StringValue(response.Data.ID)
 
 	// Construct time entries
@@ -102,12 +105,11 @@ func MapGPUResponseToModel(ctx context.Context, response *readGPUResponse, model
 	}
 
 	// If model doesn't already have these populated, set them
-	model = setModelValuesNotPresent(ctx, response, model)
-
-	return model
+	return setModelValuesNotPresent(ctx, response, model)
 }
 
-func setModelValuesNotPresent(ctx context.Context, response *readGPUResponse, model ResourceModel) ResourceModel {
+func setModelValuesNotPresent(ctx context.Context, response *readGPUResponse, model ResourceModel) (ResourceModel, diag.Diagnostics) {
+	var diags diag.Diagnostics
 	if model.DatacenterId.IsNull() {
 		model.DatacenterId = types.StringValue(response.Data.Datacenter.ID)
 	}
@@ -127,22 +129,39 @@ func setModelValuesNotPresent(ctx context.Context, response *readGPUResponse, mo
 		model.GPUCount = types.Int64Value(response.Data.Configuration.GPUCount)
 	}
 
-	// The API returns a longer image name than the user configures. A refresh here
-	// shows permanent drift.
+	// Only an import reaches this fill. A value that differs from the image of the
+	// create plans a replacement, so the fill never guesses.
 	if model.ImageName.IsNull() || model.ImageName.ValueString() == "" {
-		model.ImageName = types.StringValue(response.Data.Image)
+		model.ImageName = types.StringNull()
+		diags.Append(importedImageName(response, &model)...)
 	}
 
 	// initial_auth changes the state only, so the API value must not win.
 	if model.InitialAuth.IsNull() && response.Data.SshKeyId != "" {
-		authObj, diags := types.ObjectValueFrom(ctx, ResourceModelInitialAuth{}.AttrTypes(), ResourceModelInitialAuth{
+		authObj, authDiags := types.ObjectValueFrom(ctx, ResourceModelInitialAuth{}.AttrTypes(), ResourceModelInitialAuth{
 			SshKeyId: types.StringValue(response.Data.SshKeyId),
 		})
-		if !diags.HasError() {
+		if !authDiags.HasError() {
 			model.InitialAuth = authObj
 		}
 	}
-	return model
+	return model, diags
+}
+
+func importedImageName(response *readGPUResponse, model *ResourceModel) diag.Diagnostics {
+	var diags diag.Diagnostics
+	reported := response.Data.ImageName
+	if reported == "" {
+		diags.AddError(ErrSummaryCannotImportImage, fmt.Sprintf(ErrDetailImageNameNotReported, response.Data.ID))
+		return diags
+	}
+	imageName := strings.ToLower(reported)
+	if !slices.Contains(GPUImageNames, imageName) {
+		diags.AddError(ErrSummaryCannotImportImage, fmt.Sprintf(ErrDetailImageNameNotAccepted, response.Data.ID, reported, strings.Join(GPUImageNames, ", ")))
+		return diags
+	}
+	model.ImageName = types.StringValue(imageName)
+	return diags
 }
 
 // Only the name can change out of band and reconcile in place. A refresh of any other
