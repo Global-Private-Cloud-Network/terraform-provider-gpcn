@@ -893,7 +893,7 @@ func TestSetModelValuesNotPresentRefusesAMissingImageName(t *testing.T) {
 
 	result, diags := setModelValuesNotPresent(context.Background(), response, importModel())
 
-	assertImportImageError(t, diags, "GPCN™ did not report the image that GPU gpu-123 was created with, so the import cannot set image_name. A wrong value would plan a replacement of the GPU. Import it again with a provider and a GPCN™ API that report the image.")
+	assertImportImageError(t, diags, "GPCN™ does not report the image of GPU gpu-123 yet, so the provider cannot set image_name. A wrong value would plan a replacement of the GPU. Run the command again once GPCN™ reports the image.")
 	if !result.ImageName.IsNull() {
 		t.Errorf("Expected ImageName null, got %v", result.ImageName)
 	}
@@ -930,8 +930,8 @@ func assertImportImageError(t *testing.T, diags diag.Diagnostics, wantDetail str
 	if len(errs) != 1 {
 		t.Fatalf("Expected one error, got %v", diags)
 	}
-	if got := errs[0].Summary(); got != "Cannot import the GPU's image" {
-		t.Errorf("Expected summary %q, got %q", "Cannot import the GPU's image", got)
+	if got := errs[0].Summary(); got != "Cannot read the GPU's image" {
+		t.Errorf("Expected summary %q, got %q", "Cannot read the GPU's image", got)
 	}
 	if got := errs[0].Detail(); got != wantDetail {
 		t.Errorf("Expected detail %q, got %q", wantDetail, got)

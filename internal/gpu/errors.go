@@ -8,7 +8,7 @@ const (
 	ErrSummaryUnableToUpdateGPU       = "Unable to Update GPU"
 	ErrSummaryUnableToDeleteGPU       = "Unable to Delete GPU"
 	ErrSummaryUnableToFetchInventory  = "Unable to fetch GPU inventory"
-	ErrSummaryCannotImportImage       = "Cannot import the GPU's image"
+	ErrSummaryCannotImportImage       = "Cannot read the GPU's image"
 )
 
 // Error detail message templates
@@ -21,7 +21,7 @@ const (
 	ErrDetailNoInventoryAvailable       = "no GPU availability for series code %s in datacenter %s with GPU count %d"
 	ErrDetailNoInventoryAvailableByName = "no GPU availability for series %s in datacenter %s with GPU count %d"
 	ErrDetailUnknownGPUSeries           = "GPU series %q is not offered in datacenter %s; available series: %s"
-	ErrDetailImageNameNotReported       = "GPCN™ did not report the image that GPU %s was created with, so the import cannot set image_name. A wrong value would plan a replacement of the GPU. Import it again with a provider and a GPCN™ API that report the image."
+	ErrDetailImageNameNotReported       = "GPCN™ does not report the image of GPU %s yet, so the provider cannot set image_name. A wrong value would plan a replacement of the GPU. Run the command again once GPCN™ reports the image."
 )
 
 // Warning message constants

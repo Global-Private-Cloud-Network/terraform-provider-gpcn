@@ -1098,7 +1098,7 @@ func TestGPUResourcePlanImportRefusesAMissingImageName(t *testing.T) {
 				ResourceName:  gpcnGPUTest,
 				ImportState:   true,
 				ImportStateId: gpuPlanTestID,
-				ExpectError:   regexp.MustCompile(`Cannot import the GPU's image`),
+				ExpectError:   regexp.MustCompile(`Cannot read the GPU's image`),
 			},
 		},
 	})
