@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -140,6 +141,16 @@ func HandleJobOutcomeResponse(w http.ResponseWriter, jobID, resourceID, outcome,
 		"message": "Job progress retrieved successfully",
 		"data":    map[string]any{"jobs": []any{job}, "notFound": []any{}},
 	})
+}
+
+// HandleBusyResponse answers a request with the 409 that names the job that
+// holds the resource.
+func HandleBusyResponse(w http.ResponseWriter, holderJobID string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	_, _ = fmt.Fprintf(w, `{"success":false,"message":"The resource is busy.","error":{"code":"RESOURCE_BUSY","statusCode":409,`+
+		`"details":{"resourceType":"resource","resourceId":"r-1","heldBy":{"jobId":%q,"resourceType":"resource",`+
+		`"operation":"update","verb":"Updating"}}}}`, holderJobID)
 }
 
 // HandleCreateJobResponse answers a request that starts a job, as the API

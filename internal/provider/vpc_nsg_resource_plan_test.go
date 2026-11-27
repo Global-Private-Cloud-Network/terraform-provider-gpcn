@@ -1485,3 +1485,13 @@ func TestVpcNsgResourceNoOwnerFieldUnchanged(t *testing.T) {
 		},
 	})
 }
+
+func TestVpcNsgResourcePlanDestroyWaitsOutBusyHolder(t *testing.T) {
+	shortenBusyRetry(t, &vpcnsgs.BusyRetryInterval)
+	server, _ := startNsgPlanMockServer(t)
+	deleteRequest := "DELETE /v1/resource/vpcs/" + nsgPlanTestVpcID + "/nsgs/" + nsgPlanTestID
+	proxy := startBusyPlanTestProxy(t, server, deleteRequest)
+
+	runBusyDestroyPlanTest(t, nsgPlanTestConfig(proxy.url, "nsg-busy", ""))
+	proxy.checkSentAgain(t, map[string]string{deleteRequest: ""})
+}

@@ -191,12 +191,13 @@ func UpdateGPU(gpcnClient *client.GpcnClient, ctx context.Context, id, name, res
 		return err
 	}
 
-	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+id, bytes.NewBuffer(jsonUpdateGPURequestBody))
-	if err != nil {
-		return err
-	}
-
-	response, err := gpcnClient.DoWithRetry(request)
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+id, bytes.NewBuffer(jsonUpdateGPURequestBody))
+		if err != nil {
+			return nil, err
+		}
+		return gpcnClient.DoWithRetry(request)
+	})
 	if err != nil {
 		return err
 	}
@@ -209,12 +210,13 @@ func UpdateGPU(gpcnClient *client.GpcnClient, ctx context.Context, id, name, res
 func DeleteGPU(gpcnClient *client.GpcnClient, ctx context.Context, id string) error {
 	tflog.Info(ctx, LogStartingDeleteGPU)
 
-	request, err := http.NewRequestWithContext(ctx, "DELETE", BASE_URL_V1+id, nil)
-	if err != nil {
-		return err
-	}
-
-	response, err := gpcnClient.DoWithRetry(request)
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		request, err := http.NewRequestWithContext(ctx, "DELETE", BASE_URL_V1+id, nil)
+		if err != nil {
+			return nil, err
+		}
+		return gpcnClient.DoWithRetry(request)
+	})
 	if err != nil {
 		return err
 	}

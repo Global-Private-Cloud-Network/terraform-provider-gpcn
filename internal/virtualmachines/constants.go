@@ -47,3 +47,7 @@ var vmTerminalFailureStatuses = []VMStatus{VMStatusDestroyed, VMStatusDeleting}
 func (s VMStatus) String() string {
 	return string(s)
 }
+
+// BusyRetryInterval is the wait before a request goes out again after the job
+// that held the resource ended. It is a variable so that tests can shorten it.
+var BusyRetryInterval = 5 * time.Second

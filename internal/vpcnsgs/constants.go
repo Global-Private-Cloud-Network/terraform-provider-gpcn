@@ -1,5 +1,7 @@
 package vpcnsgs
 
+import "time"
+
 // BaseURLV1 is the VPC collection. Every security group route is scoped under
 // a VPC. A group carries no datacenter and no resource group of its own.
 const BaseURLV1 = "/v1/resource/vpcs/"
@@ -30,3 +32,7 @@ const (
 	ActionReplaceNsgRules = "Replace GPCN VPC Security Group Rules"
 	ActionDeleteNsg       = "Delete GPCN VPC Security Group"
 )
+
+// BusyRetryInterval is the wait before a request goes out again after the job
+// that held the resource ended. It is a variable so that tests can shorten it.
+var BusyRetryInterval = 5 * time.Second

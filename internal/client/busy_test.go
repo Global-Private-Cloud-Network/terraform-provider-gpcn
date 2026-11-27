@@ -1,8 +1,10 @@
 package client
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -334,4 +336,241 @@ func TestHolderStillRunningIsABusyWaitExhaustion(t *testing.T) {
 	if !errors.Is(err, ErrBusyWaitExhausted) {
 		t.Errorf("errors.Is(err, ErrBusyWaitExhausted) = false, want true")
 	}
+}
+
+const holderTestSucceededJob = `{"id":"h1","stage":"completed","outcome":"succeeded","progress":100,"message":null,"failureReason":null}`
+
+const holderTestNotFoundBody = `{"success":true,"message":"Job progress retrieved successfully","data":{"jobs":[],"notFound":["h1"]}}`
+
+// busyThenAccepted answers busy to the first send and accepts the rest.
+func busyThenAccepted(sends *int) func() (string, error) {
+	return func() (string, error) {
+		*sends++
+		if *sends == 1 {
+			return "", busyTestError(http.StatusConflict, busyTestBody)
+		}
+		return "accepted", nil
+	}
+}
+
+func TestSendWaitingForHolderSendsAgainAfterTheHolder(t *testing.T) {
+	fastHolderPolling(t)
+	gpcnClient, calls := holderServer(t, http.StatusOK, holderJobsBody(holderTestSucceededJob))
+
+	sends := 0
+	result, err := SendWaitingForHolder(gpcnClient, t.Context(), time.Millisecond, busyThenAccepted(&sends))
+	if err != nil {
+		t.Fatalf("SendWaitingForHolder = %v, want nil", err)
+	}
+	if result != "accepted" {
+		t.Errorf("result = %q, want %q", result, "accepted")
+	}
+	if sends != 2 {
+		t.Errorf("sends = %d, want 2", sends)
+	}
+	if got := int(calls.Load()); got != 1 {
+		t.Errorf("poll calls = %d, want 1", got)
+	}
+}
+
+func TestSendWaitingForHolderReportsAHolderThatOutlivesTheDeadline(t *testing.T) {
+	fastHolderPolling(t)
+	gpcnClient, _ := holderServer(t, http.StatusOK, holderJobsBody(`{"id":"h1","stage":"running","outcome":null}`))
+	gpcnClient.config.PollingTimeout = 50 * time.Millisecond
+
+	sends := 0
+	_, err := SendWaitingForHolder(gpcnClient, t.Context(), time.Millisecond, busyThenAccepted(&sends))
+	if !errors.Is(err, ErrHolderStillRunning) {
+		t.Errorf("SendWaitingForHolder = %v, want ErrHolderStillRunning", err)
+	}
+	if sends != 1 {
+		t.Errorf("sends = %d, want 1", sends)
+	}
+}
+
+// The holder answer arrives after the deadline, so the deadline always passes
+// between the two sends.
+func TestSendWaitingForHolderStopsAtADeadlineThatPassedAfterTheHolder(t *testing.T) {
+	tests := []struct {
+		name           string
+		body           string
+		wantPrefix     string
+		wantNotVisible bool
+	}{
+		{
+			name:       "the holder ended",
+			body:       holderJobsBody(holderTestSucceededJob),
+			wantPrefix: "job h1 ended as the wait for it ran out after ",
+		},
+		{
+			name:           "the holder is not visible",
+			body:           holderTestNotFoundBody,
+			wantPrefix:     "the wait for job h1 ran out after ",
+			wantNotVisible: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fastHolderPolling(t)
+
+			const pollingTimeout = 500 * time.Millisecond
+			sentAt := make(chan time.Time, 1)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				time.Sleep(time.Until((<-sentAt).Add(pollingTimeout)))
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			t.Cleanup(server.Close)
+
+			cfg := DefaultConfig(server.URL, "test-key")
+			cfg.MaxRetries = 0
+			cfg.PollingTimeout = pollingTimeout
+			gpcnClient, err := NewGpcnClient(cfg)
+			if err != nil {
+				t.Fatalf("failed to create client: %v", err)
+			}
+
+			sends := 0
+			send := busyThenAccepted(&sends)
+			_, err = SendWaitingForHolder(gpcnClient, t.Context(), time.Millisecond, func() (string, error) {
+				if sends == 0 {
+					sentAt <- time.Now()
+				}
+				return send()
+			})
+			if err == nil || !strings.HasPrefix(err.Error(), tt.wantPrefix) {
+				t.Fatalf("SendWaitingForHolder = %v, want it to start with %q", err, tt.wantPrefix)
+			}
+			if got := errors.Is(err, ErrHolderNotVisible); got != tt.wantNotVisible {
+				t.Errorf("errors.Is(err, ErrHolderNotVisible) = %t, want %t", got, tt.wantNotVisible)
+			}
+			if sends != 1 {
+				t.Errorf("sends = %d, want 1", sends)
+			}
+		})
+	}
+}
+
+func TestSendWaitingForHolderStopsWhenTheContextEndsInTheSleep(t *testing.T) {
+	fastHolderPolling(t)
+	gpcnClient, calls := holderServer(t, http.StatusOK, holderJobsBody(holderTestSucceededJob))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go func() {
+		for calls.Load() == 0 {
+			time.Sleep(time.Millisecond)
+		}
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	sends := 0
+	_, err := SendWaitingForHolder(gpcnClient, ctx, time.Hour, busyThenAccepted(&sends))
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("SendWaitingForHolder = %v, want context.Canceled", err)
+	}
+	if !errors.Is(err, ErrBusyWaitExhausted) {
+		t.Errorf("SendWaitingForHolder = %v, want ErrBusyWaitExhausted", err)
+	}
+	if sends != 1 {
+		t.Errorf("sends = %d, want 1", sends)
+	}
+}
+
+func TestSendWaitingForHolderReturnsOtherRefusalsAtOnce(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "another 409 code",
+			err:  busyTestError(http.StatusConflict, strings.Replace(busyTestBody, "RESOURCE_BUSY", "L2_SEGMENT_IN_USE", 1)),
+		},
+		{
+			name: "a busy 409 without a holder job id",
+			err:  busyTestError(http.StatusConflict, strings.Replace(busyTestBody, `"jobId":"h1",`, "", 1)),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gpcnClient, calls := holderServer(t, http.StatusOK, holderJobsBody(holderTestSucceededJob))
+
+			sends := 0
+			result, err := SendWaitingForHolder(gpcnClient, t.Context(), time.Millisecond, func() (string, error) {
+				sends++
+				return "refused", tt.err
+			})
+			//nolint:errorlint // The error must come back unchanged.
+			if err != tt.err {
+				t.Errorf("SendWaitingForHolder = %v, want the error of the send", err)
+			}
+			if result != "refused" {
+				t.Errorf("result = %q, want the result of the send", result)
+			}
+			if sends != 1 {
+				t.Errorf("sends = %d, want 1", sends)
+			}
+			if got := int(calls.Load()); got != 0 {
+				t.Errorf("poll calls = %d, want 0", got)
+			}
+		})
+	}
+}
+
+func TestSendWaitingForHolder(t *testing.T) {
+	t.Run("ends a chain of holders at one deadline", func(t *testing.T) {
+		fastHolderPolling(t)
+
+		// A deadline that starts again for the second holder ends at about 4.5s.
+		const pollingTimeout = 3 * time.Second
+		const firstHolderEnds = 1500 * time.Millisecond
+
+		start := time.Now()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			raw, _ := io.ReadAll(r.Body)
+			w.Header().Set("Content-Type", "application/json")
+			if strings.Contains(string(raw), "h2") {
+				_, _ = w.Write([]byte(holderJobsBody(`{"id":"h2","stage":"running","outcome":null}`)))
+				return
+			}
+			time.Sleep(time.Until(start.Add(firstHolderEnds)))
+			_, _ = w.Write([]byte(holderJobsBody(holderTestSucceededJob)))
+		}))
+		t.Cleanup(server.Close)
+
+		cfg := DefaultConfig(server.URL, "test-key")
+		cfg.MaxRetries = 0
+		cfg.PollingTimeout = pollingTimeout
+		gpcnClient, err := NewGpcnClient(cfg)
+		if err != nil {
+			t.Fatalf("failed to create client: %v", err)
+		}
+
+		sends := 0
+		_, err = SendWaitingForHolder(gpcnClient, t.Context(), time.Millisecond, func() (string, error) {
+			sends++
+			body := busyTestBody
+			if sends > 1 {
+				body = strings.Replace(body, `"jobId":"h1"`, `"jobId":"h2"`, 1)
+			}
+			return "", busyTestError(http.StatusConflict, body)
+		})
+		elapsed := time.Since(start)
+		if !errors.Is(err, ErrHolderStillRunning) || !strings.HasPrefix(err.Error(), "job h2 still holds this resource after ") {
+			t.Fatalf("SendWaitingForHolder = %v, want the still-running error of h2", err)
+		}
+		// The error counts from the first send, and it rounds to a second.
+		if !strings.Contains(err.Error(), " after 3s;") && !strings.Contains(err.Error(), " after 4s;") {
+			t.Errorf("error = %q, want an elapsed time of about 3s", err.Error())
+		}
+		if elapsed >= 4*time.Second {
+			t.Errorf("elapsed = %s, want less than 4s", elapsed)
+		}
+		if sends != 2 {
+			t.Errorf("sends = %d, want 2", sends)
+		}
+	})
 }

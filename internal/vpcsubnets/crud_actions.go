@@ -206,12 +206,13 @@ func UpdateSubnet(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, sub
 		return nil, err
 	}
 
-	request, err := http.NewRequestWithContext(ctx, "PUT", subnetPath(vpcID, subnetID), bytes.NewBuffer(jsonUpdateSubnetRequestBody))
-	if err != nil {
-		return nil, err
-	}
-
-	response, err := gpcnClient.DoWithRetry(request)
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		request, err := http.NewRequestWithContext(ctx, "PUT", subnetPath(vpcID, subnetID), bytes.NewBuffer(jsonUpdateSubnetRequestBody))
+		if err != nil {
+			return nil, err
+		}
+		return gpcnClient.DoWithRetry(request)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -241,12 +242,13 @@ func RebindSubnetNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 		return err
 	}
 
-	request, err := http.NewRequestWithContext(ctx, "PUT", subnetPath(vpcID, subnetID)+nsgPathSegment, bytes.NewBuffer(rebindRequestBody))
-	if err != nil {
-		return err
-	}
-
-	jobID, err := issueJob(gpcnClient, request)
+	jobID, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (string, error) {
+		request, err := http.NewRequestWithContext(ctx, "PUT", subnetPath(vpcID, subnetID)+nsgPathSegment, bytes.NewBuffer(rebindRequestBody))
+		if err != nil {
+			return "", err
+		}
+		return issueJob(gpcnClient, request)
+	})
 	if err != nil {
 		return err
 	}
@@ -265,12 +267,13 @@ func RebindSubnetNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 func DeleteSubnet(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, subnetID string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteSubnetWithID, subnetID))
 
-	request, err := http.NewRequestWithContext(ctx, "DELETE", subnetPath(vpcID, subnetID), nil)
-	if err != nil {
-		return err
-	}
-
-	jobID, err := issueJob(gpcnClient, request)
+	jobID, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (string, error) {
+		request, err := http.NewRequestWithContext(ctx, "DELETE", subnetPath(vpcID, subnetID), nil)
+		if err != nil {
+			return "", err
+		}
+		return issueJob(gpcnClient, request)
+	})
 	if err != nil {
 		return err
 	}

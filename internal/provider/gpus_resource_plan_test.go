@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	"terraform-provider-gpcn/internal/gpu"
 	"terraform-provider-gpcn/internal/testutil"
 
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
@@ -1005,4 +1006,15 @@ func TestGpuCreateJobFailedIsReplaced(t *testing.T) {
 			},
 		},
 	})
+}
+
+func TestGPUResourcePlanDestroyWaitsOutBusyHolder(t *testing.T) {
+	shortenBusyRetry(t, &gpu.BusyRetryInterval)
+	server, _ := startGPUPlanMockServer(t)
+	seriesField := fmt.Sprintf("series_code = %q\n  sku_code    = %q", gpuPlanTestSeriesCode, gpuPlanTestSkuCode)
+	deleteRequest := "DELETE /v1/resource/gpu/" + gpuPlanTestID
+	proxy := startBusyPlanTestProxy(t, server, deleteRequest)
+
+	runBusyDestroyPlanTest(t, gpuPlanTestConfig(proxy.url, seriesField, "gpu-plan-busy"))
+	proxy.checkSentAgain(t, map[string]string{deleteRequest: ""})
 }
