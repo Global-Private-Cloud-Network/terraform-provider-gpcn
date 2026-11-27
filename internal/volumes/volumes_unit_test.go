@@ -19,6 +19,9 @@ import (
 
 const testDatacenterID = "datacenter-123"
 
+// sizeBeforeResize is the size a resize fixture reads before the resize lands.
+const sizeBeforeResize = int64(100)
+
 func createTestVolumeModel(name, volumeType string, sizeGb int64) ResourceModel {
 	return ResourceModel{
 		Name:         types.StringValue(name),
@@ -270,7 +273,10 @@ func TestUpdateVolumeMockHTTP(t *testing.T) {
 
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID):
 				getCalled = true
-				resp := newVolumeResponse(volumeID, "test-volume", newSizeGb, skuId)
+				resp := newVolumeResponse(volumeID, "test-volume", sizeBeforeResize, skuId)
+				if updateCalled {
+					resp = newVolumeResponse(volumeID, "test-volume", newSizeGb, skuId)
+				}
 				resp.Data.CreatedAt = time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
 				testutil.WriteJSONResponse(w, resp)
 
@@ -318,6 +324,7 @@ func TestUpdateVolumeReadsBackByTheVolumeID(t *testing.T) {
 	)
 
 	var readPaths []string
+	resized := false
 	server, gpcnClient := testutil.SetupMockServerWithGpcnClient(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
@@ -327,12 +334,17 @@ func TestUpdateVolumeReadsBackByTheVolumeID(t *testing.T) {
 					{SkuId: skuId, SizeGb: newSizeGb},
 				}))
 			case r.Method == http.MethodPut && strings.HasSuffix(r.URL.Path, "/"+volumeID+"/resize"):
+				resized = true
 				testutil.HandleCreateJobResponse(w, jobID)
 			case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/jobs"):
 				testutil.HandleJobResponse(w, jobID, "", true)
 			case r.Method == http.MethodGet:
 				readPaths = append(readPaths, r.URL.Path)
-				testutil.WriteJSONResponse(w, newVolumeResponse(volumeID, "test-volume", newSizeGb, skuId))
+				size := sizeBeforeResize
+				if resized {
+					size = newSizeGb
+				}
+				testutil.WriteJSONResponse(w, newVolumeResponse(volumeID, "test-volume", size, skuId))
 			default:
 				testutil.LogUnexpectedRequest(t, w, r)
 			}
@@ -343,7 +355,7 @@ func TestUpdateVolumeReadsBackByTheVolumeID(t *testing.T) {
 	if _, err := UpdateVolume(gpcnClient, context.Background(), volumeID, createTestVolumeModel("test-volume", "SSD", newSizeGb)); err != nil {
 		t.Fatalf("UpdateVolume failed: %v", err)
 	}
-	if want := []string{BASE_URL_V1 + volumeID}; !slices.Equal(readPaths, want) {
+	if want := []string{BASE_URL_V1 + volumeID, BASE_URL_V1 + volumeID}; !slices.Equal(readPaths, want) {
 		t.Errorf("Expected reads %v, got %v", want, readPaths)
 	}
 }
@@ -379,7 +391,10 @@ func TestUpdateVolumeLooksUpSkuByComponentCodeMockHTTP(t *testing.T) {
 				testutil.HandleJobResponse(w, "job-ultra", volumeID, true)
 
 			case r.Method == "GET" && strings.Contains(r.URL.Path, "/volumes/"+volumeID):
-				response := newVolumeResponse(volumeID, "ultra-volume", newSizeGb, skuId)
+				response := newVolumeResponse(volumeID, "ultra-volume", sizeBeforeResize, skuId)
+				if updateCalled {
+					response = newVolumeResponse(volumeID, "ultra-volume", newSizeGb, skuId)
+				}
 				response.Data.VolumeType.Code = componentCode
 				response.Data.VolumeType.Name = "ULTRA"
 				testutil.WriteJSONResponse(w, response)

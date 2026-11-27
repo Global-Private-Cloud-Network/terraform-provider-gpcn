@@ -182,8 +182,17 @@ func UpdateVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 		return nil, err
 	}
 
-	// A resize is the only change this call makes.
+	// A resize is the only change this call makes. The holder can have made it,
+	// so each send reads the volume again.
 	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		volume, err := GetVolume(gpcnClient, ctx, volumeId)
+		if err != nil {
+			return nil, err
+		}
+		if volume.Data.SizeGb == model.SizeGb.ValueInt64() {
+			return nil, nil
+		}
+
 		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/resize", bytes.NewBuffer(jsonUpdateVolumeRequestBody))
 		if err != nil {
 			return nil, err
@@ -194,31 +203,33 @@ func UpdateVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 	if err != nil {
 		return nil, err
 	}
-	defer response.Body.Close()
-	tflog.Info(ctx, LogIssuedUpdateVolumeJob)
+	if response != nil {
+		defer response.Body.Close()
+		tflog.Info(ctx, LogIssuedUpdateVolumeJob)
 
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
-		return nil, err
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			return nil, err
+		}
+
+		var updateVolumeResponse client.JobStatusSingularResponse
+		err = json.Unmarshal(body, &updateVolumeResponse)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if !updateVolumeResponse.Success {
+			return nil, errors.New("the job to update the GPCN Volume failed to start")
+		}
+
+		_, err = client.PerformLongPolling(gpcnClient, ctx, "Update GPCN Volume", updateVolumeResponse.Data.JobID)
+		if err != nil {
+			return nil, fmt.Errorf("update volume polling failed: %w", err)
+		}
+
+		tflog.Info(ctx, LogLongPollingCompletedUpdateVolume)
 	}
-
-	var updateVolumeResponse client.JobStatusSingularResponse
-	err = json.Unmarshal(body, &updateVolumeResponse)
-
-	if err != nil {
-		return nil, err
-	}
-
-	if !updateVolumeResponse.Success {
-		return nil, errors.New("the job to update the GPCN Volume failed to start")
-	}
-
-	_, err = client.PerformLongPolling(gpcnClient, ctx, "Update GPCN Volume", updateVolumeResponse.Data.JobID)
-	if err != nil {
-		return nil, fmt.Errorf("update volume polling failed: %w", err)
-	}
-
-	tflog.Info(ctx, LogLongPollingCompletedUpdateVolume)
 
 	// Perform a GET call to retrieve actual information about the Volume
 	getVolumeResponse, err := GetVolume(gpcnClient, ctx, volumeId)
