@@ -2,7 +2,7 @@
 
 ENHANCEMENTS:
 
-- **Virtual Machine, GPU, Volume, Volume Attachment, L2 Segment, Subnet, Security Group, Elastic IP**: an update or destroy that finds the resource held by another job waits up to `polling_timeout` for that job to end and sends the request again. Before, it failed and had to be run again.
+- **Virtual Machine, GPU, Volume, Volume Attachment, L2 Segment, Subnet, Security Group, Elastic IP**: an update, a destroy, or an attach, stop or start that a create sends, waits up to `polling_timeout` for another job that holds the resource and then sends the request again, unless that job already did the same work. Each request has its own wait, so a destroy that sends several requests can wait for several jobs. Before, the request failed and had to be run again.
 
 BUG FIXES:
 
@@ -12,7 +12,7 @@ BUG FIXES:
 - **Virtual Machine**: destroying a machine that a failed create left behind releases its elastic IP by the same rule as any other destroy: only when its primary interface is on a VPC. When the provider cannot read the interfaces, or none of them is primary, it releases the address as before and warns.
 - **VPC, VPN Connection, VPN Gateway**: when the wait for the job that holds the resource runs out after a read that did not return that job, the error says that the API key cannot read it. Before, it said that the job had ended.
 - **VPN Connection**: an update cancelled while it waits for another job no longer says that the change may still apply.
-- **Provider**: a destroy that waits for another job no longer drops the resource from state when the read of that job answers 404.
+- **VPC, VPN Connection, VPN Gateway**: a destroy that waits for another job no longer drops the resource from state when the read of that job answers 404.
 - **Volume Attachment**: a destroy no longer detaches a volume that has moved to another machine.
 
 ## 1.8.0 (November 24, 2026)
