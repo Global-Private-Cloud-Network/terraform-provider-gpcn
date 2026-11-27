@@ -132,10 +132,9 @@ func TestGPUResource(t *testing.T) {
 			},
 			// ImportState testing
 			{
-				ResourceName:      gpcnGPUTest,
-				ImportState:       true,
-				ImportStateVerify: true,
-				// Image name is mapped to a "full" image name on the API
+				ResourceName:            gpcnGPUTest,
+				ImportState:             true,
+				ImportStateVerify:       true,
 				ImportStateVerifyIgnore: []string{"created_time", "last_updated"},
 			},
 			// Update and Read testing (name change only — does not trigger replacement)
