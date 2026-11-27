@@ -1090,7 +1090,6 @@ func TestGPUResourcePlanImportRefusesAMissingImageName(t *testing.T) {
 	server, mock := startGPUPlanMockServer(t)
 
 	mock.setName("gpu-plan-a")
-	mock.imageName = ""
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,

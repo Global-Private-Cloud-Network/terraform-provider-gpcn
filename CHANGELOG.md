@@ -2,7 +2,7 @@
 
 BREAKING CHANGES:
 
-- **GPU**: an import needs a GPCN™ API that reports the image on the GPU detail. Until then the import is refused. An import that succeeded before, with the display name in `image_name`, is refused now.
+- **GPU**: an import needs a GPCN™ API that reports the image on the GPU detail, and is refused until it does. Before, the import succeeded and wrote the image's display name to `image_name`.
 
 ENHANCEMENTS:
 
