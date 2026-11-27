@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"slices"
 	"sync"
 	"testing"
@@ -80,13 +81,103 @@ func acceptOwnJob(w http.ResponseWriter, _ *http.Request) {
 	testutil.HandleCreateJobResponse(w, "own-job")
 }
 
+var interfacesPath = VIRTUAL_MACHINES_BASE_URL_V1 + "vm-1/network-interfaces"
+
+// interfacesOnSegments answers each interface read with the next segment of
+// the list. An empty segment lists no interface.
+func interfacesOnSegments(segments ...string) http.HandlerFunc {
+	reads := 0
+	return func(w http.ResponseWriter, _ *http.Request) {
+		segment := segments[min(reads, len(segments)-1)]
+		reads++
+		data := []map[string]any{}
+		if segment != "" {
+			data = append(data, map[string]any{"id": "nic-2", "networkInterface": 1, "world": NicWorldL2, "l2SegmentId": segment, "operationState": "attaching"})
+		}
+		testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": data})
+	}
+}
+
 func TestAddL2SegmentInterfaceWaitsOutBusyHolder(t *testing.T) {
-	gpcnClient, recorded := setupBusyOnce(t, http.MethodPost, VIRTUAL_MACHINES_BASE_URL_V1+"vm-1/network-interfaces", acceptOwnJob, nil)
+	gpcnClient, recorded := setupBusyOnce(t, http.MethodPost, interfacesPath, acceptOwnJob, interfacesOnSegments(""))
 
 	if err := AddL2SegmentInterface(gpcnClient, context.Background(), "vm-1", "seg-1"); err != nil {
 		t.Fatalf("AddL2SegmentInterface = %v, want nil", err)
 	}
-	recorded.check(t, `{"l2SegmentId":"seg-1"}`, "send", "poll holder-job", "send", "poll own-job")
+	read := "GET " + interfacesPath
+	recorded.check(t, `{"l2SegmentId":"seg-1"}`, read, "send", "poll holder-job", read, "send", "poll own-job")
+}
+
+func TestAddL2SegmentInterfaceLeavesASegmentTheHolderAttached(t *testing.T) {
+	gpcnClient, recorded := setupBusyOnce(t, http.MethodPost, interfacesPath, acceptOwnJob, interfacesOnSegments("", "seg-1"))
+
+	if err := AddL2SegmentInterface(gpcnClient, context.Background(), "vm-1", "seg-1"); err != nil {
+		t.Fatalf("AddL2SegmentInterface = %v, want nil", err)
+	}
+	recorded.mu.Lock()
+	defer recorded.mu.Unlock()
+	read := "GET " + interfacesPath
+	if want := []string{read, "send", "poll holder-job", read}; !slices.Equal(recorded.events, want) {
+		t.Errorf("events = %q, want %q", recorded.events, want)
+	}
+}
+
+// DoWithRetry sends the attach again after the 502. The API accepted the
+// first POST, so the second meets the job of this attach as the holder.
+func TestAddL2SegmentInterfaceSkipsItsOwnAcceptedAttach(t *testing.T) {
+	previous := BusyRetryInterval
+	BusyRetryInterval = time.Millisecond
+	t.Cleanup(func() { BusyRetryInterval = previous })
+
+	var mu sync.Mutex
+	var events []string
+	posts := 0
+	listInterfaces := interfacesOnSegments("", "seg-1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == interfacesPath:
+			events = append(events, "read")
+			listInterfaces(w, r)
+		case r.Method == http.MethodPost && r.URL.Path == interfacesPath:
+			posts++
+			events = append(events, "send")
+			if posts == 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			testutil.HandleBusyResponse(w, "own-job")
+		case r.Method == http.MethodPost && r.URL.Path == client.JOBS_BASE_URL_V1:
+			ids, _ := testutil.ReadRequestBody(r)["jobIds"].([]any)
+			jobID, _ := ids[0].(string)
+			events = append(events, "poll "+jobID)
+			testutil.HandleJobResponse(w, jobID, "", true)
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	cfg := client.DefaultConfig(server.URL, "test-key")
+	cfg.MaxRetries = 1
+	cfg.InitialRetryDelay = 0
+	gpcnClient, err := client.NewGpcnClient(cfg)
+	if err != nil {
+		t.Fatalf("failed to create client: %v", err)
+	}
+
+	if err := AddL2SegmentInterface(gpcnClient, context.Background(), "vm-1", "seg-1"); err != nil {
+		t.Fatalf("AddL2SegmentInterface = %v, want nil", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if posts != 2 {
+		t.Errorf("POSTs = %d, want 2", posts)
+	}
+	if want := []string{"read", "send", "send", "poll own-job", "read"}; !slices.Equal(events, want) {
+		t.Errorf("events = %q, want %q", events, want)
+	}
 }
 
 func TestRemoveNetworkInterfaceWaitsOutBusyHolder(t *testing.T) {

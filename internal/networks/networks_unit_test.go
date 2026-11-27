@@ -671,6 +671,10 @@ func TestAddL2SegmentInterfaceSendsSegmentIdMockHTTP(t *testing.T) {
 				testutil.HandleCreateJobResponse(w, "job-1")
 				return
 			}
+			if r.Method == http.MethodGet && r.URL.Path == "/v1/resource/virtual-machines/"+vmID+"/network-interfaces" {
+				testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": []any{}})
+				return
+			}
 			testutil.HandleJobResponse(w, "job-1", "", true)
 		},
 	})
