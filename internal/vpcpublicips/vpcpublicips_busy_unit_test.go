@@ -2,6 +2,7 @@ package vpcpublicips
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"slices"
@@ -138,7 +139,14 @@ func TestReleasePublicIpHolderReadNotFoundIsAnError(t *testing.T) {
 		},
 	})
 
-	if err := ReleasePublicIp(gpcnClient, context.Background(), testVpcID, testPublicIpID); err == nil {
-		t.Error("ReleasePublicIp = nil, want the error of the holder read")
+	err := ReleasePublicIp(gpcnClient, context.Background(), testVpcID, testPublicIpID)
+	if err == nil {
+		t.Fatal("ReleasePublicIp = nil, want the error of the holder read")
+	}
+	if !errors.Is(err, client.ErrBusyWaitExhausted) {
+		t.Errorf("errors.Is(err, client.ErrBusyWaitExhausted) = false, want true for %v", err)
+	}
+	if client.IsNotFound(err) {
+		t.Errorf("client.IsNotFound(err) = true, want false for %v", err)
 	}
 }

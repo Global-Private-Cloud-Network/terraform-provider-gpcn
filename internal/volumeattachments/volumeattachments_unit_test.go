@@ -299,3 +299,26 @@ func TestDetachVolumeNotFoundStaysNotFound(t *testing.T) {
 		t.Errorf("expected client.IsNotFound to be true, got false for error: %v", err)
 	}
 }
+
+func TestDetachVolumeSkipsAVolumeThatIsGone(t *testing.T) {
+	recorder := &requestRecorder{}
+	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
+		T: t,
+		Handler: func(w http.ResponseWriter, r *http.Request) {
+			recorder.record(r)
+			if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/volumes/"+testVolID) {
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+			testutil.LogUnexpectedRequest(t, w, r)
+		},
+	})
+
+	err := DetachVolume(gpcnClient, context.Background(), testVMID, testVolID)
+	if !client.IsNotFound(err) {
+		t.Errorf("DetachVolume = %v, want an error that client.IsNotFound accepts", err)
+	}
+	if recorder.saw("PUT", "/volumes/"+testVolID+"/detach") {
+		t.Errorf("expected no detach request; requests: %s", recorder)
+	}
+}
