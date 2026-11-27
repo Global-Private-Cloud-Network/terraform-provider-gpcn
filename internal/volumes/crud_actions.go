@@ -251,7 +251,7 @@ func DeleteVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 		return err
 	}
 	if getVolumeResponse.Data.VirtualMachineId != "" {
-		err = RemoveVolumeFromVirtualMachine(gpcnClient, ctx, volumeId, getVolumeResponse.Data.VirtualMachineId)
+		err = RemoveVolumeFromVirtualMachine(gpcnClient, ctx, getVolumeResponse.Data.VirtualMachineId, volumeId)
 		if err != nil {
 			return err
 		}

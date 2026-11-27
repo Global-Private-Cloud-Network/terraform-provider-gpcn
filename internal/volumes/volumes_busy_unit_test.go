@@ -192,7 +192,7 @@ func TestAddVolumeToVirtualMachineLeavesAnAttachTheHolderMade(t *testing.T) {
 func TestRemoveVolumeFromVirtualMachineWaitsOutBusyHolder(t *testing.T) {
 	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vol-1/detach", acceptOwnJob, volumeOnMachines("vm-1"))
 
-	if err := RemoveVolumeFromVirtualMachine(gpcnClient, context.Background(), "vol-1", "vm-1"); err != nil {
+	if err := RemoveVolumeFromVirtualMachine(gpcnClient, context.Background(), "vm-1", "vol-1"); err != nil {
 		t.Fatalf("RemoveVolumeFromVirtualMachine = %v, want nil", err)
 	}
 	read := "GET " + BASE_URL_V1 + "vol-1"
@@ -204,7 +204,7 @@ func checkOneDetach(t *testing.T, machineAfterTheWait string) {
 	t.Helper()
 	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vol-1/detach", acceptOwnJob, volumeOnMachines("vm-1", machineAfterTheWait))
 
-	if err := RemoveVolumeFromVirtualMachine(gpcnClient, context.Background(), "vol-1", "vm-1"); err != nil {
+	if err := RemoveVolumeFromVirtualMachine(gpcnClient, context.Background(), "vm-1", "vol-1"); err != nil {
 		t.Fatalf("RemoveVolumeFromVirtualMachine = %v, want nil", err)
 	}
 	recorded.mu.Lock()
