@@ -21,7 +21,16 @@ func AddVolumeToVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Contex
 	if err != nil {
 		return errors.New("error marshaling the json request body GPCN Virtual Machines - Attach Volume")
 	}
+	// The holder can have made this attach, so each send reads the volume again.
 	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		volume, err := GetVolume(gpcnClient, ctx, volumeId)
+		if err != nil {
+			return nil, err
+		}
+		if volume.Data.VirtualMachineId == virtualMachineId {
+			return nil, nil
+		}
+
 		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/attach", bytes.NewBuffer(jsonAttachVolumeRequestBody))
 		if err != nil {
 			return nil, err
@@ -30,6 +39,9 @@ func AddVolumeToVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Contex
 	})
 	if err != nil {
 		return err
+	}
+	if response == nil {
+		return nil
 	}
 	defer response.Body.Close()
 

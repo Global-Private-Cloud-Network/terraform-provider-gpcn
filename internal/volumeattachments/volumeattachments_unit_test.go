@@ -109,7 +109,11 @@ func volumeOperationServer(t *testing.T, volumeAction string) (*client.GpcnClien
 				testutil.WriteJSONResponse(w, vmResponse(testVMID, 0, "Running"))
 
 			case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/volumes/"+testVolID):
-				testutil.WriteJSONResponse(w, volumeResponse(testVolID, testVMID))
+				attachedVMID := testVMID
+				if volumeAction == "attach" {
+					attachedVMID = ""
+				}
+				testutil.WriteJSONResponse(w, volumeResponse(testVolID, attachedVMID))
 
 			case r.Method == "POST" && strings.HasSuffix(r.URL.Path, "/"+testVMID+"/stop"):
 				w.WriteHeader(http.StatusInternalServerError)
@@ -224,6 +228,10 @@ func TestAttachSurfacesBackendStatusRefusalMockHTTP(t *testing.T) {
 	_, gpcnClient := testutil.SetupMockServerWithRealTransport(testutil.MockServerConfig{
 		T: t,
 		Handler: func(w http.ResponseWriter, r *http.Request) {
+			if r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/volumes/"+testVolID) {
+				testutil.WriteJSONResponse(w, volumeResponse(testVolID, ""))
+				return
+			}
 			if r.Method == "PUT" && strings.HasSuffix(r.URL.Path, "/volumes/"+testVolID+"/attach") {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)

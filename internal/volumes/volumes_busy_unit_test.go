@@ -124,15 +124,6 @@ func TestDeleteVolumeWaitsOutBusyHolder(t *testing.T) {
 	recorded.check(t, "", "GET "+BASE_URL_V1+"vol-1", "send", "poll holder-job", "send", "poll own-job")
 }
 
-func TestAddVolumeToVirtualMachineWaitsOutBusyHolder(t *testing.T) {
-	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vol-1/attach", acceptOwnJob, nil)
-
-	if err := AddVolumeToVirtualMachine(gpcnClient, context.Background(), "vm-1", "vol-1"); err != nil {
-		t.Fatalf("AddVolumeToVirtualMachine = %v, want nil", err)
-	}
-	recorded.check(t, `{"virtualMachineId":"vm-1"}`, "send", "poll holder-job", "send", "poll own-job")
-}
-
 // volumeOnMachines answers each volume read with the next machine of the list.
 func volumeOnMachines(machines ...string) http.HandlerFunc {
 	reads := 0
@@ -142,6 +133,30 @@ func volumeOnMachines(machines ...string) http.HandlerFunc {
 		testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{
 			"id": "vol-1", "virtualMachineId": machine,
 		}})
+	}
+}
+
+func TestAddVolumeToVirtualMachineWaitsOutBusyHolder(t *testing.T) {
+	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vol-1/attach", acceptOwnJob, volumeOnMachines("", "vm-2"))
+
+	if err := AddVolumeToVirtualMachine(gpcnClient, context.Background(), "vm-1", "vol-1"); err != nil {
+		t.Fatalf("AddVolumeToVirtualMachine = %v, want nil", err)
+	}
+	read := "GET " + BASE_URL_V1 + "vol-1"
+	recorded.check(t, `{"virtualMachineId":"vm-1"}`, read, "send", "poll holder-job", read, "send", "poll own-job")
+}
+
+func TestAddVolumeToVirtualMachineLeavesAnAttachTheHolderMade(t *testing.T) {
+	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vol-1/attach", acceptOwnJob, volumeOnMachines("", "vm-1"))
+
+	if err := AddVolumeToVirtualMachine(gpcnClient, context.Background(), "vm-1", "vol-1"); err != nil {
+		t.Fatalf("AddVolumeToVirtualMachine = %v, want nil", err)
+	}
+	recorded.mu.Lock()
+	defer recorded.mu.Unlock()
+	read := "GET " + BASE_URL_V1 + "vol-1"
+	if want := []string{read, "send", "poll holder-job", read}; !slices.Equal(recorded.events, want) {
+		t.Errorf("events = %q, want %q", recorded.events, want)
 	}
 }
 
