@@ -1032,19 +1032,34 @@ func TestGPUResourcePlanImportSetsImageName(t *testing.T) {
 	t.Parallel()
 	server, mock := startGPUPlanMockServer(t)
 	mock.planSeries = true
+	mock.imageName = "Ubuntu-22.04"
+	mock.setName("gpu-plan-a")
 
 	config := gpuPlanTestConfig(server.URL, gpuPlanTestSeriesFieldCode, "gpu-plan-a")
 
 	resource.UnitTest(t, resource.TestCase{
 		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
 		Steps: []resource.TestStep{
-			{Config: config},
 			{
-				Config:            config,
-				ResourceName:      gpcnGPUTest,
-				ImportState:       true,
-				ImportStateId:     gpuPlanTestID,
-				ImportStateVerify: true,
+				Config:             config,
+				ResourceName:       gpcnGPUTest,
+				ImportState:        true,
+				ImportStateId:      gpuPlanTestID,
+				ImportStatePersist: true,
+				ImportStateCheck: func(states []*terraform.InstanceState) error {
+					if len(states) != 1 {
+						return fmt.Errorf("expected 1 imported state, got %d", len(states))
+					}
+					for attribute, want := range map[string]string{
+						"id":         gpuPlanTestID,
+						"image_name": gpuPlanTestImageName,
+					} {
+						if got := states[0].Attributes[attribute]; got != want {
+							return fmt.Errorf("imported %s = %q, want %q", attribute, got, want)
+						}
+					}
+					return nil
+				},
 			},
 			{
 				Config: config,
