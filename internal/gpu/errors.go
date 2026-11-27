@@ -22,5 +22,10 @@ const (
 	ErrDetailNoInventoryAvailableByName = "no GPU availability for series %s in datacenter %s with GPU count %d"
 	ErrDetailUnknownGPUSeries           = "GPU series %q is not offered in datacenter %s; available series: %s"
 	ErrDetailImageNameNotReported       = "GPCN™ did not report the image that GPU %s was created with, so the import cannot set image_name. A wrong value would plan a replacement of the GPU. Import it again with a provider and a GPCN™ API that report the image."
-	ErrDetailImageNameNotAccepted       = "GPU %s was created with image %q, which image_name does not accept (it accepts %s). The provider cannot manage this GPU without replacing it."
+)
+
+// Warning message constants
+const (
+	WarnSummaryImageNameNotAccepted = "The GPU's image is not one image_name accepts"
+	WarnDetailImageNameNotAccepted  = "GPU %s was created with image %q, which image_name does not accept (it accepts %s). The next plan replaces the GPU unless the configuration sets lifecycle { ignore_changes = [image_name] }."
 )

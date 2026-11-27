@@ -157,7 +157,8 @@ func importedImageName(response *readGPUResponse, model *ResourceModel) diag.Dia
 	}
 	imageName := strings.ToLower(reported)
 	if !slices.Contains(GPUImageNames, imageName) {
-		diags.AddError(ErrSummaryCannotImportImage, fmt.Sprintf(ErrDetailImageNameNotAccepted, response.Data.ID, reported, strings.Join(GPUImageNames, ", ")))
+		diags.AddWarning(WarnSummaryImageNameNotAccepted, fmt.Sprintf(WarnDetailImageNameNotAccepted, response.Data.ID, reported, strings.Join(GPUImageNames, ", ")))
+		model.ImageName = types.StringValue(reported)
 		return diags
 	}
 	model.ImageName = types.StringValue(imageName)

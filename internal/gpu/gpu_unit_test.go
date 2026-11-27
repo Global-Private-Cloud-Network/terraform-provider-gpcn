@@ -899,15 +899,28 @@ func TestSetModelValuesNotPresentRefusesAMissingImageName(t *testing.T) {
 	}
 }
 
-func TestSetModelValuesNotPresentRefusesAnUnacceptedImageName(t *testing.T) {
+func TestSetModelValuesNotPresentWarnsOnAnUnacceptedImageName(t *testing.T) {
 	response := newGPUResponse("gpu-123", "test-gpu")
-	response.Data.ImageName = "massed-compute-default"
+	response.Data.ImageName = "Massed-Compute-Default"
 
 	result, diags := setModelValuesNotPresent(context.Background(), response, importModel())
 
-	assertImportImageError(t, diags, `GPU gpu-123 was created with image "massed-compute-default", which image_name does not accept (it accepts ubuntu-22.04, ubuntu-24.04). The provider cannot manage this GPU without replacing it.`)
-	if !result.ImageName.IsNull() {
-		t.Errorf("Expected ImageName null, got %v", result.ImageName)
+	if diags.HasError() {
+		t.Fatalf("Expected no error, got %v", diags)
+	}
+	warnings := diags.Warnings()
+	if len(warnings) != 1 {
+		t.Fatalf("Expected one warning, got %v", diags)
+	}
+	if got, want := warnings[0].Summary(), "The GPU's image is not one image_name accepts"; got != want {
+		t.Errorf("Expected summary %q, got %q", want, got)
+	}
+	wantDetail := `GPU gpu-123 was created with image "Massed-Compute-Default", which image_name does not accept (it accepts ubuntu-22.04, ubuntu-24.04). The next plan replaces the GPU unless the configuration sets lifecycle { ignore_changes = [image_name] }.`
+	if got := warnings[0].Detail(); got != wantDetail {
+		t.Errorf("Expected detail %q, got %q", wantDetail, got)
+	}
+	if got := result.ImageName.ValueString(); got != "Massed-Compute-Default" {
+		t.Errorf("Expected ImageName %q, got %v", "Massed-Compute-Default", result.ImageName)
 	}
 }
 
