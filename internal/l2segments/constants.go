@@ -1,5 +1,7 @@
 package l2segments
 
+import "time"
+
 // BASE_URL_V1 is the segment collection. The create and the list are mounted on
 // the trailing slash, and every per-segment route appends the segment ID.
 var BASE_URL_V1 string = "/v1/resource/l2-segments/"
@@ -21,3 +23,7 @@ const (
 // StateFailed is the state a parked segment carries. The row stays live and
 // tenant-visible, so Read keeps it in state rather than removing it.
 const StateFailed = "failed"
+
+// BusyRetryInterval is the wait before a request goes out again after the job
+// that held the resource ended. It is a variable so that tests can shorten it.
+var BusyRetryInterval = 5 * time.Second

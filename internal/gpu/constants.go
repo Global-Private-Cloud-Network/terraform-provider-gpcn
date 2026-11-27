@@ -1,5 +1,7 @@
 package gpu
 
+import "time"
+
 var BASE_URL_V1 string = "/v1/resource/gpu/"
 
 // The inventory response, not this list, decides what a datacenter offers. A
@@ -21,3 +23,7 @@ var GPUSeriesNameToCode = map[string]string{
 
 // Supported GPU Image Names
 var GPUImageNames = []string{"ubuntu-22.04", "ubuntu-24.04"}
+
+// BusyRetryInterval is the wait before a request goes out again after the job
+// that held the resource ended. It is a variable so that tests can shorten it.
+var BusyRetryInterval = 5 * time.Second

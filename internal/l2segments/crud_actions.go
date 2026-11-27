@@ -157,13 +157,14 @@ func UpdateL2Segment(gpcnClient *client.GpcnClient, ctx context.Context, segment
 	}
 	tflog.Info(ctx, LogConstructedUpdateL2SegmentRequestBody)
 
-	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+segmentID, bytes.NewBuffer(jsonUpdateRequestBody))
-	if err != nil {
-		return nil, err
-	}
-	tflog.Info(ctx, LogConstructedUpdateL2SegmentRequest)
-
-	segmentResponse, err := readSegment(gpcnClient, request)
+	segmentResponse, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*readL2SegmentResponse, error) {
+		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+segmentID, bytes.NewBuffer(jsonUpdateRequestBody))
+		if err != nil {
+			return nil, err
+		}
+		tflog.Info(ctx, LogConstructedUpdateL2SegmentRequest)
+		return readSegment(gpcnClient, request)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -177,13 +178,14 @@ func UpdateL2Segment(gpcnClient *client.GpcnClient, ctx context.Context, segment
 func DeleteL2Segment(gpcnClient *client.GpcnClient, ctx context.Context, segmentID string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteL2SegmentWithID, segmentID))
 
-	request, err := http.NewRequestWithContext(ctx, "DELETE", BASE_URL_V1+segmentID, nil)
-	if err != nil {
-		return err
-	}
-	tflog.Info(ctx, LogConstructedDeleteL2SegmentRequest)
-
-	deleteResponse, err := issueJob(gpcnClient, ctx, request)
+	deleteResponse, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*client.JobStatusSingularResponse, error) {
+		request, err := http.NewRequestWithContext(ctx, "DELETE", BASE_URL_V1+segmentID, nil)
+		if err != nil {
+			return nil, err
+		}
+		tflog.Info(ctx, LogConstructedDeleteL2SegmentRequest)
+		return issueJob(gpcnClient, ctx, request)
+	})
 	if err != nil {
 		return err
 	}

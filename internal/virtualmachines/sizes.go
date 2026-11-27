@@ -25,12 +25,13 @@ func UpdateVirtualMachineSize(gpcnClient *client.GpcnClient, ctx context.Context
 	if err != nil {
 		return err
 	}
-	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+virtualMachineId+"/size", bytes.NewBuffer(jsonUpdateVMRequestBody))
-	if err != nil {
-		return err
-	}
-
-	response, err := gpcnClient.DoWithRetry(request)
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+virtualMachineId+"/size", bytes.NewBuffer(jsonUpdateVMRequestBody))
+		if err != nil {
+			return nil, err
+		}
+		return gpcnClient.DoWithRetry(request)
+	})
 	if err != nil {
 		return err
 	}

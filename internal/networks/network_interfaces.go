@@ -228,12 +228,13 @@ func AddL2SegmentInterface(gpcnClient *client.GpcnClient, ctx context.Context, v
 	if err != nil {
 		return errors.New("error marshaling the json request body GPCN Virtual Machines - Attach Network")
 	}
-	request, err := http.NewRequestWithContext(ctx, "POST", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces", bytes.NewBuffer(jsonAttachNetworkInterfaceRequestBody))
-	if err != nil {
-		return err
-	}
-
-	response, err := gpcnClient.DoWithRetry(request)
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		request, err := http.NewRequestWithContext(ctx, "POST", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces", bytes.NewBuffer(jsonAttachNetworkInterfaceRequestBody))
+		if err != nil {
+			return nil, err
+		}
+		return gpcnClient.DoWithRetry(request)
+	})
 	if err != nil {
 		return err
 	}
@@ -264,12 +265,13 @@ func AddL2SegmentInterface(gpcnClient *client.GpcnClient, ctx context.Context, v
 // Remove a network interface from the virtual machine
 func RemoveNetworkInterface(gpcnClient *client.GpcnClient, ctx context.Context, virtualMachineId, networkInterfaceId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingRemoveNetworkInterfaceWithIDs, virtualMachineId, networkInterfaceId))
-	request, err := http.NewRequestWithContext(ctx, "DELETE", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces/"+networkInterfaceId, nil)
-	if err != nil {
-		return err
-	}
-
-	response, err := gpcnClient.DoWithRetry(request)
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		request, err := http.NewRequestWithContext(ctx, "DELETE", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces/"+networkInterfaceId, nil)
+		if err != nil {
+			return nil, err
+		}
+		return gpcnClient.DoWithRetry(request)
+	})
 	if err != nil {
 		return err
 	}

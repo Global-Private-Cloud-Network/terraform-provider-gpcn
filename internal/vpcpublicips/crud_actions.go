@@ -140,12 +140,14 @@ func AttachPublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, p
 		return err
 	}
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, publicIpURL(vpcID, publicIpID)+"/attach", bytes.NewBuffer(attachRequestBody))
-	if err != nil {
-		return err
-	}
-
-	jobID, _, err := issueJob(gpcnClient, ctx, request, LogIssuedAttachPublicIpJob)
+	jobID, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (string, error) {
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, publicIpURL(vpcID, publicIpID)+"/attach", bytes.NewBuffer(attachRequestBody))
+		if err != nil {
+			return "", err
+		}
+		jobID, _, err := issueJob(gpcnClient, ctx, request, LogIssuedAttachPublicIpJob)
+		return jobID, err
+	})
 	if err != nil {
 		return err
 	}
@@ -163,12 +165,14 @@ func DetachPublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, p
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDetachPublicIp, publicIpID))
 
 	// The detach route takes no payload, and its schema rejects a body with keys.
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, publicIpURL(vpcID, publicIpID)+"/detach", nil)
-	if err != nil {
-		return err
-	}
-
-	jobID, _, err := issueJob(gpcnClient, ctx, request, LogIssuedDetachPublicIpJob)
+	jobID, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (string, error) {
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, publicIpURL(vpcID, publicIpID)+"/detach", nil)
+		if err != nil {
+			return "", err
+		}
+		jobID, _, err := issueJob(gpcnClient, ctx, request, LogIssuedDetachPublicIpJob)
+		return jobID, err
+	})
 	if err != nil {
 		return err
 	}
@@ -185,15 +189,17 @@ func DetachPublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, p
 func ReleasePublicIp(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, publicIpID string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingReleasePublicIp, publicIpID))
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodDelete, publicIpURL(vpcID, publicIpID), nil)
-	if err != nil {
-		return err
-	}
-
 	// Only the release request itself can report that the address is already
 	// gone. A 404 from the job poll is a routing failure, not an answer about
 	// the address.
-	jobID, _, err := issueJob(gpcnClient, ctx, request, LogIssuedReleasePublicIpJob)
+	jobID, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (string, error) {
+		request, err := http.NewRequestWithContext(ctx, http.MethodDelete, publicIpURL(vpcID, publicIpID), nil)
+		if err != nil {
+			return "", err
+		}
+		jobID, _, err := issueJob(gpcnClient, ctx, request, LogIssuedReleasePublicIpJob)
+		return jobID, err
+	})
 	if client.IsNotFound(err) {
 		tflog.Info(ctx, LogPublicIpAlreadyReleased)
 		return nil

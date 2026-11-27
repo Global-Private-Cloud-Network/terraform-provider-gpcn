@@ -107,3 +107,34 @@ func HolderNotVisibleAtDeadline(jobID string, start time.Time) error {
 func newHolderStillRunningError(jobID string, elapsed time.Duration) error {
 	return &holderStillRunningError{message: fmt.Sprintf(ErrFmtHolderStillRunning, jobID, elapsed.Round(time.Second))}
 }
+
+// SendWaitingForHolder calls send again while a job holds the resource, for up
+// to the polling timeout. DoWithRetry can meet its own job as the holder. An
+// error that ends the wait does not prove that the API never took the request.
+func SendWaitingForHolder[T any](gpcnClient *GpcnClient, ctx context.Context, interval time.Duration, send func() (T, error)) (T, error) {
+	var none T
+	start := time.Now()
+	timeout := DefaultPollingConfig().Timeout
+	if config := gpcnClient.Config(); config != nil && config.PollingTimeout > 0 {
+		timeout = config.PollingTimeout
+	}
+	deadline := start.Add(timeout)
+
+	result, err := send()
+	for holder, busy := BusyHolder(err); busy; holder, busy = BusyHolder(err) {
+		outcome, waitErr := AwaitHolder(gpcnClient, ctx, holder, start, deadline)
+		if waitErr != nil {
+			return none, waitErr
+		}
+		select {
+		case <-ctx.Done():
+			return none, BusyWaitEnded(ctx.Err())
+		case <-time.After(interval):
+		}
+		if !time.Now().Before(deadline) {
+			return none, HolderDeadline(outcome, holder, start)
+		}
+		result, err = send()
+	}
+	return result, err
+}

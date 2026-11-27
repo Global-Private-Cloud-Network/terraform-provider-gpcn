@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"terraform-provider-gpcn/internal/testutil"
+	"terraform-provider-gpcn/internal/volumes"
 
 	fwresource "github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
@@ -1349,4 +1350,61 @@ func TestVolumeCreateJobFailedIsReplaced(t *testing.T) {
 			},
 		},
 	})
+}
+
+func TestVolumeResourcePlanDestroyWaitsOutBusyHolder(t *testing.T) {
+	shortenBusyRetry(t, &volumes.BusyRetryInterval)
+	server, _, _ := startVolumePlanMockServer(t)
+	deleteRequest := "DELETE /v1/resource/volumes/" + volPlanTestID
+	proxy := startBusyPlanTestProxy(t, server, deleteRequest)
+
+	runBusyDestroyPlanTest(t, volPlanTestConfig(proxy.url))
+	proxy.checkSentAgain(t, map[string]string{deleteRequest: ""})
+}
+
+func TestVolumeAttachmentResourcePlanDestroyWaitsOutBusyHolder(t *testing.T) {
+	shortenBusyRetry(t, &volumes.BusyRetryInterval)
+
+	var mu sync.Mutex
+	attachedTo := ""
+	volumePath := "/v1/resource/volumes/" + volPlanTestID
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/v1/auth/check":
+			testutil.HandleAuthCheck(w)
+		case r.Method == http.MethodGet && r.URL.Path == volumePath:
+			testutil.WriteJSONResponse(w, map[string]any{
+				"success": true,
+				"data":    map[string]any{"id": volPlanTestID, "virtualMachineId": attachedTo},
+			})
+		case r.Method == http.MethodPut && r.URL.Path == volumePath+"/attach":
+			attachedTo, _ = testutil.ReadRequestBody(r)["virtualMachineId"].(string)
+			testutil.HandleCreateJobResponse(w, "job-attach")
+		case r.Method == http.MethodPut && r.URL.Path == volumePath+"/detach":
+			attachedTo = ""
+			testutil.HandleCreateJobResponse(w, "job-detach")
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
+			testutil.HandleJobResponse(w, "job-1", volPlanTestID, true)
+		default:
+			testutil.LogUnexpectedRequest(t, w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	detachRequest := "PUT " + volumePath + "/detach"
+	proxy := startBusyPlanTestProxy(t, server, detachRequest)
+
+	runBusyDestroyPlanTest(t, fmt.Sprintf(`
+provider "gpcn" {
+  host    = %q
+  api_key = "test-key"
+}
+
+resource "gpcn_volume_attachment" "test" {
+  volume_id          = %q
+  virtual_machine_id = "vm-1"
+}
+`, proxy.url, volPlanTestID))
+	proxy.checkSentAgain(t, map[string]string{detachRequest: ""})
 }

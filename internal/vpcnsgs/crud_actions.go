@@ -175,12 +175,13 @@ func RenameNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, nsgID,
 		return err
 	}
 
-	request, err := http.NewRequestWithContext(ctx, "PUT", nsgPath(vpcID, nsgID), bytes.NewBuffer(renameRequestBody))
-	if err != nil {
-		return err
-	}
-
-	response, err := gpcnClient.DoWithRetry(request)
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		request, err := http.NewRequestWithContext(ctx, "PUT", nsgPath(vpcID, nsgID), bytes.NewBuffer(renameRequestBody))
+		if err != nil {
+			return nil, err
+		}
+		return gpcnClient.DoWithRetry(request)
+	})
 	if err != nil {
 		return err
 	}
@@ -205,30 +206,38 @@ func ReplaceNsgRules(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 	var diags diag.Diagnostics
 	tflog.Info(ctx, fmt.Sprintf(LogStartingReplaceNsgRules, nsgID))
 
-	before, err := GetNsg(gpcnClient, ctx, vpcID, nsgID)
+	var resent []ApiRule
+	var mergeDiags diag.Diagnostics
+	// The holder can add a VPN-owned rule, so each send reads the group again.
+	jobID, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (string, error) {
+		before, err := GetNsg(gpcnClient, ctx, vpcID, nsgID)
+		if err != nil {
+			return "", err
+		}
+		var bodies []map[string]any
+		bodies, resent, mergeDiags = MergeVpnRuleBodies(rules, before.Rules)
+
+		if len(bodies) > MaxRulesPerNsg {
+			diags.AddError(ErrSummaryNsgTooManyRules, fmt.Sprintf(ErrDetailNsgTooManyRules, len(bodies), len(rules), len(bodies)-len(rules)))
+			return "", nil
+		}
+
+		replaceRequestBody, err := json.Marshal(map[string]any{"rules": bodies})
+		if err != nil {
+			return "", err
+		}
+
+		request, err := http.NewRequestWithContext(ctx, "PUT", nsgPath(vpcID, nsgID)+rulesPathSegment, bytes.NewBuffer(replaceRequestBody))
+		if err != nil {
+			return "", err
+		}
+		return issueJob(gpcnClient, request)
+	})
 	if err != nil {
 		return nil, diags, err
 	}
-	bodies, resent, mergeDiags := MergeVpnRuleBodies(rules, before.Rules)
-
-	if len(bodies) > MaxRulesPerNsg {
-		diags.AddError(ErrSummaryNsgTooManyRules, fmt.Sprintf(ErrDetailNsgTooManyRules, len(bodies), len(rules), len(bodies)-len(rules)))
+	if diags.HasError() {
 		return nil, diags, nil
-	}
-
-	replaceRequestBody, err := json.Marshal(map[string]any{"rules": bodies})
-	if err != nil {
-		return nil, diags, err
-	}
-
-	request, err := http.NewRequestWithContext(ctx, "PUT", nsgPath(vpcID, nsgID)+rulesPathSegment, bytes.NewBuffer(replaceRequestBody))
-	if err != nil {
-		return nil, diags, err
-	}
-
-	jobID, err := issueJob(gpcnClient, request)
-	if err != nil {
-		return nil, diags, err
 	}
 	diags.Append(mergeDiags...)
 	tflog.Info(ctx, LogIssuedReplaceNsgRulesJob)
@@ -257,12 +266,13 @@ func ReplaceNsgRules(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, 
 func DeleteNsg(gpcnClient *client.GpcnClient, ctx context.Context, vpcID, nsgID string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteNsgWithID, nsgID))
 
-	request, err := http.NewRequestWithContext(ctx, "DELETE", nsgPath(vpcID, nsgID), nil)
-	if err != nil {
-		return err
-	}
-
-	jobID, err := issueJob(gpcnClient, request)
+	jobID, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (string, error) {
+		request, err := http.NewRequestWithContext(ctx, "DELETE", nsgPath(vpcID, nsgID), nil)
+		if err != nil {
+			return "", err
+		}
+		return issueJob(gpcnClient, request)
+	})
 	if err != nil {
 		return err
 	}

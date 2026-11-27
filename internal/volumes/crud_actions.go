@@ -183,13 +183,14 @@ func UpdateVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 	}
 
 	// A resize is the only change this call makes.
-	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/resize", bytes.NewBuffer(jsonUpdateVolumeRequestBody))
-	if err != nil {
-		return nil, err
-	}
-	tflog.Info(ctx, LogConstructedUpdateVolumeRequest)
-
-	response, err := gpcnClient.DoWithRetry(request)
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/resize", bytes.NewBuffer(jsonUpdateVolumeRequestBody))
+		if err != nil {
+			return nil, err
+		}
+		tflog.Info(ctx, LogConstructedUpdateVolumeRequest)
+		return gpcnClient.DoWithRetry(request)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -231,11 +232,6 @@ func UpdateVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 
 func DeleteVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId string) error {
 	tflog.Info(ctx, fmt.Sprintf(LogStartingDeleteVolumeWithID, volumeId))
-	request, err := http.NewRequestWithContext(ctx, "DELETE", BASE_URL_V1+volumeId, nil)
-	if err != nil {
-		return err
-	}
-	tflog.Info(ctx, LogConstructedDeleteVolumeRequest)
 
 	// Detach this volume if possible
 	// Verify the volume is attached to a virtual machine before attempting to detach it
@@ -244,12 +240,19 @@ func DeleteVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId s
 		return err
 	}
 	if getVolumeResponse.Data.VirtualMachineId != "" {
-		err = RemoveVolumeFromVirtualMachine(gpcnClient, ctx, volumeId)
+		err = RemoveVolumeFromVirtualMachine(gpcnClient, ctx, volumeId, getVolumeResponse.Data.VirtualMachineId)
 		if err != nil {
 			return err
 		}
 	}
-	response, err := gpcnClient.DoWithRetry(request)
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		request, err := http.NewRequestWithContext(ctx, "DELETE", BASE_URL_V1+volumeId, nil)
+		if err != nil {
+			return nil, err
+		}
+		tflog.Info(ctx, LogConstructedDeleteVolumeRequest)
+		return gpcnClient.DoWithRetry(request)
+	})
 	if err != nil {
 		return err
 	}
@@ -286,12 +289,13 @@ func MoveVolume(gpcnClient *client.GpcnClient, ctx context.Context, volumeId, re
 		return err
 	}
 
-	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId, bytes.NewBuffer(jsonMoveVolumeRequestBody))
-	if err != nil {
-		return err
-	}
-
-	response, err := gpcnClient.DoWithRetry(request)
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId, bytes.NewBuffer(jsonMoveVolumeRequestBody))
+		if err != nil {
+			return nil, err
+		}
+		return gpcnClient.DoWithRetry(request)
+	})
 	if err != nil {
 		return err
 	}

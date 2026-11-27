@@ -1,11 +1,14 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"reflect"
 	"regexp"
 	"slices"
@@ -5483,4 +5486,116 @@ func TestVirtualMachineResourceReadsBooleanNetworkHotplug(t *testing.T) {
 			})
 		})
 	}
+}
+
+const busyPlanTestHolderJob = "holder-job"
+
+// busyPlanTestProxy stands in front of a resource's mock server. It answers each
+// named request busy once, and it answers the reads of the holder job.
+type busyPlanTestProxy struct {
+	mu          sync.Mutex
+	url         string
+	sends       map[string][]string
+	holderPolls int
+	holderRuns  bool
+}
+
+func (p *busyPlanTestProxy) setHolderRuns(runs bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.holderRuns = runs
+}
+
+// startBusyPlanTestProxy names each busy request as "METHOD path".
+func startBusyPlanTestProxy(t *testing.T, backend *httptest.Server, busy ...string) *busyPlanTestProxy {
+	t.Helper()
+
+	target, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatalf("failed to parse the backend URL: %v", err)
+	}
+	forward := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) { r.SetURL(target) }}
+
+	proxy := &busyPlanTestProxy{sends: map[string][]string{}}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(raw))
+		request := r.Method + " " + r.URL.Path
+
+		proxy.mu.Lock()
+		if slices.Contains(busy, request) {
+			proxy.sends[request] = append(proxy.sends[request], string(raw))
+			if len(proxy.sends[request]) == 1 {
+				proxy.mu.Unlock()
+				testutil.HandleBusyResponse(w, busyPlanTestHolderJob)
+				return
+			}
+		}
+		if r.URL.Path == client.JOBS_BASE_URL_V1 && strings.Contains(string(raw), busyPlanTestHolderJob) {
+			proxy.holderPolls++
+			runs := proxy.holderRuns
+			proxy.mu.Unlock()
+			testutil.HandleJobResponse(w, busyPlanTestHolderJob, "", !runs)
+			return
+		}
+		proxy.mu.Unlock()
+		forward.ServeHTTP(w, r)
+	}))
+	t.Cleanup(server.Close)
+	proxy.url = server.URL
+
+	return proxy
+}
+
+// shortenBusyRetry replaces a package variable, so a caller must stay sequential.
+func shortenBusyRetry(t *testing.T, interval *time.Duration) {
+	t.Helper()
+
+	previous := *interval
+	*interval = time.Millisecond
+	t.Cleanup(func() { *interval = previous })
+}
+
+// checkSentAgain pins one wait for the holder and one second send per request.
+func (p *busyPlanTestProxy) checkSentAgain(t *testing.T, wantBodies map[string]string) {
+	t.Helper()
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for request, want := range wantBodies {
+		sent := p.sends[request]
+		if len(sent) != 2 {
+			t.Errorf("sends of %s = %d, want 2", request, len(sent))
+			continue
+		}
+		if sent[1] != want {
+			t.Errorf("second body of %s = %q, want %q", request, sent[1], want)
+		}
+	}
+	if p.holderPolls != len(wantBodies) {
+		t.Errorf("holder polls = %d, want %d", p.holderPolls, len(wantBodies))
+	}
+}
+
+func runBusyDestroyPlanTest(t *testing.T, config string) {
+	t.Helper()
+
+	resource.UnitTest(t, resource.TestCase{
+		ProtoV6ProviderFactories: testProtoV6ProviderFactories,
+		Steps: []resource.TestStep{
+			{Config: config},
+			{Config: config, Destroy: true},
+		},
+	})
+}
+
+func TestVirtualMachineResourcePlanDestroyWaitsOutBusyHolder(t *testing.T) {
+	shortenVirtualMachinePolling(t)
+	shortenBusyRetry(t, &virtualmachines.BusyRetryInterval)
+	server, _ := startVirtualMachineDestroyBodyMockServer(t, vmDestroyBodyMock{})
+	stopRequest, deleteRequest := "POST "+vmPlanTestPath+"/stop", "DELETE "+vmPlanTestPath
+	proxy := startBusyPlanTestProxy(t, server, stopRequest, deleteRequest)
+
+	runBusyDestroyPlanTest(t, vmPublicIpPlanTestConfig(proxy.url, "vm-plan-busy", true, ""))
+	proxy.checkSentAgain(t, map[string]string{stopRequest: "", deleteRequest: `{"releasePublicIps":true}`})
 }

@@ -330,6 +330,10 @@ func isHTTPError(err error, target **HTTPError) bool {
 // removes it from state instead of failing every later operation. A Delete
 // implementation treats it as success.
 func IsNotFound(err error) bool {
+	// A 404 from the read of a holder job says nothing about the resource.
+	if errors.Is(err, ErrBusyWaitExhausted) {
+		return false
+	}
 	return hasStatus(err, http.StatusNotFound)
 }
 

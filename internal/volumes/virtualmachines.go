@@ -21,12 +21,13 @@ func AddVolumeToVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Contex
 	if err != nil {
 		return errors.New("error marshaling the json request body GPCN Virtual Machines - Attach Volume")
 	}
-	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/attach", bytes.NewBuffer(jsonAttachVolumeRequestBody))
-	if err != nil {
-		return err
-	}
-
-	response, err := gpcnClient.DoWithRetry(request)
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/attach", bytes.NewBuffer(jsonAttachVolumeRequestBody))
+		if err != nil {
+			return nil, err
+		}
+		return gpcnClient.DoWithRetry(request)
+	})
 	if err != nil {
 		return err
 	}
@@ -53,16 +54,29 @@ func AddVolumeToVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Contex
 	return nil
 }
 
-// Remove a volume from the virtual machine
-func RemoveVolumeFromVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, volumeId string) error {
-	request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/detach", nil)
+// RemoveVolumeFromVirtualMachine sends no detach when the volume is not on that
+// machine. The detach names only the volume, so it can act on another machine.
+func RemoveVolumeFromVirtualMachine(gpcnClient *client.GpcnClient, ctx context.Context, volumeId, virtualMachineId string) error {
+	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		volume, err := GetVolume(gpcnClient, ctx, volumeId)
+		if err != nil {
+			return nil, err
+		}
+		if volume.Data.VirtualMachineId == "" || volume.Data.VirtualMachineId != virtualMachineId {
+			return nil, nil
+		}
+
+		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+volumeId+"/detach", nil)
+		if err != nil {
+			return nil, err
+		}
+		return gpcnClient.DoWithRetry(request)
+	})
 	if err != nil {
 		return err
 	}
-
-	response, err := gpcnClient.DoWithRetry(request)
-	if err != nil {
-		return err
+	if response == nil {
+		return nil
 	}
 	defer response.Body.Close()
 
