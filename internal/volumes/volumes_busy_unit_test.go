@@ -85,23 +85,52 @@ func acceptSync(w http.ResponseWriter, _ *http.Request) {
 	testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{}})
 }
 
-func TestUpdateVolumeWaitsOutBusyHolder(t *testing.T) {
-	sizesPath := DATA_CENTERS_BASE_URL_V1 + testDatacenterID + "/volume-sizes"
-	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vol-1/resize", acceptOwnJob, func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == sizesPath {
+var volumeSizesPath = DATA_CENTERS_BASE_URL_V1 + testDatacenterID + "/volume-sizes"
+
+// volumeOnSizes serves the size catalog and answers each volume read with the
+// next size of the list.
+func volumeOnSizes(sizes ...int64) http.HandlerFunc {
+	reads := 0
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == volumeSizesPath {
 			testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{"volumeTypes": []map[string]any{{
 				"componentCode":  "vol-add-ssd",
 				"availableSizes": []map[string]any{{"skuId": "sku-1", "sizeGb": 200}},
 			}}}})
 			return
 		}
-		testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{"id": "vol-1"}})
-	})
+		size := sizes[min(reads, len(sizes)-1)]
+		reads++
+		testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{"id": "vol-1", "sizeGb": size}})
+	}
+}
+
+func TestUpdateVolumeWaitsOutBusyHolder(t *testing.T) {
+	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vol-1/resize", acceptOwnJob, volumeOnSizes(100, 100, 200))
 
 	if _, err := UpdateVolume(gpcnClient, context.Background(), "vol-1", createTestVolumeModel("vol", "SSD", 200)); err != nil {
 		t.Fatalf("UpdateVolume = %v, want nil", err)
 	}
-	recorded.check(t, `{"newSizeGb":200}`, "GET "+sizesPath, "send", "poll holder-job", "send", "poll own-job", "GET "+BASE_URL_V1+"vol-1")
+	read := "GET " + BASE_URL_V1 + "vol-1"
+	recorded.check(t, `{"newSizeGb":200}`, "GET "+volumeSizesPath, read, "send", "poll holder-job", read, "send", "poll own-job", read)
+}
+
+func TestUpdateVolumeLeavesASizeTheHolderSet(t *testing.T) {
+	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vol-1/resize", acceptOwnJob, volumeOnSizes(100, 200))
+
+	response, err := UpdateVolume(gpcnClient, context.Background(), "vol-1", createTestVolumeModel("vol", "SSD", 200))
+	if err != nil {
+		t.Fatalf("UpdateVolume = %v, want nil", err)
+	}
+	if response.Data.SizeGb != 200 {
+		t.Errorf("read-back size = %d, want 200", response.Data.SizeGb)
+	}
+	recorded.mu.Lock()
+	defer recorded.mu.Unlock()
+	read := "GET " + BASE_URL_V1 + "vol-1"
+	if want := []string{"GET " + volumeSizesPath, read, "send", "poll holder-job", read, read}; !slices.Equal(recorded.events, want) {
+		t.Errorf("events = %q, want %q", recorded.events, want)
+	}
 }
 
 func TestMoveVolumeWaitsOutBusyHolder(t *testing.T) {
@@ -124,15 +153,6 @@ func TestDeleteVolumeWaitsOutBusyHolder(t *testing.T) {
 	recorded.check(t, "", "GET "+BASE_URL_V1+"vol-1", "send", "poll holder-job", "send", "poll own-job")
 }
 
-func TestAddVolumeToVirtualMachineWaitsOutBusyHolder(t *testing.T) {
-	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vol-1/attach", acceptOwnJob, nil)
-
-	if err := AddVolumeToVirtualMachine(gpcnClient, context.Background(), "vm-1", "vol-1"); err != nil {
-		t.Fatalf("AddVolumeToVirtualMachine = %v, want nil", err)
-	}
-	recorded.check(t, `{"virtualMachineId":"vm-1"}`, "send", "poll holder-job", "send", "poll own-job")
-}
-
 // volumeOnMachines answers each volume read with the next machine of the list.
 func volumeOnMachines(machines ...string) http.HandlerFunc {
 	reads := 0
@@ -145,10 +165,34 @@ func volumeOnMachines(machines ...string) http.HandlerFunc {
 	}
 }
 
+func TestAddVolumeToVirtualMachineWaitsOutBusyHolder(t *testing.T) {
+	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vol-1/attach", acceptOwnJob, volumeOnMachines("", "vm-2"))
+
+	if err := AddVolumeToVirtualMachine(gpcnClient, context.Background(), "vm-1", "vol-1"); err != nil {
+		t.Fatalf("AddVolumeToVirtualMachine = %v, want nil", err)
+	}
+	read := "GET " + BASE_URL_V1 + "vol-1"
+	recorded.check(t, `{"virtualMachineId":"vm-1"}`, read, "send", "poll holder-job", read, "send", "poll own-job")
+}
+
+func TestAddVolumeToVirtualMachineLeavesAnAttachTheHolderMade(t *testing.T) {
+	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vol-1/attach", acceptOwnJob, volumeOnMachines("", "vm-1"))
+
+	if err := AddVolumeToVirtualMachine(gpcnClient, context.Background(), "vm-1", "vol-1"); err != nil {
+		t.Fatalf("AddVolumeToVirtualMachine = %v, want nil", err)
+	}
+	recorded.mu.Lock()
+	defer recorded.mu.Unlock()
+	read := "GET " + BASE_URL_V1 + "vol-1"
+	if want := []string{read, "send", "poll holder-job", read}; !slices.Equal(recorded.events, want) {
+		t.Errorf("events = %q, want %q", recorded.events, want)
+	}
+}
+
 func TestRemoveVolumeFromVirtualMachineWaitsOutBusyHolder(t *testing.T) {
 	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vol-1/detach", acceptOwnJob, volumeOnMachines("vm-1"))
 
-	if err := RemoveVolumeFromVirtualMachine(gpcnClient, context.Background(), "vol-1", "vm-1"); err != nil {
+	if err := RemoveVolumeFromVirtualMachine(gpcnClient, context.Background(), "vm-1", "vol-1"); err != nil {
 		t.Fatalf("RemoveVolumeFromVirtualMachine = %v, want nil", err)
 	}
 	read := "GET " + BASE_URL_V1 + "vol-1"
@@ -160,7 +204,7 @@ func checkOneDetach(t *testing.T, machineAfterTheWait string) {
 	t.Helper()
 	gpcnClient, recorded := setupBusyOnce(t, http.MethodPut, BASE_URL_V1+"vol-1/detach", acceptOwnJob, volumeOnMachines("vm-1", machineAfterTheWait))
 
-	if err := RemoveVolumeFromVirtualMachine(gpcnClient, context.Background(), "vol-1", "vm-1"); err != nil {
+	if err := RemoveVolumeFromVirtualMachine(gpcnClient, context.Background(), "vm-1", "vol-1"); err != nil {
 		t.Fatalf("RemoveVolumeFromVirtualMachine = %v, want nil", err)
 	}
 	recorded.mu.Lock()
@@ -204,7 +248,7 @@ func TestUpdateVolumeKeepsItsOwnTimeoutAfterAWait(t *testing.T) {
 				"availableSizes": []map[string]any{{"skuId": "sku-1", "sizeGb": 200}},
 			}}}})
 		case r.Method == http.MethodGet && r.URL.Path == BASE_URL_V1+"vol-1":
-			testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{"id": "vol-1"}})
+			testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": map[string]any{"id": "vol-1", "sizeGb": sizeBeforeResize}})
 		case r.Method == http.MethodPut && r.URL.Path == BASE_URL_V1+"vol-1/resize":
 			if sentAt.IsZero() {
 				sentAt = time.Now()

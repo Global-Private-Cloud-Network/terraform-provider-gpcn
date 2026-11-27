@@ -573,4 +573,22 @@ func TestSendWaitingForHolder(t *testing.T) {
 			t.Errorf("sends = %d, want 2", sends)
 		}
 	})
+
+	t.Run("sends nothing after a deadline that passes in the sleep", func(t *testing.T) {
+		fastHolderPolling(t)
+		gpcnClient, calls := holderServer(t, http.StatusOK, holderJobsBody(holderTestSucceededJob))
+		gpcnClient.config.PollingTimeout = 50 * time.Millisecond
+
+		sends := 0
+		_, err := SendWaitingForHolder(gpcnClient, t.Context(), 100*time.Millisecond, busyThenAccepted(&sends))
+		if want := "job h1 ended as the wait for it ran out after "; err == nil || !strings.HasPrefix(err.Error(), want) {
+			t.Fatalf("SendWaitingForHolder = %v, want it to start with %q", err, want)
+		}
+		if sends != 1 {
+			t.Errorf("sends = %d, want 1", sends)
+		}
+		if got := int(calls.Load()); got != 1 {
+			t.Errorf("poll calls = %d, want 1", got)
+		}
+	})
 }

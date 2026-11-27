@@ -228,7 +228,18 @@ func AddL2SegmentInterface(gpcnClient *client.GpcnClient, ctx context.Context, v
 	if err != nil {
 		return errors.New("error marshaling the json request body GPCN Virtual Machines - Attach Network")
 	}
+	// The holder can have made this attach, so each send reads the interfaces again.
 	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		interfaces, err := GetNetworkInterfaces(gpcnClient, ctx, virtualMachineId)
+		if err != nil {
+			return nil, err
+		}
+		if slices.ContainsFunc(interfaces, func(inter ReadVirtualMachineNetworkDataResponseTF) bool {
+			return inter.L2SegmentID.ValueString() == l2SegmentId
+		}) {
+			return nil, nil
+		}
+
 		request, err := http.NewRequestWithContext(ctx, "POST", VIRTUAL_MACHINES_BASE_URL_V1+virtualMachineId+"/network-interfaces", bytes.NewBuffer(jsonAttachNetworkInterfaceRequestBody))
 		if err != nil {
 			return nil, err
@@ -237,6 +248,9 @@ func AddL2SegmentInterface(gpcnClient *client.GpcnClient, ctx context.Context, v
 	})
 	if err != nil {
 		return err
+	}
+	if response == nil {
+		return nil
 	}
 	defer response.Body.Close()
 

@@ -1358,6 +1358,8 @@ func segmentUpdateMockServer(t *testing.T, vmID string) (*httptest.Server, *clie
 				segmentId, _ := body["l2SegmentId"].(string)
 				attached = append(attached, segmentId)
 				testutil.HandleCreateJobResponse(w, "job-1")
+			case r.Method == http.MethodGet && r.URL.Path == interfacesPath:
+				testutil.WriteJSONResponse(w, map[string]any{"success": true, "data": []any{}})
 			case r.Method == http.MethodPost && r.URL.Path == "/v1/resource/jobs/":
 				testutil.HandleJobResponse(w, "job-1", "", true)
 			default:

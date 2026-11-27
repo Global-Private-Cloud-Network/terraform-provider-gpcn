@@ -25,7 +25,16 @@ func UpdateVirtualMachineSize(gpcnClient *client.GpcnClient, ctx context.Context
 	if err != nil {
 		return err
 	}
+	// The holder can have made this resize, so each send reads the machine again.
 	response, err := client.SendWaitingForHolder(gpcnClient, ctx, BusyRetryInterval, func() (*http.Response, error) {
+		live, err := GetVirtualMachine(gpcnClient, ctx, virtualMachineId)
+		if err != nil {
+			return nil, err
+		}
+		if live.Data.Configuration.SkuId == skuId {
+			return nil, nil
+		}
+
 		request, err := http.NewRequestWithContext(ctx, "PUT", BASE_URL_V1+virtualMachineId+"/size", bytes.NewBuffer(jsonUpdateVMRequestBody))
 		if err != nil {
 			return nil, err
@@ -34,6 +43,10 @@ func UpdateVirtualMachineSize(gpcnClient *client.GpcnClient, ctx context.Context
 	})
 	if err != nil {
 		return err
+	}
+	if response == nil {
+		tflog.Info(ctx, LogVirtualMachineAlreadyCarriesTheSize)
+		return nil
 	}
 	defer response.Body.Close()
 
